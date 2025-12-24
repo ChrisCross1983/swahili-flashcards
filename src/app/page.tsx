@@ -29,6 +29,7 @@ export default function Home() {
   const [direction, setDirection] = useState<"DE_TO_SW" | "SW_TO_DE">("DE_TO_SW");
   const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
   const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     setOwnerKey(getOrCreateOwnerKey());
@@ -98,6 +99,7 @@ async function createCard(skipWarning = false) {
       // Wenn Duplikat: lieber als deutliche Warnbox anzeigen
       if (res.status === 409) {
         setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
+        setStatus("");
         return;
       }
 
@@ -116,6 +118,54 @@ async function createCard(skipWarning = false) {
   }
 }
 
+async function updateCard() {
+  try {
+    setDuplicateHint(null);
+    setStatus("Speichere...");
+
+    const res = await fetch("/api/cards", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ownerKey,
+        id: editingId,
+        german,
+        swahili,
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      console.error(json.error);
+      if (res.status === 409) {
+        setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
+        setStatus("");
+        return;
+      }
+      setStatus(json.error ?? "Aktualisieren fehlgeschlagen.");
+      return;
+    }
+
+    setStatus("Gespeichert ✅");
+    setEditingId(null);
+    setGerman("");
+    setSwahili("");
+    setImageFile(null);
+
+    await loadCards();
+  } catch (e: any) {
+    setStatus(e.message ?? "Aktualisieren fehlgeschlagen.");
+  }
+}
+
+function saveCard() {
+  if (editingId) {
+    return updateCard();
+  }
+  return createCard();
+}
+
 async function loadCards() {
   setStatus("Lade Karten...");
   const res = await fetch(`/api/cards?ownerKey=${encodeURIComponent(ownerKey)}`);
@@ -128,6 +178,23 @@ async function loadCards() {
 
   setCards(json.cards);
   setStatus(`Geladen ✅ (${json.cards.length})`);
+}
+
+function startEdit(card: any) {
+  setEditingId(card.id);
+  setGerman(card.german_text ?? "");
+  setSwahili(card.swahili_text ?? "");
+  setDuplicateHint(null);
+  setStatus("");
+}
+
+function cancelEdit() {
+  setEditingId(null);
+  setGerman("");
+  setSwahili("");
+  setImageFile(null);
+  setDuplicateHint(null);
+  setStatus("");
 }
 
 async function checkExistingGerman(): Promise<boolean> {
@@ -312,15 +379,24 @@ async function gradeCurrent(correct: boolean) {
 
           <button
             className="mt-4 w-full rounded-xl bg-black text-white p-3 disabled:opacity-50"
-            onClick={createCard}
+            onClick={() => saveCard()}
             disabled={!ownerKey || !german || !swahili}
           >
-            Karte speichern
+            {editingId ? "Änderungen speichern" : "Karte speichern"}
           </button>
+
+          {editingId && (
+            <button
+              className="mt-2 w-full rounded-xl border p-3"
+              onClick={() => cancelEdit()}
+            >
+              Bearbeiten abbrechen
+            </button>
+          )}
 
           <button
             className="mt-3 w-full rounded-xl border p-3"
-            onClick={loadCards}
+            onClick={() => loadCards()}
             disabled={!ownerKey}
           >
             Karten laden
@@ -348,7 +424,7 @@ async function gradeCurrent(correct: boolean) {
 
             <button
               className="mt-3 w-full rounded-xl border p-3"
-              onClick={loadToday}
+              onClick={() => loadToday()}
               disabled={!ownerKey}
             >
               Heute fällige Karten laden
@@ -421,14 +497,25 @@ async function gradeCurrent(correct: boolean) {
                     {c.german_text} — {c.swahili_text}
                   </div>
 
-                  <button
-                    className="text-sm px-3 py-1 rounded-lg border"
-                    onClick={() => deleteCard(c.id)}
-                    disabled={!ownerKey}
-                    title="Löschen"
-                  >
-                    🗑️
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      className="text-sm px-3 py-1 rounded-lg border"
+                      onClick={() => startEdit(c)}
+                      disabled={!ownerKey}
+                      title="Bearbeiten"
+                    >
+                      ✏️
+                    </button>
+
+                    <button
+                      className="text-sm px-3 py-1 rounded-lg border"
+                      onClick={() => deleteCard(c.id)}
+                      disabled={!ownerKey}
+                      title="Löschen"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
 
                 {c.image_path && (

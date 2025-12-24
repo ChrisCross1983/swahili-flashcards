@@ -117,3 +117,52 @@ export async function DELETE(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+type UpdateCardBody = {
+  ownerKey: string;
+  id: string;
+  german?: string;
+  swahili?: string;
+  imagePath?: string | null;
+};
+
+export async function PATCH(req: Request) {
+  const body = (await req.json()) as UpdateCardBody;
+
+  if (!body.ownerKey || !body.id) {
+    return NextResponse.json(
+      { error: "ownerKey and id are required" },
+      { status: 400 }
+    );
+  }
+
+  const updates: any = {};
+  if (typeof body.german === "string") updates.german_text = body.german;
+  if (typeof body.swahili === "string") updates.swahili_text = body.swahili;
+  if ("imagePath" in body) updates.image_path = body.imagePath;
+
+  const { data, error } = await supabaseServer
+    .from("cards")
+    .update(updates)
+    .eq("id", body.id)
+    .eq("owner_key", body.ownerKey)
+    .select()
+    .single();
+
+  if (error) {
+    if ((error as any).code === "23505") {
+      return NextResponse.json(
+        { error: "Diese Karte existiert bereits." },
+        { status: 409 }
+      );
+    }
+    console.error(error);
+    return NextResponse.json(
+      { error: "Aktualisieren fehlgeschlagen." },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ card: data });
+}
+
