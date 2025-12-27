@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 const KEY_NAME = "ramona_owner_key";
@@ -33,6 +34,7 @@ export default function HomeClient() {
     const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const router = useRouter();
 
     useEffect(() => {
         setOwnerKey(getOrCreateOwnerKey());
@@ -335,252 +337,40 @@ export default function HomeClient() {
     return (
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
-                <h1 className="text-2xl font-semibold">Swahili Flashcards (MVP)</h1>
-                <div className="mt-3 flex items-center justify-between gap-3">
+                <h1 className="text-3xl font-semibold">Swahili</h1>
+
+                <div className="mt-3 flex items-center justify-between">
                     <div className="text-xs text-gray-500">
                         Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
                     </div>
-
-                    <button
-                        className="rounded-xl border px-3 py-2 text-sm"
-                        onClick={logout}
-                    >
+                    <button className="rounded-xl border px-3 py-2 text-sm" onClick={logout}>
                         Logout
                     </button>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">
-                    Owner-Key: <span className="font-mono">{ownerKey || "..."}</span>
-                </p>
 
-                <div className="mt-6 rounded-2xl border p-4 shadow-sm bg-white">
-                    <label className="block text-sm font-medium">Deutsch</label>
-                    <input
-                        className="mt-1 w-full rounded-xl border p-3"
-                        value={german}
-                        onChange={(e) => setGerman(e.target.value)}
-                        placeholder="z.B. Guten Morgen"
-                    />
-
-                    <label className="block text-sm font-medium mt-4">Swahili</label>
-                    <input
-                        className="mt-1 w-full rounded-xl border p-3"
-                        value={swahili}
-                        onChange={(e) => setSwahili(e.target.value)}
-                        placeholder="z.B. Habari za asubuhi"
-                    />
-
-                    <label className="block text-sm font-medium mt-4">Bild (optional)</label>
-                    <input
-                        type="file"
-                        accept="image/*"
-                        className="mt-1 w-full"
-                        onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-                    />
-
-                    {previewUrl && (
-                        <div className="mt-3">
-                            <p className="text-xs text-gray-500 mb-2">Vorschau</p>
-                            <img
-                                src={previewUrl}
-                                alt="Vorschau"
-                                className="w-40 h-40 object-cover rounded-xl border"
-                            />
-                        </div>
-                    )}
-
-                    {duplicateHint && (
-                        <div className="mt-4 rounded-xl border border-yellow-400 bg-yellow-50 p-3 text-sm">
-                            <p>{duplicateHint}</p>
-
-                            <div className="mt-2 flex gap-2">
-                                <button
-                                    className="rounded-lg border px-3 py-1"
-                                    onClick={() => {
-                                        setDuplicateHint(null);
-                                    }}
-                                >
-                                    Korrigieren
-                                </button>
-
-                                <button
-                                    className="rounded-lg bg-black text-white px-3 py-1"
-                                    onClick={() => createCard(true)}
-                                >
-                                    Trotzdem speichern
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
+                <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <button
-                        className="mt-4 w-full rounded-xl bg-black text-white p-3 disabled:opacity-50"
-                        onClick={() => saveCard()}
-                        disabled={!ownerKey || !german || !swahili}
+                        onClick={() => router.push("/trainer")}
+                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                     >
-                        {editingId ? "Änderungen speichern" : "Karte speichern"}
+                        <div className="text-xl font-semibold">Vokabeltrainer</div>
+                        <div className="mt-2 text-sm text-gray-600">
+                            Trainiere deine gespeicherten Karten (Leitner).
+                        </div>
                     </button>
 
-                    {editingId && (
-                        <button
-                            className="mt-2 w-full rounded-xl border p-3"
-                            onClick={() => cancelEdit()}
-                        >
-                            Bearbeiten abbrechen
-                        </button>
-                    )}
-
                     <button
-                        className="mt-3 w-full rounded-xl border p-3"
-                        onClick={() => loadCards()}
-                        disabled={!ownerKey}
+                        onClick={() => router.push("/path")}
+                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                     >
-                        Karten laden
+                        <div className="text-xl font-semibold">Lernpfad</div>
+                        <div className="mt-2 text-sm text-gray-600">
+                            Kategorien von leicht bis schwer.
+                        </div>
                     </button>
-
-                    {status && (
-                        <div className="mt-3 rounded-xl border p-3 text-sm bg-white">
-                            {status}
-                        </div>
-                    )}
-
-                    <div className="mt-6 rounded-2xl border p-4 bg-white">
-                        <div className="flex items-center justify-between gap-3">
-                            <p className="font-medium">Lernen</p>
-
-                            <select
-                                className="border rounded-lg p-2 text-sm"
-                                value={direction}
-                                onChange={(e) => setDirection(e.target.value as any)}
-                            >
-                                <option value="DE_TO_SW">Deutsch → Swahili</option>
-                                <option value="SW_TO_DE">Swahili → Deutsch</option>
-                            </select>
-                        </div>
-
-                        <button
-                            className="mt-3 w-full rounded-xl border p-3"
-                            onClick={() => loadToday()}
-                            disabled={!ownerKey}
-                        >
-                            Heute fällige Karten laden
-                        </button>
-
-                        {todayItems.length === 0 ? (
-                            <p className="mt-3 text-sm text-gray-600">Keine Karten fällig 🎉</p>
-                        ) : (
-                            <div className="mt-4 rounded-xl border p-4">
-                                <p className="text-xs text-gray-500">
-                                    Karte {currentIndex + 1} / {todayItems.length} (Level {todayItems[currentIndex]?.level})
-                                </p>
-
-                                <div className="mt-3 text-lg font-semibold">
-                                    {direction === "DE_TO_SW"
-                                        ? todayItems[currentIndex]?.german
-                                        : todayItems[currentIndex]?.swahili}
-                                </div>
-
-                                {todayItems[currentIndex]?.imagePath && (
-                                    <img
-                                        src={`${IMAGE_BASE_URL}/${todayItems[currentIndex].imagePath}`}
-                                        alt="Kartenbild"
-                                        className="mt-4 w-full max-w-xs rounded-xl border object-cover"
-                                    />
-                                )}
-
-                                {reveal && (
-                                    <div className="mt-3 text-lg">
-                                        {direction === "DE_TO_SW"
-                                            ? todayItems[currentIndex]?.swahili
-                                            : todayItems[currentIndex]?.german}
-                                    </div>
-                                )}
-
-                                <div className="mt-4 flex gap-2">
-                                    {!reveal ? (
-                                        <button
-                                            className="w-full rounded-xl bg-black text-white p-3"
-                                            onClick={() => setReveal(true)}
-                                        >
-                                            Umdrehen
-                                        </button>
-                                    ) : (
-                                        <>
-                                            <button
-                                                className="w-full rounded-xl border p-3"
-                                                onClick={() => gradeCurrent(false)}
-                                            >
-                                                ❌ Nicht gewusst
-                                            </button>
-                                            <button
-                                                className="w-full rounded-xl bg-black text-white p-3"
-                                                onClick={() => gradeCurrent(true)}
-                                            >
-                                                ✅ Gewusst
-                                            </button>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mt-6">
-                        <input
-                            type="text"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Suchen (Deutsch oder Swahili)"
-                            className="w-full rounded-xl border p-3"
-                        />
-
-                        <button
-                            className="mt-2 w-full rounded-xl border p-3"
-                            onClick={() => loadCards(search)}
-                            disabled={!ownerKey}
-                        >
-                            🔍 Suchen
-                        </button>
-                    </div>
-
-                    <div className="mt-6 space-y-3">
-                        {cards.map((c) => (
-                            <div key={c.id} className="rounded-xl border p-3">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="text-sm font-medium">
-                                        {c.german_text} — {c.swahili_text}
-                                    </div>
-
-                                    <div className="flex gap-2">
-                                        <button
-                                            className="text-sm px-3 py-1 rounded-lg border"
-                                            onClick={() => startEdit(c)}
-                                            disabled={!ownerKey}
-                                            title="Bearbeiten"
-                                        >
-                                            ✏️
-                                        </button>
-
-                                        <button
-                                            className="text-sm px-3 py-1 rounded-lg border"
-                                            onClick={() => deleteCard(c.id)}
-                                            disabled={!ownerKey}
-                                            title="Löschen"
-                                        >
-                                            🗑️
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {c.image_path && (
-                                    <div className="mt-2 text-xs text-gray-500">
-                                        Bild gespeichert: {c.image_path}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
                 </div>
             </div>
         </main>
     );
 }
+
