@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
 
 const KEY_NAME = "ramona_owner_key";
@@ -33,11 +34,16 @@ export default function TrainerClient() {
     const [direction, setDirection] = useState<"DE_TO_SW" | "SW_TO_DE">("DE_TO_SW");
     const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
+    const [duplicatePreview, setDuplicatePreview] = useState<any | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSource, setEditSource] = useState<"cards" | "create">("create");
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
+    const [learnStarted, setLearnStarted] = useState(false);
+    const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM">("DE_TO_SW");
+
+    const router = useRouter();
 
     useEffect(() => {
         setOwnerKey(getOrCreateOwnerKey());
@@ -123,12 +129,13 @@ export default function TrainerClient() {
                 return;
             }
 
-            setStatus(`Gespeichert ✅ (id: ${json.card.id})`);
+            showToast("Karte gespeichert ✅");
             setGerman("");
             setSwahili("");
             setImageFile(null);
             setDuplicateHint(null);
-            await loadCards();
+            setDuplicatePreview(null);
+            await loadCards(undefined, { silent: true });
         } catch (e: any) {
             setStatus(`Fehler: ${e.message}`);
         }
@@ -172,13 +179,13 @@ export default function TrainerClient() {
                 return;
             }
 
-            setStatus("Gespeichert ✅");
+            showToast("Karte aktualisiert ✅");
             setEditingId(null);
             setGerman("");
             setSwahili("");
             setImageFile(null);
 
-            await loadCards();
+            await loadCards(undefined, { silent: true });
 
             setOpenCreate(false);
             setOpenCards(true);
@@ -187,7 +194,6 @@ export default function TrainerClient() {
         }
     }
 
-
     function saveCard() {
         if (editingId) {
             return updateCard();
@@ -195,24 +201,27 @@ export default function TrainerClient() {
         return createCard();
     }
 
-    async function loadCards(q?: string) {
-        setStatus("Lade Karten...");
+    async function loadCards(q?: string, opts?: { silent?: boolean }) {
+        const silent = opts?.silent ?? false;
+
+        if (!silent) setStatus("Lade Karten...");
+
         const url =
             q && q.trim().length > 0
                 ? `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&q=${encodeURIComponent(q)}`
                 : `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}`;
 
         const res = await fetch(url);
-
         const json = await res.json();
 
         if (!res.ok) {
-            setStatus(json.error ?? "Aktion fehlgeschlagen.");
+            if (!silent) setStatus(json.error ?? "Aktion fehlgeschlagen.");
             return;
         }
 
         setCards(json.cards);
-        setStatus(`Geladen ✅ (${json.cards.length})`);
+
+        if (!silent) setStatus("");
     }
 
     function startEdit(card: any) {
@@ -253,6 +262,9 @@ export default function TrainerClient() {
             setDuplicateHint(
                 `Hinweis: Für „${german}“ gibt es bereits Karten. Prüfe kurz, ob es eine Variante oder ein Tippfehler ist.`
             );
+
+            setDuplicatePreview(json.cards ?? null);
+
             return true;
         }
 
@@ -275,8 +287,8 @@ export default function TrainerClient() {
             return;
         }
 
-        setStatus("Gelöscht ✅");
-        await loadCards();
+        showToast("Karte gelöscht ✅");
+        await loadCards(undefined, { silent: true });
     }
 
     async function loadToday() {
@@ -341,6 +353,11 @@ export default function TrainerClient() {
         } else {
             setCurrentIndex(nextIndex);
             setReveal(false);
+
+            // Wenn RANDOM aktiv: pro Karte neu würfeln
+            if (directionMode === "RANDOM") {
+                setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
+            }
         }
     }
 
@@ -348,6 +365,11 @@ export default function TrainerClient() {
         const supabase = supabaseBrowser();
         await supabase.auth.signOut();
         window.location.href = "/login";
+    }
+
+    function showToast(message: string) {
+        setStatus(message);
+        window.setTimeout(() => setStatus(""), 2500);
     }
 
     const filteredCards = cards.filter((c) => {
@@ -376,9 +398,17 @@ export default function TrainerClient() {
                 <h1 className="text-2xl font-semibold">Swahili Flashcards (MVP)</h1>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
+                    <button
+                        className="rounded-xl border px-3 py-2 text-sm"
+                        onClick={() => router.push("/")}
+                    >
+                        ← Home
+                    </button>
+
                     <div className="text-xs text-gray-500">
                         Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
                     </div>
+
                     <button className="rounded-xl border px-3 py-2 text-sm" onClick={logout}>
                         Logout
                     </button>
@@ -388,6 +418,10 @@ export default function TrainerClient() {
                 <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <button
                         onClick={() => {
+                            setStatus("");
+                            setReveal(false);
+                            setLearnStarted(false);
+                            setDirectionMode("DE_TO_SW");
                             setOpenLearn(true);
                             loadToday();
                         }}
@@ -416,8 +450,9 @@ export default function TrainerClient() {
                         onClick={() => {
                             setStatus("");
                             setDuplicateHint(null);
+                            setDuplicatePreview(null);
                             setOpenCards(true);
-                            loadCards(); // lädt sofort beim Öffnen
+                            loadCards();
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                     >
@@ -434,97 +469,120 @@ export default function TrainerClient() {
                     title="Heute lernen"
                     onClose={() => setOpenLearn(false)}
                 >
-                    <div className="rounded-2xl border p-4 bg-white">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium">Lernen</div>
 
+                    {todayItems.length === 0 ? (
+                        <p className="mt-4 text-sm text-gray-600">Keine Karten fällig 🎉</p>
+                    ) : !learnStarted ? (
+                        <div className="mt-4 rounded-2xl border p-4">
+                            <div className="text-sm font-medium">Einstellungen</div>
+                            <p className="mt-1 text-sm text-gray-600">
+                                Wähle die Abfragerichtung – dann startest du.
+                            </p>
+
+                            <label className="block text-sm font-medium mt-4">Abfragerichtung</label>
                             <select
-                                className="rounded-xl border p-2 text-sm"
-                                value={direction}
+                                className="mt-1 w-full rounded-xl border p-3 text-sm"
+                                value={directionMode}
                                 onChange={(e) =>
-                                    setDirection(e.target.value as "DE_TO_SW" | "SW_TO_DE")
+                                    setDirectionMode(e.target.value as "DE_TO_SW" | "SW_TO_DE" | "RANDOM")
                                 }
                             >
                                 <option value="DE_TO_SW">Deutsch → Swahili</option>
                                 <option value="SW_TO_DE">Swahili → Deutsch</option>
+                                <option value="RANDOM">Zufällig (Abwechslung)</option>
                             </select>
-                        </div>
 
-                        <div className="mt-3">
                             <button
-                                className="w-full rounded-xl border p-3"
-                                onClick={loadToday}
+                                className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                onClick={() => {
+                                    // Direction festlegen
+                                    const chosen =
+                                        directionMode === "RANDOM"
+                                            ? (Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE")
+                                            : directionMode;
+
+                                    setDirection(chosen);
+                                    setReveal(false);
+                                    setCurrentIndex(0);
+                                    setLearnStarted(true);
+                                }}
                             >
-                                Heute fällige Karten neu laden
+                                Start
                             </button>
                         </div>
+                    ) : (
+                        <div className="mt-4">
+                            <div className="text-xs text-gray-500">
+                                Karte {currentIndex + 1} / {todayItems.length}
+                            </div>
 
-                        {todayItems.length === 0 ? (
-                            <p className="mt-4 text-sm text-gray-600">
-                                Keine Karten fällig 🎉
-                            </p>
-                        ) : (
-                            <div className="mt-4">
-                                <div className="text-xs text-gray-500">
-                                    Karte {currentIndex + 1} / {todayItems.length}
+                            <div className="mt-3 rounded-2xl border p-4">
+                                {currentImagePath ? (
+                                    <img
+                                        src={`${IMAGE_BASE_URL}/${currentImagePath}`}
+                                        alt="Bild"
+                                        className="w-full max-h-64 object-cover rounded-xl border"
+                                    />
+                                ) : null}
+
+                                <div className="mt-4 text-lg font-semibold">
+                                    {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
                                 </div>
 
-                                <div className="mt-3 rounded-2xl border p-4">
-                                    {/* Bild */}
-                                    {currentImagePath ? (
-                                        <img
-                                            src={`${IMAGE_BASE_URL}/${currentImagePath}`}
-                                            alt="Bild"
-                                            className="w-full max-h-64 object-cover rounded-xl border"
-                                        />
-                                    ) : null}
-
-                                    {/* Prompt */}
-                                    <div className="mt-4 text-lg font-semibold">
-                                        {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
-                                    </div>
-
-                                    {/* Answer */}
-                                    <div className="mt-3">
-                                        {!reveal ? (
-                                            <button
-                                                className="w-full rounded-xl bg-black text-white p-3"
-                                                onClick={() => setReveal(true)}
-                                            >
-                                                Aufdecken
-                                            </button>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                <div className="rounded-xl bg-gray-50 p-3 border">
-                                                    <div className="text-xs text-gray-500">Antwort</div>
-                                                    <div className="text-base font-medium">
-                                                        {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <button
-                                                        className="rounded-xl border p-3"
-                                                        onClick={() => gradeCurrent(false)}
-                                                    >
-                                                        Nicht gewusst
-                                                    </button>
-                                                    <button
-                                                        className="rounded-xl bg-black text-white p-3"
-                                                        onClick={() => gradeCurrent(true)}
-                                                    >
-                                                        Gewusst
-                                                    </button>
+                                <div className="mt-3">
+                                    {!reveal ? (
+                                        <button
+                                            className="w-full rounded-xl bg-black text-white p-3"
+                                            onClick={() => setReveal(true)}
+                                        >
+                                            Aufdecken
+                                        </button>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="rounded-xl bg-gray-50 p-3 border">
+                                                <div className="text-xs text-gray-500">Antwort</div>
+                                                <div className="text-base font-medium">
+                                                    {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                                 </div>
                                             </div>
-                                        )}
-                                    </div>
-                                </div>
 
-                                <p className="mt-3 text-sm">{status}</p>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button
+                                                    className="rounded-xl border p-3"
+                                                    onClick={() => gradeCurrent(false)}
+                                                >
+                                                    Nicht gewusst
+                                                </button>
+                                                <button
+                                                    className="rounded-xl bg-black text-white p-3"
+                                                    onClick={() => gradeCurrent(true)}
+                                                >
+                                                    Gewusst
+                                                </button>
+                                            </div>
+
+                                            <button
+                                                className="w-full rounded-xl border p-3 text-sm"
+                                                onClick={() => {
+                                                    // zurück zum Setup, z.B. Richtung ändern oder neu starten
+                                                    setLearnStarted(false);
+                                                    setReveal(false);
+                                                }}
+                                            >
+                                                Einstellungen ändern
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        )}
-                    </div>
+
+                            {status ? (
+                                <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
+                                    {status}
+                                </div>
+                            ) : null}
+                        </div>
+                    )}
                 </Modal>
 
                 {/* Create Modal */}
@@ -553,41 +611,103 @@ export default function TrainerClient() {
                             placeholder="z.B. Habari za asubuhi"
                         />
 
-                        <label className="block text-sm font-medium mt-4">
-                            Bild (optional)
+                        <label className="block text-sm font-medium mt-4 mb-1">
+                            Bild hinzufügen
                         </label>
+
                         <input
                             type="file"
                             accept="image/*"
-                            className="mt-1 w-full"
+                            id="image-upload"
+                            className="hidden"
                             onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
                         />
 
-                        {previewUrl && (
-                            <div className="mt-3">
-                                <p className="text-xs text-gray-500 mb-2">Vorschau</p>
-                                <img
-                                    src={previewUrl}
-                                    alt="Vorschau"
-                                    className="w-40 h-40 object-cover rounded-xl border"
-                                />
-                            </div>
-                        )}
+                        <label
+                            htmlFor="image-upload"
+                            className="
+                                flex items-center justify-center gap-3
+                                rounded-2xl border-2 border-dashed
+                                p-4 cursor-pointer
+                                transition
+                                hover:bg-gray-50 hover:border-gray-400
+                            "
+                        >
+                            {previewUrl ? (
+                                <>
+                                    <img
+                                        src={previewUrl}
+                                        alt="Vorschau"
+                                        className="w-16 h-16 object-cover rounded-xl border"
+                                    />
+                                    <div className="text-sm">
+                                        <div className="font-medium">Bild ändern</div>
+                                        <div className="text-xs text-gray-500">
+                                            Tippen zum Austauschen
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="text-3xl">🖼️</div>
+                                    <div className="text-sm">
+                                        <div className="font-medium">Bild hinzufügen</div>
+                                        <div className="text-xs text-gray-500">
+                                            Tippen, um ein Bild auszuwählen
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </label>
 
                         {duplicateHint && (
-                            <div className="mt-4 rounded-xl border p-3 bg-yellow-50">
-                                <div className="text-sm font-medium">Hinweis</div>
-                                <div className="text-sm text-gray-700 mt-1">{duplicateHint}</div>
+                            <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
+                                <p className="text-sm font-medium">{duplicateHint}</p>
 
-                                <div className="mt-3 flex gap-2">
+                                {/* Vorschau vorhandener Karten */}
+                                {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
+                                    <div className="space-y-2">
+                                        <p className="text-xs text-gray-600">Bereits vorhandene Karten:</p>
+
+                                        {duplicatePreview.slice(0, 5).map((c: any) => (
+                                            <div
+                                                key={c.id}
+                                                className="flex items-center gap-3 rounded-lg border bg-white p-2"
+                                            >
+                                                {c.image_path ? (
+                                                    <img
+                                                        src={`${IMAGE_BASE_URL}/${c.image_path}`}
+                                                        alt="Bild"
+                                                        className="w-10 h-10 rounded-md object-cover border"
+                                                    />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-md border bg-gray-100 flex items-center justify-center text-xs text-gray-400">
+                                                        –
+                                                    </div>
+                                                )}
+
+                                                <div className="text-sm">
+                                                    <div className="font-medium">{c.german_text}</div>
+                                                    <div className="text-gray-600">{c.swahili_text}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2 pt-2">
                                     <button
-                                        className="rounded-xl border px-3 py-2 text-sm"
-                                        onClick={() => setDuplicateHint(null)}
+                                        className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                                        onClick={() => {
+                                            setDuplicateHint(null);
+                                            setDuplicatePreview(null);
+                                        }}
                                     >
-                                        Abbrechen
+                                        Korrigieren
                                     </button>
+
                                     <button
-                                        className="rounded-xl bg-black text-white px-3 py-2 text-sm"
+                                        className="flex-1 rounded-xl bg-black text-white px-3 py-2 text-sm"
                                         onClick={() => createCard(true)}
                                     >
                                         Trotzdem speichern
@@ -604,7 +724,11 @@ export default function TrainerClient() {
                             {editingId ? "Änderungen speichern" : "Karte speichern"}
                         </button>
 
-                        <p className="mt-3 text-sm">{status}</p>
+                        {status ? (
+                            <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
+                                {status}
+                            </div>
+                        ) : null}
                     </div>
                 </Modal>
                 {/* My Cards Modal */}
@@ -628,13 +752,8 @@ export default function TrainerClient() {
                             </div>
                         ) : null}
 
-                        <div className="mt-3 flex gap-2">
-                            <button className="rounded-xl border px-3 py-2 text-sm" onClick={() => loadCards()}>
-                                Neu laden
-                            </button>
-                            <div className="text-sm text-gray-500 flex items-center">
-                                {cards.length} Karten
-                            </div>
+                        <div className="mt-3 text-sm text-gray-500">
+                            {cards.length} Karten
                         </div>
 
                         {/* Liste */}
@@ -687,7 +806,7 @@ export default function TrainerClient() {
                     </div>
                 </Modal>
 
-            </div>
-        </main>
+            </div >
+        </main >
     );
 }
