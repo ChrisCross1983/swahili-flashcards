@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import Modal from "@/components/Modal";
+import FullScreenSheet from "@/components/FullScreenSheet";
 
 const KEY_NAME = "ramona_owner_key";
 const IMAGE_BASE_URL =
@@ -490,7 +490,6 @@ export default function TrainerClient() {
                 <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <button
                         onClick={() => {
-                            // Modal öffnen
                             setOpenLearn(true);
 
                             // Setup immer sauber zurücksetzen
@@ -549,15 +548,15 @@ export default function TrainerClient() {
                             loadCards(undefined, { silent: true });
                         }}
                     >
-                        <div className="font-semibold">Karte suchen</div>
-                        <div className="text-sm text-gray-600">
-                            Deutsch oder Swahili
+                        <div className="text-xl font-semibold">Karte suchen</div>
+                        <div className="mt-2 text-sm text-gray-600">
+                            Deutsch oder Swahili.
                         </div>
                     </button>
                 </div>
 
                 {/* Learn Modal */}
-                <Modal
+                <FullScreenSheet
                     open={openLearn}
                     title="Heute lernen"
                     onClose={() => {
@@ -770,10 +769,10 @@ export default function TrainerClient() {
                             </div>
                         </div>
                     )}
-                </Modal>
+                </FullScreenSheet>
 
                 {/* Create Modal */}
-                <Modal
+                <FullScreenSheet
                     open={openCreate}
                     title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
                     onClose={() => {
@@ -928,10 +927,10 @@ export default function TrainerClient() {
                             </div>
                         ) : null}
                     </div>
-                </Modal >
+                </FullScreenSheet>
 
                 {/* My Cards Modal */}
-                < Modal
+                <FullScreenSheet
                     open={openCards}
                     title="Meine Karten"
                     onClose={() => setOpenCards(false)
@@ -996,10 +995,10 @@ export default function TrainerClient() {
                             ) : null}
                         </div>
                     </div>
-                </Modal >
+                </FullScreenSheet>
 
                 {/* Search Modal */}
-                < Modal
+                <FullScreenSheet
                     open={openSearch}
                     title="Karte suchen"
                     onClose={() => {
@@ -1042,7 +1041,7 @@ export default function TrainerClient() {
                             ))
                         )}
                     </div>
-                </Modal >
+                </FullScreenSheet>
             </div >
         </main >
     );
