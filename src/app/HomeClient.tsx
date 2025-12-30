@@ -4,22 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-const KEY_NAME = "ramona_owner_key";
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
 
-function getOrCreateOwnerKey() {
-    let k = localStorage.getItem(KEY_NAME);
-    if (!k) {
-        k = crypto.randomUUID();
-        localStorage.setItem(KEY_NAME, k);
-    }
-    return k;
-}
+type Props = { ownerKey: string };
 
-export default function HomeClient() {
+export default function HomeClient({ ownerKey }: Props) {
     const [userEmail, setUserEmail] = useState<string | null>(null);
-    const [ownerKey, setOwnerKey] = useState("");
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
     const [status, setStatus] = useState("");
@@ -35,10 +26,6 @@ export default function HomeClient() {
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const router = useRouter();
-
-    useEffect(() => {
-        setOwnerKey(getOrCreateOwnerKey());
-    }, []);
 
     useEffect(() => {
         (async () => {
