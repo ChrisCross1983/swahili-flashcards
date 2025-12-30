@@ -60,6 +60,13 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     const router = useRouter();
 
+    const [leitnerStats, setLeitnerStats] = useState<null | {
+        total: number;
+        byLevel: { level: number; label: string; count: number }[];
+        nextDueDate: string | null;
+        nextDueInDays: number | null;
+    }>(null);
+
     useEffect(() => {
         // nur im Browser verfügbar
         const k = localStorage.getItem(LEGACY_KEY_NAME);
@@ -368,6 +375,14 @@ export default function TrainerClient({ ownerKey }: Props) {
         setReveal(false);
 
         setStatus(`Alle Karten: ${items.length}`);
+    }
+
+    async function loadLeitnerStats() {
+        const res = await fetch(`/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`);
+        const json = await res.json();
+        if (!res.ok) return;
+
+        setLeitnerStats(json);
     }
 
     async function gradeCurrent(correct: boolean) {
@@ -786,6 +801,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                     if (learnMode === "LEITNER_TODAY") {
                                         await loadToday();
+                                        await loadLeitnerStats();
                                     } else {
                                         await loadAllForDrill();
                                     }
@@ -808,38 +824,87 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {learnStarted && todayItems.length === 0 && (
                         <>
                             {learnMode === "LEITNER_TODAY" ? (
-                                <div className="mt-4 rounded-2xl border p-4">
-                                    <div className="text-sm font-medium">
+                                <div className="mt-4 rounded-2xl border p-4 bg-white">
+                                    <div className="text-lg font-semibold">
                                         {learnDone ? "Heute erledigt ✅" : "Keine Karten fällig 🎉"}
                                     </div>
 
                                     <div className="mt-2 text-sm text-gray-700">
                                         {learnDone
-                                            ? "Du hast deinen heutigen Leitner-Topf durch. Morgen geht’s weiter."
+                                            ? "Du hast deinen heutigen Leitner-Topf durch. Weiter so."
                                             : "Für heute ist nichts offen — sehr gut."}
                                     </div>
 
-                                    <div className="mt-4">
-                                        <button
-                                            className="w-full rounded-xl bg-black text-white p-3"
-                                            onClick={() => {
-                                                setLearnStarted(false);
-                                                setLearnDone(false);
-                                                setShowSummary(false);
+                                    {/* Lernstand */}
+                                    <div className="mt-4 rounded-2xl border p-4">
+                                        <div className="text-sm font-medium">Dein Lernstand</div>
 
-                                                setTodayItems([]);
-                                                setCurrentIndex(0);
-                                                setReveal(false);
-                                                setStatus("");
+                                        {!leitnerStats ? (
+                                            <div className="mt-2 text-sm text-gray-600">Lade Lernstand…</div>
+                                        ) : (
+                                            <>
+                                                <div className="mt-3 space-y-2 text-sm">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-gray-600">Karten im Training</span>
+                                                        <span className="font-medium">{leitnerStats.total}</span>
+                                                    </div>
 
-                                                setLearnMode(null);
-                                                setDirectionMode(null);
-                                            }}
-                                        >
-                                            Fertig
-                                        </button>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-gray-600">Nächste Karte fällig</span>
+                                                        <span className="font-medium">
+                                                            {leitnerStats.nextDueInDays == null
+                                                                ? "—"
+                                                                : leitnerStats.nextDueInDays === 0
+                                                                    ? "heute"
+                                                                    : `in ${leitnerStats.nextDueInDays} Tag${leitnerStats.nextDueInDays === 1 ? "" : "en"
+                                                                    }`}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {Array.isArray(leitnerStats.byLevel) && leitnerStats.byLevel.length > 0 ? (
+                                                    <div className="mt-4">
+                                                        <div className="text-xs font-medium text-gray-500">Verteilung</div>
+                                                        <div className="mt-2 space-y-2">
+                                                            {leitnerStats.byLevel.map((b) => (
+                                                                <div key={b.level} className="flex items-center justify-between text-sm">
+                                                                    <span className="text-gray-700">{b.label}</span>
+                                                                    <span className="font-medium">{b.count}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+
+                                                <div className="mt-4 rounded-xl bg-gray-50 border p-3 text-xs text-gray-600">
+                                                    Tipp: Wenn heute nichts fällig ist, ist das ein gutes Zeichen – dein Rhythmus sitzt.
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
+
+                                    <button
+                                        className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                        type="button"
+                                        onClick={() => {
+                                            setLearnStarted(false);
+                                            setLearnDone(false);
+                                            setShowSummary(false);
+
+                                            setTodayItems([]);
+                                            setCurrentIndex(0);
+                                            setReveal(false);
+                                            setStatus("");
+
+                                            setLearnMode(null);
+                                            setDirectionMode(null);
+                                            setOpenDirectionChange(false);
+                                        }}
+                                    >
+                                        Fertig
+                                    </button>
                                 </div>
+
                             ) : (
                                 <div className="mt-4 rounded-2xl border p-4">
                                     <div className="text-sm font-medium">Session abgeschlossen ✅</div>
