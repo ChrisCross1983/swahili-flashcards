@@ -5,18 +5,14 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import FullScreenSheet from "@/components/FullScreenSheet";
 
-const KEY_NAME = "ramona_owner_key";
+const LEGACY_KEY_NAME = "ramona_owner_key";
+
+type Props = {
+    ownerKey: string;
+};
+
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
-
-function getOrCreateOwnerKey() {
-    let k = localStorage.getItem(KEY_NAME);
-    if (!k) {
-        k = crypto.randomUUID();
-        localStorage.setItem(KEY_NAME, k);
-    }
-    return k;
-}
 
 function shuffleArray<T>(array: T[]): T[] {
     const a = [...array];
@@ -27,9 +23,8 @@ function shuffleArray<T>(array: T[]): T[] {
     return a;
 }
 
-export default function TrainerClient() {
+export default function TrainerClient({ ownerKey }: Props) {
     const [userEmail, setUserEmail] = useState<string | null>(null);
-    const [ownerKey, setOwnerKey] = useState("");
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
     const [status, setStatus] = useState("");
@@ -56,12 +51,20 @@ export default function TrainerClient() {
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionTotal, setSessionTotal] = useState(0);
     const [showSummary, setShowSummary] = useState(false);
+    const [legacyKey, setLegacyKey] = useState<string | null>(null);
+    const [showMigrate, setShowMigrate] = useState(false);
+    const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
 
     const router = useRouter();
 
     useEffect(() => {
-        setOwnerKey(getOrCreateOwnerKey());
-    }, []);
+        // nur im Browser verfügbar
+        const k = localStorage.getItem(LEGACY_KEY_NAME);
+        if (k && k !== ownerKey) {
+            setLegacyKey(k);
+            setShowMigrate(true);
+        }
+    }, [ownerKey]);
 
     useEffect(() => {
         (async () => {
@@ -80,6 +83,11 @@ export default function TrainerClient() {
         setPreviewUrl(url);
         return () => URL.revokeObjectURL(url);
     }, [imageFile]);
+
+    useEffect(() => {
+        loadCards(undefined, { silent: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function uploadImage(): Promise<string | null> {
         if (!imageFile) return null;
@@ -132,7 +140,6 @@ export default function TrainerClient() {
             if (!res.ok) {
                 console.error(json.error);
 
-                // Wenn Duplikat: lieber als deutliche Warnbox anzeigen
                 if (res.status === 409) {
                     setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
                     setStatus("");
@@ -444,6 +451,33 @@ export default function TrainerClient() {
         window.setTimeout(() => setStatus(""), 2500);
     }
 
+    async function migrateLegacyData() {
+        if (!legacyKey) return;
+
+        setMigrateStatus("Übernehme alte Karten…");
+
+        const res = await fetch("/api/migrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fromKey: legacyKey, toKey: ownerKey }),
+        });
+
+        const json = await res.json();
+
+        if (!res.ok) {
+            setMigrateStatus(json.error ?? "Migration fehlgeschlagen.");
+            return;
+        }
+
+        setMigrateStatus("Fertig ✅ Alte Karten wurden übernommen.");
+
+        localStorage.removeItem(LEGACY_KEY_NAME);
+
+        // neu laden
+        await loadCards();
+        setShowMigrate(false);
+    }
+
     const filteredCards = cards.filter((c) => {
         const q = search.trim().toLowerCase();
         if (!q) return true;
@@ -485,6 +519,38 @@ export default function TrainerClient() {
                         Logout
                     </button>
                 </div>
+
+                {showMigrate ? (
+                    <div className="mt-4 rounded-2xl border p-4 bg-white">
+                        <div className="font-semibold">Alte Karten gefunden</div>
+                        <div className="mt-1 text-sm text-gray-600">
+                            Deine Karten aus der alten App-Version sind noch da, aber unter einem anderen Schlüssel gespeichert.
+                            Mit einem Klick übernehmen wir sie in deinen Login.
+                        </div>
+
+                        {migrateStatus ? (
+                            <div className="mt-2 text-sm text-gray-600">{migrateStatus}</div>
+                        ) : null}
+
+                        <div className="mt-3 flex gap-3">
+                            <button
+                                className="rounded-xl bg-black text-white px-4 py-2 text-sm"
+                                type="button"
+                                onClick={migrateLegacyData}
+                            >
+                                Jetzt übernehmen
+                            </button>
+
+                            <button
+                                className="rounded-xl border px-4 py-2 text-sm"
+                                type="button"
+                                onClick={() => setShowMigrate(false)}
+                            >
+                                Später
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
 
                 {/* Bubbles */}
                 <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -542,7 +608,7 @@ export default function TrainerClient() {
                         </div>
                     </button>
                     <button
-                        className="rounded-2xl border p-4 hover:shadow-sm transition"
+                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                         onClick={() => {
                             setOpenSearch(true);
                             loadCards(undefined, { silent: true });

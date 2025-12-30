@@ -3,9 +3,41 @@
 import { useRouter } from "next/navigation";
 
 const CATEGORIES = [
-  { slug: "basics", title: "Basics", level: 1, description: "Hallo, Bitte, Danke …" },
-  { slug: "numbers", title: "Zahlen", level: 2, description: "1–100, Uhrzeiten …" },
-  { slug: "food", title: "Essen & Trinken", level: 3, description: "Restaurant, Einkaufen …" },
+  {
+    slug: "basics",
+    title: "Basics",
+    level: 1,
+    description: "Hallo, Bitte, Danke …",
+    enabled: true,
+  },
+  {
+    slug: "travel",
+    title: "Reisen",
+    level: 2,
+    description: "Unterwegs, Weg fragen …",
+    enabled: false,
+  },
+  {
+    slug: "home",
+    title: "Wohnen",
+    level: 3,
+    description: "Haus, Alltag, Dinge …",
+    enabled: false,
+  },
+  {
+    slug: "work",
+    title: "Arbeit",
+    level: 4,
+    description: "Office, Meetings …",
+    enabled: false,
+  },
+  {
+    slug: "sentences",
+    title: "Sätze & Übungen",
+    level: 5,
+    description: "Nominalklassen, Struktur …",
+    enabled: false,
+  },
 ];
 
 export default function PathClient() {
@@ -23,10 +55,23 @@ export default function PathClient() {
           {CATEGORIES.sort((a, b) => a.level - b.level).map((c) => (
             <button
               key={c.slug}
-              className="w-full rounded-2xl border p-4 text-left hover:shadow-sm transition"
-              onClick={() => router.push(`/path/${c.slug}`)}
+              className={`w-full rounded-2xl border p-4 text-left transition ${c.enabled ? "hover:shadow-sm" : "opacity-50 cursor-not-allowed"
+                }`}
+              onClick={() => {
+                if (!c.enabled) return;
+                router.push(`/path/${c.slug}`);
+              }}
+              type="button"
             >
-              <div className="font-semibold">{c.title}</div>
+              <div className="font-semibold flex items-center gap-2">
+                <span
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-sm ${c.enabled ? "" : "bg-gray-100"
+                    }`}
+                >
+                  {c.level}
+                </span>
+                {c.title}
+              </div>
               <div className="text-sm text-gray-600">{c.description}</div>
             </button>
           ))}
@@ -39,6 +84,6 @@ export default function PathClient() {
           ← Zurück
         </button>
       </div>
-    </main>
+    </main >
   );
 }

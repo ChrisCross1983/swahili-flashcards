@@ -8,5 +8,5 @@ export default async function TrainerPage() {
 
   if (!user) redirect("/login");
 
-  return <TrainerClient />;
+  return <TrainerClient ownerKey={user.id} />;
 }
