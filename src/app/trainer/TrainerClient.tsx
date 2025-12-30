@@ -45,14 +45,17 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
-    const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "ALL_SHUFFLE">("LEITNER_TODAY");
+    const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "ALL_SHUFFLE" | null>(null);
     const [learnStarted, setLearnStarted] = useState(false);
-    const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM">("DE_TO_SW");
+    const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>(null);
+    const [openDirectionChange, setOpenDirectionChange] = useState(false);
+    const [learnDone, setLearnDone] = useState(false);
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionTotal, setSessionTotal] = useState(0);
     const [showSummary, setShowSummary] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
+    const [startHint, setStartHint] = useState<string | null>(null);
     const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
 
     const router = useRouter();
@@ -369,28 +372,15 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     async function gradeCurrent(correct: boolean) {
         const item = todayItems[currentIndex];
+        if (!item) return;
 
-        // === SESSION STATISTIK ===
-        if (correct) {
-            setSessionCorrect((x) => x + 1);
-        }
+        // Session-Statistik
+        if (correct) setSessionCorrect((x) => x + 1);
 
         const nextIndex = currentIndex + 1;
 
-        // === DRILL MODUS (KEINE DB-ÄNDERUNG) ===
+        // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
         if (learnMode === "ALL_SHUFFLE") {
-            if (!correct) {
-                const id = item.cardId;
-                const count = (wrongCounts[id] ?? 0) + 1;
-
-                setWrongCounts((prev) => ({ ...prev, [id]: count }));
-
-                // falsch beantwortete Karten max. 2x wiederholen
-                if (count <= 2) {
-                    setTodayItems((prev) => [...prev, item]);
-                }
-            }
-
             if (nextIndex >= todayItems.length) {
                 // Session beendet → Summary anzeigen
                 setReveal(false);
@@ -399,7 +389,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                 return;
             }
 
-            // nächste Karte
             setCurrentIndex(nextIndex);
             setReveal(false);
 
@@ -407,11 +396,10 @@ export default function TrainerClient({ ownerKey }: Props) {
             if (directionMode === "RANDOM") {
                 setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
             }
-
             return;
         }
 
-        // === LEITNER MODUS (DB UPDATE) ===
+        // === LEITNER MODUS: DB UPDATE ===
         try {
             await fetch("/api/learn/grade", {
                 method: "POST",
@@ -428,10 +416,12 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         if (nextIndex >= todayItems.length) {
             setReveal(false);
-            await loadToday(); // neu laden, damit fällige Karten verschwinden
+            setTodayItems([]);      // triggert "Erledigt"-UI
+            setLearnDone(true);     // zeigt "Heute erledigt"
             return;
         }
 
+        // nächste Karte
         setCurrentIndex(nextIndex);
         setReveal(false);
 
@@ -558,17 +548,20 @@ export default function TrainerClient({ ownerKey }: Props) {
                         onClick={() => {
                             setOpenLearn(true);
 
-                            // Setup immer sauber zurücksetzen
+                            // Setup sauber zurücksetzen
                             setLearnStarted(false);
-                            setLearnMode("LEITNER_TODAY");     // Standard: Leitner (heute fällig)
-                            setDirectionMode("DE_TO_SW");      // Standard: Deutsch -> Swahili
+                            setLearnDone(false);
+                            setShowSummary(false);
 
-                            // Lern-Session zurücksetzen
+                            // NICHTS vorauswählen (UX!)
+                            setLearnMode(null);
+                            setDirectionMode(null);
+
+                            // Session reset
                             setTodayItems([]);
                             setCurrentIndex(0);
                             setReveal(false);
 
-                            // Status/Feedback clean halten
                             setStatus("");
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
@@ -624,55 +617,159 @@ export default function TrainerClient({ ownerKey }: Props) {
                 {/* Learn Modal */}
                 <FullScreenSheet
                     open={openLearn}
-                    title="Heute lernen"
+                    title="Vokabeln lernen"
                     onClose={() => {
+                        if (learnStarted || showSummary || todayItems.length > 0 || learnDone) {
+                            setLearnStarted(false);
+                            setLearnDone(false);
+                            setShowSummary(false);
+                            setTodayItems([]);
+                            setCurrentIndex(0);
+                            setReveal(false);
+                            setStatus("");
+
+                            setLearnMode(null);
+                            setDirectionMode(null);
+
+                            return;
+                        }
+
                         setOpenLearn(false);
-                        setLearnStarted(false);
-                        setReveal(false);
                     }}
                 >
                     {/* === SETUP === */}
                     {!learnStarted && (
-                        <div className="mt-4 rounded-2xl border p-4">
+                        <div className="mt-4 rounded-2xl border p-4 bg-white">
                             <div className="text-sm font-medium">Einstellungen</div>
                             <p className="mt-1 text-sm text-gray-600">
-                                Wähle Lernmethode und Abfragerichtung, dann starte.
+                                Wähle Lernmodus und Abfragerichtung – dann starten wir.
                             </p>
 
-                            <label className="block text-sm font-medium mt-4">Lernmethode</label>
-                            <select
-                                className="mt-1 w-full rounded-xl border p-3 text-sm"
-                                value={learnMode}
-                                onChange={(e) =>
-                                    setLearnMode(e.target.value as "LEITNER_TODAY" | "ALL_SHUFFLE")
-                                }
-                            >
-                                <option value="LEITNER_TODAY">
-                                    Leitner (heute fällige Karten)
-                                </option>
-                                <option value="ALL_SHUFFLE">
-                                    Shuffle-Drill (alle Karten)
-                                </option>
-                            </select>
+                            <div className="mt-4">
+                                <div className="text-sm font-medium">Lernmodus</div>
+                                <div className="mt-2 grid grid-cols-1 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setLearnMode("LEITNER_TODAY")}
+                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "LEITNER_TODAY"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="font-semibold">Heute fällig (Langzeit)</div>
+                                                <div className="mt-1 text-sm text-gray-600">
+                                                    Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
+                                                </div>
+                                            </div>
 
-                            <label className="block text-sm font-medium mt-4">Abfragerichtung</label>
-                            <select
-                                className="mt-1 w-full rounded-xl border p-3 text-sm"
-                                value={directionMode}
-                                onChange={(e) =>
-                                    setDirectionMode(
-                                        e.target.value as "DE_TO_SW" | "SW_TO_DE" | "RANDOM"
-                                    )
-                                }
-                            >
-                                <option value="DE_TO_SW">Deutsch → Swahili</option>
-                                <option value="SW_TO_DE">Swahili → Deutsch</option>
-                                <option value="RANDOM">Zufällig</option>
-                            </select>
+                                            {learnMode === "LEITNER_TODAY" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setLearnMode("ALL_SHUFFLE")}
+                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "ALL_SHUFFLE"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="font-semibold">Alle Karten (Mix)</div>
+                                                <div className="mt-1 text-sm text-gray-600">
+                                                    Fragt alle Karten einmal zufällig ab – perfekt zum schnellen Check.
+                                                </div>
+                                            </div>
+
+                                            {learnMode === "ALL_SHUFFLE" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="mt-4">
+                                <div className="text-sm font-medium">Abfragerichtung</div>
+                                <div className="mt-2 grid grid-cols-1 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDirectionMode("DE_TO_SW")}
+                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span>Deutsch → Swahili</span>
+                                            {directionMode === "DE_TO_SW" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setDirectionMode("SW_TO_DE")}
+                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span>Swahili → Deutsch</span>
+                                            {directionMode === "SW_TO_DE" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setDirectionMode("RANDOM")}
+                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span>Zufällig (Abwechslung)</span>
+                                            {directionMode === "RANDOM" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
 
                             <button
-                                className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode ? "bg-gray-400" : "bg-black"
+                                    }`}
+                                type="button"
                                 onClick={async () => {
+                                    setStartHint(null);
+
+                                    if (!learnMode || !directionMode) {
+                                        setStartHint("Bitte wähle Lernmodus UND Abfragerichtung, bevor du startest.");
+                                        return;
+                                    }
+
+                                    setLearnDone(false);
                                     setSessionCorrect(0);
                                     setShowSummary(false);
 
@@ -698,20 +795,56 @@ export default function TrainerClient({ ownerKey }: Props) {
                             >
                                 Start
                             </button>
+
+                            {startHint ? (
+                                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                                    {startHint}
+                                </div>
+                            ) : null}
                         </div>
                     )}
 
-                    {/* === KEINE KARTEN / Endergebnis Drill Session === */}
+                    {/* === KEINE KARTEN / ENDE === */}
                     {learnStarted && todayItems.length === 0 && (
                         <>
                             {learnMode === "LEITNER_TODAY" ? (
-                                <p className="mt-4 text-sm text-gray-600">Keine Karten fällig 🎉</p>
+                                <div className="mt-4 rounded-2xl border p-4">
+                                    <div className="text-sm font-medium">
+                                        {learnDone ? "Heute erledigt ✅" : "Keine Karten fällig 🎉"}
+                                    </div>
+
+                                    <div className="mt-2 text-sm text-gray-700">
+                                        {learnDone
+                                            ? "Du hast deinen heutigen Leitner-Topf durch. Morgen geht’s weiter."
+                                            : "Für heute ist nichts offen — sehr gut."}
+                                    </div>
+
+                                    <div className="mt-4">
+                                        <button
+                                            className="w-full rounded-xl bg-black text-white p-3"
+                                            onClick={() => {
+                                                setLearnStarted(false);
+                                                setLearnDone(false);
+                                                setShowSummary(false);
+
+                                                setTodayItems([]);
+                                                setCurrentIndex(0);
+                                                setReveal(false);
+                                                setStatus("");
+
+                                                setLearnMode(null);
+                                                setDirectionMode(null);
+                                            }}
+                                        >
+                                            Fertig
+                                        </button>
+                                    </div>
+                                </div>
                             ) : (
                                 <div className="mt-4 rounded-2xl border p-4">
                                     <div className="text-sm font-medium">Session abgeschlossen ✅</div>
 
                                     {(() => {
-                                        // robust: wenn sessionTotal mal 0 ist, zeig trotzdem etwas Sinnvolles
                                         const total = sessionTotal > 0 ? sessionTotal : Math.max(sessionCorrect, 1);
                                         const pct = Math.round((sessionCorrect / total) * 100);
 
@@ -729,7 +862,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     <button
                                                         className="rounded-xl border p-3"
                                                         onClick={async () => {
-                                                            // Drill sofort nochmal starten, gleiche Einstellungen behalten
                                                             setSessionCorrect(0);
                                                             setShowSummary(false);
                                                             setReveal(false);
@@ -737,7 +869,6 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                             await loadAllForDrill();
 
-                                                            // Richtung neu würfeln, falls RANDOM
                                                             if (directionMode === "RANDOM") {
                                                                 setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
                                                             }
@@ -752,10 +883,19 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         className="rounded-xl bg-black text-white p-3"
                                                         onClick={() => {
                                                             setLearnStarted(false);
+                                                            setLearnDone(false);
+                                                            setShowSummary(false);
+
+                                                            setTodayItems([]);
+                                                            setCurrentIndex(0);
                                                             setReveal(false);
+                                                            setStatus("");
+
+                                                            setLearnMode(null);
+                                                            setDirectionMode(null);
                                                         }}
                                                     >
-                                                        Zurück
+                                                        Fertig
                                                     </button>
                                                 </div>
                                             </>
@@ -771,6 +911,75 @@ export default function TrainerClient({ ownerKey }: Props) {
                         <div className="mt-4">
                             <div className="text-xs text-gray-500">
                                 Karte {currentIndex + 1} / {todayItems.length}
+                                {/* Session-Header: Richtung ändern (ohne Neustart) */}
+                                <div className="mt-2 flex items-center justify-between gap-3">
+                                    <div className="text-xs text-gray-500">
+                                        Richtung:{" "}
+                                        <span className="font-medium">
+                                            {directionMode === "RANDOM"
+                                                ? "Zufällig (Abwechslung)"
+                                                : direction === "DE_TO_SW"
+                                                    ? "Deutsch → Swahili"
+                                                    : "Swahili → Deutsch"}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="rounded-xl border px-3 py-2 text-xs"
+                                        onClick={() => setOpenDirectionChange((v) => !v)}
+                                    >
+                                        Richtung ändern
+                                    </button>
+                                </div>
+
+                                {openDirectionChange ? (
+                                    <div className="mt-3 rounded-2xl border p-3">
+                                        <div className="text-sm font-medium">Abfragerichtung</div>
+
+                                        <div className="mt-2 grid grid-cols-1 gap-2">
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border p-3 text-left"
+                                                onClick={() => {
+                                                    setDirectionMode("DE_TO_SW");
+                                                    setDirection("DE_TO_SW");
+                                                    setOpenDirectionChange(false);
+                                                }}
+                                            >
+                                                Deutsch → Swahili
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border p-3 text-left"
+                                                onClick={() => {
+                                                    setDirectionMode("SW_TO_DE");
+                                                    setDirection("SW_TO_DE");
+                                                    setOpenDirectionChange(false);
+                                                }}
+                                            >
+                                                Swahili → Deutsch
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border p-3 text-left"
+                                                onClick={() => {
+                                                    setDirectionMode("RANDOM");
+                                                    const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
+                                                    setDirection(chosen);
+                                                    setOpenDirectionChange(false);
+                                                }}
+                                            >
+                                                Zufällig (Abwechslung)
+                                            </button>
+                                        </div>
+
+                                        <p className="mt-2 text-xs text-gray-500">
+                                            Tipp: „Zufällig“ würfelt ab jetzt pro Karte neu.
+                                        </p>
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="mt-3 rounded-2xl border p-4">
@@ -820,16 +1029,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 Gewusst
                                             </button>
                                         </div>
-
-                                        <button
-                                            className="w-full rounded-xl border p-3 text-sm"
-                                            onClick={() => {
-                                                setLearnStarted(false);
-                                                setReveal(false);
-                                            }}
-                                        >
-                                            Einstellungen ändern
-                                        </button>
                                     </div>
                                 )}
                             </div>
