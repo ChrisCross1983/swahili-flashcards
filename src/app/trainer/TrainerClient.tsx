@@ -47,6 +47,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [openCreate, setOpenCreate] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "ALL_SHUFFLE" | null>(null);
     const [learnStarted, setLearnStarted] = useState(false);
+    const [returnToLearn, setReturnToLearn] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>(null);
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnDone, setLearnDone] = useState(false);
@@ -57,8 +58,21 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [showMigrate, setShowMigrate] = useState(false);
     const [startHint, setStartHint] = useState<string | null>(null);
     const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
+    const [suggestOpen, setSuggestOpen] = useState(false);
+    const [suggestLoading, setSuggestLoading] = useState(false);
+    const [selectedSuggestUrl, setSelectedSuggestUrl] = useState<string | null>(null);
+    const [selectedSuggestPath, setSelectedSuggestPath] = useState<string | null>(null);
+    const [suggestItems, setSuggestItems] = useState<any[]>([]);
+    const [suggestError, setSuggestError] = useState<string | null>(null);
+
+    const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
 
     const router = useRouter();
+
+    const editingCard = cards.find((c) => c.id === editingId) ?? null;
+
+    const editingImagePath =
+        selectedSuggestPath ?? (editingCard?.image_path ?? null);
 
     const [leitnerStats, setLeitnerStats] = useState<null | {
         total: number;
@@ -118,6 +132,70 @@ export default function TrainerClient({ ownerKey }: Props) {
         return json.path as string;
     }
 
+    async function openImageSuggestions() {
+        setSuggestError(null);
+        setSuggestItems([]);
+        setSuggestLoading(true);
+        setSuggestOpen(true);
+
+        const query = german.trim() || swahili.trim();
+        if (!query) {
+            setSuggestLoading(false);
+            setSuggestError("Bitte zuerst Deutsch oder Swahili ausfüllen.");
+            return;
+        }
+
+        const res = await fetch(`/api/images/suggest?q=${encodeURIComponent(query)}`);
+        const json = await res.json();
+
+        setSuggestLoading(false);
+
+        if (!res.ok) {
+            setSuggestError(json.error ?? "Bildvorschläge konnten nicht geladen werden.");
+            return;
+        }
+
+        setSuggestItems(json.items ?? []);
+    }
+
+    async function chooseSuggestedImage(imageUrl: string, thumbUrl?: string) {
+        try {
+            setStatus("Übernehme Bild...");
+            setSuggestError(null);
+
+            const res = await fetch("/api/images/import", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ownerKey, imageUrl }),
+            });
+            const json = await res.json();
+
+            if (!res.ok) {
+                setStatus("");
+                setSuggestError(json.error ?? "Bild konnte nicht übernommen werden.");
+                return;
+            }
+
+            setSelectedSuggestUrl(imageUrl);
+            setSelectedSuggestPath(json.path);
+
+            setSuggestedImagePath(json.path);
+
+            // Preview zeigen (optional: thumb, sonst Storage-URL)
+            if (thumbUrl) setPreviewUrl(thumbUrl);
+
+            setImageFile(null);
+
+            setStatus("Bild übernommen ✅");
+            setSuggestOpen(false);
+        } catch (e) {
+            console.error(e);
+            setStatus("Bildübernahme fehlgeschlagen.");
+        } finally {
+            setSuggestLoading(false);
+        }
+    }
+
     async function createCard(skipWarning = false) {
         try {
 
@@ -132,7 +210,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
             setStatus("Speichere...");
 
-            const imagePath = await uploadImage();
+            const imagePath = suggestedImagePath ?? (await uploadImage());
 
             const res = await fetch("/api/cards", {
                 method: "POST",
@@ -163,7 +241,13 @@ export default function TrainerClient({ ownerKey }: Props) {
             showToast("Karte gespeichert ✅");
             setGerman("");
             setSwahili("");
+            resetImageInputs();
+            setSelectedSuggestUrl(null);
+            setSelectedSuggestPath(null);
+            setSuggestItems([]);
+            setStatus("Karte gespeichert ✅");
             setImageFile(null);
+            setSuggestedImagePath(null);
             setDuplicateHint(null);
             setDuplicatePreview(null);
             await loadCards(undefined, { silent: true });
@@ -177,9 +261,18 @@ export default function TrainerClient({ ownerKey }: Props) {
             setDuplicateHint(null);
             setStatus("Speichere...");
 
-            let imagePath: string | undefined = undefined;
-            if (imageFile) {
-                imagePath = (await uploadImage()) ?? undefined;
+            if (!editingId) {
+                setStatus("Fehler: Keine Karte zum Speichern ausgewählt.");
+                return;
+            }
+
+            let imagePath: string | null | undefined = undefined;
+
+            if (suggestedImagePath) {
+                imagePath = suggestedImagePath;
+            }
+            else if (imageFile) {
+                imagePath = (await uploadImage()) ?? null;
             }
 
             const body: any = {
@@ -189,7 +282,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 swahili,
             };
 
-            if (imagePath) body.imagePath = imagePath;
+            if (imagePath !== undefined) body.imagePath = imagePath;
 
             const res = await fetch("/api/cards", {
                 method: "PATCH",
@@ -200,7 +293,6 @@ export default function TrainerClient({ ownerKey }: Props) {
             const json = await res.json();
 
             if (!res.ok) {
-                console.error(json.error);
                 if (res.status === 409) {
                     setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
                     setStatus("");
@@ -210,18 +302,53 @@ export default function TrainerClient({ ownerKey }: Props) {
                 return;
             }
 
+            const updated = json.card; // { id, german_text, swahili_text, image_path, ... }
+
             showToast("Karte aktualisiert ✅");
+
+            setCards((prev) =>
+                prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+            );
+
+            setTodayItems((prev) =>
+                prev.map((it: any) => {
+                    const itId = it.cardId ?? it.card_id ?? it.id;
+                    if (String(itId) !== String(updated.id)) return it;
+
+                    return {
+                        ...it,
+                        german: updated.german_text,
+                        swahili: updated.swahili_text,
+                        imagePath: updated.image_path ?? null,
+                        image_path: updated.image_path ?? null,
+                        german_text: updated.german_text,
+                        swahili_text: updated.swahili_text,
+                    };
+                })
+            );
+
+            // ✅ Edit-Inputs resetten
             setEditingId(null);
             setGerman("");
             setSwahili("");
             setImageFile(null);
-
-            await loadCards(undefined, { silent: true });
+            setSuggestedImagePath(null);
+            setSelectedSuggestUrl(null);
+            setSelectedSuggestPath(null);
+            setSuggestItems([]);
+            setSuggestError(null);
 
             setOpenCreate(false);
+
+            if (returnToLearn) {
+                setReturnToLearn(false);
+                setStatus("");
+                return;
+            }
+
             setOpenCards(true);
         } catch (e: any) {
-            setStatus(e.message ?? "Aktualisieren fehlgeschlagen.");
+            setStatus(e?.message ?? "Aktualisieren fehlgeschlagen.");
         }
     }
 
@@ -260,7 +387,19 @@ export default function TrainerClient({ ownerKey }: Props) {
         setGerman(card.german_text ?? "");
         setSwahili(card.swahili_text ?? "");
         setDuplicateHint(null);
+        setImageFile(null);
         setStatus("");
+
+        const existingPath = card.image_path ?? null;
+
+        setSelectedSuggestPath(existingPath);
+        setSelectedSuggestUrl(null);
+
+        if (existingPath) {
+            setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
+        } else {
+            setPreviewUrl(null);
+        }
     }
 
     function cancelEdit() {
@@ -322,6 +461,34 @@ export default function TrainerClient({ ownerKey }: Props) {
         await loadCards(undefined, { silent: true });
     }
 
+    function startEditFromLearn() {
+        const item = todayItems[currentIndex];
+        if (!item) return;
+
+        setReturnToLearn(true);
+
+        setEditingId(item.cardId);
+        setGerman(currentGerman ?? "");
+        setSwahili(currentSwahili ?? "");
+        setDuplicateHint(null);
+        setDuplicatePreview(null);
+
+        const existingPath =
+            item?.image_path ?? item?.imagePath ?? item?.image ?? null;
+
+        if (existingPath) {
+            setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
+        } else {
+            setPreviewUrl(null);
+        }
+
+        setSuggestedImagePath(null);
+        setSelectedSuggestUrl(null);
+        setSelectedSuggestPath(existingPath);
+
+        setOpenCreate(true);
+    }
+
     async function loadToday() {
         setStatus("Lade fällige Karten...");
 
@@ -340,6 +507,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSessionTotal(items.length);
 
         setTodayItems(shuffleArray(items));
+        setSessionTotal(json.items.length);
+        setSessionCorrect(0);
         setCurrentIndex(0);
         setReveal(false);
 
@@ -454,6 +623,21 @@ export default function TrainerClient({ ownerKey }: Props) {
     function showToast(message: string) {
         setStatus(message);
         window.setTimeout(() => setStatus(""), 2500);
+    }
+
+    function resetImageInputs() {
+        setImageFile(null);
+        setPreviewUrl(null);
+
+        setSuggestOpen(false);
+        setSuggestLoading(false);
+        setSuggestItems([]);
+        setSuggestError(null);
+
+        setSelectedSuggestUrl(null);
+        setSelectedSuggestPath(null);
+
+        setSuggestedImagePath(null);
     }
 
     async function migrateLegacyData() {
@@ -591,6 +775,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         onClick={() => {
                             setStatus("");
                             setDuplicateHint(null);
+                            resetImageInputs();
                             setOpenCreate(true);
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
@@ -839,11 +1024,20 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     <div className="mt-4 rounded-2xl border p-4">
                                         <div className="text-sm font-medium">Dein Lernstand</div>
 
+                                        {/* Ergebnis (Leitner) */}
                                         {!leitnerStats ? (
                                             <div className="mt-2 text-sm text-gray-600">Lade Lernstand…</div>
                                         ) : (
                                             <>
                                                 <div className="mt-3 space-y-2 text-sm">
+                                                    {sessionTotal > 0 && (
+                                                    <div className="mt-3 rounded-2xl border p-4">
+                                                        <div className="text-sm font-semibold">
+                                                            Ergebnis: {sessionCorrect}/{sessionTotal} gewusst{" "}
+                                                            ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%)
+                                                        </div>
+                                                    </div>
+                                                    )}
                                                     <div className="flex items-center justify-between">
                                                         <span className="text-gray-600">Karten im Training</span>
                                                         <span className="font-medium">{leitnerStats.total}</span>
@@ -1048,13 +1242,27 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
 
                             <div className="mt-3 rounded-2xl border p-4">
-                                {currentImagePath && (
-                                    <img
-                                        src={`${IMAGE_BASE_URL}/${currentImagePath}`}
-                                        alt="Bild"
-                                        className="w-full max-h-64 object-cover rounded-xl border"
-                                    />
-                                )}
+                                <div className="flex justify-end">
+                                    <button
+                                        type="button"
+                                        className="rounded-xl border px-3 py-2 text-xs"
+                                        onClick={startEditFromLearn}
+                                    >
+                                        ✏️ Bearbeiten
+                                    </button>
+                                </div>
+
+                                {currentImagePath ? (
+                                    <div className="mt-3 rounded-2xl border bg-white overflow-hidden">
+                                        <div className="w-full h-56 flex items-center justify-center bg-gray-50">
+                                            <img
+                                                src={`${IMAGE_BASE_URL}/${currentImagePath}`}
+                                                alt="Bild"
+                                                className="max-h-full max-w-full object-contain"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : null}
 
                                 <div className="mt-4 text-lg font-semibold">
                                     {direction === "DE_TO_SW"
@@ -1108,6 +1316,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                     onClose={() => {
                         setOpenCreate(false);
                         cancelEdit();
+                        resetImageInputs();
                     }}
                 >
                     <div className="rounded-2xl border p-4 shadow-sm bg-white">
@@ -1175,6 +1384,35 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 </>
                             )}
                         </label>
+
+                        <button
+                            type="button"
+                            className="mt-3 w-full rounded-xl border p-3"
+                            onClick={openImageSuggestions}
+                        >
+                            ✨ Bild vorschlagen
+                        </button>
+
+                        {suggestedImagePath ? (
+                            <div className="mt-2 text-xs text-gray-500">
+                                Vorschlagsbild ausgewählt ✅
+                            </div>
+                        ) : null}
+
+                        {editingImagePath ? (
+                            <div className="mt-3">
+                                <div className="text-xs text-gray-500 mb-2">Aktuelles Bild</div>
+                                <img
+                                    src={`${IMAGE_BASE_URL}/${editingImagePath}`}
+                                    alt="Aktuelles Bild"
+                                    className="w-full max-h-56 object-contain rounded-2xl border bg-white"
+                                />
+                            </div>
+                        ) : (
+                            <div className="mt-3 text-xs text-gray-500">
+                                Noch kein Bild hinterlegt.
+                            </div>
+                        )}
 
                         {duplicateHint && (
                             <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
@@ -1257,6 +1495,39 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         ) : null}
                     </div>
+                </FullScreenSheet>
+
+                {/* Suggestion Modal */}
+                <FullScreenSheet
+                    open={suggestOpen}
+                    title="Bildvorschläge"
+                    onClose={() => setSuggestOpen(false)}
+                >
+                    {suggestLoading ? (
+                        <div className="mt-4 text-sm text-gray-600">Lade Vorschläge…</div>
+                    ) : suggestError ? (
+                        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                            {suggestError}
+                        </div>
+                    ) : suggestItems.length === 0 ? (
+                        <div className="mt-4 text-sm text-gray-600">
+                            Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
+                        </div>
+                    ) : (
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                            {suggestItems.map((it) => (
+                                <button
+                                    key={it.pageId}
+                                    type="button"
+                                    className="rounded-xl border overflow-hidden hover:shadow-sm transition"
+                                    onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
+                                >
+                                    <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
+                                    <div className="p-2 text-xs text-gray-600 line-clamp-2">{it.title}</div>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </FullScreenSheet>
 
                 {/* My Cards Modal */}
