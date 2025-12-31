@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
+import { speakSwahili } from "@/lib/audio/tts";
 import FullScreenSheet from "@/components/FullScreenSheet";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
@@ -89,6 +91,10 @@ export default function TrainerClient({ ownerKey }: Props) {
             setShowMigrate(true);
         }
     }, [ownerKey]);
+
+    useEffect(() => {
+        initFeedbackSounds();
+    }, []);
 
     useEffect(() => {
         (async () => {
@@ -557,6 +563,9 @@ export default function TrainerClient({ ownerKey }: Props) {
     async function gradeCurrent(correct: boolean) {
         const item = todayItems[currentIndex];
         if (!item) return;
+
+        if (correct) playCorrect();
+        else playWrong();
 
         // Session-Statistik
         if (correct) setSessionCorrect((x) => x + 1);
@@ -1031,12 +1040,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             <>
                                                 <div className="mt-3 space-y-2 text-sm">
                                                     {sessionTotal > 0 && (
-                                                    <div className="mt-3 rounded-2xl border p-4">
-                                                        <div className="text-sm font-semibold">
-                                                            Ergebnis: {sessionCorrect}/{sessionTotal} gewusst{" "}
-                                                            ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%)
+                                                        <div className="mt-3 rounded-2xl border p-4">
+                                                            <div className="text-sm font-semibold">
+                                                                Ergebnis: {sessionCorrect}/{sessionTotal} gewusst{" "}
+                                                                ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%)
+                                                            </div>
                                                         </div>
-                                                    </div>
                                                     )}
                                                     <div className="flex items-center justify-between">
                                                         <span className="text-gray-600">Karten im Training</span>
@@ -1281,10 +1290,32 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     <div className="mt-4 space-y-3">
                                         <div className="rounded-xl bg-gray-50 p-3 border">
                                             <div className="text-xs text-gray-500">Antwort</div>
-                                            <div className="text-base font-medium">
-                                                {direction === "DE_TO_SW"
-                                                    ? currentSwahili
-                                                    : currentGerman}
+
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="text-base font-medium">
+                                                    {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                </div>
+
+                                                {direction === "DE_TO_SW" ? (
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={() => speakSwahili(currentSwahili)}
+                                                            title="Aussprache"
+                                                        >
+                                                            🔊
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={() => speakSwahili(currentSwahili, { slow: true })}
+                                                            title="Langsam"
+                                                        >
+                                                            🐢
+                                                        </button>
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         </div>
 
