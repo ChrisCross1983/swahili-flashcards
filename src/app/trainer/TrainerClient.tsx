@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
+import { create } from "domain";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -69,6 +70,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
+    const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
 
     const router = useRouter();
 
@@ -515,14 +517,26 @@ export default function TrainerClient({ ownerKey }: Props) {
             setSuggestError(null);
 
             if (returnToLearn) {
+                setOpenCreate(false);
+
+                cancelEdit();
+                resetImageInputs();
+
+                setEditAudioPath(null);
+                setPendingAudioBlob(null);
+                setPendingAudioType(null);
+
                 setReturnToLearn(false);
                 setStatus("");
+
                 return;
             }
 
             if (editSource === "create") {
                 setOpenCards(false);
                 setOpenCreate(true);
+
+                setCreateDraft(null);
 
                 // zurück in "Neue Karte"-Modus
                 setEditingId(null);
@@ -709,24 +723,24 @@ export default function TrainerClient({ ownerKey }: Props) {
         return false;
     }
 
-    async function deleteCard(id: string) {
+    async function deleteCard(id: string): Promise<boolean> {
         const yes = confirm("Karte wirklich löschen?");
-        if (!yes) return;
+        if (!yes) return false;
 
-        setStatus("Lösche...");
         const res = await fetch(
             `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&id=${encodeURIComponent(id)}`,
             { method: "DELETE" }
         );
-
         const json = await res.json();
+
         if (!res.ok) {
-            setStatus(json.error ?? "Aktion fehlgeschlagen.");
-            return;
+            setStatus(json?.error || "Löschen fehlgeschlagen.");
+            return false;
         }
 
-        showToast("Karte gelöscht ✅");
         await loadCards(undefined, { silent: true });
+        showToast("Karte gelöscht ✅");
+        return true;
     }
 
     function startEditFromLearn() {
@@ -946,6 +960,72 @@ export default function TrainerClient({ ownerKey }: Props) {
         // neu laden
         await loadCards();
         setShowMigrate(false);
+    }
+
+    function handleCancelEdit() {
+        if (returnToLearn) {
+            setReturnToLearn(false);
+            setOpenCreate(false);
+
+            cancelEdit();
+            resetImageInputs();
+
+            setEditAudioPath(null);
+            setPendingAudioBlob(null);
+            setPendingAudioType(null);
+
+            return;
+        }
+
+        if (editSource === "create" && editingId && createDraft) {
+            setEditingId(null);
+            setEditAudioPath(null);
+
+            setGerman(createDraft.german);
+            setSwahili(createDraft.swahili);
+
+            setCreateDraft(null);
+
+            resetImageInputs();
+            setDuplicateHint(null);
+            setDuplicatePreview(null);
+
+            setPendingAudioBlob(null);
+            setPendingAudioType(null);
+            setStatus("");
+
+            return;
+        }
+
+        if (editSource === "create" && !editingId) {
+            setOpenCreate(false);
+
+            setGerman("");
+            setSwahili("");
+            resetImageInputs();
+
+            setDuplicateHint(null);
+            setDuplicatePreview(null);
+
+            setPendingAudioBlob(null);
+            setPendingAudioType(null);
+
+            setEditAudioPath(null);
+            setStatus("");
+
+            return;
+        }
+
+        setOpenCreate(false);
+
+        cancelEdit();
+        resetImageInputs();
+
+        setEditAudioPath(null);
+        setPendingAudioBlob(null);
+        setPendingAudioType(null);
+
+        setOpenCards(true);
     }
 
     const filteredCards = cards.filter((c) => {
@@ -1644,11 +1724,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 <FullScreenSheet
                     open={openCreate}
                     title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
-                    onClose={() => {
-                        setOpenCreate(false);
-                        cancelEdit();
-                        resetImageInputs();
-                    }}
+                    onClose={handleCancelEdit}
                 >
                     <div className="rounded-2xl border p-4 shadow-sm bg-white">
                         <label className="block text-sm font-medium">Deutsch</label>
@@ -1885,6 +1961,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 className="w-full flex items-center gap-3 rounded-lg border bg-white p-2 text-left hover:bg-gray-50 transition"
                                                 onClick={() => {
                                                     // Duplikat direkt bearbeiten
+                                                    setCreateDraft({ german, swahili });
                                                     const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
                                                     startEdit(full, "create");
                                                     setDuplicateHint(null);
@@ -1950,13 +2027,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             <button
                                 className="rounded-xl border p-3"
                                 type="button"
-                                onClick={() => {
-                                    setPendingAudioBlob(null);
-                                    setPendingAudioType(null);
-                                    setOpenCreate(false);
-                                    cancelEdit();
-                                    resetImageInputs();
-                                }}
+                                onClick={handleCancelEdit}
                             >
                                 Abbrechen
                             </button>
@@ -1967,7 +2038,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 type="button"
                                 className="mt-3 w-full rounded-xl border p-3 text-red-600"
                                 onClick={async () => {
-                                    await deleteCard(editingId);
+                                    if (!editingId) return;
+
+                                    const deleted = await deleteCard(editingId);
+                                    if (!deleted) return; // <- bleibt im Edit-Sheet
+
                                     setOpenCreate(false);
                                     cancelEdit();
                                     resetImageInputs();
