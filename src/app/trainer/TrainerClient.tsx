@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
-import { speakSwahili } from "@/lib/audio/tts";
 import FullScreenSheet from "@/components/FullScreenSheet";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
@@ -83,8 +82,31 @@ export default function TrainerClient({ ownerKey }: Props) {
         nextDueInDays: number | null;
     }>(null);
 
+    const [isRecording, setIsRecording] = useState(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const chunksRef = useRef<BlobPart[]>([]);
+    const audioElRef = useRef<HTMLAudioElement | null>(null);
+
+    function getAudioPublicUrl(path: string) {
+        return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
+    }
+
+    function stopAnyAudio() {
+        if (audioElRef.current) {
+            audioElRef.current.pause();
+            audioElRef.current.currentTime = 0;
+        }
+    }
+
+    function playCardAudioIfExists(card: any) {
+        if (!card?.audio_path) return;
+        const url = getAudioPublicUrl(card.audio_path);
+        stopAnyAudio();
+        audioElRef.current = new Audio(url);
+        audioElRef.current.play().catch(() => { });
+    }
+
     useEffect(() => {
-        // nur im Browser verfügbar
         const k = localStorage.getItem(LEGACY_KEY_NAME);
         if (k && k !== ownerKey) {
             setLegacyKey(k);
@@ -200,6 +222,73 @@ export default function TrainerClient({ ownerKey }: Props) {
         } finally {
             setSuggestLoading(false);
         }
+    }
+
+    async function startRecording() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        const candidates = [
+            "audio/mp4",
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg",
+        ];
+        const mimeType = candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) ?? "";
+
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        mediaRecorderRef.current = recorder;
+        chunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+            stream.getTracks().forEach((t) => t.stop());
+
+            const rawType = recorder.mimeType || "audio/mp4";
+            const baseType = rawType.split(";")[0];
+            const blob = new Blob(chunksRef.current, { type: baseType });
+
+            const card = todayItems[currentIndex];
+            if (!card) return;
+
+            const resolvedCardId = String(card.cardId ?? card.id ?? "").trim();
+            if (!resolvedCardId) {
+                console.error("No card id found in current item", card);
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append("file", new File([blob], "recording", { type: blob.type }));
+            fd.append("cardId", resolvedCardId);
+            fd.append("ownerKey", ownerKey);
+
+            const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
+            const json = await res.json();
+
+            if (!res.ok) {
+                console.error(json?.error || "Upload failed");
+                return;
+            }
+
+            const updated = { ...card, audio_path: json.audio_path };
+            const copy = [...todayItems];
+            copy[currentIndex] = updated;
+            setTodayItems(copy);
+            setStatus("Audio gespeichert ✅");
+        };
+
+        recorder.start();
+        setIsRecording(true);
+    }
+
+    function stopRecording() {
+        const r = mediaRecorderRef.current;
+        if (!r) return;
+        r.stop();
+        setIsRecording(false);
     }
 
     async function createCard(skipWarning = false) {
@@ -499,7 +588,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         setStatus("Lade fällige Karten...");
 
         const res = await fetch(
-            `/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`
+            `/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
         );
         const json = await res.json();
 
@@ -525,8 +614,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         setStatus("Lade alle Karten...");
 
         const res = await fetch(
-            `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}`
+            `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
         );
+        
         const json = await res.json();
 
         if (!res.ok) {
@@ -541,6 +631,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             german: c.german_text,
             swahili: c.swahili_text,
             imagePath: c.image_path ?? null,
+            audio_path: c.audio_path ?? null,
         }));
 
         setSessionTotal(items.length);
@@ -558,6 +649,13 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (!res.ok) return;
 
         setLeitnerStats(json);
+    }
+
+    function revealCard() {
+        setReveal(true);
+
+        const card = todayItems[currentIndex];
+        playCardAudioIfExists(card);
     }
 
     async function gradeCurrent(correct: boolean) {
@@ -1282,62 +1380,62 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 {!reveal ? (
                                     <button
                                         className="mt-4 w-full rounded-xl bg-black text-white p-3"
-                                        onClick={() => setReveal(true)}
+                                        onClick={revealCard}
                                     >
                                         Aufdecken
                                     </button>
                                 ) : (
-                                    <div className="mt-4 space-y-3">
-                                        <div className="rounded-xl bg-gray-50 p-3 border">
-                                            <div className="text-xs text-gray-500">Antwort</div>
-
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div className="text-base font-medium">
-                                                    {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                                </div>
-
-                                                {direction === "DE_TO_SW" ? (
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={() => speakSwahili(currentSwahili)}
-                                                            title="Aussprache"
-                                                        >
-                                                            🔊
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={() => speakSwahili(currentSwahili, { slow: true })}
-                                                            title="Langsam"
-                                                        >
-                                                            🐢
-                                                        </button>
-                                                    </div>
-                                                ) : null}
-                                            </div>
+                                    <>
+                                        <div className="mt-4 text-lg font-semibold">
+                                            {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <button
-                                                className="rounded-xl border p-3"
-                                                onClick={() => gradeCurrent(false)}
-                                            >
+                                        <div className="mt-3 flex items-center gap-2">
+                                            {!todayItems[currentIndex]?.audio_path ? (
+                                                <>
+                                                    {!isRecording ? (
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={startRecording}
+                                                        >
+                                                            🎙️ Aufnahme starten
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={stopRecording}
+                                                        >
+                                                            ⏹️ Stop & Speichern
+                                                        </button>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-lg border px-3 py-2 text-sm"
+                                                    onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                                >
+                                                    🔊 Audio abspielen
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="mt-4 grid grid-cols-2 gap-3">
+                                            <button className="rounded-xl border p-3" onClick={() => gradeCurrent(false)}>
                                                 Nicht gewusst
                                             </button>
-                                            <button
-                                                className="rounded-xl bg-black text-white p-3"
-                                                onClick={() => gradeCurrent(true)}
-                                            >
+                                            <button className="rounded-xl bg-black text-white p-3" onClick={() => gradeCurrent(true)}>
                                                 Gewusst
                                             </button>
                                         </div>
-                                    </div>
+                                    </>
                                 )}
                             </div>
                         </div>
                     )}
+
                 </FullScreenSheet>
 
                 {/* Create Modal */}

@@ -11,7 +11,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabaseServer
     .from("cards")
-    .select("id, german_text, swahili_text")
+    .select("id, german_text, swahili_text, image_path, audio_path")
     .eq("owner_key", ownerKey);
 
   if (error) {

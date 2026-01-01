@@ -26,7 +26,7 @@ export async function POST(req: Request) {
             swahili_text: body.swahili,
             image_path: body.imagePath ?? null,
         })
-        .select()
+        .select("id, german_text, swahili_text, image_path, audio_path, created_at")
         .single();
 
     if (error) {
@@ -75,7 +75,7 @@ export async function GET(req: Request) {
 
     let query = supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text, image_path, created_at")
+        .select("id, german_text, swahili_text, image_path, audio_path, created_at")
         .eq("owner_key", ownerKey);
 
     if (q && q.trim().length > 0) {

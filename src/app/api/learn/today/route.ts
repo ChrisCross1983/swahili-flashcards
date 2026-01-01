@@ -18,7 +18,7 @@ export async function GET(req: Request) {
       card_id,
       level,
       due_date,
-      cards!inner(id, german_text, swahili_text, image_path)
+      cards!inner(id, german_text, swahili_text, image_path, audio_path)
     `
     )
     .eq("owner_key", ownerKey)
@@ -29,14 +29,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Wir geben nur die Card-Daten + Progress zurück
   const items = (data ?? []).map((row: any) => ({
     cardId: row.card_id,
     level: row.level,
     dueDate: row.due_date,
     german: row.cards.german_text,
     swahili: row.cards.swahili_text,
-    imagePath: row.cards.image_path,
+    imagePath: row.cards.image_path ?? null,
+    audio_path: row.cards.audio_path ?? null,
   }));
 
   return NextResponse.json({ items });
