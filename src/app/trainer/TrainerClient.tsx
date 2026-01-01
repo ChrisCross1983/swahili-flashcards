@@ -616,7 +616,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         const res = await fetch(
             `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
         );
-        
+
         const json = await res.json();
 
         if (!res.ok) {
@@ -1610,13 +1610,29 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         )}
 
-                        <button
-                            className="mt-4 w-full rounded-xl bg-black text-white p-3 disabled:opacity-50"
-                            onClick={saveCard}
-                            disabled={!german || !swahili}
-                        >
-                            {editingId ? "Änderungen speichern" : "Karte speichern"}
-                        </button>
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                            <button
+                                className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
+                                onClick={saveCard}
+                                disabled={!german || !swahili}
+                            >
+                                {editingId ? "Änderungen speichern" : "Karte speichern"}
+                            </button>
+
+                            {editingId && (
+                                <button
+                                    type="button"
+                                    className="rounded-xl border p-3 text-red-600"
+                                    onClick={async () => {
+                                        await deleteCard(editingId);
+                                        setOpenCreate(false);
+                                        cancelEdit();
+                                    }}
+                                >
+                                    🗑️ Löschen
+                                </button>
+                            )}
+                        </div>
 
                         {status ? (
                             <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
@@ -1753,22 +1769,40 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 Keine Karte gefunden.
                             </p>
                         ) : (
-                            filteredCards.map((c) => (
-                                <button
-                                    key={c.id}
-                                    className="w-full text-left rounded-xl border p-3 hover:bg-gray-50"
-                                    onClick={() => {
-                                        setOpenSearch(false);
-                                        setSearch("");
-                                        startEdit(c);
-                                        setOpenCreate(true);
-                                    }}
-                                >
-                                    <div className="font-medium">
-                                        {c.german_text} — {c.swahili_text}
+                            <div className="mt-4 space-y-2">
+                                {filteredCards.map((c) => (
+                                    <div key={c.id} className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="flex-1 text-left rounded-xl border p-3 hover:bg-gray-50"
+                                            onClick={() => {
+                                                setOpenSearch(false);
+                                                setSearch("");
+                                                startEdit(c);
+                                                setOpenCreate(true);
+                                            }}
+                                        >
+                                            <div className="font-medium">
+                                                {c.german_text} — {c.swahili_text}
+                                            </div>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            className="rounded-xl border p-3"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                deleteCard(c.id);
+                                            }}
+                                            aria-label="Karte löschen"
+                                            title="Löschen"
+                                        >
+                                            🗑️
+                                        </button>
                                     </div>
-                                </button>
-                            ))
+                                ))}
+                            </div>
                         )}
                     </div>
                 </FullScreenSheet>
