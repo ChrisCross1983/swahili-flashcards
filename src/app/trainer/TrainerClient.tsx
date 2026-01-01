@@ -535,6 +535,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                 setDuplicateHint(null);
                 setDuplicatePreview(null);
 
+                setPendingAudioBlob(null);
+                setPendingAudioType(null);
+
                 setStatus("Duplikat aktualisiert ✅");
                 return;
             }
@@ -1058,6 +1061,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                             setEditSource("create");
                             setEditAudioPath(null);
                             setEditingId(null);
+
+                            setPendingAudioBlob(null);
+                            setPendingAudioType(null);
 
                             setOpenCreate(true);
                         }}
@@ -1945,6 +1951,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 className="rounded-xl border p-3"
                                 type="button"
                                 onClick={() => {
+                                    setPendingAudioBlob(null);
+                                    setPendingAudioType(null);
                                     setOpenCreate(false);
                                     cancelEdit();
                                     resetImageInputs();
