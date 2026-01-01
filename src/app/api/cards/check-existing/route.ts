@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabaseServer
     .from("cards")
-    .select("id, german_text, swahili_text, image_path")
+    .select("id, german_text, swahili_text, image_path, audio_path")
     .eq("owner_key", ownerKey)
     .ilike("german_text", german);
 

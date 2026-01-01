@@ -67,6 +67,8 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [suggestError, setSuggestError] = useState<string | null>(null);
     const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
+    const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
+    const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
 
     const router = useRouter();
 
@@ -291,6 +293,51 @@ export default function TrainerClient({ ownerKey }: Props) {
         setIsRecording(false);
     }
 
+    async function startRecordingForCreate() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        const candidates = [
+            "audio/mp4",
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg",
+        ];
+        const mimeType =
+            candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) ?? "";
+
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        mediaRecorderRef.current = recorder;
+        chunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = () => {
+            stream.getTracks().forEach((t) => t.stop());
+
+            const rawType = recorder.mimeType || "audio/mp4";
+            const baseType = rawType.split(";")[0];
+
+            const blob = new Blob(chunksRef.current, { type: baseType });
+
+            setPendingAudioBlob(blob);
+            setPendingAudioType(baseType);
+            setStatus("Audio bereit ✅ (wird beim Speichern hochgeladen)");
+        };
+
+        recorder.start();
+        setIsRecording(true);
+    }
+
+    function stopRecordingForCreate() {
+        const r = mediaRecorderRef.current;
+        if (!r) return;
+        r.stop();
+        setIsRecording(false);
+    }
+
     async function createCard(skipWarning = false) {
         try {
 
@@ -333,10 +380,29 @@ export default function TrainerClient({ ownerKey }: Props) {
                 return;
             }
 
+            const created = json.card;
+
+            if (created?.id && pendingAudioBlob) {
+                const fd = new FormData();
+                fd.append(
+                    "file",
+                    new File([pendingAudioBlob], "recording", { type: pendingAudioType ?? "audio/mp4" })
+                );
+                fd.append("cardId", String(created.id));
+                fd.append("ownerKey", ownerKey);
+
+                const up = await fetch("/api/upload-audio", { method: "POST", body: fd });
+                const upJson = await up.json();
+
+                if (up.ok) {
+                    setPendingAudioBlob(null);
+                    setPendingAudioType(null);
+                } else {
+                    setStatus(upJson?.error ?? "Audio-Upload fehlgeschlagen");
+                }
+            }
+
             showToast("Karte gespeichert ✅");
-            setGerman("");
-            setSwahili("");
-            resetImageInputs();
             setSelectedSuggestUrl(null);
             setSelectedSuggestPath(null);
             setSuggestItems([]);
@@ -346,6 +412,22 @@ export default function TrainerClient({ ownerKey }: Props) {
             setDuplicateHint(null);
             setDuplicatePreview(null);
             await loadCards(undefined, { silent: true });
+            // Create-Flow: Formular für nächste Karte vorbereiten
+            setGerman("");
+            setSwahili("");
+            resetImageInputs();
+
+            setPendingAudioBlob(null);
+            setPendingAudioType(null);
+
+            setEditAudioPath(null);
+            setEditingId(null);
+
+            setDuplicateHint(null);
+            setDuplicatePreview(null);
+
+            setStatus("Karte gespeichert ✅");
+
         } catch (e: any) {
             setStatus(`Fehler: ${e.message}`);
         }
@@ -423,7 +505,6 @@ export default function TrainerClient({ ownerKey }: Props) {
             );
 
             // ✅ Edit-Inputs resetten
-            setEditingId(null);
             setGerman("");
             setSwahili("");
             setImageFile(null);
@@ -433,15 +514,35 @@ export default function TrainerClient({ ownerKey }: Props) {
             setSuggestItems([]);
             setSuggestError(null);
 
-            setOpenCreate(false);
-
             if (returnToLearn) {
                 setReturnToLearn(false);
                 setStatus("");
                 return;
             }
 
+            if (editSource === "create") {
+                setOpenCards(false);
+                setOpenCreate(true);
+
+                // zurück in "Neue Karte"-Modus
+                setEditingId(null);
+                setEditAudioPath(null);
+
+                setGerman("");
+                setSwahili("");
+                resetImageInputs();
+
+                setDuplicateHint(null);
+                setDuplicatePreview(null);
+
+                setStatus("Duplikat aktualisiert ✅");
+                return;
+            }
+
+            // Standard-Fall: Edit aus "Meine Karten"
+            setOpenCreate(false);
             setOpenCards(true);
+
         } catch (e: any) {
             setStatus(e?.message ?? "Aktualisieren fehlgeschlagen.");
         }
@@ -477,7 +578,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (!silent) setStatus("");
     }
 
-    function startEdit(card: any) {
+    function startEdit(card: any, source: "cards" | "create" = "cards") {
+        setEditSource(source);
+
         setEditingId(card.id);
         setGerman(card.german_text ?? "");
         setSwahili(card.swahili_text ?? "");
@@ -951,8 +1054,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                             setStatus("");
                             setDuplicateHint(null);
                             resetImageInputs();
-                            setOpenCreate(true);
+
+                            setEditSource("create");
                             setEditAudioPath(null);
+                            setEditingId(null);
+
+                            setOpenCreate(true);
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                     >
@@ -1481,13 +1588,33 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     )}
                                                 </>
                                             ) : (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-lg border px-3 py-2 text-sm"
-                                                    onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
-                                                >
-                                                    🔊 Audio abspielen
-                                                </button>
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        className="rounded-lg border px-3 py-2 text-sm"
+                                                        onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                                    >
+                                                        🔊 Abspielen
+                                                    </button>
+
+                                                    {!isRecording ? (
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={startRecording}
+                                                        >
+                                                            🎙️ Neu aufnehmen
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={stopRecording}
+                                                        >
+                                                            ⏹️ Stop & Speichern
+                                                        </button>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
 
@@ -1535,6 +1662,72 @@ export default function TrainerClient({ ownerKey }: Props) {
                         />
 
                         <div className="mt-6 text-sm font-medium">Medien</div>
+                        {!editingId && (
+                            <div className="mt-4 rounded-xl border p-3">
+                                <div className="text-sm font-medium">Aussprache</div>
+
+                                <div className="mt-3 flex items-center gap-2">
+                                    {pendingAudioBlob ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border px-3 py-2"
+                                                onClick={() => {
+                                                    const url = URL.createObjectURL(pendingAudioBlob);
+                                                    stopAnyAudio();
+                                                    audioElRef.current = new Audio(url);
+                                                    audioElRef.current.play().catch(() => { });
+                                                }}
+                                            >
+                                                🔊 Abspielen
+                                            </button>
+
+                                            {!isRecording ? (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={startRecordingForCreate}
+                                                >
+                                                    🎙️ Neu aufnehmen
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={stopRecordingForCreate}
+                                                >
+                                                    ⏹️ Stop
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            {!isRecording ? (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={startRecordingForCreate}
+                                                >
+                                                    🎙️ Aufnahme starten
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={stopRecordingForCreate}
+                                                >
+                                                    ⏹️ Stop
+                                                </button>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="mt-2 text-xs text-gray-500">
+                                    Wird automatisch beim Speichern der Karte hochgeladen.
+                                </div>
+                            </div>
+                        )}
 
                         <input
                             type="file"
@@ -1686,7 +1879,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 className="w-full flex items-center gap-3 rounded-lg border bg-white p-2 text-left hover:bg-gray-50 transition"
                                                 onClick={() => {
                                                     // Duplikat direkt bearbeiten
-                                                    startEdit(c);
+                                                    const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
+                                                    startEdit(full, "create");
                                                     setDuplicateHint(null);
                                                     setDuplicatePreview(null);
                                                     setOpenCreate(true);
@@ -1742,31 +1936,45 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
                                 onClick={saveCard}
                                 disabled={!german || !swahili}
+                                type="button"
                             >
-                                {editingId ? "Änderungen speichern" : "Karte speichern"}
+                                {editingId ? "Speichern" : "Karte speichern"}
                             </button>
 
-                            {editingId && (
-                                <button
-                                    type="button"
-                                    className="rounded-xl border p-3 text-red-600"
-                                    onClick={async () => {
-                                        await deleteCard(editingId);
-                                        setOpenCreate(false);
-                                        cancelEdit();
-                                    }}
-                                >
-                                    🗑️ Löschen
-                                </button>
-                            )}
+                            <button
+                                className="rounded-xl border p-3"
+                                type="button"
+                                onClick={() => {
+                                    setOpenCreate(false);
+                                    cancelEdit();
+                                    resetImageInputs();
+                                }}
+                            >
+                                Abbrechen
+                            </button>
                         </div>
 
-                        {status ? (
-                            <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
-                                {status}
-                            </div>
-                        ) : null}
+                        {editingId && (
+                            <button
+                                type="button"
+                                className="mt-3 w-full rounded-xl border p-3 text-red-600"
+                                onClick={async () => {
+                                    await deleteCard(editingId);
+                                    setOpenCreate(false);
+                                    cancelEdit();
+                                    resetImageInputs();
+                                }}
+                            >
+                                🗑️ Löschen
+                            </button>
+                        )}
                     </div>
+
+                    {status ? (
+                        <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
+                            {status}
+                        </div>
+                    ) : null}
                 </FullScreenSheet>
 
                 {/* Suggestion Modal */}
@@ -1828,8 +2036,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         {c.german_text} — {c.swahili_text}
                                     </div>
 
-                                    <div className="mt-2 flex items-center justify-between gap-3">
-                                        {/* Thumbnail nur wenn Bild da ist */}
+                                    <div className="mt-2 flex items-center gap-2">
                                         {c.image_path ? (
                                             <img
                                                 src={`${IMAGE_BASE_URL}/${c.image_path}`}
@@ -1840,27 +2047,24 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             <div className="w-12 h-12 rounded-lg border bg-gray-50" />
                                         )}
 
-                                        {/* Audio nur wenn vorhanden: als Icon */}
-                                        <div className="flex items-center gap-2">
-                                            {c.audio_path ? (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-lg border px-3 py-2 text-sm"
-                                                    onClick={() => playCardAudioIfExists(c)}
-                                                    aria-label="Audio abspielen"
-                                                    title="Audio abspielen"
-                                                >
-                                                    🔊
-                                                </button>
-                                            ) : null}
-                                        </div>
+                                        {c.audio_path ? (
+                                            <button
+                                                type="button"
+                                                className="rounded-lg border p-2 text-sm"
+                                                onClick={() => playCardAudioIfExists(c)}
+                                                aria-label="Audio abspielen"
+                                                title="Audio abspielen"
+                                            >
+                                                🔊
+                                            </button>
+                                        ) : null}
                                     </div>
 
                                     <div className="mt-3 flex gap-2">
                                         <button
                                             className="rounded-xl border px-3 py-2 text-sm"
                                             onClick={() => {
-                                                startEdit(c);
+                                                startEdit(c, "cards");
                                                 setOpenCards(false);
                                                 setOpenCreate(true);
                                             }}
@@ -1920,7 +2124,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             onClick={() => {
                                                 setOpenSearch(false);
                                                 setSearch("");
-                                                startEdit(c);
+                                                startEdit(c, "cards");
                                                 setOpenCreate(true);
                                             }}
                                         >
