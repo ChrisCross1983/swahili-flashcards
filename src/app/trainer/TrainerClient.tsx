@@ -65,8 +65,8 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [selectedSuggestPath, setSelectedSuggestPath] = useState<string | null>(null);
     const [suggestItems, setSuggestItems] = useState<any[]>([]);
     const [suggestError, setSuggestError] = useState<string | null>(null);
-
     const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
+    const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
 
     const router = useRouter();
 
@@ -483,6 +483,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSwahili(card.swahili_text ?? "");
         setDuplicateHint(null);
         setImageFile(null);
+        setEditAudioPath(card.audio_path ?? null);
         setStatus("");
 
         const existingPath = card.image_path ?? null;
@@ -497,12 +498,78 @@ export default function TrainerClient({ ownerKey }: Props) {
         }
     }
 
+    async function startRecordingForEdit() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        const candidates = [
+            "audio/mp4",
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg",
+        ];
+        const mimeType =
+            candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) ?? "";
+
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        mediaRecorderRef.current = recorder;
+        chunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+            stream.getTracks().forEach((t) => t.stop());
+
+            const rawType = recorder.mimeType || "audio/mp4";
+            const baseType = rawType.split(";")[0];
+            const blob = new Blob(chunksRef.current, { type: baseType });
+
+            const resolvedCardId = String(editingId ?? "").trim();
+            if (!resolvedCardId) {
+                console.error("No editingId for audio upload");
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append("file", new File([blob], "recording", { type: blob.type }));
+            fd.append("cardId", resolvedCardId);
+            fd.append("ownerKey", ownerKey);
+
+            const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
+            const json = await res.json();
+
+            if (!res.ok) {
+                console.error(json?.error || "Upload failed");
+                setStatus(json?.error || "Upload fehlgeschlagen");
+                return;
+            }
+
+            setEditAudioPath(json.audio_path ?? null);
+            setStatus("Audio gespeichert ✅");
+
+            await loadCards();
+        };
+
+        recorder.start();
+        setIsRecording(true);
+    }
+
+    function stopRecordingForEdit() {
+        const r = mediaRecorderRef.current;
+        if (!r) return;
+        r.stop();
+        setIsRecording(false);
+    }
+
     function cancelEdit() {
         setEditingId(null);
         setGerman("");
         setSwahili("");
         setImageFile(null);
         setDuplicateHint(null);
+        setEditAudioPath(null);
         setStatus("");
     }
 
@@ -565,6 +632,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         setEditingId(item.cardId);
         setGerman(currentGerman ?? "");
         setSwahili(currentSwahili ?? "");
+        setEditAudioPath(item.audio_path ?? null);
         setDuplicateHint(null);
         setDuplicatePreview(null);
 
@@ -884,6 +952,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             setDuplicateHint(null);
                             resetImageInputs();
                             setOpenCreate(true);
+                            setEditAudioPath(null);
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
                     >
@@ -1465,9 +1534,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             placeholder="z.B. Habari za asubuhi"
                         />
 
-                        <label className="block text-sm font-medium mt-4 mb-1">
-                            Bild hinzufügen
-                        </label>
+                        <div className="mt-6 text-sm font-medium">Medien</div>
 
                         <input
                             type="file"
@@ -1476,6 +1543,70 @@ export default function TrainerClient({ ownerKey }: Props) {
                             className="hidden"
                             onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
                         />
+
+                        {editingId && (
+                            <div className="mt-4 rounded-xl border p-3">
+                                <div className="text-sm font-medium">Aussprache</div>
+
+                                <div className="mt-3 flex items-center gap-2">
+                                    {editAudioPath ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border px-3 py-2"
+                                                onClick={() => playCardAudioIfExists({ audio_path: editAudioPath })}
+                                            >
+                                                🔊 Abspielen
+                                            </button>
+
+                                            {!isRecording ? (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={startRecordingForEdit}
+                                                >
+                                                    🎙️ Neu aufnehmen
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={stopRecordingForEdit}
+                                                >
+                                                    ⏹️ Stop & Speichern
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            {!isRecording ? (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={startRecordingForEdit}
+                                                >
+                                                    🎙️ Aufnahme starten
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-3 py-2"
+                                                    onClick={stopRecordingForEdit}
+                                                >
+                                                    ⏹️ Stop & Speichern
+                                                </button>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="mt-2 text-xs text-gray-500">
+                                    Audio kann nur bei bestehenden Karten gespeichert werden.
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mt-4 text-sm font-medium">Bild</div>
 
                         <label
                             htmlFor="image-upload"
@@ -1537,11 +1668,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     className="w-full max-h-56 object-contain rounded-2xl border bg-white"
                                 />
                             </div>
-                        ) : (
-                            <div className="mt-3 text-xs text-gray-500">
-                                Noch kein Bild hinterlegt.
-                            </div>
-                        )}
+                        ) : null}
 
                         {duplicateHint && (
                             <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
@@ -1701,18 +1828,33 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         {c.german_text} — {c.swahili_text}
                                     </div>
 
-                                    {c.image_path ? (
-                                        <div className="mt-2 flex items-center gap-3">
+                                    <div className="mt-2 flex items-center justify-between gap-3">
+                                        {/* Thumbnail nur wenn Bild da ist */}
+                                        {c.image_path ? (
                                             <img
                                                 src={`${IMAGE_BASE_URL}/${c.image_path}`}
                                                 alt="Bild"
                                                 className="w-12 h-12 object-cover rounded-lg border"
                                             />
-                                            <span className="text-xs text-gray-500">Bild hinterlegt</span>
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-lg border bg-gray-50" />
+                                        )}
+
+                                        {/* Audio nur wenn vorhanden: als Icon */}
+                                        <div className="flex items-center gap-2">
+                                            {c.audio_path ? (
+                                                <button
+                                                    type="button"
+                                                    className="rounded-lg border px-3 py-2 text-sm"
+                                                    onClick={() => playCardAudioIfExists(c)}
+                                                    aria-label="Audio abspielen"
+                                                    title="Audio abspielen"
+                                                >
+                                                    🔊
+                                                </button>
+                                            ) : null}
                                         </div>
-                                    ) : (
-                                        <div className="mt-2 text-xs text-gray-400">Kein Bild</div>
-                                    )}
+                                    </div>
 
                                     <div className="mt-3 flex gap-2">
                                         <button
