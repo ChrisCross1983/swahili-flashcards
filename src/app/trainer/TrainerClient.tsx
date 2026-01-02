@@ -666,10 +666,25 @@ export default function TrainerClient({ ownerKey }: Props) {
                 return;
             }
 
-            setEditAudioPath(json.audio_path ?? null);
+            const newPath = json.audio_path ?? null;
+
+            setEditAudioPath(newPath);
             setStatus("Audio gespeichert ✅");
 
-            await loadCards();
+            // ✅ Cards-State direkt aktualisieren (ohne neu laden zu müssen)
+            setCards((prev) =>
+                prev.map((c) =>
+                    String(c.id) === String(resolvedCardId) ? { ...c, audio_path: newPath } : c
+                )
+            );
+
+            setTodayItems((prev) =>
+                prev.map((it: any) => {
+                    const itId = it.cardId ?? it.card_id ?? it.id;
+                    if (String(itId) !== String(resolvedCardId)) return it;
+                    return { ...it, audio_path: newPath };
+                })
+            );
         };
 
         recorder.start();
@@ -749,7 +764,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         setReturnToLearn(true);
 
-        setEditingId(item.cardId);
+        setEditingId(String(item.cardId ?? item.id));
         setGerman(currentGerman ?? "");
         setSwahili(currentSwahili ?? "");
         setEditAudioPath(item.audio_path ?? null);
@@ -847,6 +862,11 @@ export default function TrainerClient({ ownerKey }: Props) {
     }
 
     async function gradeCurrent(correct: boolean) {
+        if (isRecording) {
+            stopRecording();
+            return;
+        }
+
         const item = todayItems[currentIndex];
         if (!item) return;
 
@@ -1026,6 +1046,11 @@ export default function TrainerClient({ ownerKey }: Props) {
         setPendingAudioType(null);
 
         setOpenCards(true);
+    }
+
+    function toggleLearnRecording() {
+        if (isRecording) stopRecording();
+        else startRecording();
     }
 
     const filteredCards = cards.filter((c) => {
@@ -1390,7 +1415,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </div>
 
                                     {/* Lernstand */}
-                                    <div className="mt-4 rounded-2xl border p-4">
+                                    <div className="mt-4 rounded-2xl border p-6">
                                         <div className="text-sm font-medium">Dein Lernstand</div>
 
                                         {/* Ergebnis (Leitner) */}
@@ -1469,7 +1494,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 </div>
 
                             ) : (
-                                <div className="mt-4 rounded-2xl border p-4">
+                                <div className="mt-4 rounded-2xl border p-6">
                                     <div className="text-sm font-medium">Session abgeschlossen ✅</div>
 
                                     {(() => {
@@ -1486,7 +1511,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     gewusst ({pct}%)
                                                 </div>
 
-                                                <div className="mt-4 grid grid-cols-2 gap-3">
+                                                <div className="mt-6 grid grid-cols-2 gap-4">
                                                     <button
                                                         className="rounded-xl border p-3"
                                                         onClick={async () => {
@@ -1610,16 +1635,29 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 ) : null}
                             </div>
 
-                            <div className="mt-3 rounded-2xl border p-4">
-                                <div className="flex justify-end">
+                            <div className="mt-3 rounded-2xl border p-6">
+                                <div className="flex items-center justify-between">
                                     <button
                                         type="button"
-                                        className="rounded-xl border px-3 py-2 text-xs"
+                                        className="rounded-xl border px-4 py-2 text-xs"
                                         onClick={startEditFromLearn}
                                     >
                                         ✏️ Bearbeiten
                                     </button>
                                 </div>
+
+                                {/* Nur wenn was fehlt: Quick Actions */}
+                                {!todayItems[currentIndex]?.audio_path ? (
+                                    <div className="mt-4">
+                                        <button
+                                            type="button"
+                                            className="rounded-xl border px-4 py-2 text-sm"
+                                            onClick={toggleLearnRecording}
+                                        >
+                                            {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                        </button>
+                                    </div>
+                                ) : null}
 
                                 {currentImagePath ? (
                                     <div className="mt-3 rounded-2xl border bg-white overflow-hidden">
@@ -1633,7 +1671,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </div>
                                 ) : null}
 
-                                <div className="mt-4 text-lg font-semibold">
+                                <div className="mt-8 text-lg font-semibold">
                                     {direction === "DE_TO_SW"
                                         ? currentGerman
                                         : currentSwahili}
@@ -1652,59 +1690,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                         </div>
 
-                                        <div className="mt-3 flex items-center gap-2">
-                                            {!todayItems[currentIndex]?.audio_path ? (
-                                                <>
-                                                    {!isRecording ? (
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={startRecording}
-                                                        >
-                                                            🎙️ Aufnahme starten
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={stopRecording}
-                                                        >
-                                                            ⏹️ Stop & Speichern
-                                                        </button>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <>
+                                        <div className="mt-8 flex flex-wrap items-center gap-4">
+                                            {todayItems[currentIndex]?.audio_path ? (
+                                                <div className="mt-6">
                                                     <button
                                                         type="button"
-                                                        className="rounded-lg border px-3 py-2 text-sm"
+                                                        className="rounded-xl border px-4 py-2 text-sm"
                                                         onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                                        aria-label="Audio abspielen"
+                                                        title="Audio abspielen"
                                                     >
                                                         🔊 Abspielen
                                                     </button>
-
-                                                    {!isRecording ? (
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={startRecording}
-                                                        >
-                                                            🎙️ Neu aufnehmen
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={stopRecording}
-                                                        >
-                                                            ⏹️ Stop & Speichern
-                                                        </button>
-                                                    )}
-                                                </>
-                                            )}
+                                                </div>
+                                            ) : null}
                                         </div>
 
-                                        <div className="mt-4 grid grid-cols-2 gap-3">
+                                        <div className="mt-10 grid grid-cols-2 gap-6">
                                             <button className="rounded-xl border p-3" onClick={() => gradeCurrent(false)}>
                                                 Nicht gewusst
                                             </button>
@@ -1717,7 +1719,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         </div>
                     )}
-
                 </FullScreenSheet>
 
                 {/* Create Modal */}
@@ -1726,7 +1727,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                     title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
                     onClose={handleCancelEdit}
                 >
-                    <div className="rounded-2xl border p-4 shadow-sm bg-white">
+                    <div className="rounded-2xl border p-6 shadow-sm bg-white">
                         <label className="block text-sm font-medium">Deutsch</label>
                         <input
                             className="mt-1 w-full rounded-xl border p-3"
@@ -1745,10 +1746,10 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                         <div className="mt-6 text-sm font-medium">Medien</div>
                         {!editingId && (
-                            <div className="mt-4 rounded-xl border p-3">
+                            <div className="mt-2 rounded-xl border p-3">
                                 <div className="text-sm font-medium">Aussprache</div>
 
-                                <div className="mt-3 flex items-center gap-2">
+                                <div className="mt-3 flex items-center gap-4">
                                     {pendingAudioBlob ? (
                                         <>
                                             <button
@@ -1820,10 +1821,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                         />
 
                         {editingId && (
-                            <div className="mt-4 rounded-xl border p-3">
+                            <div className="mt-2 rounded-xl border p-2">
                                 <div className="text-sm font-medium">Aussprache</div>
 
-                                <div className="mt-3 flex items-center gap-2">
+                                <div className="mt-4 flex items-center gap-3">
                                     {editAudioPath ? (
                                         <>
                                             <button
@@ -1886,7 +1887,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         <label
                             htmlFor="image-upload"
                             className="
-                                flex items-center justify-center gap-3
+                                mt-2 flex items-center justify-center gap-3
                                 rounded-2xl border-2 border-dashed
                                 p-4 cursor-pointer
                                 transition
@@ -1922,7 +1923,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                         <button
                             type="button"
-                            className="mt-3 w-full rounded-xl border p-3"
+                            className="mt-6 w-full rounded-xl border p-3"
                             onClick={openImageSuggestions}
                         >
                             ✨ Bild vorschlagen
@@ -2014,7 +2015,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         )}
 
-                        <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="mt-6 grid grid-cols-2 gap-4">
                             <button
                                 className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
                                 onClick={saveCard}
@@ -2077,7 +2078,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
                         </div>
                     ) : (
-                        <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="mt-6 grid grid-cols-2 gap-4">
                             {suggestItems.map((it) => (
                                 <button
                                     key={it.pageId}
