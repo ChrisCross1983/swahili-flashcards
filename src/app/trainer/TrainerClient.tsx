@@ -1697,19 +1697,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
 
                             <div className="mt-3 rounded-2xl border p-6">
-                                <div className="flex items-center justify-between">
-                                    <button
-                                        type="button"
-                                        className="rounded-xl border px-4 py-2 text-xs"
-                                        onClick={startEditFromLearn}
-                                    >
-                                        ✏️ Bearbeiten
-                                    </button>
-                                </div>
-
-                                {/* Nur wenn was fehlt: Quick Actions */}
-                                {!todayItems[currentIndex]?.audio_path ? (
-                                    <div className="mt-4">
+                                {/* Top Actions Row */}
+                                <div className="flex items-center justify-between gap-3">
+                                    {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
+                                    {!todayItems[currentIndex]?.audio_path ? (
                                         <button
                                             type="button"
                                             className="rounded-xl border px-4 py-2 text-sm"
@@ -1717,11 +1708,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         >
                                             {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
                                         </button>
-                                    </div>
-                                ) : null}
+                                    ) : (
+                                        <div />
+                                    )}
 
+                                    {/* Rechts: Bearbeiten – immer sichtbar */}
+                                    <button
+                                        type="button"
+                                        className="ml-auto rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
+                                        onClick={startEditFromLearn}
+                                    >
+                                        ✏️ Bearbeiten
+                                    </button>
+                                </div>
+
+                                {/* Bild */}
                                 {currentImagePath ? (
-                                    <div className="mt-3 rounded-2xl border bg-white overflow-hidden">
+                                    <div className="mt-6 rounded-2xl border bg-white overflow-hidden">
                                         <div className="w-full h-56 flex items-center justify-center bg-gray-50">
                                             <img
                                                 src={`${IMAGE_BASE_URL}/${currentImagePath}`}
@@ -1732,6 +1735,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </div>
                                 ) : null}
 
+                                {/* Prompt */}
                                 <div className="mt-8 text-lg font-semibold">
                                     {direction === "DE_TO_SW"
                                         ? currentGerman
@@ -1751,7 +1755,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                         </div>
 
-                                        <div className="mt-8 flex flex-wrap items-center gap-4">
+                                        {/* Audio abspielen – nur wenn vorhanden */}
+                                        <div className="mt-4 flex flex-wrap items-center gap-4">
                                             {todayItems[currentIndex]?.audio_path ? (
                                                 <div className="mt-6">
                                                     <button
@@ -1768,10 +1773,19 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </div>
 
                                         <div className="mt-10 grid grid-cols-2 gap-6">
-                                            <button className="rounded-xl border p-3" onClick={() => gradeCurrent(false)}>
+                                            <button
+                                                type="button"
+                                                className="rounded-2xl border p-4 text-sm font-medium bg-red-50 border-red-200 text-red-800 active:scale-[0.99]"
+                                                onClick={() => gradeCurrent(false)}
+                                            >
                                                 Nicht gewusst
                                             </button>
-                                            <button className="rounded-xl bg-black text-white p-3" onClick={() => gradeCurrent(true)}>
+
+                                            <button
+                                                type="button"
+                                                className="rounded-2xl p-4 text-sm font-medium bg-green-600 text-white active:scale-[0.99]"
+                                                onClick={() => gradeCurrent(true)}
+                                            >
                                                 Gewusst
                                             </button>
                                         </div>
