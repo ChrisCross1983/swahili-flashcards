@@ -1073,6 +1073,56 @@ export default function TrainerClient({ ownerKey }: Props) {
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
+    const leitnerUi = (() => {
+        if (!leitnerStats) {
+            return {
+                total: 0,
+                newCount: 0,
+                tomorrowCount: 0,
+                laterCount: 0,
+                nextText: "—",
+            };
+        }
+
+        const total = Number(leitnerStats.total ?? 0);
+
+        const byLevel = Array.isArray(leitnerStats.byLevel) ? leitnerStats.byLevel : [];
+
+        const parseDays = (label: string) => {
+            const m = label.match(/\((\d+)\s*Tag/);
+            return m ? Number(m[1]) : null;
+        };
+
+        const sumByDays = (days: number) =>
+            byLevel
+                .filter((b: any) => parseDays(String(b.label ?? "")) === days)
+                .reduce((acc: number, b: any) => acc + Number(b.count ?? 0), 0);
+
+        const sumLater = () =>
+            byLevel
+                .filter((b: any) => {
+                    const d = parseDays(String(b.label ?? ""));
+                    return d != null && d >= 2;
+                })
+                .reduce((acc: number, b: any) => acc + Number(b.count ?? 0), 0);
+
+        const newCount = sumByDays(0);
+        const tomorrowCount = sumByDays(1);
+        const laterCount = sumLater();
+
+        const nextDue = leitnerStats.nextDueInDays;
+        const nextText =
+            nextDue == null
+                ? "—"
+                : nextDue === 0
+                    ? "heute"
+                    : nextDue === 1
+                        ? "morgen"
+                        : `in ${nextDue} Tagen`;
+
+        return { total, newCount, tomorrowCount, laterCount, nextText };
+    })();
+
     return (
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
@@ -1403,72 +1453,82 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {learnStarted && todayItems.length === 0 && (
                         <>
                             {learnMode === "LEITNER_TODAY" ? (
-                                <div className="mt-4 rounded-2xl border p-4 bg-white">
+                                <div className="mt-4 rounded-2xl border p-6 bg-white">
                                     <div className="text-lg font-semibold">
-                                        {learnDone ? "Heute erledigt ✅" : "Keine Karten fällig 🎉"}
+                                        {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
                                     </div>
 
                                     <div className="mt-2 text-sm text-gray-700">
                                         {learnDone
-                                            ? "Du hast deinen heutigen Leitner-Topf durch. Weiter so."
-                                            : "Für heute ist nichts offen — sehr gut."}
+                                            ? "Für heute bist du fertig. Morgen geht’s entspannt weiter."
+                                            : "Für heute ist nichts offen — dein Rhythmus passt."}
                                     </div>
 
                                     {/* Lernstand */}
                                     <div className="mt-4 rounded-2xl border p-6">
-                                        <div className="text-sm font-medium">Dein Lernstand</div>
+                                        {/* 1) Heute */}
+                                        <div className="text-sm font-medium">📊 Heute</div>
 
-                                        {/* Ergebnis (Leitner) */}
-                                        {!leitnerStats ? (
-                                            <div className="mt-2 text-sm text-gray-600">Lade Lernstand…</div>
+                                        {sessionTotal > 0 ? (
+                                            <div className="mt-3 rounded-2xl border p-4">
+                                                <div className="text-base font-semibold">
+                                                    {sessionCorrect} von {sessionTotal} Karten sicher
+                                                </div>
+                                                <div className="mt-2 text-sm text-gray-600">
+                                                    {sessionTotal - sessionCorrect} Karten üben wir nochmal
+                                                </div>
+
+                                                <div className="mt-3 h-2 w-full rounded-full border">
+                                                    <div
+                                                        className="h-2 rounded-full"
+                                                        style={{
+                                                            width: `${Math.round((sessionCorrect / sessionTotal) * 100)}%`,
+                                                            backgroundColor: "black",
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
                                         ) : (
-                                            <>
-                                                <div className="mt-3 space-y-2 text-sm">
-                                                    {sessionTotal > 0 && (
-                                                        <div className="mt-3 rounded-2xl border p-4">
-                                                            <div className="text-sm font-semibold">
-                                                                Ergebnis: {sessionCorrect}/{sessionTotal} gewusst{" "}
-                                                                ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%)
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-gray-600">Karten im Training</span>
-                                                        <span className="font-medium">{leitnerStats.total}</span>
-                                                    </div>
-
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-gray-600">Nächste Karte fällig</span>
-                                                        <span className="font-medium">
-                                                            {leitnerStats.nextDueInDays == null
-                                                                ? "—"
-                                                                : leitnerStats.nextDueInDays === 0
-                                                                    ? "heute"
-                                                                    : `in ${leitnerStats.nextDueInDays} Tag${leitnerStats.nextDueInDays === 1 ? "" : "en"
-                                                                    }`}
-                                                        </span>
-                                                    </div>
-                                                </div>
-
-                                                {Array.isArray(leitnerStats.byLevel) && leitnerStats.byLevel.length > 0 ? (
-                                                    <div className="mt-4">
-                                                        <div className="text-xs font-medium text-gray-500">Verteilung</div>
-                                                        <div className="mt-2 space-y-2">
-                                                            {leitnerStats.byLevel.map((b) => (
-                                                                <div key={b.level} className="flex items-center justify-between text-sm">
-                                                                    <span className="text-gray-700">{b.label}</span>
-                                                                    <span className="font-medium">{b.count}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ) : null}
-
-                                                <div className="mt-4 rounded-xl bg-gray-50 border p-3 text-xs text-gray-600">
-                                                    Tipp: Wenn heute nichts fällig ist, ist das ein gutes Zeichen – dein Rhythmus sitzt.
-                                                </div>
-                                            </>
+                                            <div className="mt-2 text-sm text-gray-600">Keine Session-Daten.</div>
                                         )}
+
+                                        {/* 2) Gesamt */}
+                                        <div className="mt-6 text-sm font-medium">🌱 Dein Lernstand</div>
+
+                                        <div className="mt-3 rounded-2xl border p-4 text-sm">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-600">Karten im Training</span>
+                                                <span className="font-semibold">{leitnerUi.total}</span>
+                                            </div>
+
+                                            <div className="mt-4 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700">🆕 Neue Karten</span>
+                                                    <span className="font-medium">{leitnerUi.newCount}</span>
+                                                </div>
+
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700">🔁 Morgen dran</span>
+                                                    <span className="font-medium">{leitnerUi.tomorrowCount}</span>
+                                                </div>
+
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700">✅ Später wiederholen</span>
+                                                    <span className="font-medium">{leitnerUi.laterCount}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 3) Nächstes */}
+                                        <div className="mt-6 text-sm font-medium">⏰ Nächstes Training</div>
+                                        <div className="mt-2 rounded-2xl border p-4 text-sm text-gray-700">
+                                            Nächste Karten sind {leitnerUi.nextText} dran.
+                                        </div>
+
+                                        {/* 4) Tipp */}
+                                        <div className="mt-4 rounded-2xl border p-4 text-sm text-gray-600">
+                                            Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
+                                        </div>
                                     </div>
 
                                     <button
@@ -1492,9 +1552,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         Fertig
                                     </button>
                                 </div>
-
                             ) : (
-                                <div className="mt-4 rounded-2xl border p-6">
+                                <div className="mt-4 rounded-2xl border p-6 bg-white">
                                     <div className="text-sm font-medium">Session abgeschlossen ✅</div>
 
                                     {(() => {
@@ -1514,6 +1573,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 <div className="mt-6 grid grid-cols-2 gap-4">
                                                     <button
                                                         className="rounded-xl border p-3"
+                                                        type="button"
                                                         onClick={async () => {
                                                             setSessionCorrect(0);
                                                             setShowSummary(false);
@@ -1534,6 +1594,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                     <button
                                                         className="rounded-xl bg-black text-white p-3"
+                                                        type="button"
                                                         onClick={() => {
                                                             setLearnStarted(false);
                                                             setLearnDone(false);
