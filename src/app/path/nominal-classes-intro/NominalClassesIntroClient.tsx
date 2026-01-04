@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
-import { BASICS_PACK } from "@/lib/packs/basics";
+import { NOMINAL_CLASSES_INTRO_PACK } from "@/lib/packs/nominal-classes-intro";
 import { useRouter } from "next/navigation";
 
 function norm(s: string) {
   return s.trim().toLowerCase();
 }
+
 function keyOf(german: string, swahili: string) {
   return `${norm(german)}||${norm(swahili)}`;
 }
@@ -17,8 +17,8 @@ type Props = {
   ownerKey: string;
 };
 
-export default function BasicsClient({ ownerKey }: Props) {
-  const items = useMemo(() => BASICS_PACK, []);
+export default function NominalClassesIntroClient({ ownerKey }: Props) {
+  const items = useMemo(() => NOMINAL_CLASSES_INTRO_PACK, []);
   const total = items.length;
 
   const [open, setOpen] = useState(true);
@@ -75,7 +75,6 @@ export default function BasicsClient({ ownerKey }: Props) {
 
     if (res.status === 409) {
       setStatus("Schon im Trainer vorhanden ✅");
-      // existing Set updaten, damit UI sofort reagiert
       setExisting((prev) => {
         const next = new Set(prev);
         next.add(keyOf(german, swahili));
@@ -122,10 +121,9 @@ export default function BasicsClient({ ownerKey }: Props) {
 
   return (
     <>
-      {/* Haupt-Sheet: Pack spielen */}
       <FullScreenSheet
         open={open}
-        title="Lernpfad · Basics"
+        title="Lernpfad · 🌱 Nominalklassen – Einstieg"
         onClose={() => router.push("/path")}
       >
         {finished ? (
@@ -148,9 +146,7 @@ export default function BasicsClient({ ownerKey }: Props) {
           </div>
         ) : (
           <>
-            <div className="text-xs text-gray-500">
-              Karte {idx + 1} / {total}
-            </div>
+            <div className="text-xs text-gray-500">Karte {idx + 1} / {total}</div>
 
             {alreadyInTrainer ? (
               <div className="mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs">
@@ -211,7 +207,6 @@ export default function BasicsClient({ ownerKey }: Props) {
         )}
       </FullScreenSheet>
 
-      {/* Adjust-Sheet: Vor dem Übernehmen anpassen */}
       <FullScreenSheet
         open={openAdjust}
         title="Vor dem Übernehmen anpassen"
@@ -228,11 +223,12 @@ export default function BasicsClient({ ownerKey }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium">Swahili</label>
-            <input
+            <label className="block text-sm font-medium">Swahili / Rückseite</label>
+            <textarea
               className="mt-1 w-full rounded-xl border p-3"
               value={draftSwahili}
               onChange={(e) => setDraftSwahili(e.target.value)}
+              rows={3}
             />
           </div>
 
@@ -241,7 +237,6 @@ export default function BasicsClient({ ownerKey }: Props) {
               className="rounded-xl border p-3"
               type="button"
               onClick={() => setOpenAdjust(false)}
-              disabled={saving}
             >
               Abbrechen
             </button>
@@ -250,13 +245,11 @@ export default function BasicsClient({ ownerKey }: Props) {
               className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
               type="button"
               onClick={() => addToTrainerFinal(draftGerman, draftSwahili)}
-              disabled={saving || !draftGerman.trim() || !draftSwahili.trim()}
+              disabled={saving}
             >
-              {saving ? "Speichere…" : "Übernehmen"}
+              {saving ? "Speichere …" : "In Trainer übernehmen"}
             </button>
           </div>
-
-          {status ? <div className="text-sm text-gray-600">{status}</div> : null}
         </div>
       </FullScreenSheet>
     </>

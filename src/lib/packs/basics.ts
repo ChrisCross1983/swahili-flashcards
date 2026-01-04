@@ -1,7 +1,4 @@
-export type PackCard = {
-  german: string;
-  swahili: string;
-};
+import { type PackCard } from "./types";
 
 export const BASICS_PACK: PackCard[] = [
   { german: "Hallo", swahili: "Habari" },
