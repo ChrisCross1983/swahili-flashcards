@@ -355,6 +355,16 @@ export default function HomeClient({ ownerKey }: Props) {
                             Kategorien von leicht bis schwer.
                         </div>
                     </button>
+
+                    <button
+                        onClick={() => router.push("/sentence-trainer")}
+                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
+                    >
+                        <div className="text-xl font-semibold">Satztrainer</div>
+                        <div className="mt-2 text-sm text-gray-600">
+                            Baue Sätze aus deinem Wortschatz.
+                        </div>
+                    </button>
                 </div>
             </div>
         </main>

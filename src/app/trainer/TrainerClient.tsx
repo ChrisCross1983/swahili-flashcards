@@ -170,14 +170,21 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSuggestLoading(true);
         setSuggestOpen(true);
 
-        const query = german.trim() || swahili.trim();
+        const trimmedGerman = german.trim();
+        const trimmedSwahili = swahili.trim();
+        const query = trimmedGerman || trimmedSwahili;
         if (!query) {
             setSuggestLoading(false);
             setSuggestError("Bitte zuerst Deutsch oder Swahili ausfüllen.");
             return;
         }
 
-        const res = await fetch(`/api/images/suggest?q=${encodeURIComponent(query)}`);
+        const params = new URLSearchParams();
+        if (trimmedGerman) params.set("german", trimmedGerman);
+        if (trimmedSwahili) params.set("swahili", trimmedSwahili);
+        params.set("q", query);
+
+        const res = await fetch(`/api/images/suggest?${params.toString()}`);
         const json = await res.json();
 
         setSuggestLoading(false);
