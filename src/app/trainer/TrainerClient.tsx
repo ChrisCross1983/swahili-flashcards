@@ -5,7 +5,6 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
-import { create } from "domain";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -1478,8 +1477,13 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         {sessionTotal > 0 ? (
                                             <div className="mt-3 rounded-2xl border p-4">
-                                                <div className="text-base font-semibold">
-                                                    {sessionCorrect} von {sessionTotal} Karten sicher
+                                                <div className="text-base font-semibold flex items-center justify-between gap-3">
+                                                    <span>
+                                                        {sessionCorrect} von {sessionTotal} Karten sicher{" "}
+                                                        <span className="text-gray-500 font-medium">
+                                                            ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}% gewusst)
+                                                        </span>
+                                                    </span>
                                                 </div>
                                                 <div className="mt-2 text-sm text-gray-600">
                                                     {sessionTotal - sessionCorrect} Karten üben wir nochmal
@@ -1628,183 +1632,206 @@ export default function TrainerClient({ ownerKey }: Props) {
                     )}
 
                     {/* === LERNKARTE === */}
-                    {learnStarted && todayItems.length > 0 && (
-                        <div className="mt-4">
-                            <div className="text-xs text-gray-500">
-                                Karte {currentIndex + 1} / {todayItems.length}
-                                {/* Session-Header: Richtung ändern (ohne Neustart) */}
-                                <div className="mt-2 flex items-center justify-between gap-3">
-                                    <div className="text-xs text-gray-500">
-                                        Richtung:{" "}
-                                        <span className="font-medium">
-                                            {directionMode === "RANDOM"
-                                                ? "Zufällig (Abwechslung)"
-                                                : direction === "DE_TO_SW"
-                                                    ? "Deutsch → Swahili"
-                                                    : "Swahili → Deutsch"}
-                                        </span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        className="rounded-xl border px-3 py-2 text-xs"
-                                        onClick={() => setOpenDirectionChange((v) => !v)}
-                                    >
-                                        Richtung ändern
-                                    </button>
-                                </div>
+                    {learnStarted && todayItems.length > 0 && (() => {
+                        const answeredCount = Math.max(0, currentIndex); // bereits bewertete Karten
+                        const safePct =
+                            answeredCount === 0 ? 0 : Math.round((sessionCorrect / answeredCount) * 100);
 
-                                {openDirectionChange ? (
-                                    <div className="mt-3 rounded-2xl border p-3">
-                                        <div className="text-sm font-medium">Abfragerichtung</div>
-
-                                        <div className="mt-2 grid grid-cols-1 gap-2">
-                                            <button
-                                                type="button"
-                                                className="rounded-xl border p-3 text-left"
-                                                onClick={() => {
-                                                    setDirectionMode("DE_TO_SW");
-                                                    setDirection("DE_TO_SW");
-                                                    setOpenDirectionChange(false);
-                                                }}
-                                            >
-                                                Deutsch → Swahili
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                className="rounded-xl border p-3 text-left"
-                                                onClick={() => {
-                                                    setDirectionMode("SW_TO_DE");
-                                                    setDirection("SW_TO_DE");
-                                                    setOpenDirectionChange(false);
-                                                }}
-                                            >
-                                                Swahili → Deutsch
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                className="rounded-xl border p-3 text-left"
-                                                onClick={() => {
-                                                    setDirectionMode("RANDOM");
-                                                    const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
-                                                    setDirection(chosen);
-                                                    setOpenDirectionChange(false);
-                                                }}
-                                            >
-                                                Zufällig (Abwechslung)
-                                            </button>
+                        return (
+                            <>
+                                {/* ===== Session Header (clean) ===== */}
+                                <div className="mb-3">
+                                    {/* Row 1: Progress + % */}
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm text-gray-600">
+                                            Karte <span className="font-medium text-gray-900">{currentIndex + 1}</span> von{" "}
+                                            <span className="font-medium text-gray-900">{todayItems.length}</span>
                                         </div>
 
-                                        <p className="mt-2 text-xs text-gray-500">
-                                            Tipp: „Zufällig“ würfelt ab jetzt pro Karte neu.
-                                        </p>
+                                        <div className="rounded-full border px-3 py-1 text-sm text-gray-700 bg-white">
+                                            ✔︎{" "}
+                                            <span className="font-medium">
+                                                {answeredCount === 0 ? "—" : `${safePct}%`}
+                                            </span>{" "}
+                                            <span className="text-gray-500">sicher</span>
+                                        </div>
                                     </div>
-                                ) : null}
-                            </div>
 
-                            <div className="mt-3 rounded-2xl border p-6">
-                                {/* Top Actions Row */}
-                                <div className="flex items-center justify-between gap-3">
-                                    {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
-                                    {!todayItems[currentIndex]?.audio_path ? (
+                                    {/* Row 2: Direction + Button */}
+                                    <div className="mt-2 flex items-center justify-between gap-3">
+                                        <div className="text-sm text-gray-600">
+                                            Richtung:{" "}
+                                            <span className="font-medium text-gray-900">
+                                                {directionMode === "RANDOM"
+                                                    ? "Zufällig"
+                                                    : direction === "DE_TO_SW"
+                                                        ? "Deutsch → Swahili"
+                                                        : "Swahili → Deutsch"}
+                                            </span>
+                                            {directionMode === "RANDOM" ? (
+                                                <span className="text-gray-400"> (Abwechslung)</span>
+                                            ) : null}
+                                        </div>
+
                                         <button
                                             type="button"
-                                            className="rounded-xl border px-4 py-2 text-sm"
-                                            onClick={toggleLearnRecording}
+                                            className="shrink-0 rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 active:scale-[0.99]"
+                                            onClick={() => setOpenDirectionChange((v) => !v)}
                                         >
-                                            {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                            Richtung ändern
+                                        </button>
+                                    </div>
+
+                                    {/* Dropdown */}
+                                    {openDirectionChange ? (
+                                        <div className="mt-3 rounded-2xl border p-3 bg-white">
+                                            <div className="text-sm font-medium">Abfragerichtung</div>
+
+                                            <div className="mt-2 grid grid-cols-1 gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border p-3 text-left hover:bg-gray-50"
+                                                    onClick={() => {
+                                                        setDirectionMode("DE_TO_SW");
+                                                        setDirection("DE_TO_SW");
+                                                        setOpenDirectionChange(false);
+                                                    }}
+                                                >
+                                                    Deutsch → Swahili
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border p-3 text-left hover:bg-gray-50"
+                                                    onClick={() => {
+                                                        setDirectionMode("SW_TO_DE");
+                                                        setDirection("SW_TO_DE");
+                                                        setOpenDirectionChange(false);
+                                                    }}
+                                                >
+                                                    Swahili → Deutsch
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border p-3 text-left hover:bg-gray-50"
+                                                    onClick={() => {
+                                                        setDirectionMode("RANDOM");
+                                                        const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
+                                                        setDirection(chosen);
+                                                        setOpenDirectionChange(false);
+                                                    }}
+                                                >
+                                                    Zufällig (Abwechslung)
+                                                </button>
+                                            </div>
+
+                                            <p className="mt-2 text-xs text-gray-500">
+                                                Tipp: „Zufällig“ würfelt ab jetzt pro Karte neu.
+                                            </p>
+                                        </div>
+                                    ) : null}
+                                </div>
+
+                                {/* ===== Card ===== */}
+                                <div className="mt-3 rounded-2xl border p-6">
+                                    {/* Top Actions Row */}
+                                    <div className="flex items-center justify-between gap-3">
+                                        {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
+                                        {!todayItems[currentIndex]?.audio_path ? (
+                                            <button
+                                                type="button"
+                                                className="rounded-xl border px-4 py-2 text-sm"
+                                                onClick={toggleLearnRecording}
+                                            >
+                                                {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                            </button>
+                                        ) : (
+                                            <div />
+                                        )}
+
+                                        {/* Rechts: Bearbeiten */}
+                                        <button
+                                            type="button"
+                                            className="ml-auto rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
+                                            onClick={startEditFromLearn}
+                                        >
+                                            ✏️ Bearbeiten
+                                        </button>
+                                    </div>
+
+                                    {/* Bild */}
+                                    {reveal && currentImagePath ? (
+                                        <div className="mt-6 rounded-2xl border bg-white overflow-hidden">
+                                            <div className="w-full h-56 flex items-center justify-center bg-gray-50">
+                                                <img
+                                                    src={`${IMAGE_BASE_URL}/${currentImagePath}`}
+                                                    alt="Bild"
+                                                    className="max-h-full max-w-full object-contain"
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : null}
+
+                                    {/* Prompt */}
+                                    <div className="mt-8 text-lg font-semibold">
+                                        {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                    </div>
+
+                                    {!reveal ? (
+                                        <button
+                                            className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                            onClick={revealCard}
+                                        >
+                                            Aufdecken
                                         </button>
                                     ) : (
-                                        <div />
-                                    )}
+                                        <>
+                                            <div className="mt-4 text-lg font-semibold">
+                                                {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                            </div>
 
-                                    {/* Rechts: Bearbeiten – immer sichtbar */}
-                                    <button
-                                        type="button"
-                                        className="ml-auto rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
-                                        onClick={startEditFromLearn}
-                                    >
-                                        ✏️ Bearbeiten
-                                    </button>
-                                </div>
-
-                                {/* Bild */}
-                                {currentImagePath ? (
-                                    <div className="mt-6 rounded-2xl border bg-white overflow-hidden">
-                                        <div className="w-full h-56 flex items-center justify-center bg-gray-50">
-                                            <img
-                                                src={`${IMAGE_BASE_URL}/${currentImagePath}`}
-                                                alt="Bild"
-                                                className="max-h-full max-w-full object-contain"
-                                            />
-                                        </div>
-                                    </div>
-                                ) : null}
-
-                                {/* Prompt */}
-                                <div className="mt-8 text-lg font-semibold">
-                                    {direction === "DE_TO_SW"
-                                        ? currentGerman
-                                        : currentSwahili}
-                                </div>
-
-                                {!reveal ? (
-                                    <button
-                                        className="mt-4 w-full rounded-xl bg-black text-white p-3"
-                                        onClick={revealCard}
-                                    >
-                                        Aufdecken
-                                    </button>
-                                ) : (
-                                    <>
-                                        <div className="mt-4 text-lg font-semibold">
-                                            {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                        </div>
-
-                                        {/* Audio abspielen – nur wenn vorhanden */}
-                                        <div className="mt-4 flex flex-wrap items-center gap-4">
+                                            {/* Audio abspielen */}
                                             {todayItems[currentIndex]?.audio_path ? (
                                                 <div className="mt-6">
                                                     <button
                                                         type="button"
                                                         className="rounded-xl border px-4 py-2 text-sm"
                                                         onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
-                                                        aria-label="Audio abspielen"
-                                                        title="Audio abspielen"
                                                     >
                                                         🔊 Abspielen
                                                     </button>
                                                 </div>
                                             ) : null}
-                                        </div>
 
-                                        <div className="mt-10 grid grid-cols-2 gap-6">
-                                            <button
-                                                type="button"
-                                                className="rounded-2xl border p-4 text-sm font-medium bg-red-50 border-red-200 text-red-800 active:scale-[0.99]"
-                                                onClick={() => gradeCurrent(false)}
-                                            >
-                                                Nicht gewusst
-                                            </button>
+                                            <div className="mt-10 grid grid-cols-2 gap-6">
+                                                <button
+                                                    type="button"
+                                                    className="rounded-2xl border p-4 text-sm font-medium bg-red-50 border-red-200 text-red-800 active:scale-[0.99]"
+                                                    onClick={() => gradeCurrent(false)}
+                                                >
+                                                    Nicht gewusst
+                                                </button>
 
-                                            <button
-                                                type="button"
-                                                className="rounded-2xl p-4 text-sm font-medium bg-green-600 text-white active:scale-[0.99]"
-                                                onClick={() => gradeCurrent(true)}
-                                            >
-                                                Gewusst
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </FullScreenSheet>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-2xl p-4 text-sm font-medium bg-green-600 text-white active:scale-[0.99]"
+                                                    onClick={() => gradeCurrent(true)}
+                                                >
+                                                    Gewusst
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </>
+                        );
+                    })()}
+
+                </FullScreenSheet >
 
                 {/* Create Modal */}
-                <FullScreenSheet
+                < FullScreenSheet
                     open={openCreate}
                     title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
                     onClose={handleCancelEdit}
@@ -2136,48 +2163,51 @@ export default function TrainerClient({ ownerKey }: Props) {
                         )}
                     </div>
 
-                    {status ? (
-                        <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
-                            {status}
-                        </div>
-                    ) : null}
-                </FullScreenSheet>
+                    {
+                        status ? (
+                            <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
+                                {status}
+                            </div>
+                        ) : null
+                    }
+                </FullScreenSheet >
 
                 {/* Suggestion Modal */}
-                <FullScreenSheet
+                < FullScreenSheet
                     open={suggestOpen}
                     title="Bildvorschläge"
                     onClose={() => setSuggestOpen(false)}
                 >
-                    {suggestLoading ? (
-                        <div className="mt-4 text-sm text-gray-600">Lade Vorschläge…</div>
-                    ) : suggestError ? (
-                        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                            {suggestError}
-                        </div>
-                    ) : suggestItems.length === 0 ? (
-                        <div className="mt-4 text-sm text-gray-600">
-                            Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
-                        </div>
-                    ) : (
-                        <div className="mt-6 grid grid-cols-2 gap-4">
-                            {suggestItems.map((it) => (
-                                <button
-                                    key={it.pageId}
-                                    type="button"
-                                    className="rounded-xl border overflow-hidden hover:shadow-sm transition"
-                                    onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
-                                >
-                                    <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
-                                    <div className="p-2 text-xs text-gray-600 line-clamp-2">{it.title}</div>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </FullScreenSheet>
+                    {
+                        suggestLoading ? (
+                            <div className="mt-4 text-sm text-gray-600" > Lade Vorschläge…</div>
+                        ) : suggestError ? (
+                            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                                {suggestError}
+                            </div>
+                        ) : suggestItems.length === 0 ? (
+                            <div className="mt-4 text-sm text-gray-600">
+                                Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
+                            </div>
+                        ) : (
+                            <div className="mt-6 grid grid-cols-2 gap-4">
+                                {suggestItems.map((it) => (
+                                    <button
+                                        key={it.pageId}
+                                        type="button"
+                                        className="rounded-xl border overflow-hidden hover:shadow-sm transition"
+                                        onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
+                                    >
+                                        <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
+                                        <div className="p-2 text-xs text-gray-600 line-clamp-2">{it.title}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                </FullScreenSheet >
 
                 {/* My Cards Modal */}
-                <FullScreenSheet
+                < FullScreenSheet
                     open={openCards}
                     title="Meine Karten"
                     onClose={() => setOpenCards(false)
@@ -2253,10 +2283,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                             ) : null}
                         </div>
                     </div>
-                </FullScreenSheet>
+                </FullScreenSheet >
 
                 {/* Search Modal */}
-                <FullScreenSheet
+                < FullScreenSheet
                     open={openSearch}
                     title="Karte suchen"
                     onClose={() => {
@@ -2317,7 +2347,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         )}
                     </div>
-                </FullScreenSheet>
+                </FullScreenSheet >
             </div >
         </main >
     );

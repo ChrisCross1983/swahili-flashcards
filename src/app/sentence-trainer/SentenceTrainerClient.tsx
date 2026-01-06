@@ -1,11 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function SentenceTrainerClient() {
     const router = useRouter();
-    const [started, setStarted] = useState(false);
 
     return (
         <main className="min-h-screen p-6 flex justify-center">
@@ -26,19 +24,12 @@ export default function SentenceTrainerClient() {
 
                         <button
                             className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:shadow-sm"
-                            onClick={() => setStarted(true)}
+                            onClick={() => router.push("/trainer/sentences/level-1")}
                             type="button"
                         >
                             Start
                         </button>
                     </div>
-
-                    {started && (
-                        <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
-                            <div className="font-semibold">Coming next</div>
-                            <div>Multiple Choice Aufgaben aus deinen Nomen-Karten.</div>
-                        </div>
-                    )}
                 </div>
 
                 <button
