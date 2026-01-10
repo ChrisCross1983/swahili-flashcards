@@ -1774,8 +1774,16 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     ) : null}
 
                                     {/* Prompt */}
-                                    <div className="mt-8 text-lg font-semibold">
-                                        {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                    <div className="mt-8">
+                                        <div className="text-xs text-gray-500 uppercase tracking-wide">
+                                            {direction === "DE_TO_SW" ? "Deutsch" : "Swahili"}
+                                        </div>
+                                        <div
+                                            className={`mt-1 text-2xl font-semibold ${direction === "DE_TO_SW" ? "text-gray-900" : "text-emerald-600"
+                                                }`}
+                                        >
+                                            {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                        </div>
                                     </div>
 
                                     {!reveal ? (
@@ -1787,8 +1795,16 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </button>
                                     ) : (
                                         <>
-                                            <div className="mt-4 text-lg font-semibold">
-                                                {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                            <div className="mt-4 border-t pt-4">
+                                                <div className="text-xs text-gray-500 uppercase tracking-wide">
+                                                    {direction === "DE_TO_SW" ? "Swahili" : "Deutsch"}
+                                                </div>
+                                                <div
+                                                    className={`mt-1 text-xl font-semibold ${direction === "DE_TO_SW" ? "text-emerald-600" : "text-gray-900"
+                                                        }`}
+                                                >
+                                                    {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                </div>
                                             </div>
 
                                             {/* Audio abspielen */}
