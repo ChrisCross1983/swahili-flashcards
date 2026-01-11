@@ -843,7 +843,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             return;
         }
 
-        const items = (json.cards ?? []).map((c: any) => ({
+        const items = (json.items ?? json.cards ?? []).map((c: any) => ({
             cardId: c.id,
             level: 0,
             dueDate: null,
@@ -878,7 +878,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             return;
         }
 
-        const items = (json.cards ?? []).map((c: any) => ({
+        const items = (json.items ?? json.cards ?? []).map((c: any) => ({
             cardId: c.id,
             level: 0,
             dueDate: null,
@@ -969,13 +969,23 @@ export default function TrainerClient({ ownerKey }: Props) {
     async function updateLastMissed(action: "add" | "remove", cardId: string) {
         if (!cardId) return;
         try {
-            await fetch("/api/learn/last-missed", {
+            const res = await fetch("/api/learn/last-missed", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ownerKey, cardId, action }),
             });
+            if (!res.ok) {
+                const json = await res.json().catch(() => ({}));
+                console.error("last-missed update failed", json?.error ?? res.statusText);
+                if (process.env.NODE_ENV === "development") {
+                    setStatus(json?.error ?? "Last-Missed Update fehlgeschlagen.");
+                }
+            }
         } catch (e) {
             console.error("Failed to update last missed", e);
+            if (process.env.NODE_ENV === "development") {
+                setStatus("Last-Missed Update fehlgeschlagen.");
+            }
         }
     }
 
