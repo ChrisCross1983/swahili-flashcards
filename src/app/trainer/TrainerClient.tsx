@@ -47,11 +47,12 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
+    const [drillSource, setDrillSource] = useState<"ALL" | "LAST_MISSED" | null>(null);
     const [cardSelection, setCardSelection] = useState<"ALL_CARDS" | "LAST_MISSED" | null>(null);
+    const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnStarted, setLearnStarted] = useState(false);
     const [returnToLearn, setReturnToLearn] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>(null);
-    const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnDone, setLearnDone] = useState(false);
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
@@ -1001,6 +1002,22 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
         if (learnMode === "DRILL") {
+            // Wenn Drill auf "LAST_MISSED" läuft und Karte richtig war: last-missed in DB löschen
+            if (drillSource === "LAST_MISSED" && correct) {
+                const cardId = resolveCardId(item);
+                if (cardId) {
+                    try {
+                        await fetch("/api/learn/clear-last-missed", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ ownerKey, cardId }),
+                        });
+                    } catch (e) {
+                        console.error("Failed to clear last missed", e);
+                    }
+                }
+            }
+
             if (nextIndex >= todayItems.length) {
                 await persistLearnSession({
                     mode: "DRILL",
@@ -1032,8 +1049,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ownerKey,
-                    cardId: item.cardId,
+                    cardId: resolveCardId(item),
                     correct,
+                    currentLevel: Number.isFinite(item?.level) ? item.level : 0,
                 }),
             });
         } catch (e) {
@@ -1324,7 +1342,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             // NICHTS vorauswählen (UX!)
                             setLearnMode(null);
                             setDirectionMode(null);
-                            setCardSelection(null);
+                            setDrillSource(null);
 
                             // Session reset
                             setTodayItems([]);
@@ -1409,7 +1427,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                             setLearnMode(null);
                             setDirectionMode(null);
-                            setCardSelection(null);
+                            setDrillSource(null);
                             resetSessionTracking();
 
                             return;
@@ -1423,7 +1441,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         <div className="mt-4 rounded-2xl border p-4 bg-white">
                             <div className="text-sm font-medium">Einstellungen</div>
                             <p className="mt-1 text-sm text-gray-600">
-                                Wähle Lernmethode, Abfragerichtung und Karten-Auswahl – dann starten wir.
+                                Wähle Lernmethode, Abfragerichtung – dann starten wir.
                             </p>
 
                             <div className="mt-4">
@@ -1478,6 +1496,27 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </button>
                                 </div>
                             </div>
+
+                            {learnMode === "DRILL" ? (
+                                <div className="mt-4">
+                                    <div className="text-sm font-medium">Was willst du trainieren?</div>
+                                    <div className="mt-2">
+                                        <select
+                                            className="w-full rounded-xl border p-3 bg-white"
+                                            value={drillSource ?? ""}
+                                            onChange={(e) =>
+                                                setDrillSource((e.target.value || null) as "ALL" | "LAST_MISSED" | null)
+                                            }
+                                        >
+                                            <option value="" disabled>
+                                                Bitte auswählen…
+                                            </option>
+                                            <option value="ALL">Alle Karten</option>
+                                            <option value="LAST_MISSED">Zuletzt nicht gewusst</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            ) : null}
 
                             <div className="mt-4">
                                 <div className="text-sm font-medium">Abfragerichtung</div>
@@ -1538,56 +1577,15 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 </div>
                             </div>
 
-                            <div className="mt-4">
-                                <div className="text-sm font-medium">Karten-Auswahl</div>
-                                <div className="mt-2 grid grid-cols-1 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setCardSelection("ALL_CARDS")}
-                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${cardSelection === "ALL_CARDS"
-                                            ? "border-black bg-gray-50"
-                                            : "border-gray-200 bg-white hover:bg-gray-50"
-                                            }`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span>Alle Karten</span>
-                                            {cardSelection === "ALL_CARDS" ? (
-                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
-                                                    ✓
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setCardSelection("LAST_MISSED")}
-                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${cardSelection === "LAST_MISSED"
-                                            ? "border-black bg-gray-50"
-                                            : "border-gray-200 bg-white hover:bg-gray-50"
-                                            }`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span>Zuletzt nicht gewusst</span>
-                                            {cardSelection === "LAST_MISSED" ? (
-                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
-                                                    ✓
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-
                             <button
-                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode || !cardSelection ? "bg-gray-400" : "bg-black"
+                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode || (learnMode === "DRILL" && !drillSource) ? "bg-gray-400" : "bg-black"
                                     }`}
                                 type="button"
                                 onClick={async () => {
                                     setStartHint(null);
 
-                                    if (!learnMode || !directionMode || !cardSelection) {
-                                        setStartHint("Bitte wähle Lernmethode, Abfragerichtung und Karten-Auswahl, bevor du startest.");
+                                    if (!learnMode || !directionMode || (learnMode === "DRILL" && !drillSource)) {
+                                        setStartHint("Bitte wähle Lernmethode, Abfragerichtung und ggf. eine Karten-Auswahl, bevor du startest.");
                                         return;
                                     }
 
@@ -1605,9 +1603,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     setCurrentIndex(0);
 
                                     if (learnMode === "LEITNER_TODAY") {
-                                        const items = await loadToday
-
-                                        await loadLeitnerStats();
+                                        const items = await loadToday();          // ✅ FIX: items existiert jetzt
+                                        await loadLeitnerStats();                 // ✅ Lernstand aktualisieren
                                         if (items && items.length === 0) {
                                             await persistLearnSession({
                                                 mode: "LEITNER",
@@ -1617,7 +1614,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             });
                                         }
                                     } else {
-                                        if (cardSelection === "ALL_CARDS") {
+                                        if (drillSource === "ALL") {
                                             await loadAllForDrill();
                                         } else {
                                             await loadLastMissed();
@@ -1683,9 +1680,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 }
 
                                                 setLearnMode("DRILL");
-                                                setCardSelection("LAST_MISSED");
+                                                setDrillSource("LAST_MISSED");
                                                 setLearnStarted(true);
-                                                setOpenDirectionChange(false);
                                                 setStatus("");
 
                                                 startDrillWithItems(repeatItems);
@@ -1782,15 +1778,14 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                             setLearnMode(null);
                                             setDirectionMode(null);
-                                            setCardSelection(null);
-                                            setOpenDirectionChange(false);
+                                            setDrillSource(null);
                                             resetSessionTracking();
                                         }}
                                     >
                                         Fertig
                                     </button>
                                 </div>
-                            ) : cardSelection === "LAST_MISSED" && lastMissedEmpty ? (
+                            ) : learnMode === "DRILL" && drillSource === "LAST_MISSED" && lastMissedEmpty ? (
                                 <div className="mt-4 rounded-2xl border p-6 bg-white">
                                     <div className="text-lg font-semibold">
                                         Keine zuletzt nicht gewussten Karten 🎉
@@ -1814,8 +1809,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                             setLearnMode(null);
                                             setDirectionMode(null);
-                                            setCardSelection(null);
-                                            setOpenDirectionChange(false);
+                                            setDrillSource(null);
                                             resetSessionTracking();
                                         }}
                                     >
@@ -1842,28 +1836,6 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                 <div className="mt-6 grid grid-cols-2 gap-4">
                                                     <button
-                                                        className="rounded-xl border p-3"
-                                                        type="button"
-                                                        onClick={async () => {
-                                                            resetSessionTracking();
-
-                                                            if (cardSelection === "LAST_MISSED") {
-                                                                await loadLastMissed();
-                                                            } else {
-                                                                await loadAllForDrill();
-                                                            }
-
-                                                            if (directionMode === "RANDOM") {
-                                                                setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
-                                                            }
-
-                                                            setLearnStarted(true);
-                                                        }}
-                                                    >
-                                                        Wiederholen
-                                                    </button>
-
-                                                    <button
                                                         className="rounded-xl bg-black text-white p-3"
                                                         type="button"
                                                         onClick={() => {
@@ -1878,7 +1850,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                             setLearnMode(null);
                                                             setDirectionMode(null);
-                                                            setCardSelection(null);
+                                                            setDrillSource(null);
                                                             resetSessionTracking();
                                                         }}
                                                     >
@@ -1919,25 +1891,22 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </div>
                                     </div>
 
-                                    {/* Row 2: Direction + Button */}
+                                    {/* Row 2: Direction + Change Button */}
                                     <div className="mt-2 flex items-center justify-between gap-3">
                                         <div className="text-sm text-gray-600">
                                             Richtung:{" "}
                                             <span className="font-medium text-gray-900">
                                                 {directionMode === "RANDOM"
-                                                    ? "Zufällig"
+                                                    ? "Zufällig (Abwechslung)"
                                                     : direction === "DE_TO_SW"
                                                         ? "Deutsch → Swahili"
                                                         : "Swahili → Deutsch"}
                                             </span>
-                                            {directionMode === "RANDOM" ? (
-                                                <span className="text-gray-400"> (Abwechslung)</span>
-                                            ) : null}
                                         </div>
 
                                         <button
                                             type="button"
-                                            className="shrink-0 rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 active:scale-[0.99]"
+                                            className="rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
                                             onClick={() => setOpenDirectionChange((v) => !v)}
                                         >
                                             Richtung ändern
@@ -2109,7 +2078,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 </FullScreenSheet >
 
                 {/* Create Modal */}
-                < FullScreenSheet
+                <FullScreenSheet
                     open={openCreate}
                     title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
                     onClose={handleCancelEdit}
@@ -2372,7 +2341,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     )
                                                 }
 
-                                                < div className="text-sm" >
+                                                <div className="text-sm" >
                                                     <div className="font-medium">{c.german_text}</div>
                                                     <div className="text-gray-600">{c.swahili_text}</div>
                                                 </div>
@@ -2451,7 +2420,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 </FullScreenSheet >
 
                 {/* Suggestion Modal */}
-                < FullScreenSheet
+                <FullScreenSheet
                     open={suggestOpen}
                     title="Bildvorschläge"
                     onClose={() => setSuggestOpen(false)}
@@ -2485,7 +2454,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 </FullScreenSheet >
 
                 {/* My Cards Modal */}
-                < FullScreenSheet
+                <FullScreenSheet
                     open={openCards}
                     title="Meine Karten"
                     onClose={() => setOpenCards(false)
@@ -2504,7 +2473,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                         {/* Liste */}
                         <div className="mt-4 space-y-3">
-                            {cards.map((c) => (
+                            {filteredCards.map((c) => (
                                 <div key={c.id} className="rounded-xl border p-3">
                                     <div className="text-sm font-medium">
                                         {c.german_text} — {c.swahili_text}
@@ -2564,7 +2533,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 </FullScreenSheet >
 
                 {/* Search Modal */}
-                < FullScreenSheet
+                <FullScreenSheet
                     open={openSearch}
                     title="Karte suchen"
                     onClose={() => {
