@@ -9,23 +9,21 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
     }
 
-    const { data: sessionRows, error: sessionError } = await supabaseServer
-        .from("learn_sessions")
-        .select("wrong_card_ids")
+    const { data: lastMissedRows, error: lastMissedError } = await supabaseServer
+        .from("learn_last_missed")
+        .select("card_id, created_at")
         .eq("owner_key", ownerKey)
-        .eq("mode", "LEITNER")
         .order("created_at", { ascending: false })
-        .limit(1);
 
-    if (sessionError) {
-        return NextResponse.json({ error: sessionError.message }, { status: 500 });
+    if (lastMissedError) {
+        return NextResponse.json({ error: lastMissedError.message }, { status: 500 });
     }
 
-    const wrongCardIds = Array.isArray(sessionRows?.[0]?.wrong_card_ids)
-        ? sessionRows?.[0]?.wrong_card_ids
-        : [];
+    const cardIds = (lastMissedRows ?? [])
+        .map((row) => String(row.card_id ?? "").trim())
+        .filter(Boolean);
 
-    if (wrongCardIds.length === 0) {
+    if (cardIds.length === 0) {
         return NextResponse.json({ cards: [] });
     }
 
@@ -33,11 +31,74 @@ export async function GET(req: Request) {
         .from("cards")
         .select("id, german_text, swahili_text, image_path, audio_path")
         .eq("owner_key", ownerKey)
-        .in("id", wrongCardIds);
+        .in("id", cardIds);
 
     if (cardsError) {
         return NextResponse.json({ error: cardsError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ cards: cards ?? [] });
+    const cardMap = new Map(
+        (cards ?? []).map((card) => [String(card.id), card])
+    );
+
+    const orderedCards = cardIds
+        .map((id) => cardMap.get(String(id)))
+        .filter(Boolean);
+
+    return NextResponse.json({ cards: orderedCards });
+}
+
+export async function POST(req: Request) {
+    try {
+        const body = await req.json();
+        const ownerKey = String(body?.ownerKey ?? "").trim();
+        const cardId = String(body?.cardId ?? "").trim();
+        const action = String(body?.action ?? "").trim();
+
+        if (!ownerKey || !cardId) {
+            return NextResponse.json(
+                { error: "ownerKey und cardId sind erforderlich." },
+                { status: 400 }
+            );
+        }
+
+        if (action === "add") {
+            const { error } = await supabaseServer
+                .from("learn_last_missed")
+                .upsert(
+                    { owner_key: ownerKey, card_id: cardId },
+                    { onConflict: "owner_key,card_id" }
+                );
+
+            if (error) {
+                return NextResponse.json({ error: error.message }, { status: 500 });
+            }
+
+            return NextResponse.json({ ok: true });
+        }
+
+        if (action === "remove") {
+            const { error } = await supabaseServer
+                .from("learn_last_missed")
+                .delete()
+                .eq("owner_key", ownerKey)
+                .eq("card_id", cardId);
+
+            if (error) {
+                return NextResponse.json({ error: error.message }, { status: 500 });
+            }
+
+            return NextResponse.json({ ok: true });
+        }
+
+        return NextResponse.json(
+            { error: "Ungültige Aktion." },
+            { status: 400 }
+        );
+    } catch (e: any) {
+        return NextResponse.json(
+            { error: e?.message ?? "Unbekannter Fehler" },
+            { status: 500 }
+        );
+    }
 }

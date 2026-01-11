@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 export async function POST(req: Request) {
     try {
@@ -21,16 +16,14 @@ export async function POST(req: Request) {
             );
         }
 
-        const { data: sessions, error: sessionError } = await supabaseAdmin
-            .from("learn_sessions")
-            .select("id, wrong_card_ids")
+        const { error: deleteError } = await supabaseServer
+            .from("learn_last_missed")
+            .delete()
             .eq("owner_key", ownerKey)
-            .eq("mode", "LEITNER")
-            .order("created_at", { ascending: false })
-            .limit(1);
+            .eq("card_id", cardId);
 
-        if (sessionError) {
-            return NextResponse.json({ error: sessionError.message }, { status: 500 });
+        if (deleteError) {
+            return NextResponse.json({ error: deleteError.message }, { status: 500 });
         }
 
         return NextResponse.json({ ok: true });

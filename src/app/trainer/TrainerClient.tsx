@@ -966,6 +966,19 @@ export default function TrainerClient({ ownerKey }: Props) {
         return String(item?.cardId ?? item?.card_id ?? item?.id ?? "").trim();
     }
 
+    async function updateLastMissed(action: "add" | "remove", cardId: string) {
+        if (!cardId) return;
+        try {
+            await fetch("/api/learn/last-missed", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ownerKey, cardId, action }),
+            });
+        } catch (e) {
+            console.error("Failed to update last missed", e);
+        }
+    }
+
     function revealCard() {
         setReveal(true);
 
@@ -1002,6 +1015,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (!correct && cardId) {
             setSessionWrongIds(nextWrongIds);
             setSessionWrongItems((prev) => (prev[cardId] ? prev : { ...prev, [cardId]: item }));
+            await updateLastMissed("add", cardId);
         }
 
         const nextIndex = currentIndex + 1;
@@ -1012,15 +1026,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             if (drillSource === "LAST_MISSED" && correct) {
                 const cardId = resolveCardId(item);
                 if (cardId) {
-                    try {
-                        await fetch("/api/learn/clear-last-missed", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ ownerKey, cardId }),
-                        });
-                    } catch (e) {
-                        console.error("Failed to clear last missed", e);
-                    }
+                    await updateLastMissed("remove", cardId);
                 }
             }
 
