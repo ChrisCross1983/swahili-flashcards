@@ -86,6 +86,9 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [leitnerStats, setLeitnerStats] = useState<null | {
         total: number;
         byLevel: { level: number; label: string; count: number }[];
+        dueTodayCount: number;
+        dueTomorrowCount: number;
+        dueLaterCount: number;
         nextDueDate: string | null;
         nextDueInDays: number | null;
     }>(null);
@@ -912,7 +915,10 @@ export default function TrainerClient({ ownerKey }: Props) {
     }
 
     async function loadLeitnerStats() {
-        const res = await fetch(`/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`);
+        const res = await fetch(
+            `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`,
+            { cache: "no-store" }
+        );
         const json = await res.json();
         if (!res.ok) return;
 
@@ -1065,6 +1071,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 correctCount: nextCorrect,
                 wrongCardIds: Array.from(nextWrongIds),
             });
+            await loadLeitnerStats();
             setReveal(false);
             setTodayItems([]);      // triggert "Erledigt"-UI
             setLearnDone(true);     // zeigt "Heute erledigt"
@@ -1228,7 +1235,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (!leitnerStats) {
             return {
                 total: 0,
-                newCount: 0,
+                todayCount: 0,
                 tomorrowCount: 0,
                 laterCount: 0,
                 nextText: "—",
@@ -1237,29 +1244,9 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         const total = Number(leitnerStats.total ?? 0);
 
-        const byLevel = Array.isArray(leitnerStats.byLevel) ? leitnerStats.byLevel : [];
-
-        const parseDays = (label: string) => {
-            const m = label.match(/\((\d+)\s*Tag/);
-            return m ? Number(m[1]) : null;
-        };
-
-        const sumByDays = (days: number) =>
-            byLevel
-                .filter((b: any) => parseDays(String(b.label ?? "")) === days)
-                .reduce((acc: number, b: any) => acc + Number(b.count ?? 0), 0);
-
-        const sumLater = () =>
-            byLevel
-                .filter((b: any) => {
-                    const d = parseDays(String(b.label ?? ""));
-                    return d != null && d >= 2;
-                })
-                .reduce((acc: number, b: any) => acc + Number(b.count ?? 0), 0);
-
-        const newCount = sumByDays(0);
-        const tomorrowCount = sumByDays(1);
-        const laterCount = sumLater();
+        const todayCount = Number(leitnerStats.dueTodayCount ?? 0);
+        const tomorrowCount = Number(leitnerStats.dueTomorrowCount ?? 0);
+        const laterCount = Number(leitnerStats.dueLaterCount ?? 0);
 
         const nextDue = leitnerStats.nextDueInDays;
         const nextText =
@@ -1271,7 +1258,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         ? "morgen"
                         : `in ${nextDue} Tagen`;
 
-        return { total, newCount, tomorrowCount, laterCount, nextText };
+        return { total, todayCount, tomorrowCount, laterCount, nextText };
     })();
 
     return (
@@ -1481,7 +1468,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <div className="font-semibold">Drill (ohne Leitner)</div>
+                                                <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
                                                 <div className="mt-1 text-sm text-gray-600">
                                                     Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
                                                 </div>
@@ -1729,14 +1716,14 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         <div className="mt-3 rounded-2xl border p-4 text-sm">
                                             <div className="flex items-center justify-between">
-                                                <span className="text-gray-600">Karten im Training</span>
+                                                <span className="text-gray-600">Karten insgesamt</span>
                                                 <span className="font-semibold">{leitnerUi.total}</span>
                                             </div>
 
                                             <div className="mt-4 space-y-2">
                                                 <div className="flex items-center justify-between">
-                                                    <span className="text-gray-700">🆕 Neue Karten</span>
-                                                    <span className="font-medium">{leitnerUi.newCount}</span>
+                                                    <span className="text-gray-700">📅 Heute fällig</span>
+                                                    <span className="font-medium">{leitnerUi.todayCount}</span>
                                                 </div>
 
                                                 <div className="flex items-center justify-between">

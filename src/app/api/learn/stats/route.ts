@@ -14,8 +14,16 @@ function labelForLevel(level: number) {
 function daysUntil(dateStr: string) {
   const today = new Date();
   const d = new Date(dateStr + "T00:00:00");
-  const diffMs = d.getTime() - new Date(today.toISOString().slice(0, 10) + "T00:00:00").getTime();
+  const diffMs =
+    d.getTime() -
+    new Date(today.toISOString().slice(0, 10) + "T00:00:00").getTime();
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+function addDaysYmd(base: Date, days: number) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function GET(req: Request) {
@@ -26,7 +34,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
   }
 
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const todayDate = new Date();
+  const today = todayDate.toISOString().slice(0, 10); // YYYY-MM-DD
+  const tomorrow = addDaysYmd(todayDate, 1);
 
   const { data, error } = await supabaseServer
     .from("card_progress")
@@ -40,11 +50,30 @@ export async function GET(req: Request) {
   const rows = data ?? [];
   const total = rows.length;
 
+  let dueTodayCount = 0;
+  let dueTomorrowCount = 0;
+  let dueLaterCount = 0;
+
   // counts by level
   const map = new Map<number, number>();
   for (const r of rows) {
     const lvl = Number(r.level ?? 0);
     map.set(lvl, (map.get(lvl) ?? 0) + 1);
+
+
+    const dueDate = r.due_date as string | null;
+    if (!dueDate) {
+      dueLaterCount += 1;
+      continue;
+    }
+
+    if (dueDate <= today) {
+      dueTodayCount += 1;
+    } else if (dueDate === tomorrow) {
+      dueTomorrowCount += 1;
+    } else {
+      dueLaterCount += 1;
+    }
   }
 
   // next due date (strictly after today)
@@ -65,6 +94,9 @@ export async function GET(req: Request) {
   return NextResponse.json({
     total,
     byLevel,
+    dueTodayCount,
+    dueTomorrowCount,
+    dueLaterCount,
     nextDueDate: futureDue,
     nextDueInDays: futureDue ? daysUntil(futureDue) : null,
   });

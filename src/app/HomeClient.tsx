@@ -25,7 +25,43 @@ export default function HomeClient({ ownerKey }: Props) {
     const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [leitnerStats, setLeitnerStats] = useState<null | {
+        total: number;
+        dueTodayCount: number;
+        dueTomorrowCount: number;
+        dueLaterCount: number;
+        nextDueInDays: number | null;
+    }>(null);
     const router = useRouter();
+
+    const leitnerUi = (() => {
+        if (!leitnerStats) {
+            return {
+                total: 0,
+                todayCount: 0,
+                tomorrowCount: 0,
+                laterCount: 0,
+                nextText: "—",
+            };
+        }
+
+        const total = Number(leitnerStats.total ?? 0);
+        const todayCount = Number(leitnerStats.dueTodayCount ?? 0);
+        const tomorrowCount = Number(leitnerStats.dueTomorrowCount ?? 0);
+        const laterCount = Number(leitnerStats.dueLaterCount ?? 0);
+
+        const nextDue = leitnerStats.nextDueInDays;
+        const nextText =
+            nextDue == null
+                ? "—"
+                : nextDue === 0
+                    ? "heute"
+                    : nextDue === 1
+                        ? "morgen"
+                        : `in ${nextDue} Tagen`;
+
+        return { total, todayCount, tomorrowCount, laterCount, nextText };
+    })();
 
     useEffect(() => {
         (async () => {
@@ -44,6 +80,11 @@ export default function HomeClient({ ownerKey }: Props) {
         setPreviewUrl(url);
         return () => URL.revokeObjectURL(url);
     }, [imageFile]);
+
+    useEffect(() => {
+        loadLeitnerStats();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function uploadImage(): Promise<string | null> {
         if (!imageFile) return null;
@@ -184,6 +225,18 @@ export default function HomeClient({ ownerKey }: Props) {
 
         setCards(json.cards);
         setStatus(`Geladen ✅ (${json.cards.length})`);
+        await loadLeitnerStats();
+    }
+
+    async function loadLeitnerStats() {
+        const res = await fetch(
+            `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`,
+            { cache: "no-store" }
+        );
+        const json = await res.json();
+        if (!res.ok) return;
+
+        setLeitnerStats(json);
     }
 
     function startEdit(card: any) {
@@ -335,6 +388,33 @@ export default function HomeClient({ ownerKey }: Props) {
                     </button>
                 </div>
 
+                <div className="mt-6 rounded-2xl border p-4">
+                    <div className="text-sm font-medium">📊 Lernstand</div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-700">📅 Fällig heute</span>
+                            <span className="font-semibold">{leitnerUi.todayCount}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-700">🔁 Morgen dran</span>
+                            <span className="font-semibold">{leitnerUi.tomorrowCount}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-700">✅ Später</span>
+                            <span className="font-semibold">{leitnerUi.laterCount}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-700">📚 Gesamt</span>
+                            <span className="font-semibold">{leitnerUi.total}</span>
+                        </div>
+                    </div>
+
+                    <div className="mt-3 text-xs text-gray-600">
+                        Nächstes Training: {leitnerUi.nextText}.
+                    </div>
+                </div>
+
                 <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <button
                         onClick={() => router.push("/trainer")}
@@ -370,4 +450,3 @@ export default function HomeClient({ ownerKey }: Props) {
         </main>
     );
 }
-
