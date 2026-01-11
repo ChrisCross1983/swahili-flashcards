@@ -46,15 +46,19 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
-    const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "ALL_SHUFFLE" | null>(null);
+    const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
+    const [cardSelection, setCardSelection] = useState<"ALL_CARDS" | "LAST_MISSED" | null>(null);
     const [learnStarted, setLearnStarted] = useState(false);
     const [returnToLearn, setReturnToLearn] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>(null);
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnDone, setLearnDone] = useState(false);
     const [sessionCorrect, setSessionCorrect] = useState(0);
+    const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
+    const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, any>>({});
     const [sessionTotal, setSessionTotal] = useState(0);
     const [showSummary, setShowSummary] = useState(false);
+    const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
     const [startHint, setStartHint] = useState<string | null>(null);
@@ -89,6 +93,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
+    const sessionSavedRef = useRef(false);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -803,7 +808,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         if (!res.ok) {
             setStatus(json.error ?? "Aktion fehlgeschlagen.");
-            return;
+            return null;
         }
 
         const items = Array.isArray(json.items) ? json.items : [];
@@ -811,16 +816,17 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSessionTotal(items.length);
 
         setTodayItems(shuffleArray(items));
-        setSessionTotal(json.items.length);
         setSessionCorrect(0);
         setCurrentIndex(0);
         setReveal(false);
 
         setStatus(`Fällig heute: ${items.length}`);
+        return items;
     }
 
     async function loadAllForDrill() {
         setStatus("Lade alle Karten...");
+        setLastMissedEmpty(false);
 
         const res = await fetch(
             `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
@@ -852,12 +858,105 @@ export default function TrainerClient({ ownerKey }: Props) {
         setStatus(`Alle Karten: ${items.length}`);
     }
 
+    async function loadLastMissed() {
+        setStatus("Lade zuletzt nicht gewusste Karten...");
+        setLastMissedEmpty(false);
+
+        const res = await fetch(
+            `/api/learn/last-missed?ownerKey=${encodeURIComponent(ownerKey)}`,
+            { cache: "no-store" }
+        );
+
+        const json = await res.json();
+
+        if (!res.ok) {
+            setStatus(json.error ?? "Aktion fehlgeschlagen.");
+            return;
+        }
+
+        const items = (json.cards ?? []).map((c: any) => ({
+            cardId: c.id,
+            level: 0,
+            dueDate: null,
+            german: c.german_text,
+            swahili: c.swahili_text,
+            imagePath: c.image_path ?? null,
+            audio_path: c.audio_path ?? null,
+        }));
+
+        setSessionTotal(items.length);
+
+        if (items.length === 0) {
+            setTodayItems([]);
+            setCurrentIndex(0);
+            setReveal(false);
+            setLastMissedEmpty(true);
+            setStatus("Keine zuletzt nicht gewussten Karten.");
+            return;
+        }
+
+        setTodayItems(shuffleArray(items));
+        setCurrentIndex(0);
+        setReveal(false);
+
+        setStatus(`Zuletzt nicht gewusst: ${items.length}`);
+    }
+
+    function startDrillWithItems(items: any[]) {
+        setLastMissedEmpty(false);
+        setSessionTotal(items.length);
+        setTodayItems(shuffleArray(items));
+        setCurrentIndex(0);
+        setReveal(false);
+    }
+
     async function loadLeitnerStats() {
         const res = await fetch(`/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`);
         const json = await res.json();
         if (!res.ok) return;
 
         setLeitnerStats(json);
+    }
+
+    function resetSessionTracking() {
+        setSessionCorrect(0);
+        setSessionTotal(0);
+        setSessionWrongIds(new Set());
+        setSessionWrongItems({});
+        setShowSummary(false);
+        setLearnDone(false);
+        setLastMissedEmpty(false);
+        sessionSavedRef.current = false;
+    }
+
+    async function persistLearnSession(params: {
+        mode: "LEITNER" | "DRILL";
+        totalCount: number;
+        correctCount: number;
+        wrongCardIds: string[];
+    }) {
+        if (sessionSavedRef.current) return;
+        sessionSavedRef.current = true;
+
+        try {
+            await fetch("/api/learn/sessions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    mode: params.mode,
+                    totalCount: params.totalCount,
+                    correctCount: params.correctCount,
+                    wrongCardIds: params.wrongCardIds,
+                }),
+            });
+        } catch (e) {
+            console.error("Failed to persist learn session", e);
+        }
+    }
+
+    function resolveCardId(item: any) {
+        return String(item?.cardId ?? item?.card_id ?? item?.id ?? "").trim();
     }
 
     function revealCard() {
@@ -879,14 +978,36 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (correct) playCorrect();
         else playWrong();
 
+        const cardId = resolveCardId(item);
+
+        const nextCorrect = correct ? sessionCorrect + 1 : sessionCorrect;
+
         // Session-Statistik
-        if (correct) setSessionCorrect((x) => x + 1);
+        if (correct) setSessionCorrect(nextCorrect);
+
+        const nextWrongIds = (() => {
+            if (correct || !cardId) return new Set(sessionWrongIds);
+            const updated = new Set(sessionWrongIds);
+            updated.add(cardId);
+            return updated;
+        })();
+
+        if (!correct && cardId) {
+            setSessionWrongIds(nextWrongIds);
+            setSessionWrongItems((prev) => (prev[cardId] ? prev : { ...prev, [cardId]: item }));
+        }
 
         const nextIndex = currentIndex + 1;
 
         // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
-        if (learnMode === "ALL_SHUFFLE") {
+        if (learnMode === "DRILL") {
             if (nextIndex >= todayItems.length) {
+                await persistLearnSession({
+                    mode: "DRILL",
+                    totalCount: sessionTotal,
+                    correctCount: nextCorrect,
+                    wrongCardIds: Array.from(nextWrongIds),
+                });
                 // Session beendet → Summary anzeigen
                 setReveal(false);
                 setTodayItems([]);
@@ -920,6 +1041,12 @@ export default function TrainerClient({ ownerKey }: Props) {
         }
 
         if (nextIndex >= todayItems.length) {
+            await persistLearnSession({
+                mode: "LEITNER",
+                totalCount: sessionTotal,
+                correctCount: nextCorrect,
+                wrongCardIds: Array.from(nextWrongIds),
+            });
             setReveal(false);
             setTodayItems([]);      // triggert "Erledigt"-UI
             setLearnDone(true);     // zeigt "Heute erledigt"
@@ -1197,11 +1324,13 @@ export default function TrainerClient({ ownerKey }: Props) {
                             // NICHTS vorauswählen (UX!)
                             setLearnMode(null);
                             setDirectionMode(null);
+                            setCardSelection(null);
 
                             // Session reset
                             setTodayItems([]);
                             setCurrentIndex(0);
                             setReveal(false);
+                            resetSessionTracking();
 
                             setStatus("");
                         }}
@@ -1280,6 +1409,8 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                             setLearnMode(null);
                             setDirectionMode(null);
+                            setCardSelection(null);
+                            resetSessionTracking();
 
                             return;
                         }
@@ -1292,11 +1423,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                         <div className="mt-4 rounded-2xl border p-4 bg-white">
                             <div className="text-sm font-medium">Einstellungen</div>
                             <p className="mt-1 text-sm text-gray-600">
-                                Wähle Lernmodus und Abfragerichtung – dann starten wir.
+                                Wähle Lernmethode, Abfragerichtung und Karten-Auswahl – dann starten wir.
                             </p>
 
                             <div className="mt-4">
-                                <div className="text-sm font-medium">Lernmodus</div>
+                                <div className="text-sm font-medium">Lernmethode</div>
                                 <div className="mt-2 grid grid-cols-1 gap-3">
                                     <button
                                         type="button"
@@ -1324,21 +1455,21 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                     <button
                                         type="button"
-                                        onClick={() => setLearnMode("ALL_SHUFFLE")}
-                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "ALL_SHUFFLE"
+                                        onClick={() => setLearnMode("DRILL")}
+                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "DRILL"
                                             ? "border-black bg-gray-50"
                                             : "border-gray-200 bg-white hover:bg-gray-50"
                                             }`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <div className="font-semibold">Alle Karten (Mix)</div>
+                                                <div className="font-semibold">Drill (ohne Leitner)</div>
                                                 <div className="mt-1 text-sm text-gray-600">
-                                                    Fragt alle Karten einmal zufällig ab – perfekt zum schnellen Check.
+                                                    Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
                                                 </div>
                                             </div>
 
-                                            {learnMode === "ALL_SHUFFLE" ? (
+                                            {learnMode === "DRILL" ? (
                                                 <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
                                                     ✓
                                                 </div>
@@ -1407,21 +1538,60 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 </div>
                             </div>
 
+                            <div className="mt-4">
+                                <div className="text-sm font-medium">Karten-Auswahl</div>
+                                <div className="mt-2 grid grid-cols-1 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setCardSelection("ALL_CARDS")}
+                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${cardSelection === "ALL_CARDS"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span>Alle Karten</span>
+                                            {cardSelection === "ALL_CARDS" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setCardSelection("LAST_MISSED")}
+                                        className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${cardSelection === "LAST_MISSED"
+                                            ? "border-black bg-gray-50"
+                                            : "border-gray-200 bg-white hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span>Zuletzt nicht gewusst</span>
+                                            {cardSelection === "LAST_MISSED" ? (
+                                                <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
+                                                    ✓
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
                             <button
-                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode ? "bg-gray-400" : "bg-black"
+                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode || !cardSelection ? "bg-gray-400" : "bg-black"
                                     }`}
                                 type="button"
                                 onClick={async () => {
                                     setStartHint(null);
 
-                                    if (!learnMode || !directionMode) {
-                                        setStartHint("Bitte wähle Lernmodus UND Abfragerichtung, bevor du startest.");
+                                    if (!learnMode || !directionMode || !cardSelection) {
+                                        setStartHint("Bitte wähle Lernmethode, Abfragerichtung und Karten-Auswahl, bevor du startest.");
                                         return;
                                     }
 
-                                    setLearnDone(false);
-                                    setSessionCorrect(0);
-                                    setShowSummary(false);
+                                    resetSessionTracking();
 
                                     const chosen =
                                         directionMode === "RANDOM"
@@ -1435,10 +1605,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     setCurrentIndex(0);
 
                                     if (learnMode === "LEITNER_TODAY") {
-                                        await loadToday();
+                                        const items = await loadToday
+
                                         await loadLeitnerStats();
+                                        if (items && items.length === 0) {
+                                            await persistLearnSession({
+                                                mode: "LEITNER",
+                                                totalCount: 0,
+                                                correctCount: 0,
+                                                wrongCardIds: [],
+                                            });
+                                        }
                                     } else {
-                                        await loadAllForDrill();
+                                        if (cardSelection === "ALL_CARDS") {
+                                            await loadAllForDrill();
+                                        } else {
+                                            await loadLastMissed();
+                                        }
                                     }
 
                                     setLearnStarted(true);
@@ -1469,6 +1652,48 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             ? "Für heute bist du fertig. Morgen geht’s entspannt weiter."
                                             : "Für heute ist nichts offen — dein Rhythmus passt."}
                                     </div>
+
+                                    {(() => {
+                                        const total = sessionTotal;
+                                        const pct = total > 0 ? Math.round((sessionCorrect / total) * 100) : 0;
+
+                                        return (
+                                            <div className="mt-3 text-sm text-gray-700">
+                                                Ergebnis:{" "}
+                                                <span className="font-medium">
+                                                    {sessionCorrect}/{total}
+                                                </span>{" "}
+                                                gewusst ({pct}%)
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {sessionWrongIds.size > 0 ? (
+                                        <button
+                                            className="mt-4 w-full rounded-xl border p-3"
+                                            type="button"
+                                            onClick={() => {
+                                                const repeatItems = Object.values(sessionWrongItems);
+                                                if (repeatItems.length === 0) return;
+
+                                                resetSessionTracking();
+
+                                                if (directionMode === "RANDOM") {
+                                                    setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
+                                                }
+
+                                                setLearnMode("DRILL");
+                                                setCardSelection("LAST_MISSED");
+                                                setLearnStarted(true);
+                                                setOpenDirectionChange(false);
+                                                setStatus("");
+
+                                                startDrillWithItems(repeatItems);
+                                            }}
+                                        >
+                                            Nicht gewusste wiederholen
+                                        </button>
+                                    ) : null}
 
                                     {/* Lernstand */}
                                     <div className="mt-4 rounded-2xl border p-6">
@@ -1557,7 +1782,41 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                             setLearnMode(null);
                                             setDirectionMode(null);
+                                            setCardSelection(null);
                                             setOpenDirectionChange(false);
+                                            resetSessionTracking();
+                                        }}
+                                    >
+                                        Fertig
+                                    </button>
+                                </div>
+                            ) : cardSelection === "LAST_MISSED" && lastMissedEmpty ? (
+                                <div className="mt-4 rounded-2xl border p-6 bg-white">
+                                    <div className="text-lg font-semibold">
+                                        Keine zuletzt nicht gewussten Karten 🎉
+                                    </div>
+                                    <div className="mt-2 text-sm text-gray-700">
+                                        Du hast in der letzten Session alle Karten gewusst.
+                                    </div>
+
+                                    <button
+                                        className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                        type="button"
+                                        onClick={() => {
+                                            setLearnStarted(false);
+                                            setLearnDone(false);
+                                            setShowSummary(false);
+
+                                            setTodayItems([]);
+                                            setCurrentIndex(0);
+                                            setReveal(false);
+                                            setStatus("");
+
+                                            setLearnMode(null);
+                                            setDirectionMode(null);
+                                            setCardSelection(null);
+                                            setOpenDirectionChange(false);
+                                            resetSessionTracking();
                                         }}
                                     >
                                         Fertig
@@ -1586,12 +1845,13 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         className="rounded-xl border p-3"
                                                         type="button"
                                                         onClick={async () => {
-                                                            setSessionCorrect(0);
-                                                            setShowSummary(false);
-                                                            setReveal(false);
-                                                            setCurrentIndex(0);
+                                                            resetSessionTracking();
 
-                                                            await loadAllForDrill();
+                                                            if (cardSelection === "LAST_MISSED") {
+                                                                await loadLastMissed();
+                                                            } else {
+                                                                await loadAllForDrill();
+                                                            }
 
                                                             if (directionMode === "RANDOM") {
                                                                 setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
@@ -1618,6 +1878,8 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                             setLearnMode(null);
                                                             setDirectionMode(null);
+                                                            setCardSelection(null);
+                                                            resetSessionTracking();
                                                         }}
                                                     >
                                                         Fertig
