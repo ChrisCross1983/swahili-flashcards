@@ -21,14 +21,16 @@ export async function POST(req: Request) {
             );
         }
 
-        const { error } = await supabaseAdmin
-            .from("learn_state")
-            .update({ last_missed_at: null })
+        const { data: sessions, error: sessionError } = await supabaseAdmin
+            .from("learn_sessions")
+            .select("id, wrong_card_ids")
             .eq("owner_key", ownerKey)
-            .eq("card_id", cardId);
+            .eq("mode", "LEITNER")
+            .order("created_at", { ascending: false })
+            .limit(1);
 
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 500 });
+        if (sessionError) {
+            return NextResponse.json({ error: sessionError.message }, { status: 500 });
         }
 
         return NextResponse.json({ ok: true });

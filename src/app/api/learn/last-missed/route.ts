@@ -13,8 +13,7 @@ export async function GET(req: Request) {
         .from("learn_sessions")
         .select("wrong_card_ids")
         .eq("owner_key", ownerKey)
-        .not("wrong_card_ids", "is", null)
-        .neq("wrong_card_ids", "{}")
+        .eq("mode", "LEITNER")
         .order("created_at", { ascending: false })
         .limit(1);
 
