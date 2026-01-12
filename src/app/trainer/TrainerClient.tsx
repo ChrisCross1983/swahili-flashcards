@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -59,6 +60,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, any>>({});
     const [sessionTotal, setSessionTotal] = useState(0);
     const [showSummary, setShowSummary] = useState(false);
+    const [endedEarly, setEndedEarly] = useState(false);
     const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
@@ -75,6 +77,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
+    const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
 
     const router = useRouter();
 
@@ -933,6 +936,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         setShowSummary(false);
         setLearnDone(false);
         setLastMissedEmpty(false);
+        setEndedEarly(false);
+        setExitConfirmOpen(false);
         sessionSavedRef.current = false;
     }
 
@@ -960,6 +965,32 @@ export default function TrainerClient({ ownerKey }: Props) {
         } catch (e) {
             console.error("Failed to persist learn session", e);
         }
+    }
+
+    async function endSessionEarly() {
+        setExitConfirmOpen(false);
+        stopAnyAudio();
+
+        if (isRecording) {
+            stopRecording();
+        }
+
+        const answeredCount = Math.max(0, currentIndex);
+        const correctCount = sessionCorrect;
+
+        await persistLearnSession({
+            mode: learnMode === "DRILL" ? "DRILL" : "LEITNER",
+            totalCount: answeredCount,
+            correctCount,
+            wrongCardIds: Array.from(sessionWrongIds),
+        });
+
+        setSessionTotal(answeredCount);
+        setReveal(false);
+        setTodayItems([]);
+        setLearnDone(false);
+        setShowSummary(true);
+        setEndedEarly(true);
     }
 
     function resolveCardId(item: any) {
@@ -1247,6 +1278,14 @@ export default function TrainerClient({ ownerKey }: Props) {
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
+    const isSessionRunning =
+        learnStarted &&
+        (todayItems.length > 0 || currentIndex > 0 || reveal) &&
+        !learnDone &&
+        !showSummary &&
+        !endedEarly &&
+        (learnMode === "LEITNER_TODAY" || learnMode === "DRILL");
+
     const leitnerUi = (() => {
         if (!leitnerStats) {
             return {
@@ -1419,10 +1458,16 @@ export default function TrainerClient({ ownerKey }: Props) {
                     open={openLearn}
                     title="Vokabeln lernen"
                     onClose={() => {
-                        if (learnStarted || showSummary || todayItems.length > 0 || learnDone) {
+                        if (isSessionRunning) {
+                            setExitConfirmOpen(true);
+                            return;
+                        }
+
+                        if (learnStarted || showSummary || todayItems.length > 0 || learnDone || endedEarly) {
                             setLearnStarted(false);
                             setLearnDone(false);
                             setShowSummary(false);
+                            setEndedEarly(false);
                             setTodayItems([]);
                             setCurrentIndex(0);
                             setReveal(false);
@@ -1460,7 +1505,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <div className="font-semibold">Heute fällig (Langzeit)</div>
+                                                <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
                                                 <div className="mt-1 text-sm text-gray-600">
                                                     Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
                                                 </div>
@@ -1641,7 +1686,66 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {/* === KEINE KARTEN / ENDE === */}
                     {learnStarted && todayItems.length === 0 && (
                         <>
-                            {learnMode === "LEITNER_TODAY" ? (
+                            {endedEarly ? (
+                                <div className="mt-4 rounded-2xl border p-6 bg-white">
+                                    <div className="text-lg font-semibold">Session beendet</div>
+                                    <div className="mt-2 text-sm text-gray-700">
+                                        Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis.
+                                    </div>
+
+                                    {(() => {
+                                        const answeredCount = sessionTotal;
+                                        const wrongCount = sessionWrongIds.size;
+                                        const pct =
+                                            answeredCount > 0
+                                                ? Math.round((sessionCorrect / answeredCount) * 100)
+                                                : 0;
+
+                                        return (
+                                            <div className="mt-4 space-y-2 text-sm text-gray-700">
+                                                <div>
+                                                    Gewusst:{" "}
+                                                    <span className="font-medium">
+                                                        {sessionCorrect}/{answeredCount}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    Nicht gewusst:{" "}
+                                                    <span className="font-medium">
+                                                        {wrongCount}/{answeredCount}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    Trefferquote:{" "}
+                                                    <span className="font-medium">{pct}%</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    <button
+                                        className="mt-6 w-full rounded-xl bg-black text-white p-3"
+                                        type="button"
+                                        onClick={() => {
+                                            setLearnStarted(false);
+                                            setLearnDone(false);
+                                            setShowSummary(false);
+
+                                            setTodayItems([]);
+                                            setCurrentIndex(0);
+                                            setReveal(false);
+                                            setStatus("");
+
+                                            setLearnMode(null);
+                                            setDirectionMode(null);
+                                            setDrillSource(null);
+                                            resetSessionTracking();
+                                        }}
+                                    >
+                                        Fertig
+                                    </button>
+                                </div>
+                            ) : learnMode === "LEITNER_TODAY" ? (
                                 <div className="mt-4 rounded-2xl border p-6 bg-white">
                                     <div className="text-lg font-semibold">
                                         {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
@@ -2077,6 +2181,16 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </>
                         );
                     })()}
+
+                    <ConfirmDialog
+                        open={exitConfirmOpen}
+                        title="Training beenden?"
+                        description="Willst du die Session wirklich beenden? Dein aktuelles Ergebnis wird gespeichert."
+                        cancelLabel="Weiterlernen"
+                        confirmLabel="Beenden"
+                        onCancel={() => setExitConfirmOpen(false)}
+                        onConfirm={endSessionEarly}
+                    />
 
                 </FullScreenSheet >
 
