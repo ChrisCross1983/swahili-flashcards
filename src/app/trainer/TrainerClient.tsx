@@ -78,6 +78,14 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+    const [setupCounts, setSetupCounts] = useState({
+        todayDue: 0,
+        totalCards: 0,
+        lastMissedCount: 0,
+    });
+    const [setupCountsLoading, setSetupCountsLoading] = useState(false);
+    const [highlightTarget, setHighlightTarget] = useState<"LEARNMODE" | "DIRECTION" | "DRILLSOURCE" | null>(null);
+    const [drillMenuOpen, setDrillMenuOpen] = useState(false);
 
     const router = useRouter();
 
@@ -101,6 +109,11 @@ export default function TrainerClient({ ownerKey }: Props) {
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const sessionSavedRef = useRef(false);
+    const learnModeRef = useRef<HTMLDivElement | null>(null);
+    const directionRef = useRef<HTMLDivElement | null>(null);
+    const drillSourceRef = useRef<HTMLDivElement | null>(null);
+    const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const drillMenuRef = useRef<HTMLDivElement | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -119,6 +132,31 @@ export default function TrainerClient({ ownerKey }: Props) {
         stopAnyAudio();
         audioElRef.current = new Audio(url);
         audioElRef.current.play().catch(() => { });
+    }
+
+    function triggerSetupHighlight(
+        target: "LEARNMODE" | "DIRECTION" | "DRILLSOURCE",
+        message: string
+    ) {
+        setStartHint(message);
+        setHighlightTarget(target);
+
+        if (highlightTimeoutRef.current) {
+            clearTimeout(highlightTimeoutRef.current);
+        }
+
+        const targetRef =
+            target === "LEARNMODE"
+                ? learnModeRef
+                : target === "DIRECTION"
+                    ? directionRef
+                    : drillSourceRef;
+
+        targetRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        highlightTimeoutRef.current = setTimeout(() => {
+            setHighlightTarget(null);
+        }, 1200);
     }
 
     useEffect(() => {
@@ -155,6 +193,60 @@ export default function TrainerClient({ ownerKey }: Props) {
         loadCards(undefined, { silent: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!openLearn) return;
+
+        let isActive = true;
+        setSetupCountsLoading(true);
+
+        (async () => {
+            try {
+                const res = await fetch(`/api/learn/setup-counts?ownerKey=${ownerKey}`);
+                const json = await res.json();
+                if (!res.ok) {
+                    throw new Error(json.error ?? "Setup counts failed");
+                }
+
+                if (!isActive) return;
+                setSetupCounts({
+                    todayDue: json.todayDue ?? 0,
+                    totalCards: json.totalCards ?? 0,
+                    lastMissedCount: json.lastMissedCount ?? 0,
+                });
+            } catch {
+                if (!isActive) return;
+                setSetupCounts({
+                    todayDue: 0,
+                    totalCards: 0,
+                    lastMissedCount: 0,
+                });
+            } finally {
+                if (isActive) {
+                    setSetupCountsLoading(false);
+                }
+            }
+        })();
+
+        return () => {
+            isActive = false;
+        };
+    }, [openLearn, ownerKey]);
+
+    useEffect(() => {
+        if (!drillMenuOpen) return;
+
+        function handleClick(event: MouseEvent) {
+            if (drillMenuRef.current && !drillMenuRef.current.contains(event.target as Node)) {
+                setDrillMenuOpen(false);
+            }
+        }
+
+        document.addEventListener("mousedown", handleClick);
+        return () => {
+            document.removeEventListener("mousedown", handleClick);
+        };
+    }, [drillMenuOpen]);
 
     async function uploadImage(): Promise<string | null> {
         if (!imageFile) return null;
@@ -1385,6 +1477,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             setLearnMode(null);
                             setDirectionMode(null);
                             setDrillSource(null);
+                            setDrillMenuOpen(false);
 
                             // Session reset
                             setTodayItems([]);
@@ -1476,12 +1569,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                             setLearnMode(null);
                             setDirectionMode(null);
                             setDrillSource(null);
+                            setDrillMenuOpen(false);
                             resetSessionTracking();
 
                             return;
                         }
 
                         setOpenLearn(false);
+                        setDrillMenuOpen(false);
                     }}
                 >
                     {/* === SETUP === */}
@@ -1492,18 +1587,24 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 Wähle Lernmethode, Abfragerichtung – dann starten wir.
                             </p>
 
-                            <div className="mt-4">
+                            <div
+                                ref={learnModeRef}
+                                className={`mt-4 rounded-2xl ${highlightTarget === "LEARNMODE" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                            >
                                 <div className="text-sm font-medium">Lernmethode</div>
                                 <div className="mt-2 grid grid-cols-1 gap-3">
                                     <button
                                         type="button"
-                                        onClick={() => setLearnMode("LEITNER_TODAY")}
-                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "LEITNER_TODAY"
+                                        onClick={() => {
+                                            setLearnMode("LEITNER_TODAY");
+                                            setDrillMenuOpen(false);
+                                        }}
+                                        className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "LEITNER_TODAY"
                                             ? "border-black bg-gray-50"
                                             : "border-gray-200 bg-white hover:bg-gray-50"
                                             }`}
                                     >
-                                        <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-start justify-between gap-3 pr-10">
                                             <div>
                                                 <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
                                                 <div className="mt-1 text-sm text-gray-600">
@@ -1517,17 +1618,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 </div>
                                             ) : null}
                                         </div>
+                                        <div className="absolute right-4 top-4 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                                            {setupCountsLoading ? "…" : setupCounts.todayDue}
+                                        </div>
                                     </button>
 
                                     <button
                                         type="button"
-                                        onClick={() => setLearnMode("DRILL")}
-                                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "DRILL"
+                                        onClick={() => {
+                                            setLearnMode("DRILL");
+                                            setDrillMenuOpen(false);
+                                        }}
+                                        className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "DRILL"
                                             ? "border-black bg-gray-50"
                                             : "border-gray-200 bg-white hover:bg-gray-50"
                                             }`}
                                     >
-                                        <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-start justify-between gap-3 pr-10">
                                             <div>
                                                 <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
                                                 <div className="mt-1 text-sm text-gray-600">
@@ -1541,32 +1648,89 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 </div>
                                             ) : null}
                                         </div>
+                                        <div className="absolute right-4 top-4 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                                            {setupCountsLoading ? "…" : setupCounts.totalCards}
+                                        </div>
                                     </button>
                                 </div>
                             </div>
 
                             {learnMode === "DRILL" ? (
-                                <div className="mt-4">
+                                <div
+                                    ref={drillSourceRef}
+                                    className={`mt-4 rounded-2xl ${highlightTarget === "DRILLSOURCE" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                                >
                                     <div className="text-sm font-medium">Was willst du trainieren?</div>
-                                    <div className="mt-2">
-                                        <select
-                                            className="w-full rounded-xl border p-3 bg-white"
-                                            value={drillSource ?? ""}
-                                            onChange={(e) =>
-                                                setDrillSource((e.target.value || null) as "ALL" | "LAST_MISSED" | null)
-                                            }
+                                    <div className="mt-2" ref={drillMenuRef}>
+                                        <button
+                                            type="button"
+                                            className="flex w-full items-center justify-between rounded-xl border bg-white p-3 text-left"
+                                            onClick={() => setDrillMenuOpen((prev) => !prev)}
                                         >
-                                            <option value="" disabled>
-                                                Bitte auswählen…
-                                            </option>
-                                            <option value="ALL">Alle Karten</option>
-                                            <option value="LAST_MISSED">Zuletzt nicht gewusst</option>
-                                        </select>
+                                            <span className={drillSource ? "text-gray-900" : "text-gray-400"}>
+                                                {drillSource === "ALL"
+                                                    ? "Alle Karten"
+                                                    : drillSource === "LAST_MISSED"
+                                                        ? "Zuletzt nicht gewusst"
+                                                        : "Bitte auswählen…"}
+                                            </span>
+                                            <span className="text-xs text-gray-400">▾</span>
+                                        </button>
+
+                                        {drillMenuOpen ? (
+                                            <div className="mt-2 space-y-2 rounded-xl border bg-white p-2 shadow-sm">
+                                                <button
+                                                    type="button"
+                                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "ALL"
+                                                        ? "bg-gray-100"
+                                                        : "hover:bg-gray-50"
+                                                        }`}
+                                                    onClick={() => {
+                                                        setDrillSource("ALL");
+                                                        setDrillMenuOpen(false);
+                                                    }}
+                                                >
+                                                    <span>Alle Karten</span>
+                                                    <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                                                        {setupCountsLoading ? "…" : setupCounts.totalCards}
+                                                    </span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "LAST_MISSED"
+                                                        ? "bg-gray-100"
+                                                        : "hover:bg-gray-50"
+                                                        }`}
+                                                    onClick={() => {
+                                                        setDrillSource("LAST_MISSED");
+                                                        setDrillMenuOpen(false);
+                                                    }}
+                                                >
+                                                    <span>Zuletzt nicht gewusst</span>
+                                                    <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                                                        {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
+                                                    </span>
+                                                </button>
+                                            </div>
+                                        ) : null}
                                     </div>
+                                    {drillSource === null ? (
+                                        <div className="mt-2 text-sm text-gray-600">
+                                            <div>Bitte Quelle auswählen.</div>
+                                            {!setupCountsLoading && setupCounts.lastMissedCount > 0 ? (
+                                                <div className="mt-1">
+                                                    Es warten {setupCounts.lastMissedCount} Karten im &quot;Zuletzt nicht gewusst&quot; Topf.
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
 
-                            <div className="mt-4">
+                            <div
+                                ref={directionRef}
+                                className={`mt-4 rounded-2xl ${highlightTarget === "DIRECTION" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                            >
                                 <div className="text-sm font-medium">Abfragerichtung</div>
                                 <div className="mt-2 grid grid-cols-1 gap-3">
                                     <button
@@ -1632,8 +1796,18 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 onClick={async () => {
                                     setStartHint(null);
 
-                                    if (!learnMode || !directionMode || (learnMode === "DRILL" && !drillSource)) {
-                                        setStartHint("Bitte wähle Lernmethode, Abfragerichtung und ggf. eine Karten-Auswahl, bevor du startest.");
+                                    if (!learnMode) {
+                                        triggerSetupHighlight("LEARNMODE", "Wähle zuerst die Lernmethode.");
+                                        return;
+                                    }
+
+                                    if (!directionMode) {
+                                        triggerSetupHighlight("DIRECTION", "Wähle noch die Abfragerichtung.");
+                                        return;
+                                    }
+
+                                    if (learnMode === "DRILL" && !drillSource) {
+                                        triggerSetupHighlight("DRILLSOURCE", "Wähle noch, was du trainieren willst.");
                                         return;
                                     }
 
