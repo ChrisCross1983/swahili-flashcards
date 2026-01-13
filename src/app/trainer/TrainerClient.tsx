@@ -1371,13 +1371,16 @@ export default function TrainerClient({ ownerKey }: Props) {
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
+    const isLeitnerSelected = learnMode === "LEITNER_TODAY";
+    const isDrillSelected = learnMode === "DRILL";
+
     const isSessionRunning =
         learnStarted &&
         (todayItems.length > 0 || currentIndex > 0 || reveal) &&
         !learnDone &&
         !showSummary &&
         !endedEarly &&
-        (learnMode === "LEITNER_TODAY" || learnMode === "DRILL");
+        (isLeitnerSelected || isDrillSelected);
 
     const leitnerUi = (() => {
         if (!leitnerStats) {
@@ -1417,11 +1420,11 @@ export default function TrainerClient({ ownerKey }: Props) {
     const drillSourceHighlight = missingDrillSource && startDisabled;
     const directionHighlight = missingDirection && startDisabled;
     const startHint = missingLearnMode
-        ? "1) Lernmethode wählen"
+        ? "Lernmethode wählen"
         : missingDrillSource
-            ? "2) Quelle wählen (Alle Karten / Zuletzt nicht gewusst)"
+            ? "Quelle wählen (Alle Karten / Zuletzt nicht gewusst)"
             : missingDirection
-                ? "2) Abfragerichtung wählen"
+                ? "Abfragerichtung wählen"
                 : null;
 
     return (
@@ -1623,7 +1626,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     setLearnMode("LEITNER_TODAY");
                                                     setDrillMenuOpen(false);
                                                 }}
-                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "LEITNER_TODAY"
+                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
                                                     ? "border-black bg-gray-50"
                                                     : "border-gray-200 bg-white hover:bg-gray-50"
                                                     }`}
@@ -1636,7 +1639,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         </div>
                                                     </div>
 
-                                                    {learnMode === "LEITNER_TODAY" ? (
+                                                    {isLeitnerSelected ? (
                                                         <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
                                                             ✓
                                                         </div>
@@ -1661,7 +1664,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         }, 0);
                                                     }
                                                 }}
-                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "DRILL"
+                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
                                                     ? "border-black bg-gray-50"
                                                     : "border-gray-200 bg-white hover:bg-gray-50"
                                                     }`}
@@ -1674,7 +1677,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         </div>
                                                     </div>
 
-                                                    {learnMode === "LEITNER_TODAY" ? (
+                                                    {isDrillSelected ? (
                                                         <div className="shrink-0 rounded-full border border-black px-2 py-1 text-xs">
                                                             ✓
                                                         </div>
