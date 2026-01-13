@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
@@ -64,7 +64,6 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
-    const [startHint, setStartHint] = useState<string | null>(null);
     const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
@@ -84,7 +83,6 @@ export default function TrainerClient({ ownerKey }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
-    const [highlightTarget, setHighlightTarget] = useState<"LEARNMODE" | "DIRECTION" | "DRILLSOURCE" | null>(null);
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
 
     const router = useRouter();
@@ -112,7 +110,6 @@ export default function TrainerClient({ ownerKey }: Props) {
     const learnModeRef = useRef<HTMLDivElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const drillSourceRef = useRef<HTMLDivElement | null>(null);
-    const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const drillMenuRef = useRef<HTMLDivElement | null>(null);
 
     function getAudioPublicUrl(path: string) {
@@ -134,17 +131,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         audioElRef.current.play().catch(() => { });
     }
 
-    function triggerSetupHighlight(
-        target: "LEARNMODE" | "DIRECTION" | "DRILLSOURCE",
-        message: string
-    ) {
-        setStartHint(message);
-        setHighlightTarget(target);
-
-        if (highlightTimeoutRef.current) {
-            clearTimeout(highlightTimeoutRef.current);
-        }
-
+    function triggerSetupHighlight(target: "LEARNMODE" | "DIRECTION" | "DRILLSOURCE") {
         const targetRef =
             target === "LEARNMODE"
                 ? learnModeRef
@@ -153,10 +140,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                     : drillSourceRef;
 
         targetRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-
-        highlightTimeoutRef.current = setTimeout(() => {
-            setHighlightTarget(null);
-        }, 1200);
     }
 
     useEffect(() => {
@@ -194,44 +177,36 @@ export default function TrainerClient({ ownerKey }: Props) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    useEffect(() => {
-        if (!openLearn) return;
-
-        let isActive = true;
+    const refreshSetupCounts = useCallback(async () => {
         setSetupCountsLoading(true);
 
-        (async () => {
-            try {
-                const res = await fetch(`/api/learn/setup-counts?ownerKey=${ownerKey}`);
-                const json = await res.json();
-                if (!res.ok) {
-                    throw new Error(json.error ?? "Setup counts failed");
-                }
-
-                if (!isActive) return;
-                setSetupCounts({
-                    todayDue: json.todayDue ?? 0,
-                    totalCards: json.totalCards ?? 0,
-                    lastMissedCount: json.lastMissedCount ?? 0,
-                });
-            } catch {
-                if (!isActive) return;
-                setSetupCounts({
-                    todayDue: 0,
-                    totalCards: 0,
-                    lastMissedCount: 0,
-                });
-            } finally {
-                if (isActive) {
-                    setSetupCountsLoading(false);
-                }
+        try {
+            const res = await fetch(`/api/learn/setup-counts?ownerKey=${ownerKey}`);
+            const json = await res.json();
+            if (!res.ok) {
+                throw new Error(json.error ?? "Setup counts failed");
             }
-        })();
 
-        return () => {
-            isActive = false;
-        };
-    }, [openLearn, ownerKey]);
+            setSetupCounts({
+                todayDue: json.todayDue ?? 0,
+                totalCards: json.totalCards ?? 0,
+                lastMissedCount: json.lastMissedCount ?? 0,
+            });
+        } catch {
+            setSetupCounts({
+                todayDue: 0,
+                totalCards: 0,
+                lastMissedCount: 0,
+            });
+        } finally {
+            setSetupCountsLoading(false);
+        }
+    }, [ownerKey]);
+
+    useEffect(() => {
+        if (!openLearn) return;
+        void refreshSetupCounts();
+    }, [openLearn, refreshSetupCounts]);
 
     useEffect(() => {
         if (!drillMenuOpen) return;
@@ -919,6 +894,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         setCurrentIndex(0);
         setReveal(false);
 
+        setSetupCounts((prev) => ({ ...prev, todayDue: items.length }));
+        await refreshSetupCounts();
+
         setStatus(`Fällig heute: ${items.length}`);
         return items;
     }
@@ -954,6 +932,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         setCurrentIndex(0);
         setReveal(false);
 
+        setSetupCounts((prev) => ({ ...prev, totalCards: items.length }));
+        await refreshSetupCounts();
+
         setStatus(`Alle Karten: ${items.length}`);
     }
 
@@ -984,6 +965,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         }));
 
         setSessionTotal(items.length);
+        setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
+        await refreshSetupCounts();
 
         if (items.length === 0) {
             setTodayItems([]);
@@ -1090,7 +1073,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     }
 
     async function updateLastMissed(action: "add" | "remove", cardId: string) {
-        if (!cardId) return;
+        if (!cardId) return false;
         try {
             const res = await fetch("/api/learn/last-missed", {
                 method: "POST",
@@ -1103,12 +1086,15 @@ export default function TrainerClient({ ownerKey }: Props) {
                 if (process.env.NODE_ENV === "development") {
                     setStatus(json?.error ?? "Last-Missed Update fehlgeschlagen.");
                 }
+                return false;
             }
+            return true;
         } catch (e) {
             console.error("Failed to update last missed", e);
             if (process.env.NODE_ENV === "development") {
                 setStatus("Last-Missed Update fehlgeschlagen.");
             }
+            return false;
         }
     }
 
@@ -1159,7 +1145,14 @@ export default function TrainerClient({ ownerKey }: Props) {
             if (drillSource === "LAST_MISSED" && correct) {
                 const cardId = resolveCardId(item);
                 if (cardId) {
-                    await updateLastMissed("remove", cardId);
+                    const removed = await updateLastMissed("remove", cardId);
+                    if (removed) {
+                        setSetupCounts((prev) => ({
+                            ...prev,
+                            lastMissedCount: Math.max(0, prev.lastMissedCount - 1),
+                        }));
+                        void refreshSetupCounts();
+                    }
                 }
             }
 
@@ -1170,6 +1163,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                     correctCount: nextCorrect,
                     wrongCardIds: Array.from(nextWrongIds),
                 });
+                await refreshSetupCounts();
                 // Session beendet → Summary anzeigen
                 setReveal(false);
                 setTodayItems([]);
@@ -1211,6 +1205,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 wrongCardIds: Array.from(nextWrongIds),
             });
             await loadLeitnerStats();
+            await refreshSetupCounts();
             setReveal(false);
             setTodayItems([]);      // triggert "Erledigt"-UI
             setLearnDone(true);     // zeigt "Heute erledigt"
@@ -1408,6 +1403,18 @@ export default function TrainerClient({ ownerKey }: Props) {
         return { total, todayCount, tomorrowCount, laterCount, nextText };
     })();
 
+    const missingLearnMode = learnMode === null;
+    const missingDirection = directionMode === null;
+    const missingDrillSource = learnMode === "DRILL" && drillSource === null;
+    const startDisabled = missingLearnMode || missingDirection || missingDrillSource;
+    const startHint = missingLearnMode
+        ? "1) Lernmethode wählen"
+        : missingDrillSource
+            ? "2) Quelle wählen (Alle Karten / Zuletzt nicht gewusst)"
+            : missingDirection
+                ? "2) Abfragerichtung wählen"
+                : null;
+
     return (
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
@@ -1589,7 +1596,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                             <div
                                 ref={learnModeRef}
-                                className={`mt-4 rounded-2xl ${highlightTarget === "LEARNMODE" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                                className={`mt-4 rounded-2xl ${missingLearnMode && startDisabled ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
                             >
                                 <div className="text-sm font-medium">Lernmethode</div>
                                 <div className="mt-2 grid grid-cols-1 gap-3">
@@ -1628,6 +1635,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         onClick={() => {
                                             setLearnMode("DRILL");
                                             setDrillMenuOpen(false);
+                                            if (!drillSource) {
+                                                setTimeout(() => {
+                                                    drillSourceRef.current?.scrollIntoView({
+                                                        behavior: "smooth",
+                                                        block: "center",
+                                                    });
+                                                }, 0);
+                                            }
                                         }}
                                         className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${learnMode === "DRILL"
                                             ? "border-black bg-gray-50"
@@ -1658,7 +1673,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             {learnMode === "DRILL" ? (
                                 <div
                                     ref={drillSourceRef}
-                                    className={`mt-4 rounded-2xl ${highlightTarget === "DRILLSOURCE" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                                    className={`mt-4 rounded-2xl ${missingDrillSource && startDisabled ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
                                 >
                                     <div className="text-sm font-medium">Was willst du trainieren?</div>
                                     <div className="mt-2" ref={drillMenuRef}>
@@ -1729,7 +1744,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                             <div
                                 ref={directionRef}
-                                className={`mt-4 rounded-2xl ${highlightTarget === "DIRECTION" ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
+                                className={`mt-4 rounded-2xl ${missingDirection && startDisabled ? "ring-2 ring-red-400 bg-red-50/40 animate-pulse" : ""}`}
                             >
                                 <div className="text-sm font-medium">Abfragerichtung</div>
                                 <div className="mt-2 grid grid-cols-1 gap-3">
@@ -1790,24 +1805,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
 
                             <button
-                                className={`mt-4 w-full rounded-xl p-3 text-white ${!learnMode || !directionMode || (learnMode === "DRILL" && !drillSource) ? "bg-gray-400" : "bg-black"
+                                className={`mt-4 w-full rounded-xl p-3 text-white ${startDisabled ? "bg-gray-400" : "bg-black"
                                     }`}
                                 type="button"
                                 onClick={async () => {
-                                    setStartHint(null);
 
                                     if (!learnMode) {
-                                        triggerSetupHighlight("LEARNMODE", "Wähle zuerst die Lernmethode.");
+                                        triggerSetupHighlight("LEARNMODE");
                                         return;
                                     }
 
                                     if (!directionMode) {
-                                        triggerSetupHighlight("DIRECTION", "Wähle noch die Abfragerichtung.");
+                                        triggerSetupHighlight("DIRECTION");
                                         return;
                                     }
 
                                     if (learnMode === "DRILL" && !drillSource) {
-                                        triggerSetupHighlight("DRILLSOURCE", "Wähle noch, was du trainieren willst.");
+                                        triggerSetupHighlight("DRILLSOURCE");
                                         return;
                                     }
 
@@ -2149,8 +2163,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {/* === LERNKARTE === */}
                     {learnStarted && todayItems.length > 0 && (() => {
                         const answeredCount = Math.max(0, currentIndex); // bereits bewertete Karten
-                        const safePct =
-                            answeredCount === 0 ? 0 : Math.round((sessionCorrect / answeredCount) * 100);
+                        const safeAnswered = Math.max(0, answeredCount);
+                        const safeCorrect = Math.min(sessionCorrect, safeAnswered);
+                        const computedPct =
+                            safeAnswered === 0 ? 0 : Math.round((safeCorrect / safeAnswered) * 100);
+                        const safePct = Math.max(0, Math.min(100, computedPct));
 
                         return (
                             <>
