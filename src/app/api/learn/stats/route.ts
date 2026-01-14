@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-const LEVEL_DAYS = [0, 1, 3, 7, 14, 30, 60];
+const LEITNER_INTERVAL_DAYS = [1, 2, 6, 14, 30, 60];
 
 function labelForLevel(level: number) {
-  const days = LEVEL_DAYS[level] ?? null;
+  const days = LEITNER_INTERVAL_DAYS[level] ?? null;
   if (days === null) return `Level ${level}`;
-  if (days === 0) return "Neu (0 Tage)";
   if (days === 1) return "Morgen (1 Tag)";
   return `In ${days} Tagen`;
 }

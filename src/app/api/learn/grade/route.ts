@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-const intervals = [1, 3, 7, 14, 30, 60]; // Tage für Level 0..5
+const LEITNER_INTERVAL_DAYS = [1, 2, 6, 14, 30, 60];
+const MAX_LEVEL = LEITNER_INTERVAL_DAYS.length - 1;
 
 function toYmd(d: Date) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
-function addDaysSafe(base: Date, days: number) {
+function addDaysYmd(base: Date, days: number) {
   const safeDays = Number.isFinite(days) ? days : 1;
 
-  const safeBase = base instanceof Date && !Number.isNaN(base.getTime())
-    ? base
-    : new Date();
-
+  const safeBase =
+    base instanceof Date && !Number.isNaN(base.getTime()) ? base : new Date();
   const d = new Date(safeBase);
   d.setDate(d.getDate() + safeDays);
-
-  if (Number.isNaN(d.getTime())) {
-    return toYmd(new Date());
-  }
 
   return toYmd(d);
 }
@@ -50,22 +45,22 @@ export async function POST(req: Request) {
     );
   }
 
-  const lvlRaw = Number.isFinite(body.currentLevel) ? (body.currentLevel as number) : 0;
-  const currentLevel = Math.min(Math.max(lvlRaw, 0), 5);
+  const lvlRaw = Number.isFinite(body.currentLevel)
+    ? (body.currentLevel as number)
+    : 0;
+  const currentLevel = Math.min(Math.max(lvlRaw, 0), MAX_LEVEL);
 
   const newLevel = body.correct
-    ? Math.min(currentLevel + 1, 5)
+    ? Math.min(currentLevel + 1, MAX_LEVEL)
     : 0;
 
-  const nextIntervalDays =
-    Number.isFinite(intervals[newLevel]) ? intervals[newLevel] : 1;
+  const nextIntervalDays = LEITNER_INTERVAL_DAYS[newLevel] ?? 1;
 
-  const now = new Date();
-  const dueDate = body.correct
-    ? addDaysSafe(now, nextIntervalDays)
-    : addDaysSafe(now, 1);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueDate = addDaysYmd(today, nextIntervalDays);
 
-  const nowIso = now.toISOString();
+  const nowIso = new Date().toISOString();
 
   const { error } = await supabaseServer
     .from("card_progress")
