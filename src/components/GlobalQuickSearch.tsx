@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
+import { createPortal } from "react-dom";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -34,6 +35,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     const [results, setResults] = useState<CardResult[]>([]);
     const [selected, setSelected] = useState<CardResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [mounted, setMounted] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [editingCardId, setEditingCardId] = useState<string | null>(null);
@@ -84,6 +86,10 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     }, [isOpen]);
 
     useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    useEffect(() => {
         if (!isOpen) return;
 
         const trimmed = query.trim();
@@ -129,9 +135,12 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     }, [query, ownerKey, isOpen]);
 
     const handleEdit = useCallback((card: CardResult) => {
+        setIsOpen(false);
+
         setEditingCardId(String(card.id));
         setEditorOpen(true);
     }, []);
+
 
     const handleSaved = useCallback((updated: CardEditorCard) => {
         setResults((prev) =>
@@ -165,12 +174,16 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
         setSelected((prev) => (prev && String(prev.id) === String(id) ? null : prev));
     }, []);
 
-    return (
+    if (!mounted || !document?.body) {
+        return null;
+    }
+
+    return createPortal(
         <>
             <button
                 type="button"
                 aria-label="Quick Search"
-                className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-lg transition hover:scale-105 hover:bg-gray-900 active:scale-95"
+                className="fixed bottom-6 right-6 z-[2147483647] flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-lg transition hover:scale-105 hover:bg-gray-900 active:scale-95"
                 onClick={() => setIsOpen(true)}
             >
                 <span className="text-xl">🔎</span>
@@ -178,7 +191,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
 
             {isOpen ? (
                 <div
-                    className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-black/40 p-4 sm:items-center"
                     onClick={closeOverlay}
                 >
                     <div
@@ -188,9 +201,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                         <div className="mb-3 flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg font-semibold">Quick Search</h2>
-                                <p className="text-xs text-gray-500">
-                                    Finde Karten ohne Navigation.
-                                </p>
+                                <p className="text-xs text-gray-500">Finde Karten ohne Navigation.</p>
                             </div>
                             <button
                                 type="button"
@@ -217,13 +228,9 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                 ) : error ? (
                                     <div className="p-4 text-sm text-red-500">{error}</div>
                                 ) : results.length === 0 && query.trim() ? (
-                                    <div className="p-4 text-sm text-gray-500">
-                                        Keine Ergebnisse gefunden.
-                                    </div>
+                                    <div className="p-4 text-sm text-gray-500">Keine Ergebnisse gefunden.</div>
                                 ) : results.length === 0 ? (
-                                    <div className="p-4 text-sm text-gray-500">
-                                        Tippe, um Karten zu finden.
-                                    </div>
+                                    <div className="p-4 text-sm text-gray-500">Tippe, um Karten zu finden.</div>
                                 ) : (
                                     <div className="divide-y divide-gray-100">
                                         {results.map((card) => (
@@ -245,12 +252,8 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                                     </div>
                                                 )}
                                                 <div>
-                                                    <div className="font-medium text-gray-900">
-                                                        {card.german_text}
-                                                    </div>
-                                                    <div className="text-gray-500">
-                                                        {card.swahili_text}
-                                                    </div>
+                                                    <div className="font-medium text-gray-900">{card.german_text}</div>
+                                                    <div className="text-gray-500">{card.swahili_text}</div>
                                                 </div>
                                             </button>
                                         ))}
@@ -262,19 +265,16 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                 <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                                     <div className="mb-3 flex items-start justify-between">
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-900">
-                                                {selected.german_text}
-                                            </p>
-                                            <p className="text-sm text-gray-500">
-                                                {selected.swahili_text}
-                                            </p>
+                                            <p className="text-sm font-semibold text-gray-900">{selected.german_text}</p>
+                                            <p className="text-sm text-gray-500">{selected.swahili_text}</p>
                                         </div>
+
                                         <button
                                             type="button"
-                                            className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-500"
+                                            className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:bg-gray-100"
                                             onClick={() => setSelected(null)}
                                         >
-                                            Zurück
+                                            ✕
                                         </button>
                                     </div>
 
@@ -282,16 +282,12 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                         <img
                                             src={getImageUrl(selected.image_path)}
                                             alt="Karte"
-                                            className="mb-3 h-40 w-full rounded-xl object-cover"
+                                            className="mb-3 w-full max-h-56 rounded-xl object-contain bg-white"
                                         />
                                     ) : null}
 
                                     {selected.audio_path ? (
-                                        <audio
-                                            controls
-                                            src={getAudioUrl(selected.audio_path)}
-                                            className="w-full"
-                                        />
+                                        <audio controls src={getAudioUrl(selected.audio_path)} className="w-full" />
                                     ) : (
                                         <p className="text-xs text-gray-400">Kein Audio verfügbar.</p>
                                     )}
@@ -299,7 +295,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                     <div className="mt-4 flex justify-end">
                                         <button
                                             type="button"
-                                            className="rounded-full border border-gray-200 px-4 py-2 text-xs text-gray-500"
+                                            className="rounded-full border border-gray-200 px-4 py-2 text-xs text-gray-500 transition hover:bg-gray-100"
                                             onClick={() => handleEdit(selected)}
                                         >
                                             Bearbeiten
@@ -312,28 +308,33 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                 </div>
             ) : null}
 
-            <CardEditorSheet
-                ownerKey={ownerKey}
-                open={editorOpen}
-                cardId={editingCardId}
-                initialCard={
-                    selected
-                        ? {
-                            id: String(selected.id),
-                            german_text: selected.german_text,
-                            swahili_text: selected.swahili_text,
-                            image_path: selected.image_path,
-                            audio_path: selected.audio_path,
-                        }
-                        : null
-                }
-                onClose={() => {
-                    setEditorOpen(false);
-                    setEditingCardId(null);
-                }}
-                onSaved={handleSaved}
-                onDeleted={handleDeleted}
-            />
-        </>
+            {editorOpen ? (
+                <CardEditorSheet
+                    ownerKey={ownerKey}
+                    open={editorOpen}
+                    cardId={editingCardId}
+                    initialCard={
+                        selected
+                            ? {
+                                id: String(selected.id),
+                                german_text: selected.german_text,
+                                swahili_text: selected.swahili_text,
+                                image_path: selected.image_path,
+                                audio_path: selected.audio_path,
+                            }
+                            : null
+                    }
+                    onClose={() => {
+                        setEditorOpen(false);
+                        setEditingCardId(null);
+                        setIsOpen(true);
+                    }}
+
+                    onSaved={handleSaved}
+                    onDeleted={handleDeleted}
+                />
+            ) : null}
+        </>,
+        document.body
     );
 }
