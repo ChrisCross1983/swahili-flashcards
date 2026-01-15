@@ -68,6 +68,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
     const q = searchParams.get("q");
+    const id = searchParams.get("id");
 
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
@@ -78,15 +79,21 @@ export async function GET(req: Request) {
         .select("id, german_text, swahili_text, image_path, audio_path, created_at")
         .eq("owner_key", ownerKey);
 
+    if (id) {
+        query = query.eq("id", id);
+    }
+
     if (q && q.trim().length > 0) {
         query = query.or(
             `german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`
         );
     }
 
-    const { data, error } = await query.order("created_at", {
-        ascending: false,
-    });
+    const { data, error } = id
+        ? await query
+        : await query.order("created_at", {
+            ascending: false,
+        });
 
     if (error) {
         console.error(error);
@@ -94,6 +101,10 @@ export async function GET(req: Request) {
             { error: "Karten konnten nicht geladen werden." },
             { status: 500 }
         );
+    }
+
+    if (id) {
+        return NextResponse.json({ card: data?.[0] ?? null });
     }
 
     return NextResponse.json({ cards: data ?? [] });
@@ -175,4 +186,3 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({ card: data });
 }
-

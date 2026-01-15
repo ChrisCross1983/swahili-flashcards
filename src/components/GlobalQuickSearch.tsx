@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -35,6 +36,8 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const [editingCardId, setEditingCardId] = useState<string | null>(null);
+    const [editorOpen, setEditorOpen] = useState(false);
 
     const closeOverlay = useCallback(() => {
         setIsOpen(false);
@@ -50,13 +53,18 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                closeOverlay();
+                if (editorOpen) {
+                    setEditorOpen(false);
+                    setEditingCardId(null);
+                } else {
+                    closeOverlay();
+                }
             }
         };
 
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, closeOverlay]);
+    }, [isOpen, closeOverlay, editorOpen]);
 
     useEffect(() => {
         const handleHotkey = (event: KeyboardEvent) => {
@@ -119,6 +127,43 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
             window.clearTimeout(timeout);
         };
     }, [query, ownerKey, isOpen]);
+
+    const handleEdit = useCallback((card: CardResult) => {
+        setEditingCardId(String(card.id));
+        setEditorOpen(true);
+    }, []);
+
+    const handleSaved = useCallback((updated: CardEditorCard) => {
+        setResults((prev) =>
+            prev.map((card) =>
+                String(card.id) === String(updated.id)
+                    ? {
+                        ...card,
+                        german_text: updated.german_text,
+                        swahili_text: updated.swahili_text,
+                        image_path: updated.image_path,
+                        audio_path: updated.audio_path,
+                    }
+                    : card
+            )
+        );
+        setSelected((prev) =>
+            prev && String(prev.id) === String(updated.id)
+                ? {
+                    ...prev,
+                    german_text: updated.german_text,
+                    swahili_text: updated.swahili_text,
+                    image_path: updated.image_path,
+                    audio_path: updated.audio_path,
+                }
+                : prev
+        );
+    }, []);
+
+    const handleDeleted = useCallback((id: string) => {
+        setResults((prev) => prev.filter((card) => String(card.id) !== String(id)));
+        setSelected((prev) => (prev && String(prev.id) === String(id) ? null : prev));
+    }, []);
 
     return (
         <>
@@ -255,9 +300,9 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                         <button
                                             type="button"
                                             className="rounded-full border border-gray-200 px-4 py-2 text-xs text-gray-500"
-                                            onClick={closeOverlay}
+                                            onClick={() => handleEdit(selected)}
                                         >
-                                            Bearbeiten (später)
+                                            Bearbeiten
                                         </button>
                                     </div>
                                 </div>
@@ -266,6 +311,29 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                     </div>
                 </div>
             ) : null}
+
+            <CardEditorSheet
+                ownerKey={ownerKey}
+                open={editorOpen}
+                cardId={editingCardId}
+                initialCard={
+                    selected
+                        ? {
+                            id: String(selected.id),
+                            german_text: selected.german_text,
+                            swahili_text: selected.swahili_text,
+                            image_path: selected.image_path,
+                            audio_path: selected.audio_path,
+                        }
+                        : null
+                }
+                onClose={() => {
+                    setEditorOpen(false);
+                    setEditingCardId(null);
+                }}
+                onSaved={handleSaved}
+                onDeleted={handleDeleted}
+            />
         </>
     );
 }
