@@ -183,10 +183,10 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
             <button
                 type="button"
                 aria-label="Quick Search"
-                className="fixed bottom-6 right-6 z-[2147483647] flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-lg transition hover:scale-105 hover:bg-gray-900 active:scale-95"
+                className="fixed bottom-6 right-6 z-[2147483647] flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-white shadow-lg transition hover:scale-105 hover:bg-amber-600 active:scale-95"
                 onClick={() => setIsOpen(true)}
             >
-                <span className="text-xl">🔎</span>
+                <span className="text-xl">🦁</span>
             </button>
 
             {isOpen ? (
@@ -269,13 +269,23 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                             <p className="text-sm text-gray-500">{selected.swahili_text}</p>
                                         </div>
 
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:bg-gray-100"
-                                            onClick={() => setSelected(null)}
-                                        >
-                                            ✕
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
+                                                onClick={() => handleEdit(selected)}
+                                            >
+                                                Bearbeiten
+                                            </button>
+                                            <button
+                                                type="button"
+                                                aria-label="Vorschau schließen"
+                                                className="rounded-full border border-gray-200 px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100"
+                                                onClick={() => setSelected(null)}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {selected.image_path ? (
@@ -292,15 +302,6 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                                         <p className="text-xs text-gray-400">Kein Audio verfügbar.</p>
                                     )}
 
-                                    <div className="mt-4 flex justify-end">
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-gray-200 px-4 py-2 text-xs text-gray-500 transition hover:bg-gray-100"
-                                            onClick={() => handleEdit(selected)}
-                                        >
-                                            Bearbeiten
-                                        </button>
-                                    </div>
                                 </div>
                             ) : null}
                         </div>
