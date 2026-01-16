@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-const LEITNER_INTERVAL_DAYS = [1, 2, 6, 14, 30, 60];
-const MAX_LEVEL = LEITNER_INTERVAL_DAYS.length - 1;
+import {
+  getIntervalDays,
+  getNextLevelOnWrong,
+  MAX_LEVEL,
+} from "@/lib/leitner";
 
 function toYmd(d: Date) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -52,9 +55,9 @@ export async function POST(req: Request) {
 
   const newLevel = body.correct
     ? Math.min(currentLevel + 1, MAX_LEVEL)
-    : 0;
+    : getNextLevelOnWrong(currentLevel);
 
-  const nextIntervalDays = LEITNER_INTERVAL_DAYS[newLevel] ?? 1;
+  const nextIntervalDays = getIntervalDays(newLevel);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);

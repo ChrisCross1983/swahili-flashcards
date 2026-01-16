@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-
-const LEITNER_INTERVAL_DAYS = [1, 2, 6, 14, 30, 60];
+import { getIntervalDays } from "@/lib/leitner";
 
 function labelForLevel(level: number) {
-  const days = LEITNER_INTERVAL_DAYS[level] ?? null;
-  if (days === null) return `Level ${level}`;
+  const days = getIntervalDays(level);
   if (days === 1) return "Morgen (1 Tag)";
   return `In ${days} Tagen`;
 }

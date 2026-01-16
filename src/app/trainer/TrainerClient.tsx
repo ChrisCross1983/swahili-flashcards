@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import {
+    formatDays,
+    getIntervalDays,
+    getNextLevelOnWrong,
+    MAX_LEVEL,
+} from "@/lib/leitner";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -62,6 +68,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [showSummary, setShowSummary] = useState(false);
     const [endedEarly, setEndedEarly] = useState(false);
     const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
+    const [leitnerInfoOpen, setLeitnerInfoOpen] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
     const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
@@ -111,6 +118,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const directionRef = useRef<HTMLDivElement | null>(null);
     const drillSourceRef = useRef<HTMLDivElement | null>(null);
     const drillMenuRef = useRef<HTMLDivElement | null>(null);
+    const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -1371,6 +1379,55 @@ export default function TrainerClient({ ownerKey }: Props) {
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
+    const currentLevel = Number.isFinite(currentItem?.level)
+        ? Number(currentItem?.level)
+        : 0;
+
+    const currentDueDate =
+        currentItem?.dueDate ?? currentItem?.due_date ?? null;
+
+    const nextOnCorrectLevel = Math.min(currentLevel + 1, MAX_LEVEL);
+    const nextOnCorrectDays = getIntervalDays(nextOnCorrectLevel);
+    const nextOnWrongLevel = getNextLevelOnWrong(currentLevel);
+    const nextOnWrongDays = getIntervalDays(nextOnWrongLevel);
+
+    const footerNextDays = nextOnCorrectDays;
+
+    const dueStatusText = (() => {
+        if (!currentDueDate) return null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const due = new Date(`${currentDueDate}T00:00:00`);
+        if (Number.isNaN(due.getTime())) return null;
+        const diffMs = due.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) {
+            return `fällig seit ${Math.abs(diffDays)} Tagen`;
+        }
+        if (diffDays === 0) {
+            return "heute fällig";
+        }
+        return `fällig ${formatDays(diffDays)}`;
+    })();
+
+    useEffect(() => {
+        setLeitnerInfoOpen(false);
+    }, [currentIndex]);
+
+    useEffect(() => {
+        if (!leitnerInfoOpen) return;
+        function handleClick(event: MouseEvent) {
+            const target = event.target as Node;
+            if (leitnerInfoRef.current && !leitnerInfoRef.current.contains(target)) {
+                setLeitnerInfoOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClick);
+        return () => {
+            document.removeEventListener("mousedown", handleClick);
+        };
+    }, [leitnerInfoOpen]);
+
     const isLeitnerSelected = learnMode === "LEITNER_TODAY";
     const isDrillSelected = learnMode === "DRILL";
 
@@ -2416,6 +2473,66 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 </div>
                                             </>
                                         )}
+
+                                        {isLeitnerSelected ? (
+                                            <div className="mt-4 flex items-start justify-between gap-2 text-xs text-gray-500">
+                                                <span>
+                                                    Leitner · Stufe {currentLevel} · nächste Wiederholung{" "}
+                                                    {formatDays(footerNextDays)}
+                                                </span>
+
+                                                <div className="relative" ref={leitnerInfoRef}>
+                                                    <button
+                                                        type="button"
+                                                        className="flex h-5 w-5 items-center justify-center rounded-full border text-[10px] text-gray-600 hover:bg-gray-50"
+                                                        aria-label="Warum sehe ich diese Karte?"
+                                                        onClick={() => setLeitnerInfoOpen((open) => !open)}
+                                                    >
+                                                        ?
+                                                    </button>
+
+                                                    {leitnerInfoOpen ? (
+                                                        <div className="absolute right-0 z-20 mt-2 w-72 rounded-xl border bg-white p-3 text-xs text-gray-700 shadow-lg">
+                                                            <div className="flex items-start justify-between gap-2">
+                                                                <div className="font-semibold text-gray-900">
+                                                                    Warum sehe ich diese Karte?
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    className="text-gray-400 hover:text-gray-600"
+                                                                    onClick={() => setLeitnerInfoOpen(false)}
+                                                                    aria-label="Popover schließen"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+
+                                                            <div className="mt-2 space-y-2">
+                                                                <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
+                                                                {currentDueDate ? (
+                                                                    <div>
+                                                                        Fällig am {currentDueDate}
+                                                                        {dueStatusText ? ` · ${dueStatusText}` : ""}
+                                                                    </div>
+                                                                ) : null}
+                                                                <div>
+                                                                    Wenn du sie{" "}
+                                                                    <span className="font-semibold">gewusst</span> hast:
+                                                                    Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
+                                                                    {formatDays(nextOnCorrectDays)}
+                                                                </div>
+                                                                <div>
+                                                                    Wenn du sie{" "}
+                                                                    <span className="font-semibold">nicht gewusst</span> hast:
+                                                                    Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
+                                                                    {formatDays(nextOnWrongDays)}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </>
                             );
