@@ -22,7 +22,6 @@ export default function HomeClient({ ownerKey }: Props) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [reveal, setReveal] = useState(false);
     const [direction, setDirection] = useState<"DE_TO_SW" | "SW_TO_DE">("DE_TO_SW");
-    const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [leitnerStats, setLeitnerStats] = useState<null | {
@@ -338,20 +337,6 @@ export default function HomeClient({ ownerKey }: Props) {
         if (!res.ok) {
             setStatus(json.error ?? "Aktion fehlgeschlagen.");
             return;
-        }
-
-        // ---- Requeue-Logik (nur wenn falsch) ----
-        if (!correct) {
-            const id = item.cardId;
-            const count = (wrongCounts[id] ?? 0) + 1;
-
-            setWrongCounts((prev) => ({ ...prev, [id]: count }));
-
-            // max 2 Wiederholungen pro Session (sonst kann man hängen bleiben)
-            if (count <= 2) {
-                // ans Ende hängen
-                setTodayItems((prev) => [...prev, item]);
-            }
         }
 
         // nächste Karte

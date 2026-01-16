@@ -1393,6 +1393,17 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     const footerNextDays = nextOnCorrectDays;
 
+    const formattedDueDate = (() => {
+        if (!currentDueDate) return null;
+        const due = new Date(`${currentDueDate}T00:00:00`);
+        if (Number.isNaN(due.getTime())) return currentDueDate;
+        return new Intl.DateTimeFormat("de-DE", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+        }).format(due);
+    })();
+
     const dueStatusText = (() => {
         if (!currentDueDate) return null;
         const today = new Date();
@@ -1402,7 +1413,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         const diffMs = due.getTime() - today.getTime();
         const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
         if (diffDays < 0) {
-            return `fällig seit ${Math.abs(diffDays)} Tagen`;
+            const pastDays = Math.abs(diffDays);
+            return pastDays === 1 ? "seit 1 Tag fällig" : `seit ${pastDays} Tagen fällig`;
         }
         if (diffDays === 0) {
             return "heute fällig";
@@ -1670,7 +1682,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 <div
                                     className={
                                         learnModeHighlight
-                                            ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40 animate-pulse"
+                                            ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40"
                                             : ""
                                     }
                                 >
@@ -1757,7 +1769,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     <div
                                         className={
                                             drillSourceHighlight
-                                                ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40 animate-pulse"
+                                                ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40"
                                                 : ""
                                         }
                                     >
@@ -1838,7 +1850,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 <div
                                     className={
                                         directionHighlight
-                                            ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40 animate-pulse"
+                                            ? "rounded-3xl p-2 ring-2 ring-red-400 bg-red-50/40"
                                             : ""
                                     }
                                 >
@@ -2484,7 +2496,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 <div className="relative" ref={leitnerInfoRef}>
                                                     <button
                                                         type="button"
-                                                        className="flex h-5 w-5 items-center justify-center rounded-full border text-[10px] text-gray-600 hover:bg-gray-50"
+                                                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-gray-100 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
                                                         aria-label="Warum sehe ich diese Karte?"
                                                         onClick={() => setLeitnerInfoOpen((open) => !open)}
                                                     >
@@ -2492,47 +2504,52 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     </button>
 
                                                     {leitnerInfoOpen ? (
-                                                        <div className="absolute right-0 z-20 mt-2 w-72 rounded-xl border bg-white p-3 text-xs text-gray-700 shadow-lg">
-                                                            <div className="flex items-start justify-between gap-2">
-                                                                <div className="font-semibold text-gray-900">
-                                                                    Warum sehe ich diese Karte?
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    className="text-gray-400 hover:text-gray-600"
-                                                                    onClick={() => setLeitnerInfoOpen(false)}
-                                                                    aria-label="Popover schließen"
-                                                                >
-                                                                    ✕
-                                                                </button>
-                                                            </div>
-
-                                                            <div className="mt-2 space-y-2">
-                                                                <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
-                                                                {currentDueDate ? (
-                                                                    <div>
-                                                                        Fällig am {currentDueDate}
-                                                                        {dueStatusText ? ` · ${dueStatusText}` : ""}
+                                                        <div className="fixed inset-0 z-30 flex items-end justify-center px-4 pb-4 sm:absolute sm:inset-auto sm:top-full sm:left-1/2 sm:mt-2 sm:-translate-x-1/2 sm:items-start sm:justify-center sm:px-0 sm:pb-0">
+                                                            <button
+                                                                type="button"
+                                                                className="absolute inset-0 bg-black/30 sm:hidden"
+                                                                onClick={() => setLeitnerInfoOpen(false)}
+                                                                aria-label="Popover schließen"
+                                                            />
+                                                            <div className="relative w-full max-w-[420px] rounded-2xl border bg-white p-4 text-xs leading-5 text-gray-700 shadow-lg sm:min-w-[320px] sm:max-w-[420px] sm:w-auto">
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div className="font-semibold text-gray-900">
+                                                                        Warum sehe ich diese Karte?
                                                                     </div>
-                                                                ) : null}
-                                                                <div>
-                                                                    Wenn du sie{" "}
-                                                                    <span className="font-semibold">gewusst</span> hast:
-                                                                    Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
-                                                                    {formatDays(nextOnCorrectDays)}
+                                                                    <button
+                                                                        type="button"
+                                                                        className="text-gray-400 hover:text-gray-600"
+                                                                        onClick={() => setLeitnerInfoOpen(false)}
+                                                                        aria-label="Popover schließen"
+                                                                    >
+                                                                        ✕
+                                                                    </button>
                                                                 </div>
-                                                                <div>
-                                                                    Wenn du sie{" "}
-                                                                    <span className="font-semibold">nicht gewusst</span> hast:
-                                                                    Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
-                                                                    {formatDays(nextOnWrongDays)}
+
+                                                                <div className="mt-3 space-y-2">
+                                                                    <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
+                                                                    {formattedDueDate ? (
+                                                                        <div>
+                                                                            Fällig am: {formattedDueDate}
+                                                                            {dueStatusText ? ` (${dueStatusText})` : ""}
+                                                                        </div>
+                                                                    ) : null}
+                                                                    <div>
+                                                                        Wenn gewusst: Stufe → {nextOnCorrectLevel},
+                                                                        nächste Wiederholung {formatDays(nextOnCorrectDays)}
+                                                                    </div>
+                                                                    <div>
+                                                                        Wenn nicht gewusst: Stufe → {nextOnWrongLevel},
+                                                                        nächste Wiederholung {formatDays(nextOnWrongDays)}
+                                                                    </div>                
                                                                 </div>
+
                                                             </div>
                                                         </div>
                                                     ) : null}
                                                 </div>
                                             </div>
-                                        ) : null}
+                                        ) : null}        
                                     </div>
                                 </>
                             );
