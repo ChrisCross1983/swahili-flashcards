@@ -64,6 +64,8 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
     const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, any>>({});
+    const [answeredCardIds, setAnsweredCardIds] = useState<Set<string>>(new Set());
+    const [incorrectThisSession, setIncorrectThisSession] = useState<string[]>([]);
     const [sessionTotal, setSessionTotal] = useState(0);
     const [showSummary, setShowSummary] = useState(false);
     const [endedEarly, setEndedEarly] = useState(false);
@@ -1016,6 +1018,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSessionTotal(0);
         setSessionWrongIds(new Set());
         setSessionWrongItems({});
+        setAnsweredCardIds(new Set());
+        setIncorrectThisSession([]);
         setShowSummary(false);
         setLearnDone(false);
         setLastMissedEmpty(false);
@@ -1058,7 +1062,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             stopRecording();
         }
 
-        const answeredCount = Math.max(0, currentIndex);
+        const answeredCount = answeredCardIds.size;
         const correctCount = sessionCorrect;
         const wrongIds = Array.from(sessionWrongIds);
 
@@ -1084,6 +1088,14 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     function resolveCardId(item: any) {
         return String(item?.cardId ?? item?.card_id ?? item?.id ?? "").trim();
+    }
+
+    function findNextUnansweredIndex(items: any[], answered: Set<string>, startIndex: number) {
+        for (let i = startIndex; i < items.length; i += 1) {
+            const id = resolveCardId(items[i]);
+            if (!id || !answered.has(id)) return i;
+        }
+        return -1;
     }
 
     async function updateLastMissed(action: "add" | "remove", cardId: string) {
@@ -1132,6 +1144,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         else playWrong();
 
         const cardId = resolveCardId(item);
+        const nextAnswered = new Set(answeredCardIds);
+        if (cardId) nextAnswered.add(cardId);
+        setAnsweredCardIds(nextAnswered);
 
         const nextCorrect = correct ? sessionCorrect + 1 : sessionCorrect;
 
@@ -1145,13 +1160,31 @@ export default function TrainerClient({ ownerKey }: Props) {
             return updated;
         })();
 
+        const nextIncorrect =
+            !correct && cardId
+                ? incorrectThisSession.includes(cardId)
+                    ? incorrectThisSession
+                    : [...incorrectThisSession, cardId]
+                : incorrectThisSession;
+
+
         if (!correct && cardId) {
             setSessionWrongIds(nextWrongIds);
             setSessionWrongItems((prev) => (prev[cardId] ? prev : { ...prev, [cardId]: item }));
+            setIncorrectThisSession(nextIncorrect);
             await updateLastMissed("add", cardId);
         }
 
-        const nextIndex = currentIndex + 1;
+        const nextIndex = findNextUnansweredIndex(todayItems, nextAnswered, currentIndex + 1);
+        const fallbackIndex =
+            nextIndex === -1
+                ? findNextUnansweredIndex(todayItems, nextAnswered, 0)
+                : nextIndex;
+        if (process.env.NODE_ENV === "development" && learnMode === "LEITNER_TODAY") {
+            console.debug(
+                `[dev] Leitner progress: ${nextAnswered.size}/${sessionTotal} answered, ${nextIncorrect.length} incorrect.`
+            );
+        }
 
         // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
         if (learnMode === "DRILL") {
@@ -1170,7 +1203,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 }
             }
 
-            if (nextIndex >= todayItems.length) {
+            if (fallbackIndex === -1) {
                 await persistLearnSession({
                     mode: "DRILL",
                     totalCount: sessionTotal,
@@ -1182,10 +1215,15 @@ export default function TrainerClient({ ownerKey }: Props) {
                 setReveal(false);
                 setTodayItems([]);
                 setShowSummary(true);
+                if (process.env.NODE_ENV === "development") {
+                    console.debug(
+                        `[dev] Leitner/Drill session ended after ${nextAnswered.size} answers.`
+                    );
+                }
                 return;
             }
 
-            setCurrentIndex(nextIndex);
+            setCurrentIndex(fallbackIndex);
             setReveal(false);
 
             // Richtung ggf. neu würfeln
@@ -1211,7 +1249,7 @@ export default function TrainerClient({ ownerKey }: Props) {
             console.error(e);
         }
 
-        if (nextIndex >= todayItems.length) {
+        if (fallbackIndex === -1) {
             await persistLearnSession({
                 mode: "LEITNER",
                 totalCount: sessionTotal,
@@ -1223,11 +1261,16 @@ export default function TrainerClient({ ownerKey }: Props) {
             setReveal(false);
             setTodayItems([]);      // triggert "Erledigt"-UI
             setLearnDone(true);     // zeigt "Heute erledigt"
+            if (process.env.NODE_ENV === "development") {
+                console.debug(
+                    `[dev] Leitner session ended after ${nextAnswered.size} answers.`
+                );
+            }
             return;
         }
 
         // nächste Karte
-        setCurrentIndex(nextIndex);
+        setCurrentIndex(fallbackIndex);
         setReveal(false);
 
         if (directionMode === "RANDOM") {
@@ -2279,12 +2322,13 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {/* === LERNKARTE === */}
                     {
                         learnStarted && todayItems.length > 0 && (() => {
-                            const answeredCount = Math.max(0, currentIndex); // bereits bewertete Karten
+                            const answeredCount = answeredCardIds.size; // bereits bewertete Karten
                             const safeAnswered = Math.max(0, answeredCount);
                             const safeCorrect = Math.min(sessionCorrect, safeAnswered);
                             const computedPct =
                                 safeAnswered === 0 ? 0 : Math.round((safeCorrect / safeAnswered) * 100);
                             const safePct = Math.max(0, Math.min(100, computedPct));
+                            const currentNumber = Math.min(sessionTotal, safeAnswered + 1);
 
                             return (
                                 <>
@@ -2293,8 +2337,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         {/* Row 1: Progress + % */}
                                         <div className="flex items-center justify-between">
                                             <div className="text-sm text-gray-600">
-                                                Karte <span className="font-medium text-gray-900">{currentIndex + 1}</span> von{" "}
-                                                <span className="font-medium text-gray-900">{todayItems.length}</span>
+                                                Karte <span className="font-medium text-gray-900">{currentNumber}</span> von{" "}
+                                                <span className="font-medium text-gray-900">{sessionTotal}</span>
                                             </div>
 
                                             <div className="rounded-full border px-3 py-1 text-sm text-gray-700 bg-white">
@@ -2541,7 +2585,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                                     <div>
                                                                         Wenn nicht gewusst: Stufe → {nextOnWrongLevel},
                                                                         nächste Wiederholung {formatDays(nextOnWrongDays)}
-                                                                    </div>                
+                                                                    </div>
                                                                 </div>
 
                                                             </div>
@@ -2549,7 +2593,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     ) : null}
                                                 </div>
                                             </div>
-                                        ) : null}        
+                                        ) : null}
                                     </div>
                                 </>
                             );
