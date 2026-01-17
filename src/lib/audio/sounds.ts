@@ -1,7 +1,10 @@
 let correctAudio: HTMLAudioElement | null = null;
 let wrongAudio: HTMLAudioElement | null = null;
 
+const SOUND_ENABLED = false;
+
 function safePlay(a: HTMLAudioElement) {
+    if (!SOUND_ENABLED) return;
     try {
         a.currentTime = 0;
         void a.play();
@@ -11,21 +14,13 @@ function safePlay(a: HTMLAudioElement) {
 }
 
 export function initFeedbackSounds() {
-    if (typeof window === "undefined") return;
-
-    if (!correctAudio) correctAudio = new Audio("/audio/correct.m4a");
-    if (!wrongAudio) wrongAudio = new Audio("/audio/wrong.m4a");
-
-    correctAudio.preload = "auto";
-    wrongAudio.preload = "auto";
+    // absichtlich leer
 }
 
 export function playCorrect() {
-    if (!correctAudio) correctAudio = new Audio("/audio/correct.m4a");
-    safePlay(correctAudio);
+    // noop
 }
 
 export function playWrong() {
-    if (!wrongAudio) wrongAudio = new Audio("/audio/wrong.m4a");
-    safePlay(wrongAudio);
+    // noop
 }

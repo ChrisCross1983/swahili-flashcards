@@ -2355,7 +2355,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-white">
+                                    <div className="mt-4 rounded-2xl border p-6 bg-white text-center flex flex-col items-center">
                                         <div className="text-sm font-medium">Session abgeschlossen ✅</div>
 
                                         {(() => {
@@ -2372,9 +2372,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         gewusst ({pct}%)
                                                     </div>
 
-                                                    <div className="mt-6 grid grid-cols-2 gap-4">
+                                                    <div className="mt-6 flex justify-center w-full">
                                                         <button
-                                                            className="rounded-xl bg-black text-white p-3"
+                                                            className="rounded-xl bg-black text-white px-10 py-3"
                                                             type="button"
                                                             onClick={() => {
                                                                 setLearnStarted(false);
