@@ -2563,7 +2563,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         {!reveal ? (
                                             <button
-                                                className="mt-4 w-full rounded-xl bg-black text-white p-3"
+                                                className="mt-8 w-full rounded-xl bg-black text-white p-3"
                                                 onClick={revealCard}
                                             >
                                                 Aufdecken
@@ -2616,7 +2616,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         )}
 
                                         {isLeitnerSelected ? (
-                                            <div className="mt-4 flex items-start justify-between gap-2 text-xs text-gray-500">
+                                            <div className="mt-10 flex items-start justify-between gap-2 text-xs text-gray-500">
                                                 <span>
                                                     Leitner · Stufe {currentLevel} · nächste Wiederholung{" "}
                                                     {formatDays(footerNextDays)}
@@ -2633,14 +2633,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     </button>
 
                                                     {leitnerInfoOpen ? (
-                                                        <div className="fixed inset-0 z-30 flex items-end justify-center px-4 pb-4 sm:absolute sm:inset-auto sm:top-full sm:left-1/2 sm:mt-2 sm:-translate-x-1/2 sm:items-start sm:justify-center sm:px-0 sm:pb-0">
-                                                            <button
-                                                                type="button"
-                                                                className="absolute inset-0 bg-black/30 sm:hidden"
-                                                                onClick={() => setLeitnerInfoOpen(false)}
-                                                                aria-label="Popover schließen"
-                                                            />
-                                                            <div className="relative w-full max-w-[420px] rounded-2xl border bg-white p-4 text-xs leading-5 text-gray-700 shadow-lg sm:min-w-[320px] sm:max-w-[420px] sm:w-auto">
+                                                        <div className="absolute right-0 bottom-full mb-2 z-30 w-[min(90vw,420px)]">
+                                                            <div className="relative rounded-2xl border bg-white p-4 text-xs leading-5 text-gray-700 shadow-lg">
                                                                 <div className="flex items-start justify-between gap-2">
                                                                     <div className="font-semibold text-gray-900">
                                                                         Warum sehe ich diese Karte?
@@ -2664,15 +2658,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                                         </div>
                                                                     ) : null}
                                                                     <div>
-                                                                        Wenn gewusst: Stufe → {nextOnCorrectLevel},
-                                                                        nächste Wiederholung {formatDays(nextOnCorrectDays)}
+                                                                        Wenn gewusst: Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
+                                                                        {formatDays(nextOnCorrectDays)}
                                                                     </div>
                                                                     <div>
-                                                                        Wenn nicht gewusst: Stufe → {nextOnWrongLevel},
-                                                                        nächste Wiederholung {formatDays(nextOnWrongDays)}
+                                                                        Wenn nicht gewusst: Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
+                                                                        {formatDays(nextOnWrongDays)}
                                                                     </div>
                                                                 </div>
-
                                                             </div>
                                                         </div>
                                                     ) : null}
