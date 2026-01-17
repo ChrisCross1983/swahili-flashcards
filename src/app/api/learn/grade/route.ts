@@ -7,19 +7,21 @@ import {
   MAX_LEVEL,
 } from "@/lib/leitner";
 
-function toYmd(d: Date) {
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+function toYmdUtc(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function addDaysYmd(base: Date, days: number) {
+function addDaysYmdUtc(base: Date, days: number) {
   const safeDays = Number.isFinite(days) ? days : 1;
-
   const safeBase =
     base instanceof Date && !Number.isNaN(base.getTime()) ? base : new Date();
-  const d = new Date(safeBase);
-  d.setDate(d.getDate() + safeDays);
 
-  return toYmd(d);
+  const d = new Date(safeBase);
+  d.setUTCDate(d.getUTCDate() + safeDays);
+  return toYmdUtc(d);
 }
 
 type Body = {
@@ -57,27 +59,38 @@ export async function POST(req: Request) {
     ? Math.min(currentLevel + 1, MAX_LEVEL)
     : getNextLevelOnWrong(currentLevel);
 
-  const nextIntervalDays = getIntervalDays(newLevel);
+  let nextIntervalDays = getIntervalDays(newLevel);
+  if (!Number.isFinite(nextIntervalDays) || nextIntervalDays < 1) {
+    nextIntervalDays = 1;
+  }
 
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const dueDate = addDaysYmd(today, nextIntervalDays);
+  today.setUTCHours(0, 0, 0, 0);
+  const dueDate = addDaysYmdUtc(today, nextIntervalDays);
 
   const nowIso = new Date().toISOString();
 
-  const { error } = await supabaseServer
+  console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
+  
+  const { data, error } = await supabaseServer
     .from("card_progress")
-    .update({
-      level: newLevel,
-      due_date: dueDate,
-      last_seen_at: nowIso,
-      updated_at: nowIso,
-    })
-    .eq("owner_key", ownerKey)
-    .eq("card_id", cardId);
+    .upsert(
+      {
+        owner_key: ownerKey,
+        card_id: cardId,
+        level: newLevel,
+        due_date: dueDate,
+        last_seen_at: nowIso,
+        updated_at: nowIso,
+      },
+      {
+        onConflict: "owner_key,card_id",
+      }
+    )
+    .select();
 
   if (error) {
-    console.error("[learn/grade] update error", error);
+    console.error("[learn/grade] upsert error", error);
     return NextResponse.json(
       { error: "Update failed." },
       { status: 500 }

@@ -21,6 +21,7 @@ type Props = {
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
+const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
 
 function shuffleArray<T>(array: T[]): T[] {
     const a = [...array];
@@ -116,6 +117,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const sessionSavedRef = useRef(false);
+    const seenRef = useRef<Set<string>>(new Set());
     const learnModeRef = useRef<HTMLDivElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const drillSourceRef = useRef<HTMLDivElement | null>(null);
@@ -163,6 +165,15 @@ export default function TrainerClient({ ownerKey }: Props) {
     useEffect(() => {
         initFeedbackSounds();
     }, []);
+
+    useEffect(() => {
+        if (!DEBUG_LEITNER) return;
+        console.log("[LEITNER] queue changed", {
+            len: todayItems.length,
+            head: resolveCardId(todayItems[0]),
+            ids: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
+        });
+    }, [todayItems]);
 
     useEffect(() => {
         (async () => {
@@ -897,6 +908,13 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         const items = Array.isArray(json.items) ? json.items : [];
 
+        if (DEBUG_LEITNER) {
+            console.log("[LEITNER] session init", {
+                total: items.length,
+                ids: items.map((card: any) => resolveCardId(card)).slice(0, 20),
+            });
+        }
+
         setSessionTotal(items.length);
 
         setTodayItems(shuffleArray(items));
@@ -1026,6 +1044,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         setEndedEarly(false);
         setExitConfirmOpen(false);
         sessionSavedRef.current = false;
+        if (DEBUG_LEITNER) {
+            seenRef.current = new Set();
+        }
     }
 
     async function persistLearnSession(params: {
@@ -1140,6 +1161,36 @@ export default function TrainerClient({ ownerKey }: Props) {
         const item = todayItems[currentIndex];
         if (!item) return;
 
+        const resolved = resolveCardId(item);
+
+        console.log("[LEITNER] gradeCurrent()", {
+            correct,
+            index: currentIndex,
+            queueLen: todayItems.length,
+            resolved,
+            itemKeys: Object.keys(item ?? {}),
+            rawCardId: item?.cardId,
+            raw_card_id: item?.card_id,
+            raw_id: item?.id,
+        });
+
+
+        console.log("[LEITNER] gradeCurrent()", {
+            index: currentIndex,
+            resolved,
+            rawKeys: Object.keys(item ?? {}),
+            sample: item,
+        });
+
+        if (DEBUG_LEITNER) {
+            console.log("[LEITNER] answer", {
+                result: correct ? "known" : "wrong",
+                cardId: resolveCardId(item),
+                beforeQueueLen: todayItems.length,
+                beforeIds: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
+            });
+        }
+
         if (correct) playCorrect();
         else playWrong();
 
@@ -1167,6 +1218,15 @@ export default function TrainerClient({ ownerKey }: Props) {
                     : [...incorrectThisSession, cardId]
                 : incorrectThisSession;
 
+        if (DEBUG_LEITNER) {
+            console.log("[LEITNER] answer after", {
+                result: correct ? "known" : "wrong",
+                cardId,
+                afterQueueLen: todayItems.length,
+                afterIds: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
+                answeredSize: nextAnswered.size,
+            });
+        }
 
         if (!correct && cardId) {
             setSessionWrongIds(nextWrongIds);
@@ -1220,6 +1280,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                         `[dev] Leitner/Drill session ended after ${nextAnswered.size} answers.`
                     );
                 }
+                console.log("[LEITNER] SESSION END", {
+                    answered: Array.from(nextAnswered),
+                    wrong: Array.from(nextWrongIds),
+                    sessionTotal,
+                });
                 return;
             }
 
@@ -1464,6 +1529,26 @@ export default function TrainerClient({ ownerKey }: Props) {
         }
         return `fällig ${formatDays(diffDays)}`;
     })();
+
+    useEffect(() => {
+        if (!DEBUG_LEITNER) return;
+        const cardId = currentItem ? resolveCardId(currentItem) : null;
+        console.log("[LEITNER] current card", {
+            id: cardId,
+            index: currentIndex,
+            queueLen: todayItems.length,
+        });
+
+        if (!cardId) return;
+        if (seenRef.current.has(cardId)) {
+            console.error("[LEITNER] LOOP DETECTED - card seen twice in same session", {
+                id: cardId,
+                seen: Array.from(seenRef.current).slice(0, 50),
+            });
+            return;
+        }
+        seenRef.current.add(cardId);
+    }, [currentIndex, currentItem, todayItems.length]);
 
     useEffect(() => {
         setLeitnerInfoOpen(false);
