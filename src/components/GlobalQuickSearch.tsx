@@ -186,7 +186,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                 className="fixed bottom-6 right-6 z-[2147483647] flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-white shadow-lg transition hover:scale-105 hover:bg-amber-600 active:scale-95"
                 onClick={() => setIsOpen(true)}
             >
-                <span className="text-xl">🦁</span>
+                <span className="text-xl">🔎</span>
             </button>
 
             {isOpen ? (

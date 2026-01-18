@@ -94,6 +94,21 @@ export default function TrainerClient({ ownerKey }: Props) {
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
+    const [aiState, setAiState] = useState<{
+        open: boolean;
+        messages: { role: "user" | "assistant"; content: string }[];
+        input: string;
+        loading: boolean;
+        error: string | null;
+        useContext: boolean;
+    }>({
+        open: false,
+        messages: [],
+        input: "",
+        loading: false,
+        error: null,
+        useContext: true,
+    });
 
     const router = useRouter();
 
@@ -123,6 +138,16 @@ export default function TrainerClient({ ownerKey }: Props) {
     const drillSourceRef = useRef<HTMLDivElement | null>(null);
     const drillMenuRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
+    const aiMessagesEndRef = useRef<HTMLDivElement | null>(null);
+
+    const {
+        open: aiOpen,
+        messages: aiMessages,
+        input: aiInput,
+        loading: aiLoading,
+        error: aiError,
+        useContext: aiUseContext,
+    } = aiState;
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -192,6 +217,11 @@ export default function TrainerClient({ ownerKey }: Props) {
         setPreviewUrl(url);
         return () => URL.revokeObjectURL(url);
     }, [imageFile]);
+
+    useEffect(() => {
+        if (!aiOpen) return;
+        aiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [aiMessages, aiOpen]);
 
     useEffect(() => {
         loadCards(undefined, { silent: true });
@@ -1530,6 +1560,77 @@ export default function TrainerClient({ ownerKey }: Props) {
         return `fällig ${formatDays(diffDays)}`;
     })();
 
+    const aiCanSend = aiInput.trim().length > 0 && !aiLoading;
+
+    async function handleAiSend() {
+        const trimmed = aiInput.trim();
+        if (!trimmed || aiLoading) return;
+
+        setAiState((prev) => ({
+            ...prev,
+            loading: true,
+            error: null,
+            input: "",
+            messages: [...prev.messages, { role: "user", content: trimmed }],
+        }));
+
+        const context = aiUseContext
+            ? {
+                german: currentGerman || undefined,
+                swahili: currentSwahili || undefined,
+                direction,
+                level: Number.isFinite(currentLevel) ? currentLevel : undefined,
+                dueDate: currentDueDate ?? undefined,
+            }
+            : undefined;
+
+        try {
+            const res = await fetch("/api/ai/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    message: trimmed,
+                    context,
+                }),
+            });
+
+            const json = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setAiState((prev) => ({
+                    ...prev,
+                    loading: false,
+                    error: json?.error ?? "KI-Anfrage fehlgeschlagen.",
+                }));
+                return;
+            }
+
+            const answer = typeof json?.answer === "string" ? json.answer.trim() : "";
+
+            if (!answer) {
+                setAiState((prev) => ({
+                    ...prev,
+                    loading: false,
+                    error: "Keine Antwort erhalten.",
+                }));
+                return;
+            }
+
+            setAiState((prev) => ({
+                ...prev,
+                loading: false,
+                messages: [...prev.messages, { role: "assistant", content: answer }],
+            }));
+        } catch {
+            setAiState((prev) => ({
+                ...prev,
+                loading: false,
+                error: "KI-Anfrage fehlgeschlagen.",
+            }));
+        }
+    }
+
     useEffect(() => {
         if (!DEBUG_LEITNER) return;
         const cardId = currentItem ? resolveCardId(currentItem) : null;
@@ -2525,14 +2626,31 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 <div />
                                             )}
 
-                                            {/* Rechts: Bearbeiten */}
-                                            <button
-                                                type="button"
-                                                className="ml-auto rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
-                                                onClick={startEditFromLearn}
-                                            >
-                                                ✏️ Bearbeiten
-                                            </button>
+                                            <div className="ml-auto flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="flex h-10 w-10 items-center justify-center rounded-full border text-lg"
+                                                    onClick={() =>
+                                                        setAiState((prev) => ({
+                                                            ...prev,
+                                                            open: !prev.open,
+                                                            error: null,
+                                                        }))
+                                                    }
+                                                    aria-label={aiOpen ? "KI-Hilfe schließen" : "KI-Hilfe öffnen"}
+                                                >
+                                                    🦁
+                                                </button>
+
+                                                {/* Rechts: Bearbeiten */}
+                                                <button
+                                                    type="button"
+                                                    className="rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
+                                                    onClick={startEditFromLearn}
+                                                >
+                                                    ✏️ Bearbeiten
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Bild */}
@@ -2677,6 +2795,128 @@ export default function TrainerClient({ ownerKey }: Props) {
                             );
                         })()
                     }
+
+                    {aiOpen ? (
+                        <div
+                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                            onClick={() =>
+                                setAiState((prev) => ({
+                                    ...prev,
+                                    open: false,
+                                    error: null,
+                                }))
+                            }
+                        >
+                            <div
+                                className="flex w-full max-w-xl flex-col rounded-2xl bg-white p-6 shadow-xl max-h-[80vh]"
+                                onClick={(event) => event.stopPropagation()}
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label="KI-Hilfe"
+                            >
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <div className="text-lg font-semibold">🦁 KI-Hilfe</div>
+                                        <div className="text-xs text-gray-500">
+                                            Kurze Antworten mit Beispielen.
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="rounded-full border px-3 py-1 text-sm"
+                                        onClick={() =>
+                                            setAiState((prev) => ({
+                                                ...prev,
+                                                open: false,
+                                                error: null,
+                                            }))
+                                        }
+                                    >
+                                        Schließen
+                                    </button>
+                                </div>
+
+                                <div className="mt-4 flex-1 overflow-y-auto rounded-xl border p-4">
+                                    {aiMessages.length === 0 ? (
+                                        <div className="text-sm text-gray-500">
+                                            Stell deine Frage zur aktuellen Karte.
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col gap-3">
+                                            {aiMessages.map((message, index) => (
+                                                <div
+                                                    key={`${message.role}-${index}`}
+                                                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
+                                                        ? "self-end bg-black text-white"
+                                                        : "self-start bg-gray-100 text-gray-900"
+                                                        }`}
+                                                >
+                                                    {message.content}
+                                                </div>
+                                            ))}
+                                            {aiLoading ? (
+                                                <div className="max-w-[85%] self-start rounded-2xl bg-gray-100 px-3 py-2 text-sm text-gray-600">
+                                                    …
+                                                </div>
+                                            ) : null}
+                                            <div ref={aiMessagesEndRef} />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {aiError ? (
+                                    <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                        {aiError}
+                                    </div>
+                                ) : null}
+
+                                <label className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4"
+                                        checked={aiUseContext}
+                                        onChange={(event) =>
+                                            setAiState((prev) => ({
+                                                ...prev,
+                                                useContext: event.target.checked,
+                                            }))
+                                        }
+                                    />
+                                    Karten-Kontext anhängen
+                                </label>
+
+                                <div className="mt-3 flex items-center gap-2">
+                                    <input
+                                        className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                                        value={aiInput}
+                                        onChange={(event) =>
+                                            setAiState((prev) => ({
+                                                ...prev,
+                                                input: event.target.value,
+                                            }))
+                                        }
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter" && !event.shiftKey) {
+                                                event.preventDefault();
+                                                void handleAiSend();
+                                            }
+                                        }}
+                                        placeholder="Frage eingeben…"
+                                        disabled={aiLoading}
+                                    />
+                                    <button
+                                        type="button"
+                                        className={`rounded-xl px-4 py-2 text-sm text-white ${aiCanSend ? "bg-black" : "bg-gray-400"
+                                            }`}
+                                        onClick={() => void handleAiSend()}
+                                        disabled={!aiCanSend}
+                                    >
+                                        Senden
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
 
                     <ConfirmDialog
                         open={exitConfirmOpen}
