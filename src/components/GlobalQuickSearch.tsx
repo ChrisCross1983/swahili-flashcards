@@ -19,6 +19,8 @@ type CardResult = {
 
 type Props = {
     ownerKey: string;
+    open: boolean;
+    onClose: () => void;
 };
 
 function getImageUrl(path: string) {
@@ -29,8 +31,7 @@ function getAudioUrl(path: string) {
     return `${AUDIO_BASE_URL}/${path}`;
 }
 
-export default function GlobalQuickSearch({ ownerKey }: Props) {
-    const [isOpen, setIsOpen] = useState(false);
+export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<CardResult[]>([]);
     const [selected, setSelected] = useState<CardResult | null>(null);
@@ -42,15 +43,15 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     const [editorOpen, setEditorOpen] = useState(false);
 
     const closeOverlay = useCallback(() => {
-        setIsOpen(false);
         setQuery("");
         setResults([]);
         setSelected(null);
         setError(null);
-    }, []);
+        onClose();
+    }, [onClose]);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!open) return;
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
@@ -66,13 +67,12 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
 
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, closeOverlay, editorOpen]);
+    }, [open, closeOverlay, editorOpen]);
 
     useEffect(() => {
         const handleHotkey = (event: KeyboardEvent) => {
             if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
-                setIsOpen(true);
             }
         };
 
@@ -81,16 +81,16 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
     }, []);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!open) return;
         inputRef.current?.focus();
-    }, [isOpen]);
+    }, [open]);
 
     useEffect(() => {
         setMounted(true);
     }, []);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!open) return;
 
         const trimmed = query.trim();
         setSelected(null);
@@ -132,14 +132,14 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
             controller.abort();
             window.clearTimeout(timeout);
         };
-    }, [query, ownerKey, isOpen]);
+    }, [query, ownerKey, open]);
 
     const handleEdit = useCallback((card: CardResult) => {
-        setIsOpen(false);
+        closeOverlay();
 
         setEditingCardId(String(card.id));
         setEditorOpen(true);
-    }, []);
+    }, [closeOverlay]);
 
 
     const handleSaved = useCallback((updated: CardEditorCard) => {
@@ -180,16 +180,7 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
 
     return createPortal(
         <>
-            <button
-                type="button"
-                aria-label="Quick Search"
-                className="fixed bottom-6 right-6 z-[2147483647] flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-white shadow-lg transition hover:scale-105 hover:bg-amber-600 active:scale-95"
-                onClick={() => setIsOpen(true)}
-            >
-                <span className="text-xl">🔎</span>
-            </button>
-
-            {isOpen ? (
+            {open ? (
                 <div
                     className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-black/40 p-4 sm:items-center"
                     onClick={closeOverlay}
@@ -328,7 +319,6 @@ export default function GlobalQuickSearch({ ownerKey }: Props) {
                     onClose={() => {
                         setEditorOpen(false);
                         setEditingCardId(null);
-                        setIsOpen(true);
                     }}
 
                     onSaved={handleSaved}

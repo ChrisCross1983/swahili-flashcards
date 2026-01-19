@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { supabaseServer } from "@/lib/supabase/server";
-import GlobalQuickSearch from "@/components/GlobalQuickSearch";
+import GlobalOverlays from "@/components/GlobalOverlays";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +35,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
-        {user ? <GlobalQuickSearch ownerKey={user.id} /> : null}
+        {user ? <GlobalOverlays ownerKey={user.id} /> : null}
       </body>
     </html>
   );

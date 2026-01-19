@@ -86,6 +86,13 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
+    const [openGlobalAI, setOpenGlobalAI] = useState(false);
+    const [globalAiInput, setGlobalAiInput] = useState("");
+    const [globalAiLoading, setGlobalAiLoading] = useState(false);
+    const [globalAiError, setGlobalAiError] = useState<string | null>(null);
+    const [globalAiMessages, setGlobalAiMessages] = useState<
+        Array<{ role: "user" | "assistant"; text: string }>
+    >([]);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
     const [setupCounts, setSetupCounts] = useState({
         todayDue: 0,
@@ -139,6 +146,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     const drillMenuRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
     const aiMessagesEndRef = useRef<HTMLDivElement | null>(null);
+    const globalAiMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
     const {
         open: aiOpen,
@@ -148,6 +156,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         error: aiError,
         useContext: aiUseContext,
     } = aiState;
+
+    const aiCanSend = aiInput.trim().length > 0 && !aiLoading;
+    const aiHasMessages = aiMessages.length > 0;
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -222,6 +233,11 @@ export default function TrainerClient({ ownerKey }: Props) {
         if (!aiOpen) return;
         aiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [aiMessages, aiOpen]);
+
+    useEffect(() => {
+        if (!openGlobalAI) return;
+        globalAiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [globalAiMessages, openGlobalAI]);
 
     useEffect(() => {
         loadCards(undefined, { silent: true });
@@ -1560,8 +1576,6 @@ export default function TrainerClient({ ownerKey }: Props) {
         return `fällig ${formatDays(diffDays)}`;
     })();
 
-    const aiCanSend = aiInput.trim().length > 0 && !aiLoading;
-
     async function handleAiSend() {
         const trimmed = aiInput.trim();
         if (!trimmed || aiLoading) return;
@@ -1628,6 +1642,49 @@ export default function TrainerClient({ ownerKey }: Props) {
                 loading: false,
                 error: "KI-Anfrage fehlgeschlagen.",
             }));
+        }
+    }
+
+    async function sendGlobalAiMessage() {
+        const trimmed = globalAiInput.trim();
+        if (!trimmed || globalAiLoading) return;
+
+        setGlobalAiLoading(true);
+        setGlobalAiError(null);
+        setGlobalAiMessages((prev) => [...prev, { role: "user", text: trimmed }]);
+
+        try {
+            const res = await fetch("/api/ai/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    message: trimmed,
+                }),
+            });
+
+            const json = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setGlobalAiLoading(false);
+                setGlobalAiError(json?.error ?? "KI-Anfrage fehlgeschlagen.");
+                return;
+            }
+
+            const answer = typeof json?.answer === "string" ? json.answer.trim() : "";
+
+            if (!answer) {
+                setGlobalAiLoading(false);
+                setGlobalAiError("Keine Antwort erhalten.");
+                return;
+            }
+
+            setGlobalAiMessages((prev) => [...prev, { role: "assistant", text: answer }]);
+            setGlobalAiInput("");
+            setGlobalAiLoading(false);
+        } catch {
+            setGlobalAiLoading(false);
+            setGlobalAiError("KI-Anfrage fehlgeschlagen.");
         }
     }
 
@@ -2821,6 +2878,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             Kurze Antworten mit Beispielen.
                                         </div>
                                     </div>
+
                                     <button
                                         type="button"
                                         className="rounded-full border px-3 py-1 text-sm"
@@ -2836,12 +2894,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </button>
                                 </div>
 
-                                <div className="mt-4 flex-1 overflow-y-auto rounded-xl border p-4">
-                                    {aiMessages.length === 0 ? (
-                                        <div className="text-sm text-gray-500">
-                                            Stell deine Frage zur aktuellen Karte.
-                                        </div>
-                                    ) : (
+                                {/* ✅ Chat-History erst zeigen, wenn es Messages gibt */}
+                                {aiHasMessages ? (
+                                    <div className="mt-4 flex-1 overflow-y-auto rounded-xl border bg-white p-4 max-h-[50vh]">
                                         <div className="flex flex-col gap-3">
                                             {aiMessages.map((message, index) => (
                                                 <div
@@ -2854,15 +2909,17 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     {message.content}
                                                 </div>
                                             ))}
+
                                             {aiLoading ? (
                                                 <div className="max-w-[85%] self-start rounded-2xl bg-gray-100 px-3 py-2 text-sm text-gray-600">
                                                     …
                                                 </div>
                                             ) : null}
+
                                             <div ref={aiMessagesEndRef} />
                                         </div>
-                                    )}
-                                </div>
+                                    </div>
+                                ) : null}
 
                                 {aiError ? (
                                     <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -2914,6 +2971,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         Senden
                                     </button>
                                 </div>
+                                {/* Optional: kleiner Hint – so wie global, aber ohne große Box */}
+                                {!aiHasMessages ? (
+                                    <div className="mt-3 text-xs text-gray-400">
+                                        Tipp: „Gib mir 3 Beispielsätze“ oder „Erklär mir die Plural-Klasse“.
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
                     ) : null}
@@ -2929,6 +2992,83 @@ export default function TrainerClient({ ownerKey }: Props) {
                     />
 
                 </FullScreenSheet >
+
+                {/* Global AI Modal */}
+                <FullScreenSheet
+                    open={openGlobalAI}
+                    title="KI"
+                    onClose={() => setOpenGlobalAI(false)}
+                >
+                    <div className="text-xs text-gray-500">
+                        Kurze Antworten mit Beispielen.
+                    </div>
+
+                    {globalAiMessages.length === 0 ? (
+                        <div className="mt-6 rounded-2xl border bg-white p-6 text-center">
+                            <div className="text-lg font-semibold">
+                                Frag mich alles zu Swahili.
+                            </div>
+                            <div className="mt-2 text-sm text-gray-600">
+                                Ich helfe dir gern mit Übersetzungen, Beispielen und Grammatik.
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border bg-white p-4 max-h-[50vh]">
+                            <div className="flex flex-col gap-3">
+                                {globalAiMessages.map((message, index) => (
+                                    <div
+                                        key={`${message.role}-${index}`}
+                                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
+                                            ? "self-end bg-black text-white"
+                                            : "self-start bg-gray-100 text-gray-900"
+                                            }`}
+                                    >
+                                        {message.text}
+                                    </div>
+                                ))}
+                                {globalAiLoading ? (
+                                    <div className="max-w-[85%] self-start rounded-2xl bg-gray-100 px-3 py-2 text-sm text-gray-600">
+                                        …
+                                    </div>
+                                ) : null}
+                                <div ref={globalAiMessagesEndRef} />
+                            </div>
+                        </div>
+                    )}
+
+                    {globalAiError ? (
+                        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                            {globalAiError}
+                        </div>
+                    ) : null}
+
+                    <div className="mt-4 flex items-center gap-2">
+                        <input
+                            className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                            value={globalAiInput}
+                            onChange={(event) => setGlobalAiInput(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" && !event.shiftKey) {
+                                    event.preventDefault();
+                                    void sendGlobalAiMessage();
+                                }
+                            }}
+                            placeholder="Frage eingeben…"
+                            disabled={globalAiLoading}
+                        />
+                        <button
+                            type="button"
+                            className={`rounded-xl px-4 py-2 text-sm text-white ${globalAiInput.trim().length > 0 && !globalAiLoading
+                                ? "bg-black"
+                                : "bg-gray-400"
+                                }`}
+                            onClick={() => void sendGlobalAiMessage()}
+                            disabled={globalAiInput.trim().length === 0 || globalAiLoading}
+                        >
+                            Senden
+                        </button>
+                    </div>
+                </FullScreenSheet>
 
                 {/* Create Modal */}
                 < FullScreenSheet
@@ -3449,6 +3589,17 @@ export default function TrainerClient({ ownerKey }: Props) {
                     </div>
                 </FullScreenSheet >
             </div >
+
+            <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3 pb-[env(safe-area-inset-bottom)]">
+                <button
+                    type="button"
+                    className="flex h-14 w-14 items-center justify-center rounded-full bg-black text-2xl text-white shadow-xl"
+                    onClick={() => setOpenGlobalAI(true)}
+                    aria-label="Globale KI öffnen"
+                >
+                    🦁
+                </button>
+            </div>
         </main >
     );
 }
