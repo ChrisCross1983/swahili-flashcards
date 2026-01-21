@@ -92,17 +92,17 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         <>
             {open ? (
                 <div
-                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-black/40 p-4 sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay p-4 sm:items-center"
                     onClick={close}
                 >
                     <div
-                        className="w-full max-w-xl rounded-2xl border border-gray-200 bg-white p-4 shadow-xl"
+                        className="w-full max-w-xl rounded-2xl border border-soft bg-surface-elevated p-4 shadow-warm"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="mb-3 flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg font-semibold">Swahili-KI 🦁</h2>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-muted">
                                     Frag alles – unabhängig vom Training.
                                 </p>
                             </div>
@@ -110,7 +110,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                             <button
                                 type="button"
                                 aria-label="Schließen"
-                                className="rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-500 transition hover:bg-gray-100"
+                                className="rounded-full border border-soft px-3 py-1 text-sm text-muted transition hover:bg-surface"
                                 onClick={close}
                             >
                                 ✕
@@ -119,7 +119,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
 
                         {/* Chat Verlauf: erst anzeigen, wenn es mindestens 1 Message gibt */}
                         {messages.length > 0 ? (
-                            <div className="mb-3 max-h-72 overflow-auto rounded-xl border border-gray-100 bg-gray-50 p-3">
+                            <div className="mb-3 max-h-72 overflow-auto rounded-xl border border-soft bg-surface p-3">
                                 <div className="flex flex-col gap-2">
                                     {messages.map((m, idx) => (
                                         <div
@@ -127,8 +127,8 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                             className={[
                                                 "rounded-xl px-3 py-2 text-sm leading-5",
                                                 m.role === "user"
-                                                    ? "self-end bg-black text-white"
-                                                    : "self-start bg-white text-gray-900 border border-gray-200",
+                                                    ? "self-end bg-accent-secondary text-on-accent"
+                                                    : "self-start bg-surface text-primary border border-soft",
                                             ].join(" ")}
                                         >
                                             {m.text}
@@ -139,7 +139,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                         ) : null}
 
                         {error ? (
-                            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                            <div className="mb-3 rounded-xl border border-cta bg-accent-cta-soft p-3 text-sm text-accent-cta">
                                 {error}
                             </div>
                         ) : null}
@@ -150,19 +150,19 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 placeholder="Frage eingeben…"
-                                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm shadow-sm focus:border-black focus:outline-none"
+                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm shadow-soft focus:border-accent focus:outline-none"
                             />
                             <button
                                 type="button"
                                 onClick={send}
                                 disabled={isSending || !input.trim()}
-                                className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-50"
+                                className="rounded-xl bg-accent-primary px-4 py-3 text-sm text-on-accent disabled:opacity-60"
                             >
                                 {isSending ? "…" : "Senden"}
                             </button>
                         </div>
 
-                        <div className="mt-2 text-xs text-gray-400">
+                        <div className="mt-2 text-xs text-muted">
                             Tipp: „Gib mir 3 Beispielsätze“ oder „Erklär mir die Plural-Klasse“.
                         </div>
                     </div>

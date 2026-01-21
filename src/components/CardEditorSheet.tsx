@@ -391,11 +391,11 @@ export default function CardEditorSheet({
         <>
             <FullScreenSheet open={open} title="Karte bearbeiten" onClose={onClose}>
                 {loading ? (
-                    <div className="rounded-2xl border p-6 shadow-sm bg-white text-sm text-gray-600">
+                    <div className="rounded-2xl border border-soft p-6 shadow-soft bg-surface text-sm text-muted">
                         Lade Karte...
                     </div>
                 ) : (
-                    <div className="rounded-2xl border p-6 shadow-sm bg-white">
+                    <div className="rounded-2xl border border-soft p-6 shadow-soft bg-surface">
                         <label className="block text-sm font-medium">Deutsch</label>
                         <input
                             className="mt-1 w-full rounded-xl border p-3"
@@ -477,7 +477,7 @@ export default function CardEditorSheet({
                                 )}
                             </div>
 
-                            <div className="mt-2 text-xs text-gray-500">
+                            <div className="mt-2 text-xs text-muted">
                                 Audio kann nur bei bestehenden Karten gespeichert werden.
                             </div>
                         </div>
@@ -491,7 +491,7 @@ export default function CardEditorSheet({
                                 rounded-2xl border-2 border-dashed
                                 p-4 cursor-pointer
                                 transition
-                                hover:bg-gray-50 hover:border-gray-400
+                                hover:bg-surface hover:border-accent
                             "
                         >
                             {previewUrl ? (
@@ -503,7 +503,7 @@ export default function CardEditorSheet({
                                     />
                                     <div className="text-sm">
                                         <div className="font-medium">Bild ändern</div>
-                                        <div className="text-xs text-gray-500">
+                                        <div className="text-xs text-muted">
                                             Tippen zum Austauschen
                                         </div>
                                     </div>
@@ -513,7 +513,7 @@ export default function CardEditorSheet({
                                     <div className="text-3xl">🖼️</div>
                                     <div className="text-sm">
                                         <div className="font-medium">Bild hinzufügen</div>
-                                        <div className="text-xs text-gray-500">
+                                        <div className="text-xs text-muted">
                                             Tippen, um ein Bild auszuwählen
                                         </div>
                                     </div>
@@ -530,25 +530,25 @@ export default function CardEditorSheet({
                         </button>
 
                         {suggestedImagePath ? (
-                            <div className="mt-2 text-xs text-gray-500">
+                            <div className="mt-2 text-xs text-muted">
                                 Vorschlagsbild ausgewählt ✅
                             </div>
                         ) : null}
 
                         {editingImagePath ? (
                             <div className="mt-3">
-                                <div className="text-xs text-gray-500 mb-2">Aktuelles Bild</div>
+                                <div className="text-xs text-muted mb-2">Aktuelles Bild</div>
                                 <img
                                     src={`${IMAGE_BASE_URL}/${editingImagePath}`}
                                     alt="Aktuelles Bild"
-                                    className="w-full max-h-56 object-contain rounded-2xl border bg-white"
+                                    className="w-full max-h-56 object-contain rounded-2xl border border-soft bg-surface"
                                 />
                             </div>
                         ) : null}
 
                         <div className="mt-6 grid grid-cols-2 gap-4">
                             <button
-                                className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
+                                className="rounded-xl bg-accent-primary text-on-accent p-3 disabled:opacity-60"
                                 onClick={saveCard}
                                 disabled={!german || !swahili}
                                 type="button"
@@ -567,7 +567,7 @@ export default function CardEditorSheet({
 
                         <button
                             type="button"
-                            className="mt-3 w-full rounded-xl border p-3 text-red-600"
+                            className="mt-3 w-full rounded-xl border p-3 text-accent-cta"
                             onClick={deleteCard}
                         >
                             🗑️ Löschen
@@ -576,7 +576,7 @@ export default function CardEditorSheet({
                 )}
 
                 {status ? (
-                    <div className="mt-4 rounded-xl border bg-white p-3 text-sm">
+                    <div className="mt-4 rounded-xl border border-soft bg-surface p-3 text-sm">
                         {status}
                     </div>
                 ) : null}
@@ -588,13 +588,13 @@ export default function CardEditorSheet({
                 onClose={() => setSuggestOpen(false)}
             >
                 {suggestLoading ? (
-                    <div className="mt-4 text-sm text-gray-600">Lade Vorschläge…</div>
+                    <div className="mt-4 text-sm text-muted">Lade Vorschläge…</div>
                 ) : suggestError ? (
-                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    <div className="mt-4 rounded-xl border border-cta bg-accent-cta-soft p-3 text-sm text-accent-cta">
                         {suggestError}
                     </div>
                 ) : suggestItems.length === 0 ? (
-                    <div className="mt-4 text-sm text-gray-600">
+                    <div className="mt-4 text-sm text-muted">
                         Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
                     </div>
                 ) : (
@@ -603,11 +603,11 @@ export default function CardEditorSheet({
                             <button
                                 key={it.pageId}
                                 type="button"
-                                className="rounded-xl border overflow-hidden hover:shadow-sm transition"
+                                className="rounded-xl border overflow-hidden hover:shadow-soft transition"
                                 onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
                             >
                                 <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
-                                <div className="p-2 text-xs text-gray-600 line-clamp-2">{it.title}</div>
+                                <div className="p-2 text-xs text-muted line-clamp-2">{it.title}</div>
                             </button>
                         ))}
                     </div>

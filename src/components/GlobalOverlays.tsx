@@ -18,7 +18,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
             <div className="fixed bottom-6 right-6 z-[2147483647] flex flex-col gap-3">
                 <button
                     type="button"
-                    className="flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-lg transition hover:scale-105 active:scale-95"
+                    className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-secondary text-on-accent shadow-warm transition hover:scale-105 active:scale-95"
                     onClick={() => setOpenAi(true)}
                     aria-label="KI öffnen"
                 >
@@ -27,7 +27,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
 
                 <button
                     type="button"
-                    className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-white shadow-lg transition hover:scale-105 hover:bg-amber-600 active:scale-95"
+                    className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-primary text-on-accent shadow-warm transition hover:scale-105 hover:bg-accent-cta active:scale-95"
                     onClick={() => setOpenSearch(true)}
                     aria-label="Suche öffnen"
                 >

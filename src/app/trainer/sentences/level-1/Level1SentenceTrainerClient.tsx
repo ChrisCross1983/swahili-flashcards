@@ -69,18 +69,18 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
             "w-full rounded-2xl border px-4 py-3 text-left text-lg font-semibold transition";
 
         if (!isAnswered) {
-            return `${base} hover:shadow-sm`;
+            return `${base} hover:shadow-soft`;
         }
 
         if (option.id === exercise?.answerId) {
-            return `${base} border-green-500 bg-green-50 text-green-700`;
+            return `${base} border-success bg-accent-success-soft text-accent-success`;
         }
 
         if (option.id === selectedId) {
-            return `${base} border-red-500 bg-red-50 text-red-700`;
+            return `${base} border-cta bg-accent-cta-soft text-accent-cta`;
         }
 
-        return `${base} bg-white text-gray-800 opacity-75`;
+        return `${base} bg-surface text-primary opacity-75`;
     }
 
     return (
@@ -88,15 +88,15 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
             <div className="w-full max-w-2xl space-y-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <div className="text-sm text-indigo-600 font-semibold">Satztrainer</div>
+                        <div className="text-sm text-accent-secondary font-semibold">Satztrainer</div>
                         <h1 className="text-2xl font-semibold">Stufe 1 – Einfach</h1>
-                        <p className="text-sm text-gray-600 mt-1">
+                        <p className="text-sm text-muted mt-1">
                             Wähle das passende Wort, um den Satz zu vervollständigen.
                         </p>
                     </div>
 
                     <button
-                        className="text-sm text-gray-600 underline-offset-4 hover:underline"
+                        className="text-sm text-muted underline-offset-4 hover:underline"
                         onClick={() => router.push("/sentence-trainer")}
                         type="button"
                     >
@@ -104,16 +104,16 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                     </button>
                 </div>
 
-                <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <div className="rounded-2xl border border-soft bg-surface p-5 shadow-soft">
                     {error && (
-                        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                        <div className="rounded-xl border border-cta bg-accent-cta-soft p-3 text-sm text-accent-cta">
                             {error}
                         </div>
                     )}
 
                     {!error && (
                         <>
-                            <div className="text-sm text-gray-600">Setze ein Wort ein:</div>
+                            <div className="text-sm text-muted">Setze ein Wort ein:</div>
                             <div className="mt-2 text-2xl font-semibold">
                                 {exercise ? exercise.prompt_de : "Lade Übung ..."}
                             </div>
@@ -128,12 +128,12 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                                         type="button"
                                     >
                                         <div>{option.de}</div>
-                                        <div className="text-sm font-normal text-gray-500">{option.sw}</div>
+                                        <div className="text-sm font-normal text-muted">{option.sw}</div>
                                     </button>
                                 ))}
 
                                 {!exercise && (
-                                    <div className="text-sm text-gray-500">Noch keine Übung geladen.</div>
+                                    <div className="text-sm text-muted">Noch keine Übung geladen.</div>
                                 )}
                             </div>
 
@@ -143,15 +143,15 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                                         <span className="text-green-700">Richtig!</span>
                                     )}
                                     {isAnswered && selectedId !== exercise?.answerId && (
-                                        <span className="text-red-700">Leider falsch.</span>
+                                        <span className="text-accent-cta">Leider falsch.</span>
                                     )}
                                 </div>
 
                                 <div className="flex items-center gap-3">
-                                    {loading && <span className="text-sm text-gray-500">Lädt ...</span>}
+                                    {loading && <span className="text-sm text-muted">Lädt ...</span>}
                                     {isAnswered && (
                                         <button
-                                            className="rounded-xl border bg-gray-50 px-4 py-2 text-sm font-semibold transition hover:shadow-sm"
+                                            className="rounded-xl border bg-surface px-4 py-2 text-sm font-semibold transition hover:shadow-soft"
                                             onClick={loadExercise}
                                             type="button"
                                         >
@@ -160,7 +160,7 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                                     )}
                                     {!isAnswered && !loading && (
                                         <button
-                                            className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:shadow-sm"
+                                            className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:shadow-soft"
                                             onClick={loadExercise}
                                             type="button"
                                         >

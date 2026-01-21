@@ -365,7 +365,7 @@ export default function HomeClient({ ownerKey }: Props) {
                 <h1 className="text-3xl font-semibold">Swahili</h1>
 
                 <div className="mt-3 flex items-center justify-between">
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-muted">
                         Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
                     </div>
                     <button className="rounded-xl border px-3 py-2 text-sm" onClick={logout}>
@@ -378,24 +378,24 @@ export default function HomeClient({ ownerKey }: Props) {
 
                     <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
                         <div className="flex items-center justify-between">
-                            <span className="text-gray-700">📅 Fällig heute</span>
+                            <span className="text-muted">📅 Fällig heute</span>
                             <span className="font-semibold">{leitnerUi.todayCount}</span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-gray-700">🔁 Morgen dran</span>
+                            <span className="text-muted">🔁 Morgen dran</span>
                             <span className="font-semibold">{leitnerUi.tomorrowCount}</span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-gray-700">✅ Später</span>
+                            <span className="text-muted">✅ Später</span>
                             <span className="font-semibold">{leitnerUi.laterCount}</span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-gray-700">📚 Gesamt</span>
+                            <span className="text-muted">📚 Gesamt</span>
                             <span className="font-semibold">{leitnerUi.total}</span>
                         </div>
                     </div>
 
-                    <div className="mt-3 text-xs text-gray-600">
+                    <div className="mt-3 text-xs text-muted">
                         Nächstes Training: {leitnerUi.nextText}.
                     </div>
                 </div>
@@ -403,30 +403,30 @@ export default function HomeClient({ ownerKey }: Props) {
                 <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <button
                         onClick={() => router.push("/trainer")}
-                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
+                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
                         <div className="text-xl font-semibold">Vokabeltrainer</div>
-                        <div className="mt-2 text-sm text-gray-600">
+                        <div className="mt-2 text-sm text-muted">
                             Trainiere deine gespeicherten Karten (Leitner).
                         </div>
                     </button>
 
                     <button
                         onClick={() => router.push("/path")}
-                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
+                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
                         <div className="text-xl font-semibold">Lernpfad</div>
-                        <div className="mt-2 text-sm text-gray-600">
+                        <div className="mt-2 text-sm text-muted">
                             Kategorien von leicht bis schwer.
                         </div>
                     </button>
 
                     <button
                         onClick={() => router.push("/sentence-trainer")}
-                        className="rounded-[32px] border p-8 text-left shadow-sm hover:shadow transition"
+                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
                         <div className="text-xl font-semibold">Satztrainer</div>
-                        <div className="mt-2 text-sm text-gray-600">
+                        <div className="mt-2 text-sm text-muted">
                             Baue Sätze aus deinem Wortschatz.
                         </div>
                     </button>

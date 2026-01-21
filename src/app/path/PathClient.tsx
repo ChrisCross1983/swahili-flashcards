@@ -54,7 +54,7 @@ export default function PathClient() {
     <main className="min-h-screen p-6 flex justify-center">
       <div className="w-full max-w-xl">
         <h1 className="text-2xl font-semibold">Lernpfad</h1>
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted">
           Wähle eine Kategorie (leicht → schwer).
         </p>
 
@@ -62,7 +62,7 @@ export default function PathClient() {
           {CATEGORIES.sort((a, b) => a.level - b.level).map((c) => (
             <button
               key={c.slug}
-              className={`w-full rounded-2xl border p-4 text-left transition ${c.enabled ? "hover:shadow-sm" : "opacity-50 cursor-not-allowed"
+              className={`w-full rounded-2xl border p-4 text-left transition ${c.enabled ? "hover:shadow-soft" : "opacity-50 cursor-not-allowed"
                 }`}
               onClick={() => {
                 if (!c.enabled) return;
@@ -72,14 +72,14 @@ export default function PathClient() {
             >
               <div className="font-semibold flex items-center gap-2">
                 <span
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-sm ${c.enabled ? "" : "bg-gray-100"
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-sm ${c.enabled ? "" : "bg-surface"
                     }`}
                 >
                   {c.level}
                 </span>
                 {c.title}
               </div>
-              <div className="text-sm text-gray-600">{c.description}</div>
+              <div className="text-sm text-muted">{c.description}</div>
             </button>
           ))}
         </div>

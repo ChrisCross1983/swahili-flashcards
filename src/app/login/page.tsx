@@ -43,7 +43,7 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border p-6 bg-white shadow-sm">
+      <div className="w-full max-w-md rounded-2xl border border-soft p-6 bg-surface shadow-soft">
         <h1 className="text-2xl font-semibold">Login</h1>
 
         <label className="block text-sm font-medium mt-6">E-Mail</label>
@@ -64,7 +64,7 @@ export default function LoginPage() {
         />
 
         <button
-          className="mt-6 w-full rounded-xl bg-black text-white p-3 disabled:opacity-50"
+          className="mt-6 w-full rounded-xl bg-accent-primary text-on-accent p-3 disabled:opacity-60"
           onClick={signIn}
           disabled={!email || !password}
         >

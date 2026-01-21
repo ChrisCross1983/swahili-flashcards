@@ -45,12 +45,12 @@ export default function ConfirmDialog({
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4"
             onClick={onCancel}
             role="presentation"
         >
             <div
-                className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-lg"
+                className="w-full max-w-md rounded-2xl border border-soft bg-surface-elevated p-6 shadow-warm"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
@@ -60,7 +60,7 @@ export default function ConfirmDialog({
                 <div className="text-lg font-semibold" id={titleId}>
                     {title}
                 </div>
-                <p className="mt-2 text-sm text-gray-700" id={descriptionId}>
+                <p className="mt-2 text-sm text-muted" id={descriptionId}>
                     {description}
                 </p>
 
@@ -75,7 +75,7 @@ export default function ConfirmDialog({
                     </button>
                     <button
                         type="button"
-                        className="rounded-xl bg-black px-4 py-2 text-sm text-white"
+                        className="rounded-xl bg-accent-cta px-4 py-2 text-sm text-on-accent"
                         onClick={onConfirm}
                     >
                         {confirmLabel}

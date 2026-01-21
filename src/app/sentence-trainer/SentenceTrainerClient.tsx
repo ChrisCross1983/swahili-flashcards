@@ -9,21 +9,21 @@ export default function SentenceTrainerClient() {
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
                 <h1 className="text-2xl font-semibold">Satztrainer</h1>
-                <p className="mt-1 text-sm text-gray-600">
+                <p className="mt-1 text-sm text-muted">
                     Hier übst du, aus deinen Wörtern echte Sätze zu bauen.
                 </p>
 
-                <div className="mt-6 rounded-2xl border p-4 shadow-sm">
+                <div className="mt-6 rounded-2xl border p-4 shadow-soft">
                     <div className="flex items-center justify-between gap-4">
                         <div>
                             <div className="text-sm font-semibold">Stufe 1 – Einfach</div>
-                            <div className="text-sm text-gray-600">
+                            <div className="text-sm text-muted">
                                 Ich + Verb + X (z.B. Ninapenda chai.)
                             </div>
                         </div>
 
                         <button
-                            className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:shadow-sm"
+                            className="rounded-xl border px-4 py-2 text-sm font-semibold transition hover:shadow-soft"
                             onClick={() => router.push("/trainer/sentences/level-1")}
                             type="button"
                         >

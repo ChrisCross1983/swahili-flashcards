@@ -182,22 +182,22 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         <>
             {open ? (
                 <div
-                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-black/40 p-4 sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay p-4 sm:items-center"
                     onClick={closeOverlay}
                 >
                     <div
-                        className="w-full max-w-xl rounded-2xl border border-gray-200 bg-white p-4 shadow-xl"
+                        className="w-full max-w-xl rounded-2xl border border-soft bg-surface-elevated p-4 shadow-warm"
                         onClick={(event) => event.stopPropagation()}
                     >
                         <div className="mb-3 flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg font-semibold">Quick Search</h2>
-                                <p className="text-xs text-gray-500">Finde Karten ohne Navigation.</p>
+                                <p className="text-xs text-muted">Finde Karten ohne Navigation.</p>
                             </div>
                             <button
                                 type="button"
                                 aria-label="Close"
-                                className="rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-500 transition hover:bg-gray-100"
+                                className="rounded-full border border-soft px-3 py-1 text-sm text-muted transition hover:bg-surface"
                                 onClick={closeOverlay}
                             >
                                 ✕
@@ -210,25 +210,25 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
                                 placeholder="Deutsch oder Swahili suchen..."
-                                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm shadow-sm focus:border-black focus:outline-none"
+                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm shadow-soft focus:border-accent focus:outline-none"
                             />
 
-                            <div className="max-h-72 overflow-auto rounded-xl border border-gray-100 bg-gray-50">
+                            <div className="max-h-72 overflow-auto rounded-xl border border-soft bg-surface">
                                 {isLoading ? (
-                                    <div className="p-4 text-sm text-gray-500">Suche...</div>
+                                    <div className="p-4 text-sm text-muted">Suche...</div>
                                 ) : error ? (
-                                    <div className="p-4 text-sm text-red-500">{error}</div>
+                                    <div className="p-4 text-sm text-accent-cta">{error}</div>
                                 ) : results.length === 0 && query.trim() ? (
-                                    <div className="p-4 text-sm text-gray-500">Keine Ergebnisse gefunden.</div>
+                                    <div className="p-4 text-sm text-muted">Keine Ergebnisse gefunden.</div>
                                 ) : results.length === 0 ? (
-                                    <div className="p-4 text-sm text-gray-500">Tippe, um Karten zu finden.</div>
+                                    <div className="p-4 text-sm text-muted">Tippe, um Karten zu finden.</div>
                                 ) : (
-                                    <div className="divide-y divide-gray-100">
+                                    <div className="divide-y divide-[color:var(--border)]">
                                         {results.map((card) => (
                                             <button
                                                 key={card.id}
                                                 type="button"
-                                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition hover:bg-white"
+                                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition hover:bg-surface"
                                                 onClick={() => setSelected(card)}
                                             >
                                                 {card.image_path ? (
@@ -238,13 +238,13 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                                         className="h-10 w-10 rounded-lg border object-cover"
                                                     />
                                                 ) : (
-                                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-gray-100 text-xs text-gray-400">
+                                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-soft bg-surface text-xs text-muted">
                                                         –
                                                     </div>
                                                 )}
                                                 <div>
-                                                    <div className="font-medium text-gray-900">{card.german_text}</div>
-                                                    <div className="text-gray-500">{card.swahili_text}</div>
+                                                    <div className="font-medium text-primary">{card.german_text}</div>
+                                                    <div className="text-muted">{card.swahili_text}</div>
                                                 </div>
                                             </button>
                                         ))}
@@ -253,17 +253,17 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                             </div>
 
                             {selected ? (
-                                <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                                <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft">
                                     <div className="mb-3 flex items-start justify-between">
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-900">{selected.german_text}</p>
-                                            <p className="text-sm text-gray-500">{selected.swahili_text}</p>
+                                            <p className="text-sm font-semibold text-primary">{selected.german_text}</p>
+                                            <p className="text-sm text-muted">{selected.swahili_text}</p>
                                         </div>
 
                                         <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
-                                                className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
+                                                className="rounded-full border border-soft px-3 py-1 text-xs text-muted transition hover:border-accent hover:bg-surface"
                                                 onClick={() => handleEdit(selected)}
                                             >
                                                 Bearbeiten
@@ -271,7 +271,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                             <button
                                                 type="button"
                                                 aria-label="Vorschau schließen"
-                                                className="rounded-full border border-gray-200 px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100"
+                                                className="rounded-full border border-soft px-2 py-1 text-xs text-muted transition hover:bg-surface"
                                                 onClick={() => setSelected(null)}
                                             >
                                                 ✕
@@ -283,14 +283,14 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                         <img
                                             src={getImageUrl(selected.image_path)}
                                             alt="Karte"
-                                            className="mb-3 w-full max-h-56 rounded-xl object-contain bg-white"
+                                            className="mb-3 w-full max-h-56 rounded-xl object-contain bg-surface-elevated"
                                         />
                                     ) : null}
 
                                     {selected.audio_path ? (
                                         <audio controls src={getAudioUrl(selected.audio_path)} className="w-full" />
                                     ) : (
-                                        <p className="text-xs text-gray-400">Kein Audio verfügbar.</p>
+                                        <p className="text-xs text-muted">Kein Audio verfügbar.</p>
                                     )}
 
                                 </div>

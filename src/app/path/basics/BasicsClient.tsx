@@ -131,14 +131,14 @@ export default function BasicsClient({ ownerKey }: Props) {
         {finished ? (
           <div className="mt-2 rounded-2xl border p-4">
             <div className="text-lg font-semibold">Pack abgeschlossen ✅</div>
-            <div className="mt-2 text-sm text-gray-700">
+            <div className="mt-2 text-sm text-muted">
               Übernommen: <span className="font-medium">{addedCount}</span> ·
               Übersprungen: <span className="font-medium">{skippedCount}</span>
             </div>
 
             <div className="mt-4">
               <button
-                className="w-full rounded-xl bg-black text-white p-3"
+                className="w-full rounded-xl bg-accent-primary text-on-accent p-3"
                 type="button"
                 onClick={() => router.push("/path")}
               >
@@ -148,7 +148,7 @@ export default function BasicsClient({ ownerKey }: Props) {
           </div>
         ) : (
           <>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-muted">
               Karte {idx + 1} / {total}
             </div>
 
@@ -162,10 +162,10 @@ export default function BasicsClient({ ownerKey }: Props) {
               <div className="text-lg font-semibold">{current?.german}</div>
 
               {reveal ? (
-                <div className="mt-3 text-base text-gray-800">
+                <div className="mt-3 text-base text-primary">
                   <div>{current?.swahili}</div>
                   {current?.note ? (
-                    <div className="mt-2 text-sm text-gray-600">{current.note}</div>
+                    <div className="mt-2 text-sm text-muted">{current.note}</div>
                   ) : null}
                 </div>
               ) : (
@@ -179,7 +179,7 @@ export default function BasicsClient({ ownerKey }: Props) {
               )}
 
               {status ? (
-                <div className="mt-3 text-sm text-gray-600">{status}</div>
+                <div className="mt-3 text-sm text-muted">{status}</div>
               ) : null}
             </div>
 
@@ -193,7 +193,7 @@ export default function BasicsClient({ ownerKey }: Props) {
               </button>
 
               <button
-                className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
+                className="rounded-xl bg-accent-primary text-on-accent p-3 disabled:opacity-60"
                 type="button"
                 onClick={() => {
                   if (!current) return;
@@ -247,7 +247,7 @@ export default function BasicsClient({ ownerKey }: Props) {
             </button>
 
             <button
-              className="rounded-xl bg-black text-white p-3 disabled:opacity-50"
+              className="rounded-xl bg-accent-primary text-on-accent p-3 disabled:opacity-60"
               type="button"
               onClick={() => addToTrainerFinal(draftGerman, draftSwahili)}
               disabled={saving || !draftGerman.trim() || !draftSwahili.trim()}
@@ -256,7 +256,7 @@ export default function BasicsClient({ ownerKey }: Props) {
             </button>
           </div>
 
-          {status ? <div className="text-sm text-gray-600">{status}</div> : null}
+          {status ? <div className="text-sm text-muted">{status}</div> : null}
         </div>
       </FullScreenSheet>
     </>
