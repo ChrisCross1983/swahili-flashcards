@@ -22,6 +22,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
     const [error, setError] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => setMounted(true), []);
 
@@ -29,6 +30,14 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         if (!open) return;
         inputRef.current?.focus();
     }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        const rafId = requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
+        return () => cancelAnimationFrame(rafId);
+    }, [messages, open]);
 
     const close = useCallback(() => {
         setError(null);
@@ -119,7 +128,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
 
                         {/* Chat Verlauf: erst anzeigen, wenn es mindestens 1 Message gibt */}
                         {messages.length > 0 ? (
-                            <div className="mb-3 max-h-72 overflow-auto rounded-xl border border-soft bg-surface p-3">
+                            <div className="mb-3 max-h-72 overflow-y-auto rounded-xl border border-soft bg-surface p-3 [overflow-anchor:none]">
                                 <div className="flex flex-col gap-2">
                                     {messages.map((m, idx) => (
                                         <div
@@ -134,6 +143,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                             {m.text}
                                         </div>
                                     ))}
+                                    <div ref={messagesEndRef} />
                                 </div>
                             </div>
                         ) : null}
@@ -150,7 +160,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 placeholder="Frage eingeben…"
-                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm shadow-soft focus:border-accent focus:outline-none"
+                                className="w-full rounded-xl border border-soft px-4 py-3 text-base shadow-soft focus:border-accent focus:outline-none"
                             />
                             <button
                                 type="button"

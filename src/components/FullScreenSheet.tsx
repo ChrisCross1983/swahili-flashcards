@@ -23,7 +23,7 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-base">
+        <div className="fixed inset-0 z-50 bg-base h-dvh">
             <div className="h-full flex flex-col">
                 <div className="flex items-center justify-between border-b px-4 py-3">
                     <div className="text-base font-semibold">

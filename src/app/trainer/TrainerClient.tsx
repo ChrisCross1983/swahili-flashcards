@@ -231,12 +231,18 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     useEffect(() => {
         if (!aiOpen) return;
-        aiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        const rafId = requestAnimationFrame(() => {
+            aiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
+        return () => cancelAnimationFrame(rafId);
     }, [aiMessages, aiOpen]);
 
     useEffect(() => {
         if (!openGlobalAI) return;
-        globalAiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        const rafId = requestAnimationFrame(() => {
+            globalAiMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
+        return () => cancelAnimationFrame(rafId);
     }, [globalAiMessages, openGlobalAI]);
 
     useEffect(() => {
@@ -2896,7 +2902,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                 {/* ✅ Chat-History erst zeigen, wenn es Messages gibt */}
                                 {aiHasMessages ? (
-                                    <div className="mt-4 flex-1 overflow-y-auto rounded-xl border bg-surface p-4 max-h-[50vh]">
+                                    <div className="mt-4 flex-1 overflow-y-auto rounded-xl border bg-surface p-4 max-h-[50dvh] [overflow-anchor:none]">
                                         <div className="flex flex-col gap-3">
                                             {aiMessages.map((message, index) => (
                                                 <div
@@ -2944,7 +2950,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                 <div className="mt-3 flex items-center gap-2">
                                     <input
-                                        className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                                        className="flex-1 rounded-xl border px-3 py-2 text-base"
                                         value={aiInput}
                                         onChange={(event) =>
                                             setAiState((prev) => ({
@@ -3013,7 +3019,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         </div>
                     ) : (
-                        <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border bg-surface p-4 max-h-[50vh]">
+                        <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border bg-surface p-4 max-h-[50dvh] [overflow-anchor:none]">
                             <div className="flex flex-col gap-3">
                                 {globalAiMessages.map((message, index) => (
                                     <div
@@ -3044,7 +3050,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                     <div className="mt-4 flex items-center gap-2">
                         <input
-                            className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                            className="flex-1 rounded-xl border px-3 py-2 text-base"
                             value={globalAiInput}
                             onChange={(event) => setGlobalAiInput(event.target.value)}
                             onKeyDown={(event) => {
