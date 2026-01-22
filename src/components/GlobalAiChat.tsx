@@ -6,9 +6,9 @@ import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import type { CardProposal, Lang } from "@/lib/cards/proposals";
 import {
-  buildProposalsFromChat,
-  detectSaveIntent,
-  ProposalStatus,
+    buildProposalsFromChat,
+    detectSaveIntent,
+    ProposalStatus,
 } from "@/lib/cards/proposals";
 
 type Props = {
@@ -18,9 +18,9 @@ type Props = {
 };
 
 type ProposalMessage = {
-  kind: "proposal";
-  role: "assistant";
-  proposals: Array<CardProposal & { status: ProposalStatus }>;
+    kind: "proposal";
+    role: "assistant";
+    proposals: Array<CardProposal & { status: ProposalStatus }>;
 };
 
 type TextMessage = {
@@ -194,25 +194,27 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
 
         if (detectSaveIntent(text)) {
             const result = buildProposalsFromChat(text, textHistory);
-            setMessages((prev) => [
-                ...prev,
-                {
-                    kind: "proposal",
-                    role: "assistant",
-                    proposals: result.proposals.map((proposal) => ({
-                        ...proposal,
-                        status: { state: "idle" },
-                    })),
-                },
-                ...(result.followUpText
-                    ? [{
-                        kind: "text" as const,
-                        role: "assistant" as const,
-                        text: result.followUpText
-                    },
-                    ]
-                    : []),
-            ]);
+            setMessages((prev) => {
+                const next: Msg[] = [...prev];
+                if (result.proposals.length > 0) {
+                    next.push({
+                        kind: "proposal",
+                        role: "assistant",
+                        proposals: result.proposals.map((proposal) => ({
+                            ...proposal,
+                            status: { state: "idle" },
+                        })),
+                    });
+                }
+                if (result.followUpText) {
+                    next.push({
+                        kind: "text",
+                        role: "assistant",
+                        text: result.followUpText,
+                    });
+                }
+                return next;
+            });
             setIsSending(false);
             inputRef.current?.focus();
             return;
@@ -254,11 +256,11 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         <>
             {open ? (
                 <div
-                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay p-4 sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay-focus p-4 backdrop-blur-md sm:items-center"
                     onClick={close}
                 >
                     <div
-                        className="w-full max-w-xl rounded-2xl border border-soft bg-surface-elevated p-4 shadow-warm"
+                        className="w-full max-w-xl rounded-2xl border border-strong bg-surface-elevated p-4 shadow-warm ring-1 ring-[color:var(--accent-secondary)]/40"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="mb-3 flex items-center justify-between">
@@ -269,14 +271,19 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                 </p>
                             </div>
 
-                            <button
-                                type="button"
-                                aria-label="Schließen"
-                                className="rounded-full border border-soft px-3 py-1 text-sm text-muted transition hover:bg-surface"
-                                onClick={close}
-                            >
-                                ✕
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
+                                    KI aktiv
+                                </span>
+                                <button
+                                    type="button"
+                                    aria-label="Schließen"
+                                    className="rounded-full border border-soft px-3 py-1 text-sm text-muted transition hover:bg-surface"
+                                    onClick={close}
+                                >
+                                    ✕
+                                </button>
+                            </div>
                         </div>
 
                         {/* Chat Verlauf: erst anzeigen, wenn es mindestens 1 Message gibt */}

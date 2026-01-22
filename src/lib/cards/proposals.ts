@@ -1,16 +1,16 @@
 export type Lang = "sw" | "de";
 
 export type CardProposal = {
-  id: string;
-  type: "vocab" | "sentence";
-  front_lang: Lang;
-  back_lang: Lang;
-  front_text: string;
-  back_text: string;
-  missing_back?: boolean;
-  tags?: string[];
-  notes?: string;
-  source_context_snippet?: string;
+    id: string;
+    type: "vocab" | "sentence";
+    front_lang: Lang;
+    back_lang: Lang;
+    front_text: string;
+    back_text: string;
+    missing_back?: boolean;
+    tags?: string[];
+    notes?: string;
+    source_context_snippet?: string;
 };
 
 export type ProposalStatus =
@@ -23,6 +23,7 @@ export type ProposalStatus =
 const SAVE_INTENT = [
     "speicher",
     "speichern",
+    "abspeichern",
     "anlegen",
     "hinzufügen",
     "hinzufugen",
@@ -39,6 +40,43 @@ const SAVE_INTENT = [
     "add",
 ];
 
+const STOP_WORDS = new Set([
+    "kannst",
+    "kann",
+    "du",
+    "dir",
+    "mir",
+    "mich",
+    "bitte",
+    "das",
+    "den",
+    "die",
+    "der",
+    "ein",
+    "eine",
+    "einen",
+    "einem",
+    "einer",
+    "mal",
+    "für",
+    "zu",
+    "von",
+    "im",
+    "in",
+    "auf",
+    "am",
+    "an",
+    "als",
+    "dass",
+    "schon",
+    "nur",
+    "auch",
+    "einfach",
+    "doch",
+    "okay",
+    "ok",
+]);
+
 function looksLikeSentence(text: string) {
     return text.trim().split(/\s+/).length > 2 || /[.!?]$/.test(text.trim());
 }
@@ -49,15 +87,28 @@ function extractQuoted(text: string) {
     return match[1] ?? match[2] ?? match[3] ?? null;
 }
 
+function normalize(text: string) {
+    return text.toLowerCase().replace(/[.,!?;:()]/g, "").trim();
+}
+
 function extractCandidateFromUser(text: string) {
     const quoted = extractQuoted(text);
     if (quoted) return quoted.trim();
+
     const cleaned = text
-        .replace(/[.,!?]/g, " ")
-        .replace(/\b(speicher(n|e)?|anlegen|hinzuf(ü|u)gen|merk dir|merken|karte|flashcard|vokabel|satz|add)\b/gi, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    return cleaned || null;
+        .replace(/[.,!?;:()]/g, " ")
+        .replace(
+            /\b(speicher(n|e)?|abspeichern|anlegen|hinzuf(ü|u)gen|merk dir|merken|karte|flashcard|vokabel|satz|add)\b/gi,
+            " "
+        )
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter(Boolean)
+        .filter((word) => !STOP_WORDS.has(word.toLowerCase()));
+
+    if (cleaned.length === 0) return null;
+    const candidate = cleaned.slice(-4).join(" ");
+    return candidate.trim() || null;
 }
 
 function parseAssistantPairs(text: string) {
@@ -67,11 +118,32 @@ function parseAssistantPairs(text: string) {
         .map((line) => line.trim())
         .filter(Boolean);
 
+    const stripListPrefix = (value: string) =>
+        value.replace(/^[-*•\d+.)\s]+/g, "").trim();
+
     for (const line of lines) {
+        const labeled = line.match(/swahili\s*[:\-]\s*([^|,;]+)[,|;]\s*de(utsch)?\s*[:\-]\s*(.+)/i);
+        if (labeled?.[1] && labeled?.[3]) {
+            pairs.push({
+                sw: stripListPrefix(labeled[1].trim()),
+                de: stripListPrefix(labeled[3].trim()),
+            });
+            continue;
+        }
+
+        const labeledReverse = line.match(/de(utsch)?\s*[:\-]\s*([^|,;]+)[,|;]\s*swahili\s*[:\-]\s*(.+)/i);
+        if (labeledReverse?.[2] && labeledReverse?.[3]) {
+            pairs.push({
+                sw: stripListPrefix(labeledReverse[3].trim()),
+                de: stripListPrefix(labeledReverse[2].trim()),
+            });
+            continue;
+        }
+
         const dashMatch = line.match(/(.+?)\s*[-–—:]\s*(.+)$/);
         if (dashMatch) {
-            const left = dashMatch[1].trim();
-            const right = dashMatch[2].trim();
+            const left = stripListPrefix(dashMatch[1].trim());
+            const right = stripListPrefix(dashMatch[2].trim());
             if (left && right) {
                 pairs.push({ sw: left, de: right });
                 continue;
@@ -96,13 +168,15 @@ function findTranslationFromContext(
     candidate: string,
     messages: Array<{ role: "user" | "assistant"; text: string }>
 ) {
-    const normalized = candidate.toLowerCase();
+    const normalized = normalize(candidate);
     for (let i = messages.length - 1; i >= 0; i -= 1) {
         const message = messages[i];
         if (message.role !== "assistant") continue;
         const pairs = parseAssistantPairs(message.text);
         for (const pair of pairs) {
-            if (pair.sw.toLowerCase().includes(normalized)) {
+            const swNorm = normalize(pair.sw);
+            const deNorm = normalize(pair.de);
+            if (swNorm.includes(normalized) || deNorm.includes(normalized)) {
                 return { sw: pair.sw, de: pair.de, snippet: message.text };
             }
         }
@@ -134,24 +208,15 @@ export function buildProposalsFromChat(
                 back_text: fromContext.de,
                 source_context_snippet: fromContext.snippet.slice(0, 240),
             });
-        } else {
-            proposals.push({
-                id: crypto.randomUUID(),
-                type: looksLikeSentence(candidate) ? "sentence" : "vocab",
-                front_lang: "sw",
-                back_lang: "de",
-                front_text: candidate,
-                back_text: "",
-                missing_back: true,
-            });
         }
 
         return {
             proposals,
-            needsFollowUp: proposals.some((p) => p.missing_back),
-            followUpText: proposals.some((p) => p.missing_back)
-                ? "Was soll die deutsche Seite sein?"
-                : undefined,
+            needsFollowUp: proposals.length === 0,
+            followUpText:
+                proposals.length === 0
+                    ? `Was ist die swahilische Übersetzung von „${candidate}“?`
+                    : undefined,
         };
     }
 
@@ -171,23 +236,9 @@ export function buildProposalsFromChat(
         });
     }
 
-    if (proposals.length === 0) {
-        proposals.push({
-            id: crypto.randomUUID(),
-            type: "vocab",
-            front_lang: "sw",
-            back_lang: "de",
-            front_text: "",
-            back_text: "",
-            missing_back: true,
-        });
-    }
-
     return {
         proposals,
-        needsFollowUp: proposals.some((p) => p.missing_back),
-        followUpText: proposals.some((p) => p.missing_back)
-            ? "Was soll die deutsche Seite sein?"
-            : undefined,
+        needsFollowUp: proposals.length === 0,
+        followUpText: proposals.length === 0 ? "Welches Wort soll ich speichern?" : undefined,
     };
 }

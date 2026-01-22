@@ -1863,17 +1863,23 @@ export default function TrainerClient({ ownerKey }: Props) {
                     ? [mkText("assistant", result.followUpText)]
                     : [];
 
+                const proposalMessages =
+                    result.proposals.length > 0
+                        ? [
+                            mkProposal(
+                                result.proposals.map((proposal) => ({
+                                    ...proposal,
+                                    status: { state: "idle" },
+                                }))
+                            ),
+                        ]
+                        : [];
                 return {
                     ...prev,
                     loading: false,
                     messages: [
                         ...prev.messages,
-                        mkProposal(
-                            result.proposals.map((proposal) => ({
-                                ...proposal,
-                                status: { state: "idle" },
-                            }))
-                        ),
+                        ...proposalMessages,
                         ...followUp,
                     ],
                 };
@@ -1956,14 +1962,20 @@ export default function TrainerClient({ ownerKey }: Props) {
                     ? [mkText("assistant", result.followUpText)]
                     : [];
 
+                const proposalMessages =
+                    result.proposals.length > 0
+                        ? [
+                            mkProposal(
+                                result.proposals.map((proposal) => ({
+                                    ...proposal,
+                                    status: { state: "idle" },
+                                }))
+                            ),
+                        ]
+                        : [];
                 return [
                     ...prev,
-                    mkProposal(
-                        result.proposals.map((proposal) => ({
-                            ...proposal,
-                            status: { state: "idle" },
-                        }))
-                    ),
+                    ...proposalMessages,
                     ...followUp,
                 ];
             });
@@ -3177,7 +3189,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                     {aiOpen ? (
                         <div
-                            className="fixed inset-0 z-50 flex items-center justify-center bg-accent-primary/40 p-4"
+                            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-focus p-4 backdrop-blur-md"
                             onClick={() =>
                                 setAiState((prev) => ({
                                     ...prev,
@@ -3187,7 +3199,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             }
                         >
                             <div
-                                className="flex w-full max-w-xl flex-col rounded-2xl bg-surface p-6 shadow-warm max-h-[80vh]"
+                                className="flex w-full max-w-xl flex-col rounded-2xl border border-strong bg-surface-elevated p-6 shadow-warm ring-1 ring-[color:var(--accent-secondary)]/40 max-h-[80vh]"
                                 onClick={(event) => event.stopPropagation()}
                                 role="dialog"
                                 aria-modal="true"
@@ -3201,19 +3213,24 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </div>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        className="rounded-full border px-3 py-1 text-sm"
-                                        onClick={() =>
-                                            setAiState((prev) => ({
-                                                ...prev,
-                                                open: false,
-                                                error: null,
-                                            }))
-                                        }
-                                    >
-                                        Schließen
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
+                                            KI aktiv
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border px-3 py-1 text-sm"
+                                            onClick={() =>
+                                                setAiState((prev) => ({
+                                                    ...prev,
+                                                    open: false,
+                                                    error: null,
+                                                }))
+                                            }
+                                        >
+                                            Schließen
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* ✅ Chat-History erst zeigen, wenn es Messages gibt */}
@@ -3357,8 +3374,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                     title="KI"
                     onClose={() => setOpenGlobalAI(false)}
                 >
-                    <div className="text-xs text-muted">
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted">
                         Kurze Antworten mit Beispielen.
+                        <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
+                            KI aktiv
+                        </span>
                     </div>
 
                     {globalAiMessages.length === 0 ? (
