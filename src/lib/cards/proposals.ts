@@ -24,6 +24,7 @@ const SAVE_INTENT = [
     "speicher",
     "speichern",
     "abspeichern",
+    "ablegen",
     "anlegen",
     "hinzufügen",
     "hinzufugen",
@@ -37,17 +38,22 @@ const SAVE_INTENT = [
     "leg mir",
     "leg das",
     "leg",
+    "neu anlegen",
     "add",
 ];
 
 const STOP_WORDS = new Set([
     "kannst",
     "kann",
+    "könntest",
     "du",
     "dir",
     "mir",
     "mich",
+    "dich",
     "bitte",
+    "dann",
+    "jetzt",
     "das",
     "den",
     "die",
@@ -66,6 +72,7 @@ const STOP_WORDS = new Set([
     "auf",
     "am",
     "an",
+    "ab",
     "als",
     "dass",
     "schon",
@@ -76,6 +83,19 @@ const STOP_WORDS = new Set([
     "okay",
     "ok",
 ]);
+
+const SAVE_TOKEN_PATTERNS = [
+    /^speicher/i,
+    /^abspeicher/i,
+    /^ableg/i,
+    /^anleg/i,
+    /^hinzuf/i,
+    /^add$/i,
+    /^karte$/i,
+    /^flashcard$/i,
+    /^vokabel$/i,
+    /^satz$/i,
+];
 
 function looksLikeSentence(text: string) {
     return text.trim().split(/\s+/).length > 2 || /[.!?]$/.test(text.trim());
@@ -95,20 +115,39 @@ function extractCandidateFromUser(text: string) {
     const quoted = extractQuoted(text);
     if (quoted) return quoted.trim();
 
-    const cleaned = text
+    const tokens = text
         .replace(/[.,!?;:()]/g, " ")
-        .replace(
-            /\b(speicher(n|e)?|abspeichern|anlegen|hinzuf(ü|u)gen|merk dir|merken|karte|flashcard|vokabel|satz|add)\b/gi,
-            " "
-        )
         .split(/\s+/)
         .map((word) => word.trim())
-        .filter(Boolean)
-        .filter((word) => !STOP_WORDS.has(word.toLowerCase()));
+        .filter(Boolean);
 
-    if (cleaned.length === 0) return null;
-    const candidate = cleaned.slice(-4).join(" ");
-    return candidate.trim() || null;
+    const contentTokens = tokens.filter((token) => {
+        const lower = token.toLowerCase();
+        if (STOP_WORDS.has(lower)) return false;
+        if (SAVE_TOKEN_PATTERNS.some((pattern) => pattern.test(lower))) return false;
+        return true;
+    });
+
+    if (contentTokens.length === 0) return null;
+
+    let candidate = contentTokens[contentTokens.length - 1];
+
+    if (contentTokens.length === 2) {
+        candidate = contentTokens.join(" ");
+    } else if (contentTokens.length > 2) {
+        const lastTwo = contentTokens.slice(-2);
+        const lastTwoCombined = lastTwo.join(" ");
+        candidate = looksLikeSentence(lastTwoCombined)
+            ? lastTwoCombined
+            : contentTokens.reduce((longest, token) => (token.length > longest.length ? token : longest));
+    }
+
+    const trimmedCandidate = candidate.trim();
+    if (trimmedCandidate.split(/\s+/).length > 2 && !looksLikeSentence(trimmedCandidate)) {
+        return trimmedCandidate.split(/\s+/).reduce((longest, token) => (token.length > longest.length ? token : longest));
+    }
+
+    return trimmedCandidate || null;
 }
 
 function parseAssistantPairs(text: string) {
@@ -164,6 +203,24 @@ function parseAssistantPairs(text: string) {
     return pairs;
 }
 
+function guessLang(candidate: string): Lang {
+    const normalized = candidate.trim().toLowerCase();
+    if (/[äöüß]/.test(normalized)) return "de";
+    if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) return "de";
+    if (/(chen|lein|ung|keit|heit|schaft|tion|ismus|ieren|lich|ig|isch|en|er)$/.test(normalized)) return "de";
+    if (/^[a-z\s'-]+$/.test(normalized)) return "sw";
+    return "sw";
+}
+
+// Inline examples:
+// "speicher mfuko" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "Dann speicher mir mal bitte mfuko ab" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "bitte chombo speichern" -> candidate: "chombo", lang: "sw", follow-up: Was bedeutet „chombo“ auf Deutsch?
+// "Kannst du mir Hund abspeichern" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
+// "Speicher 'Hund'" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
+// "Speicher 'mfuko'" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "Speicher den Satz: Ninapenda chai" -> candidate: "Ninapenda chai", lang: "sw", follow-up: Was bedeutet „Ninapenda chai“ auf Deutsch?
+
 function findTranslationFromContext(
     candidate: string,
     messages: Array<{ role: "user" | "assistant"; text: string }>
@@ -197,6 +254,7 @@ export function buildProposalsFromChat(
     const proposals: CardProposal[] = [];
 
     if (candidate) {
+        const guessedLang = guessLang(candidate);
         const fromContext = findTranslationFromContext(candidate, messages);
         if (fromContext) {
             proposals.push({
@@ -210,12 +268,26 @@ export function buildProposalsFromChat(
             });
         }
 
+        if (proposals.length === 0) {
+            proposals.push({
+                id: crypto.randomUUID(),
+                type: looksLikeSentence(candidate) ? "sentence" : "vocab",
+                front_lang: guessedLang,
+                back_lang: guessedLang === "sw" ? "de" : "sw",
+                front_text: candidate,
+                back_text: "",
+                missing_back: true,
+            });
+        }
+
         return {
             proposals,
-            needsFollowUp: proposals.length === 0,
+            needsFollowUp: proposals.some((proposal) => proposal.missing_back),
             followUpText:
-                proposals.length === 0
-                    ? `Was ist die swahilische Übersetzung von „${candidate}“?`
+                proposals.some((proposal) => proposal.missing_back)
+                    ? guessedLang === "sw"
+                        ? `Was bedeutet „${candidate}“ auf Deutsch?`
+                        : `Wie lautet das swahilische Wort für „${candidate}“?`
                     : undefined,
         };
     }

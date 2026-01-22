@@ -256,11 +256,11 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         <>
             {open ? (
                 <div
-                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay-focus p-4 backdrop-blur-md sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-[rgba(0,0,0,0.32)] p-4 sm:items-center"
                     onClick={close}
                 >
                     <div
-                        className="w-full max-w-xl rounded-2xl border border-strong bg-surface-elevated p-4 shadow-warm ring-1 ring-[color:var(--accent-secondary)]/40"
+                        className="w-full max-w-xl rounded-2xl border-2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="mb-3 flex items-center justify-between">
@@ -272,7 +272,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                             </div>
 
                             <div className="flex items-center gap-2">
-                                <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
+                                <span className="rounded-full border border-[rgba(255,240,220,0.45)] bg-[rgba(255,240,220,0.1)] px-2 py-1 text-[11px] font-semibold text-[rgba(255,240,220,0.8)]">
                                     KI aktiv
                                 </span>
                                 <button

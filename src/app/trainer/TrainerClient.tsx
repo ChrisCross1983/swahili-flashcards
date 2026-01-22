@@ -3189,7 +3189,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                     {aiOpen ? (
                         <div
-                            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-focus p-4 backdrop-blur-md"
+                            className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
                             onClick={() =>
                                 setAiState((prev) => ({
                                     ...prev,
@@ -3199,7 +3199,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             }
                         >
                             <div
-                                className="flex w-full max-w-xl flex-col rounded-2xl border border-strong bg-surface-elevated p-6 shadow-warm ring-1 ring-[color:var(--accent-secondary)]/40 max-h-[80vh]"
+                                className="flex w-full max-w-xl flex-col rounded-2xl border -2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)] max-h-[80vh]"
                                 onClick={(event) => event.stopPropagation()}
                                 role="dialog"
                                 aria-modal="true"
@@ -3214,7 +3214,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </div>
 
                                     <div className="flex items-center gap-2">
-                                        <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
+                                        <span className="rounded-full border border-[rgba(255,240,220,0.45)] bg-[rgba(255,240,220,0.1)] px-2 py-1 text-[11px] font-semibold text-[rgba(255,240,220,0.8)]">
                                             KI aktiv
                                         </span>
                                         <button
