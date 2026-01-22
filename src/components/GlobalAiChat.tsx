@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import ChatProposal from "@/components/ChatProposal";
+import { useAutoScroll } from "@/hooks/useAutoScroll";
+import type { CardProposal, Lang } from "@/lib/cards/proposals";
+import {
+  buildProposalsFromChat,
+  detectSaveIntent,
+  ProposalStatus,
+} from "@/lib/cards/proposals";
 
 type Props = {
     ownerKey: string;
@@ -9,10 +17,19 @@ type Props = {
     onClose: () => void;
 };
 
-type Msg = {
+type ProposalMessage = {
+  kind: "proposal";
+  role: "assistant";
+  proposals: Array<CardProposal & { status: ProposalStatus }>;
+};
+
+type TextMessage = {
+    kind: "text";
     role: "user" | "assistant";
     text: string;
 };
+
+type Msg = ProposalMessage | TextMessage;
 
 export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
     const [mounted, setMounted] = useState(false);
@@ -22,7 +39,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
     const [error, setError] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement | null>(null);
-    const messagesEndRef = useRef<HTMLDivElement | null>(null);
+    const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
 
     useEffect(() => setMounted(true), []);
 
@@ -31,13 +48,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         inputRef.current?.focus();
     }, [open]);
 
-    useEffect(() => {
-        if (!open) return;
-        const rafId = requestAnimationFrame(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        });
-        return () => cancelAnimationFrame(rafId);
-    }, [messages, open]);
+    const textHistory = messages
+        .filter((message): message is TextMessage => message.kind === "text")
+        .map((message) => ({ role: message.role, text: message.text }));
 
     const close = useCallback(() => {
         setError(null);
@@ -58,6 +71,117 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         return () => document.removeEventListener("keydown", onKey);
     }, [open, close]);
 
+    const updateProposal = useCallback(
+        (
+            proposalId: string,
+            updater: (proposal: ProposalMessage["proposals"][number]) => ProposalMessage["proposals"][number]
+        ) => {
+            setMessages((prev) =>
+                prev.map((message) => {
+                    if (message.kind !== "proposal") return message;
+                    return {
+                        ...message,
+                        proposals: message.proposals.map((proposal) =>
+                            proposal.id === proposalId ? updater(proposal) : proposal
+                        ),
+                    };
+                })
+            );
+        },
+        []
+    );
+
+    const removeProposal = useCallback((proposalId: string) => {
+        setMessages((prev) =>
+            prev
+                .map((message) => {
+                    if (message.kind !== "proposal") return message;
+                    return {
+                        ...message,
+                        proposals: message.proposals.filter(
+                            (proposal) => proposal.id !== proposalId
+                        ),
+                    };
+                })
+                .filter((message) =>
+                    message.kind === "proposal" ? message.proposals.length > 0 : true
+                )
+        );
+    }, []);
+
+    const handleSave = useCallback(
+        async (proposalId: string) => {
+            const proposalMessage = messages.find(
+                (message) => message.kind === "proposal" && message.proposals.some((p) => p.id === proposalId)
+            ) as ProposalMessage | undefined;
+
+            const proposal = proposalMessage?.proposals.find((p) => p.id === proposalId);
+            if (!proposal || proposal.missing_back) return;
+
+            updateProposal(proposalId, (current) => ({
+                ...current,
+                status: { state: "saving" },
+            }));
+
+            try {
+                const res = await fetch("/api/cards/create", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ownerKey,
+                        type: proposal.type,
+                        front_text: proposal.front_text,
+                        back_text: proposal.back_text,
+                        front_lang: proposal.front_lang,
+                        back_lang: proposal.back_lang,
+                        source: "chat",
+                        context: proposal.source_context_snippet,
+                        tags: proposal.tags ?? [],
+                        notes: proposal.notes ?? null,
+                    }),
+                });
+
+                const json = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    updateProposal(proposalId, (current) => ({
+                        ...current,
+                        status: {
+                            state: "error",
+                            message: json?.error ?? "Speichern fehlgeschlagen.",
+                        },
+                    }));
+                    return;
+                }
+
+                if (json.status === "exists") {
+                    updateProposal(proposalId, (current) => ({
+                        ...current,
+                        status: {
+                            state: "exists",
+                            existingId: json.existing_id,
+                        },
+                    }));
+                    return;
+                }
+
+                updateProposal(proposalId, (current) => ({
+                    ...current,
+                    status: { state: "saved", id: json.id },
+                }));
+            } catch {
+                updateProposal(proposalId, (current) => ({
+                    ...current,
+                    status: {
+                        state: "error",
+                        message: "Speichern fehlgeschlagen.",
+                    },
+                }));
+            }
+        },
+        [messages, ownerKey, updateProposal]
+    );
+
     const send = useCallback(async () => {
         const text = input.trim();
         if (!text || isSending) return;
@@ -65,8 +189,34 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         setIsSending(true);
         setError(null);
 
-        setMessages((prev) => [...prev, { role: "user", text }]);
+        setMessages((prev) => [...prev, { kind: "text", role: "user", text }]);
         setInput("");
+
+        if (detectSaveIntent(text)) {
+            const result = buildProposalsFromChat(text, textHistory);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    kind: "proposal",
+                    role: "assistant",
+                    proposals: result.proposals.map((proposal) => ({
+                        ...proposal,
+                        status: { state: "idle" },
+                    })),
+                },
+                ...(result.followUpText
+                    ? [{
+                        kind: "text" as const,
+                        role: "assistant" as const,
+                        text: result.followUpText
+                    },
+                    ]
+                    : []),
+            ]);
+            setIsSending(false);
+            inputRef.current?.focus();
+            return;
+        }
 
         try {
             const r = await fetch("/api/ai/chat", {
@@ -86,14 +236,17 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                 return;
             }
 
-            setMessages((prev) => [...prev, { role: "assistant", text: String(data.answer) }]);
+            setMessages((prev) => [
+                ...prev,
+                { kind: "text", role: "assistant", text: String(data.answer) },
+            ]);
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
         } finally {
             setIsSending(false);
             inputRef.current?.focus();
         }
-    }, [input, isSending, ownerKey]);
+    }, [input, isSending, ownerKey, textHistory]);
 
     if (!mounted || !document?.body) return null;
 
@@ -131,16 +284,52 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                             <div className="mb-3 max-h-72 overflow-y-auto rounded-xl border border-soft bg-surface p-3 [overflow-anchor:none]">
                                 <div className="flex flex-col gap-2">
                                     {messages.map((m, idx) => (
-                                        <div
-                                            key={idx}
-                                            className={[
-                                                "rounded-xl px-3 py-2 text-sm leading-5",
-                                                m.role === "user"
-                                                    ? "self-end bg-accent-secondary text-on-accent"
-                                                    : "self-start bg-surface text-primary border border-soft",
-                                            ].join(" ")}
-                                        >
-                                            {m.text}
+                                        <div key={idx} className="flex flex-col">
+                                            {m.kind === "text" ? (
+                                                <div
+                                                    className={[
+                                                        "rounded-xl px-3 py-2 text-sm leading-5",
+                                                        m.role === "user"
+                                                            ? "self-end bg-accent-secondary text-on-accent"
+                                                            : "self-start bg-surface text-primary border border-soft",
+                                                    ].join(" ")}
+                                                >
+                                                    {m.text}
+                                                </div>
+                                            ) : (
+                                                <div className="self-start w-full">
+                                                    <div className="mb-2 text-xs text-muted">
+                                                        Vorschläge aus dem Chat (No auto-save; always confirm)
+                                                    </div>
+                                                    <div className="flex flex-col gap-3">
+                                                        {m.proposals.map((proposal) => (
+                                                            <ChatProposal
+                                                                key={proposal.id}
+                                                                proposal={proposal}
+                                                                status={proposal.status}
+                                                                onUpdate={(update) =>
+                                                                    updateProposal(proposal.id, (current) => ({
+                                                                        ...current,
+                                                                        ...update,
+                                                                    }))
+                                                                }
+                                                                onSave={() => void handleSave(proposal.id)}
+                                                                onDiscard={() => removeProposal(proposal.id)}
+                                                                onSwap={() =>
+                                                                    updateProposal(proposal.id, (current) => ({
+                                                                        ...current,
+                                                                        front_text: current.back_text,
+                                                                        back_text: current.front_text,
+                                                                        front_lang: current.back_lang,
+                                                                        back_lang: current.front_lang,
+                                                                        missing_back: current.back_text.trim().length === 0,
+                                                                    }))
+                                                                }
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                     <div ref={messagesEndRef} />
