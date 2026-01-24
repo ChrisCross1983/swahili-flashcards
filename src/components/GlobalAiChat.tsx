@@ -8,6 +8,8 @@ import type { CardProposal, Lang } from "@/lib/cards/proposals";
 import {
     buildProposalsFromChat,
     detectSaveIntent,
+    extractConceptsFromAssistantText,
+    LastExplainedConcept,
     ProposalStatus,
 } from "@/lib/cards/proposals";
 
@@ -37,6 +39,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
     const [input, setInput] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [lastExplainedConcepts, setLastExplainedConcepts] = useState<
+        LastExplainedConcept[]
+    >([]);
 
     const inputRef = useRef<HTMLInputElement | null>(null);
     const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
@@ -182,6 +187,54 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         [messages, ownerKey, updateProposal]
     );
 
+    const checkExisting = useCallback(
+        async (proposal: CardProposal) => {
+            const german =
+                proposal.front_lang === "de"
+                    ? proposal.front_text
+                    : proposal.back_lang === "de"
+                        ? proposal.back_text
+                        : "";
+            const swahili =
+                proposal.front_lang === "sw"
+                    ? proposal.front_text
+                    : proposal.back_lang === "sw"
+                        ? proposal.back_text
+                        : "";
+
+            if (!german && !swahili) {
+                return false;
+            }
+
+            try {
+                const res = await fetch("/api/cards/check-existing", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ownerKey,
+                        german: german || undefined,
+                        swahili: swahili || undefined,
+                    }),
+                });
+
+                const json = await res.json().catch(() => ({}));
+
+                if (!res.ok) return false;
+                return Boolean(json?.exists);
+            } catch {
+                return false;
+            }
+        },
+        [ownerKey]
+    );
+
+    const updateLastConceptsFromAnswer = useCallback((answer: string) => {
+        const concepts = extractConceptsFromAssistantText(answer, "answer");
+        if (concepts.length > 0) {
+            setLastExplainedConcepts(concepts);
+        }
+    }, []);
+
     const send = useCallback(async () => {
         const text = input.trim();
         if (!text || isSending) return;
@@ -193,20 +246,50 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         setInput("");
 
         if (detectSaveIntent(text)) {
-            const result = buildProposalsFromChat(text, textHistory);
+            const result = buildProposalsFromChat(
+                text,
+                textHistory,
+                lastExplainedConcepts
+            );
+            const existingChecks = await Promise.all(
+                result.proposals.map(async (proposal) => ({
+                    proposal,
+                    exists: await checkExisting(proposal),
+                }))
+            );
+
+            const existingMessages = existingChecks
+                .filter((item) => item.exists)
+                .map(
+                    (item) =>
+                        `„${item.proposal.front_text}“ hast du schon gespeichert.`
+                );
+            const remainingProposals = existingChecks
+                .filter((item) => !item.exists)
+                .map((item) => item.proposal);
             setMessages((prev) => {
                 const next: Msg[] = [...prev];
-                if (result.proposals.length > 0) {
+                existingMessages.forEach((message) => {
+                    next.push({
+                        kind: "text",
+                        role: "assistant",
+                        text: message,
+                    });
+                });
+                if (remainingProposals.length > 0) {
                     next.push({
                         kind: "proposal",
                         role: "assistant",
-                        proposals: result.proposals.map((proposal) => ({
+                        proposals: remainingProposals.map((proposal) => ({
                             ...proposal,
                             status: { state: "idle" },
                         })),
                     });
                 }
-                if (result.followUpText) {
+                if (
+                    result.followUpText &&
+                    (remainingProposals.length > 0 || result.proposals.length === 0)
+                ) {
                     next.push({
                         kind: "text",
                         role: "assistant",
@@ -242,13 +325,22 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                 ...prev,
                 { kind: "text", role: "assistant", text: String(data.answer) },
             ]);
+            updateLastConceptsFromAnswer(String(data.answer));
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
         } finally {
             setIsSending(false);
             inputRef.current?.focus();
         }
-    }, [input, isSending, ownerKey, textHistory]);
+    }, [
+        checkExisting,
+        input,
+        isSending,
+        lastExplainedConcepts,
+        ownerKey,
+        textHistory,
+        updateLastConceptsFromAnswer,
+    ]);
 
     if (!mounted || !document?.body) return null;
 

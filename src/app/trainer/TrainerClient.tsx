@@ -16,6 +16,8 @@ import {
 } from "@/lib/leitner";
 import {
     buildProposalsFromChat,
+    extractConceptsFromAssistantText,
+    LastExplainedConcept,
     detectSaveIntent,
     ProposalStatus,
 } from "@/lib/cards/proposals";
@@ -27,6 +29,19 @@ type Props = {
 };
 
 type Lang = "sw" | "de";
+
+type ProposalDraft = {
+    id: string;
+    type: "vocab" | "sentence";
+    front_lang: Lang;
+    back_lang: Lang;
+    front_text: string;
+    back_text: string;
+    missing_back?: boolean;
+    tags?: string[];
+    notes?: string;
+    source_context_snippet?: string;
+};
 
 type ProposalMessage = {
     kind: "proposal";
@@ -134,6 +149,11 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
     const [openGlobalAI, setOpenGlobalAI] = useState(false);
+    const [aiLastExplainedConcepts, setAiLastExplainedConcepts] = useState<
+        LastExplainedConcept[]
+    >([]);
+    const [globalLastExplainedConcepts, setGlobalLastExplainedConcepts] =
+        useState<LastExplainedConcept[]>([]);
     const [globalAiInput, setGlobalAiInput] = useState("");
     const [globalAiLoading, setGlobalAiLoading] = useState(false);
     const [globalAiError, setGlobalAiError] = useState<string | null>(null);
@@ -1844,6 +1864,57 @@ export default function TrainerClient({ ownerKey }: Props) {
         [globalAiMessages, ownerKey, updateGlobalProposal]
     );
 
+    const checkExistingForProposal = useCallback(
+        async (proposal: ProposalDraft) => {
+            const german =
+                proposal.front_lang === "de"
+                    ? proposal.front_text
+                    : proposal.back_lang === "de"
+                        ? proposal.back_text
+                        : "";
+            const swahili =
+                proposal.front_lang === "sw"
+                    ? proposal.front_text
+                    : proposal.back_lang === "sw"
+                        ? proposal.back_text
+                        : "";
+
+            if (!german && !swahili) return false;
+
+            try {
+                const res = await fetch("/api/cards/check-existing", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ownerKey,
+                        german: german || undefined,
+                        swahili: swahili || undefined,
+                    }),
+                });
+                const json = await res.json().catch(() => ({}));
+                if (!res.ok) return false;
+                return Boolean(json?.exists);
+            } catch {
+                return false;
+            }
+        },
+        [ownerKey]
+    );
+
+    const updateAiLastConcepts = useCallback((answer: string) => {
+        const concepts = extractConceptsFromAssistantText(answer, "answer");
+        if (concepts.length > 0) {
+            setAiLastExplainedConcepts(concepts);
+        }
+    }, []);
+
+    const updateGlobalLastConcepts = useCallback((answer: string) => {
+        const concepts = extractConceptsFromAssistantText(answer, "answer");
+        if (concepts.length > 0) {
+            setGlobalLastExplainedConcepts(concepts);
+        }
+    }, []);
+
     async function handleAiSend() {
         const trimmed = aiInput.trim();
         if (!trimmed || aiLoading) return;
@@ -1857,30 +1928,57 @@ export default function TrainerClient({ ownerKey }: Props) {
         }));
 
         if (detectSaveIntent(trimmed)) {
-            const result = buildProposalsFromChat(trimmed, aiTextHistory);
+            const result = buildProposalsFromChat(
+                trimmed,
+                aiTextHistory,
+                aiLastExplainedConcepts
+            );
+            const existingChecks = await Promise.all(
+                result.proposals.map(async (proposal) => ({
+                    proposal,
+                    exists: await checkExistingForProposal(proposal),
+                }))
+            );
+            const existingMessages = existingChecks
+                .filter((item) => item.exists)
+                .map(
+                    (item) =>
+                        `„${item.proposal.front_text}“ hast du schon gespeichert.`
+                );
+            const remainingProposals = existingChecks
+                .filter((item) => !item.exists)
+                .map((item) => item.proposal);
             setAiState((prev) => {
                 const followUp: ChatMessage[] = result.followUpText
-                    ? [mkText("assistant", result.followUpText)]
+                    ? [
+                        mkText("assistant", result.followUpText),
+                    ]
                     : [];
 
                 const proposalMessages =
-                    result.proposals.length > 0
+                    remainingProposals.length > 0
                         ? [
                             mkProposal(
-                                result.proposals.map((proposal) => ({
+                                remainingProposals.map((proposal) => ({
                                     ...proposal,
                                     status: { state: "idle" },
                                 }))
                             ),
                         ]
                         : [];
+                const existingNotes = existingMessages.map((message) =>
+                    mkText("assistant", message)
+                );
                 return {
                     ...prev,
                     loading: false,
                     messages: [
                         ...prev.messages,
+                        ...existingNotes,
                         ...proposalMessages,
-                        ...followUp,
+                        ...(remainingProposals.length > 0 || result.proposals.length === 0
+                            ? followUp
+                            : []),
                     ],
                 };
             });
@@ -1935,6 +2033,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 loading: false,
                 messages: [...prev.messages, { kind: "text", role: "assistant", text: answer }],
             }));
+            updateAiLastConcepts(answer);
         } catch {
             setAiState((prev) => ({
                 ...prev,
@@ -1956,27 +2055,54 @@ export default function TrainerClient({ ownerKey }: Props) {
         ]);
 
         if (detectSaveIntent(trimmed)) {
-            const result = buildProposalsFromChat(trimmed, globalTextHistory);
+            const result = buildProposalsFromChat(
+                trimmed,
+                globalTextHistory,
+                globalLastExplainedConcepts
+            );
+            const existingChecks = await Promise.all(
+                result.proposals.map(async (proposal) => ({
+                    proposal,
+                    exists: await checkExistingForProposal(proposal),
+                }))
+            );
+            const existingMessages = existingChecks
+                .filter((item) => item.exists)
+                .map(
+                    (item) =>
+                        `„${item.proposal.front_text}“ hast du schon gespeichert.`
+                );
+            const remainingProposals = existingChecks
+                .filter((item) => !item.exists)
+                .map((item) => item.proposal);
             setGlobalAiMessages((prev) => {
                 const followUp: ChatMessage[] = result.followUpText
-                    ? [mkText("assistant", result.followUpText)]
+                    ? [
+                        mkText("assistant", result.followUpText),
+                    ]
                     : [];
 
                 const proposalMessages =
-                    result.proposals.length > 0
+                    remainingProposals.length > 0
                         ? [
                             mkProposal(
-                                result.proposals.map((proposal) => ({
+                                remainingProposals.map((proposal) => ({
                                     ...proposal,
                                     status: { state: "idle" },
                                 }))
                             ),
                         ]
                         : [];
+                const existingNotes = existingMessages.map((message) =>
+                    mkText("assistant", message)
+                );
                 return [
                     ...prev,
+                    ...existingNotes,
                     ...proposalMessages,
-                    ...followUp,
+                    ...(remainingProposals.length > 0 || result.proposals.length === 0
+                        ? followUp
+                        : []),
                 ];
             });
             setGlobalAiInput("");
@@ -2014,6 +2140,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 ...prev,
                 { kind: "text", role: "assistant", text: answer },
             ]);
+            updateGlobalLastConcepts(answer);
             setGlobalAiInput("");
             setGlobalAiLoading(false);
         } catch {
@@ -3199,7 +3326,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             }
                         >
                             <div
-                                className="flex w-full max-w-xl flex-col rounded-2xl border -2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)] max-h-[80vh]"
+                                className="flex w-full max-w-xl flex-col rounded-2xl border-2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)] max-h-[80vh]"
                                 onClick={(event) => event.stopPropagation()}
                                 role="dialog"
                                 aria-modal="true"
@@ -3355,7 +3482,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
                         </div>
                     ) : null}
-
                     <ConfirmDialog
                         open={exitConfirmOpen}
                         title="Training beenden?"
@@ -3365,124 +3491,144 @@ export default function TrainerClient({ ownerKey }: Props) {
                         onCancel={() => setExitConfirmOpen(false)}
                         onConfirm={endSessionEarly}
                     />
-
                 </FullScreenSheet >
 
                 {/* Global AI Modal */}
-                <FullScreenSheet
-                    open={openGlobalAI}
-                    title="KI"
-                    onClose={() => setOpenGlobalAI(false)}
-                >
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted">
-                        Kurze Antworten mit Beispielen.
-                        <span className="rounded-full border border-strong bg-surface px-2 py-1 text-[11px] font-semibold text-accent-secondary">
-                            KI aktiv
-                        </span>
-                    </div>
-
-                    {globalAiMessages.length === 0 ? (
-                        <div className="mt-6 rounded-2xl border bg-surface p-6 text-center">
-                            <div className="text-lg font-semibold">
-                                Frag mich alles zu Swahili.
-                            </div>
-                            <div className="mt-2 text-sm text-muted">
-                                Ich helfe dir gern mit Übersetzungen, Beispielen und Grammatik.
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border bg-surface p-4 max-h-[50dvh] [overflow-anchor:none]">
-                            <div className="flex flex-col gap-3">
-                                {globalAiMessages.map((message, index) => (
-                                    <div key={`${message.role}-${index}`} className="flex flex-col">
-                                        {message.kind === "text" ? (
-                                            <div
-                                                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
-                                                    ? "self-end bg-accent-primary text-on-accent"
-                                                    : "self-start bg-surface text-primary"
-                                                    }`}
-                                            >
-                                                {message.text}
-                                            </div>
-                                        ) : (
-                                            <div className="self-start w-full">
-                                                <div className="mb-2 text-xs text-muted">
-                                                    Vorschläge aus dem Chat (No auto-save; always confirm)
-                                                </div>
-                                                <div className="flex flex-col gap-3">
-                                                    {message.proposals.map((proposal) => (
-                                                        <ChatProposal
-                                                            key={proposal.id}
-                                                            proposal={proposal}
-                                                            status={proposal.status}
-                                                            onUpdate={(update) =>
-                                                                updateGlobalProposal(proposal.id, (current) => ({
-                                                                    ...current,
-                                                                    ...update,
-                                                                }))
-                                                            }
-                                                            onSave={() => void handleGlobalSave(proposal.id)}
-                                                            onDiscard={() => removeGlobalProposal(proposal.id)}
-                                                            onSwap={() =>
-                                                                updateGlobalProposal(proposal.id, (current) => ({
-                                                                    ...current,
-                                                                    front_text: current.back_text,
-                                                                    back_text: current.front_text,
-                                                                    front_lang: current.back_lang,
-                                                                    back_lang: current.front_lang,
-                                                                    missing_back: current.back_text.trim().length === 0,
-                                                                }))
-                                                            }
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                                {globalAiLoading ? (
-                                    <div className="max-w-[85%] self-start rounded-2xl bg-surface px-3 py-2 text-sm text-muted">
-                                        …
-                                    </div>
-                                ) : null}
-                                <div ref={globalAiMessagesEndRef} />
-                            </div>
-                        </div>
-                    )}
-
-                    {globalAiError ? (
-                        <div className="mt-4 rounded-xl border border-cta bg-accent-cta-soft px-3 py-2 text-sm text-accent-cta">
-                            {globalAiError}
-                        </div>
-                    ) : null}
-
-                    <div className="mt-4 flex items-center gap-2">
-                        <input
-                            className="flex-1 rounded-xl border px-3 py-2 text-base"
-                            value={globalAiInput}
-                            onChange={(event) => setGlobalAiInput(event.target.value)}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" && !event.shiftKey) {
-                                    event.preventDefault();
-                                    void sendGlobalAiMessage();
-                                }
-                            }}
-                            placeholder="Frage eingeben…"
-                            disabled={globalAiLoading}
-                        />
-                        <button
-                            type="button"
-                            className={`rounded-xl px-4 py-2 text-sm text-white ${globalAiInput.trim().length > 0 && !globalAiLoading
-                                ? "bg-accent-primary text-on-accent"
-                                : "bg-[color:var(--border)] text-muted"
-                                }`}
-                            onClick={() => void sendGlobalAiMessage()}
-                            disabled={globalAiInput.trim().length === 0 || globalAiLoading}
+                {openGlobalAI ? (
+                    <div
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
+                        onClick={() => setOpenGlobalAI(false)}
+                    >
+                        <div
+                            className="flex w-full max-w-xl flex-col rounded-2xl border-2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)] max-h-[80vh]"
+                            onClick={(event) => event.stopPropagation()}
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Globaler KI-Chat"
                         >
-                            Senden
-                        </button>
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <div className="text-lg font-semibold">🦁 KI</div>
+                                    <div className="text-xs text-muted">
+                                        Kurze Antworten mit Beispielen.
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="rounded-full border border-[rgba(255,240,220,0.45)] bg-[rgba(255,240,220,0.1)] px-2 py-1 text-[11px] font-semibold text-[rgba(255,240,220,0.8)]">
+                                        KI aktiv
+                                    </span>
+                                    <button
+                                        type="button"
+                                        className="rounded-full border px-3 py-1 text-sm"
+                                        onClick={() => setOpenGlobalAI(false)}
+                                    >
+                                        Schließen
+                                    </button>
+                                </div>
+                            </div>
+                            {globalAiMessages.length === 0 ? (
+                                <div className="mt-6 rounded-2xl border bg-surface p-6 text-center">
+                                    <div className="text-lg font-semibold">
+                                        Frag mich alles zu Swahili.
+                                    </div>
+                                    <div className="mt-2 text-sm text-muted">
+                                        Ich helfe dir gern mit Übersetzungen, Beispielen und Grammatik.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border bg-surface p-4 max-h-[50dvh] [overflow-anchor:none]">
+                                    <div className="flex flex-col gap-3">
+                                        {globalAiMessages.map((message, index) => (
+                                            <div key={`${message.role}-${index}`} className="flex flex-col">
+                                                {message.kind === "text" ? (
+                                                    <div
+                                                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
+                                                            ? "self-end bg-accent-primary text-on-accent"
+                                                            : "self-start bg-surface text-primary"
+                                                            }`}
+                                                    >
+                                                        {message.text}
+                                                    </div>
+                                                ) : (
+                                                    <div className="self-start w-full">
+                                                        <div className="mb-2 text-xs text-muted">
+                                                            Vorschläge aus dem Chat (No auto-save; always confirm)
+                                                        </div>
+                                                        <div className="flex flex-col gap-3">
+                                                            {message.proposals.map((proposal) => (
+                                                                <ChatProposal
+                                                                    key={proposal.id}
+                                                                    proposal={proposal}
+                                                                    status={proposal.status}
+                                                                    onUpdate={(update) =>
+                                                                        updateGlobalProposal(proposal.id, (current) => ({
+                                                                            ...current,
+                                                                            ...update,
+                                                                        }))
+                                                                    }
+                                                                    onSave={() => void handleGlobalSave(proposal.id)}
+                                                                    onDiscard={() => removeGlobalProposal(proposal.id)}
+                                                                    onSwap={() =>
+                                                                        updateGlobalProposal(proposal.id, (current) => ({
+                                                                            ...current,
+                                                                            front_text: current.back_text,
+                                                                            back_text: current.front_text,
+                                                                            front_lang: current.back_lang,
+                                                                            back_lang: current.front_lang,
+                                                                            missing_back: current.back_text.trim().length === 0,
+                                                                        }))
+                                                                    }
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {globalAiLoading ? (
+                                            <div className="max-w-[85%] self-start rounded-2xl bg-surface px-3 py-2 text-sm text-muted">
+                                                …
+                                            </div>
+                                        ) : null}
+                                        <div ref={globalAiMessagesEndRef} />
+                                    </div>
+                                </div>
+                            )}
+                            {globalAiError ? (
+                                <div className="mt-4 rounded-xl border border-cta bg-accent-cta-soft px-3 py-2 text-sm text-accent-cta">
+                                    {globalAiError}
+                                </div>
+                            ) : null}
+
+                            <div className="mt-4 flex items-center gap-2">
+                                <input
+                                    className="flex-1 rounded-xl border px-3 py-2 text-base"
+                                    value={globalAiInput}
+                                    onChange={(event) => setGlobalAiInput(event.target.value)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" && !event.shiftKey) {
+                                            event.preventDefault();
+                                            void sendGlobalAiMessage();
+                                        }
+                                    }}
+                                    placeholder="Frage eingeben…"
+                                    disabled={globalAiLoading}
+                                />
+                                <button
+                                    type="button"
+                                    className={`rounded-xl px-4 py-2 text-sm text-white ${globalAiInput.trim().length > 0 && !globalAiLoading
+                                        ? "bg-accent-primary text-on-accent"
+                                        : "bg-[color:var(--border)] text-muted"
+                                        }`}
+                                    onClick={() => void sendGlobalAiMessage()}
+                                    disabled={globalAiInput.trim().length === 0 || globalAiLoading}
+                                >
+                                    Senden
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                </FullScreenSheet>
+                ) : null}
 
                 {/* Create Modal */}
                 < FullScreenSheet

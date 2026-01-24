@@ -20,6 +20,12 @@ export type ProposalStatus =
     | { state: "exists"; existingId: string }
     | { state: "error"; message: string };
 
+export type LastExplainedConcept = {
+    sw: string;
+    de: string;
+    source: "answer" | "assistant";
+};
+
 const SAVE_INTENT = [
     "speicher",
     "speichern",
@@ -95,6 +101,16 @@ const SAVE_TOKEN_PATTERNS = [
     /^flashcard$/i,
     /^vokabel$/i,
     /^satz$/i,
+];
+
+const IMPLICIT_REFERENCE_PATTERNS = [
+    /\bdas\b/i,
+    /\bdiese[smr]?\b/i,
+    /\bdiesen\b/i,
+    /\bdiesen?\s+satz\b/i,
+    /\bdie\s+vokabel\b/i,
+    /\bdas\s+wort\b/i,
+    /\bdas\s+brauche\s+ich\b/i,
 ];
 
 function looksLikeSentence(text: string) {
@@ -203,6 +219,17 @@ function parseAssistantPairs(text: string) {
     return pairs;
 }
 
+export function extractConceptsFromAssistantText(
+    text: string,
+    source: LastExplainedConcept["source"] = "answer"
+): LastExplainedConcept[] {
+    return parseAssistantPairs(text).map((pair) => ({
+        sw: pair.sw,
+        de: pair.de,
+        source,
+    }));
+}
+
 function guessLang(candidate: string): Lang {
     const normalized = candidate.trim().toLowerCase();
     if (/[äöüß]/.test(normalized)) return "de";
@@ -248,10 +275,54 @@ export function detectSaveIntent(text: string) {
 
 export function buildProposalsFromChat(
     userMessage: string,
-    messages: Array<{ role: "user" | "assistant"; text: string }>
+    messages: Array<{ role: "user" | "assistant"; text: string }>,
+    lastExplainedConcepts: LastExplainedConcept[] = []
 ): { proposals: CardProposal[]; needsFollowUp: boolean; followUpText?: string } {
     const candidate = extractCandidateFromUser(userMessage);
     const proposals: CardProposal[] = [];
+
+    const normalizedMessage = normalize(userMessage);
+
+    const referencedConcept = lastExplainedConcepts.find((concept) => {
+        const swNorm = normalize(concept.sw);
+        const deNorm = normalize(concept.de);
+        if (swNorm && normalizedMessage.includes(swNorm)) return true;
+        if (deNorm && normalizedMessage.includes(deNorm)) return true;
+        return false;
+    });
+
+    if (referencedConcept) {
+        proposals.push({
+            id: crypto.randomUUID(),
+            type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
+            front_lang: "sw",
+            back_lang: "de",
+            front_text: referencedConcept.sw,
+            back_text: referencedConcept.de,
+        });
+
+        return { proposals, needsFollowUp: false };
+    }
+
+    if (!candidate && lastExplainedConcepts.length > 0) {
+        const shouldUseImplicitReference = IMPLICIT_REFERENCE_PATTERNS.some((pattern) =>
+            pattern.test(userMessage)
+        );
+
+        if (shouldUseImplicitReference) {
+            const latest = lastExplainedConcepts[0];
+            proposals.push({
+                id: crypto.randomUUID(),
+                type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
+                front_lang: "sw",
+                back_lang: "de",
+                front_text: latest.sw,
+                back_text: latest.de,
+            });
+
+            return { proposals, needsFollowUp: false };
+        }
+    }
 
     if (candidate) {
         const guessedLang = guessLang(candidate);

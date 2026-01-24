@@ -3,20 +3,36 @@ import { supabaseServer } from "@/lib/supabaseServer";
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { ownerKey, german } = body;
+  const { ownerKey, german, swahili } = body;
 
-  if (!ownerKey || !german) {
+  const resolvedGerman =
+    typeof german === "string" ? german.trim() : "";
+  const resolvedSwahili =
+    typeof swahili === "string" ? swahili.trim() : "";
+
+  if (!ownerKey || (!resolvedGerman && !resolvedSwahili)) {
     return NextResponse.json(
-      { error: "ownerKey and german are required" },
+      { error: "ownerKey and german or swahili are required" },
       { status: 400 }
     );
   }
 
-  const { data, error } = await supabaseServer
+  let query = supabaseServer
     .from("cards")
     .select("id, german_text, swahili_text, image_path, audio_path")
-    .eq("owner_key", ownerKey)
-    .ilike("german_text", german);
+    .eq("owner_key", ownerKey);
+
+  if (resolvedGerman && resolvedSwahili) {
+    query = query.or(
+      `german_text.ilike.${resolvedGerman},swahili_text.ilike.${resolvedSwahili}`
+    );
+  } else if (resolvedGerman) {
+    query = query.ilike("german_text", resolvedGerman);
+  } else if (resolvedSwahili) {
+    query = query.ilike("swahili_text", resolvedSwahili);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error(error);
