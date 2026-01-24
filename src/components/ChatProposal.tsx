@@ -32,6 +32,14 @@ export default function ChatProposal({
     const missingBack =
         Boolean(proposal.missing_back) || proposal.back_text.trim().length === 0;
     const isSaving = status.state === "saving";
+    const sourceLabel =
+        proposal.source_label === "letzte_liste"
+            ? "Quelle: letzte Liste"
+            : proposal.source_label === "chat_kontext"
+                ? "Quelle: Chat-Kontext"
+                : proposal.source_label === "manuell"
+                    ? "Quelle: manuell"
+                    : null;
 
     function handleFrontChange(value: string) {
         setFront(value);
@@ -58,6 +66,10 @@ export default function ChatProposal({
                     {proposal.front_lang.toUpperCase()} → {proposal.back_lang.toUpperCase()}
                 </span>
             </div>
+
+            {sourceLabel ? (
+                <div className="mt-1 text-xs text-muted">{sourceLabel}</div>
+            ) : null}
 
             {editing ? (
                 <div className="mt-3 flex flex-col gap-2">

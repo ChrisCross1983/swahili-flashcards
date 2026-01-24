@@ -11,6 +11,7 @@ export type CardProposal = {
     tags?: string[];
     notes?: string;
     source_context_snippet?: string;
+    source_label?: "letzte_liste" | "chat_kontext" | "manuell";
 };
 
 export type ProposalStatus =
@@ -248,21 +249,30 @@ function guessLang(candidate: string): Lang {
 // "Speicher 'mfuko'" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
 // "Speicher den Satz: Ninapenda chai" -> candidate: "Ninapenda chai", lang: "sw", follow-up: Was bedeutet „Ninapenda chai“ auf Deutsch?
 
-function findTranslationFromContext(
+export function findPairInAssistantHistory(
     candidate: string,
     messages: Array<{ role: "user" | "assistant"; text: string }>
 ) {
     const normalized = normalize(candidate);
+    if (!normalized) return null;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
         const message = messages[i];
         if (message.role !== "assistant") continue;
         const pairs = parseAssistantPairs(message.text);
+        if (pairs.length === 0) continue;
+        let includesMatch: { sw: string; de: string } | null = null;
         for (const pair of pairs) {
             const swNorm = normalize(pair.sw);
             const deNorm = normalize(pair.de);
-            if (swNorm.includes(normalized) || deNorm.includes(normalized)) {
+            if (swNorm === normalized || deNorm === normalized) {
                 return { sw: pair.sw, de: pair.de, snippet: message.text };
             }
+            if (!includesMatch && (swNorm.includes(normalized) || deNorm.includes(normalized))) {
+                includesMatch = pair;
+            }
+        }
+        if (includesMatch) {
+            return { sw: includesMatch.sw, de: includesMatch.de, snippet: message.text };
         }
     }
     return null;
@@ -299,6 +309,7 @@ export function buildProposalsFromChat(
             back_lang: "de",
             front_text: referencedConcept.sw,
             back_text: referencedConcept.de,
+            source_label: "letzte_liste",
         });
 
         return { proposals, needsFollowUp: false };
@@ -310,7 +321,7 @@ export function buildProposalsFromChat(
         );
 
         if (shouldUseImplicitReference) {
-            const latest = lastExplainedConcepts[0];
+            const latest = lastExplainedConcepts[lastExplainedConcepts.length - 1];
             proposals.push({
                 id: crypto.randomUUID(),
                 type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
@@ -318,6 +329,7 @@ export function buildProposalsFromChat(
                 back_lang: "de",
                 front_text: latest.sw,
                 back_text: latest.de,
+                source_label: "letzte_liste",
             });
 
             return { proposals, needsFollowUp: false };
@@ -326,7 +338,7 @@ export function buildProposalsFromChat(
 
     if (candidate) {
         const guessedLang = guessLang(candidate);
-        const fromContext = findTranslationFromContext(candidate, messages);
+        const fromContext = findPairInAssistantHistory(candidate, messages);
         if (fromContext) {
             proposals.push({
                 id: crypto.randomUUID(),
@@ -336,6 +348,7 @@ export function buildProposalsFromChat(
                 front_text: fromContext.sw,
                 back_text: fromContext.de,
                 source_context_snippet: fromContext.snippet.slice(0, 240),
+                source_label: "chat_kontext",
             });
         }
 
@@ -348,6 +361,7 @@ export function buildProposalsFromChat(
                 front_text: candidate,
                 back_text: "",
                 missing_back: true,
+                source_label: "manuell",
             });
         }
 
@@ -363,9 +377,11 @@ export function buildProposalsFromChat(
         };
     }
 
-    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-    if (lastAssistant) {
-        const pairs = parseAssistantPairs(lastAssistant.text);
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role !== "assistant") continue;
+        const pairs = parseAssistantPairs(message.text);
+        if (pairs.length === 0) continue;
         pairs.forEach((pair) => {
             proposals.push({
                 id: crypto.randomUUID(),
@@ -374,9 +390,11 @@ export function buildProposalsFromChat(
                 back_lang: "de",
                 front_text: pair.sw,
                 back_text: pair.de,
-                source_context_snippet: lastAssistant.text.slice(0, 240),
+                source_context_snippet: message.text.slice(0, 240),
+                source_label: "chat_kontext",
             });
         });
+        break;
     }
 
     return {
