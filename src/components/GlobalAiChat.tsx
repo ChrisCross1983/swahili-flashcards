@@ -11,6 +11,7 @@ import {
     extractConceptsFromAssistantText,
     findPairInAssistantHistory,
     guessLang,
+    isCleanCandidate,
     LastExplainedConcept,
     looksLikeSentence,
     matchesImplicitReference,
@@ -50,7 +51,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
     const [activeDraft, setActiveDraft] = useState<ActiveSaveDraft | null>(null);
     const [draftStatus, setDraftStatus] = useState<ProposalStatus>({ state: "idle" });
 
-    const inputRef = useRef<HTMLInputElement | null>(null);
+    const inputRef = useRef<HTMLTextAreaElement | null>(null);
     const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
 
     useEffect(() => setMounted(true), []);
@@ -84,7 +85,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
     }, [open, close]);
 
     useEffect(() => {
-        if (draftStatus.state !== "saved" && draftStatus.state !== "exists") return;
+        if (draftStatus.state !== "saved") return;
         const timeout = window.setTimeout(() => {
             setActiveDraft(null);
             setDraftStatus({ state: "idle" });
@@ -95,7 +96,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
     const updateLastConceptsFromAnswer = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
         if (concepts.length > 0) {
-            setLastGoodConcepts(concepts);
+            setLastGoodConcepts((prev) => [...prev, ...concepts].slice(-3));
         }
     }, []);
 
@@ -104,17 +105,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         if (!trimmed) return "";
         if (looksLikeMetaText(trimmed)) return "";
         return trimmed;
-    }, []);
-
-    const isDraftCompletion = useCallback((text: string, draft: ActiveSaveDraft) => {
-        const trimmed = text.trim();
-        if (!trimmed) return false;
-        if (trimmed.includes("?")) return false;
-        const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-        if (wordCount > 4) return false;
-        if (draft.missing_de && !draft.de.trim()) return true;
-        if (!draft.sw.trim()) return true;
-        return false;
     }, []);
 
     const createDraft = useCallback(
@@ -148,12 +138,80 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         [createDraft, sanitizeDraftValue]
     );
 
+    useEffect(() => {
+        if (!activeDraft) return;
+        if (draftStatus.state === "saving" || draftStatus.state === "saved") return;
+        const sw = activeDraft.sw.trim();
+        const de = activeDraft.de.trim();
+        if (!sw || !de) {
+            if (draftStatus.state === "exists") {
+                setDraftStatus({ state: "idle" });
+            }
+            return;
+        }
+
+        const controller = new AbortController();
+        const checkDuplicates = async () => {
+            try {
+                const res = await fetch("/api/cards/exists", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        ownerKey,
+                        sw,
+                        de,
+                    }),
+                });
+
+                const json = await res.json().catch(() => ({}));
+                if (!res.ok) return;
+                if (json.exists) {
+                    setDraftStatus({
+                        state: "exists",
+                        existingId: json.existing_id ?? "",
+                    });
+                } else if (draftStatus.state === "exists") {
+                    setDraftStatus({ state: "idle" });
+                }
+            } catch {
+                // ignore
+            }
+        };
+
+        void checkDuplicates();
+        return () => controller.abort();
+    }, [activeDraft, draftStatus.state, ownerKey]);
+
     const addAssistantMessage = useCallback((text: string) => {
         setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
     }, []);
 
+    const translateCandidate = useCallback(
+        async (candidate: string, sourceLang: "sw" | "de") => {
+            const res = await fetch("/api/ai/translate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    text: candidate,
+                    sourceLang,
+                }),
+            });
+
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) return null;
+            const sw = typeof json.sw === "string" ? json.sw.trim() : "";
+            const de = typeof json.de === "string" ? json.de.trim() : "";
+            if (!sw || !de) return null;
+            return { sw, de };
+        },
+        [ownerKey]
+    );
+
     const handleDraftSave = useCallback(async () => {
         if (!activeDraft) return;
+        if (draftStatus.state === "exists") return;
         const sw = activeDraft.sw.trim();
         const de = activeDraft.de.trim();
         if (!sw || !de) {
@@ -220,7 +278,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                 message: "Speichern fehlgeschlagen.",
             });
         }
-    }, [activeDraft, ownerKey]);
+    }, [activeDraft, draftStatus.state, ownerKey]);
 
     const send = useCallback(async () => {
         const text = input.trim();
@@ -232,82 +290,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         setMessages((prev) => [...prev, { kind: "text", role: "user", text }]);
         setInput("");
 
-        if (activeDraft) {
-            const lowered = text.toLowerCase();
-            if (/(abbrechen|verwerfen|doch nicht|nicht speichern)/i.test(lowered)) {
-                setActiveDraft(null);
-                setDraftStatus({ state: "idle" });
-                addAssistantMessage("Alles klar, verworfen.");
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            if (/(tausch|swap|wechsel)/i.test(lowered)) {
-                setActiveDraft((prev) => {
-                    if (!prev) return prev;
-                    const next = {
-                        ...prev,
-                        sw: prev.de,
-                        de: prev.sw,
-                    };
-                    return {
-                        ...next,
-                        missing_de: !next.sw.trim() || !next.de.trim(),
-                    };
-                });
-                setDraftStatus({ state: "idle" });
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            if (detectSaveIntent(text)) {
-                if (!activeDraft.missing_de) {
-                    void handleDraftSave();
-                } else {
-                    addAssistantMessage("Bitte ergänze zuerst die fehlende Seite.");
-                }
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            if (isDraftCompletion(text, activeDraft)) {
-                const cleaned = sanitizeDraftValue(text);
-                let updatedSw = activeDraft.sw;
-                let updatedDe = activeDraft.de;
-                if (activeDraft.missing_de && !activeDraft.de.trim()) {
-                    updatedDe = cleaned;
-                } else if (!activeDraft.sw.trim()) {
-                    updatedSw = cleaned;
-                }
-                const missing = !updatedSw.trim() || !updatedDe.trim();
-                setActiveDraft({
-                    ...activeDraft,
-                    sw: updatedSw,
-                    de: updatedDe,
-                    missing_de: missing,
-                    status: missing ? "draft" : "awaiting_confirmation",
-                });
-
-                if (missing) {
-                    if (updatedSw && !updatedDe) {
-                        addAssistantMessage(`Was bedeutet „${updatedSw}“ auf Deutsch?`);
-                    } else if (!updatedSw && updatedDe) {
-                        addAssistantMessage(
-                            `Wie lautet das swahilische Wort für „${updatedDe}“?`
-                        );
-                    } else {
-                        addAssistantMessage(
-                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)"
-                        );
-                    }
-                }
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
+        if (activeDraft && draftStatus.state !== "exists") {
             setActiveDraft(null);
             setDraftStatus({ state: "idle" });
         }
@@ -315,6 +298,13 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         if (detectSaveIntent(text)) {
             const candidate = extractCandidateFromUser(text);
             const normalizedCandidate = candidate ? normalizeText(candidate) : "";
+
+            if (candidate && !isCleanCandidate(candidate)) {
+                addAssistantMessage("Welches genaue Wort soll ich speichern?");
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
+            }
 
             const referencedConcept = lastGoodConcepts.find((concept) => {
                 const swNorm = normalizeText(concept.sw);
@@ -373,42 +363,51 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                 }
             }
 
-            if (candidate && !looksLikeMetaText(candidate)) {
-                const guessed = guessLang(candidate);
-                const swCandidate = guessed === "sw" ? candidate : "";
-                const deCandidate = guessed === "de" ? candidate : "";
-                setDraftFromValues({
-                    type: looksLikeSentence(candidate) ? "sentence" : "vocab",
-                    sw: swCandidate,
-                    de: deCandidate,
-                    missing_de: true,
-                    source: "manual",
-                    status: "draft",
-                    sourceSnippet: undefined,
-                });
-                if (swCandidate) {
-                    addAssistantMessage(`Was bedeutet „${swCandidate}“ auf Deutsch?`);
-                } else if (deCandidate) {
-                    addAssistantMessage(`Wie lautet das swahilische Wort für „${deCandidate}“?`);
+            if (!candidate) {
+                if (matchesImplicitReference(text)) {
+                    addAssistantMessage("Welches Wort meinst du genau?");
                 } else {
-                    addAssistantMessage(
-                        "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)"
-                    );
+                    addAssistantMessage("Welches Wort soll ich speichern?");
                 }
-            } else {
-                setDraftFromValues({
-                    type: "vocab",
-                    sw: "",
-                    de: "",
-                    missing_de: true,
-                    source: "manual",
-                    status: "draft",
-                    sourceSnippet: undefined,
-                });
-                addAssistantMessage(
-                    "Welches Wort oder welchen Satz soll ich speichern? (Du kannst auch 'sw — de' schreiben.)"
-                );
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
             }
+
+            if (looksLikeMetaText(candidate)) {
+                addAssistantMessage("Bitte nur das Wort oder die kurze Phrase angeben.");
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
+            }
+
+            const wordCount = candidate.split(/\s+/).filter(Boolean).length;
+            if (candidate.length > 40 || wordCount > 3) {
+                addAssistantMessage("Zu lang – welches kurze Wort oder welche kurze Phrase meinst du?");
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
+            }
+
+            const guessed = guessLang(candidate);
+            const translation = await translateCandidate(candidate, guessed);
+            if (!translation) {
+                addAssistantMessage("Ich brauche die Übersetzung dazu. Kannst du sie angeben?");
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
+            }
+
+            setDraftFromValues({
+                type: looksLikeSentence(candidate) ? "sentence" : "vocab",
+                sw: translation.sw,
+                de: translation.de,
+                missing_de: false,
+                source: "manual",
+                status: "awaiting_confirmation",
+                sourceSnippet: "AI_TRANSLATION",
+                notes: "KI-Vorschlag – bitte prüfen",
+            });
 
             setIsSending(false);
             inputRef.current?.focus();
@@ -452,12 +451,12 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         textHistory,
         updateLastConceptsFromAnswer,
         activeDraft,
+        draftStatus.state,
         addAssistantMessage,
-        sanitizeDraftValue,
         setDraftFromValues,
         handleDraftSave,
-        isDraftCompletion,
         context,
+        translateCandidate,
     ]);
 
     const draftProposal: CardProposal | null = activeDraft
@@ -471,6 +470,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
             missing_back: !activeDraft.sw.trim() || !activeDraft.de.trim(),
             source_context_snippet: activeDraft.sourceSnippet,
             source_label: activeDraft.source,
+            notes: activeDraft.notes,
         }
         : null;
 
@@ -491,7 +491,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                             <div>
                                 <h2 className="text-lg font-semibold">Swahili-KI 🦁</h2>
                                 <p className="text-xs text-muted">
-                                    Frag alles – unabhängig vom Training.
+                                    Training-Kontext wird automatisch berücksichtigt.
                                 </p>
                             </div>
 
@@ -584,6 +584,11 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                                             />
                                         </div>
                                     ) : null}
+                                    {isSending ? (
+                                        <div className="self-start rounded-xl border border-soft bg-surface px-3 py-2 text-sm text-muted">
+                                            <span className="inline-flex animate-pulse tracking-widest">...</span>
+                                        </div>
+                                    ) : null}
                                     <div ref={messagesEndRef} />
                                 </div>
                             </div>
@@ -596,20 +601,21 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                         ) : null}
 
                         <div className="flex items-center gap-2">
-                            <input
+                            <textarea
                                 ref={inputRef}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
+                                    if (e.key === "Enter" && !e.shiftKey) {
                                         e.preventDefault();
                                         if (!isSending && input.trim()) {
                                             void send();
                                         }
                                     }
                                 }}
+                                rows={2}
                                 placeholder="Frage eingeben…"
-                                className="w-full rounded-xl border border-soft px-4 py-3 text-base shadow-soft focus:border-accent focus:outline-none"
+                                className="w-full resize-none rounded-xl border border-soft px-4 py-3 text-base shadow-soft focus:border-accent focus:outline-none"
                             />
                             <button
                                 type="button"

@@ -49,6 +49,10 @@ const SAVE_INTENT = [
     "leg",
     "neu anlegen",
     "add",
+    "übernehm",
+    "uebernehm",
+    "wörterbuch",
+    "woerterbuch",
 ];
 
 const STOP_WORDS = new Set([
@@ -91,6 +95,15 @@ const STOP_WORDS = new Set([
     "doch",
     "okay",
     "ok",
+    "wortpaar",
+    "übernehmen",
+    "uebernehmen",
+    "übernimm",
+    "uebernimm",
+    "abspeichern",
+    "abspeicher",
+    "speichern",
+    "speicher",
 ]);
 
 const SAVE_TOKEN_PATTERNS = [
@@ -104,6 +117,10 @@ const SAVE_TOKEN_PATTERNS = [
     /^flashcard$/i,
     /^vokabel$/i,
     /^satz$/i,
+    /^übernehm/i,
+    /^uebernehm/i,
+    /^wörterbuch$/i,
+    /^woerterbuch$/i,
 ];
 
 const IMPLICIT_REFERENCE_PATTERNS = [
@@ -118,6 +135,36 @@ const IMPLICIT_REFERENCE_PATTERNS = [
 
 export function looksLikeSentence(text: string) {
     return text.trim().split(/\s+/).length > 2 || /[.!?]$/.test(text.trim());
+}
+
+const BANNED_CANDIDATES = new Set([
+    "gehen",
+    "geh",
+    "geht",
+    "übernehmen",
+    "uebernehmen",
+    "übernimm",
+    "uebernimm",
+    "abspeichern",
+    "abspeicher",
+    "speichern",
+    "speicher",
+]);
+
+export function isCleanCandidate(candidate: string) {
+    const trimmed = candidate.trim();
+    if (!trimmed) return false;
+    if (trimmed.includes("?")) return false;
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length > 3) return false;
+    if (!/^[\p{L}'-]+(\s+[\p{L}'-]+){0,2}$/u.test(trimmed)) return false;
+    const loweredWords = words.map((word) => word.toLowerCase());
+    if (loweredWords.some((word) => BANNED_CANDIDATES.has(word))) return false;
+    if (loweredWords.some((word) => STOP_WORDS.has(word))) return false;
+    if (loweredWords.some((word) => SAVE_TOKEN_PATTERNS.some((pattern) => pattern.test(word)))) {
+        return false;
+    }
+    return true;
 }
 
 function extractQuoted(text: string) {
@@ -343,6 +390,14 @@ export function buildProposalsFromChat(
 
             return { proposals, needsFollowUp: false };
         }
+    }
+
+    if (candidate && !isCleanCandidate(candidate)) {
+        return {
+            proposals,
+            needsFollowUp: true,
+            followUpText: "Welches genaue Wort soll ich speichern?",
+        };
     }
 
     if (candidate) {

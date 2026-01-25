@@ -1,18 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import GlobalAiChat from "@/components/GlobalAiChat";
 import {
     formatDays,
     getIntervalDays,
     getNextLevelOnWrong,
     MAX_LEVEL,
 } from "@/lib/leitner";
+import { setTrainingContext } from "@/lib/aiContext";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -87,8 +87,6 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
-    const [openGlobalAI, setOpenGlobalAI] = useState(false);
-    const [globalAiUseContext, setGlobalAiUseContext] = useState(true);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
     const [setupCounts, setSetupCounts] = useState({
         todayDue: 0,
@@ -1497,13 +1495,21 @@ export default function TrainerClient({ ownerKey }: Props) {
     const currentDueDate =
         currentItem?.dueDate ?? currentItem?.due_date ?? null;
 
-    const chatContextPayload = {
-        german: currentGerman || undefined,
-        swahili: currentSwahili || undefined,
-        direction,
-        level: Number.isFinite(currentLevel) ? currentLevel : undefined,
-        dueDate: currentDueDate ?? undefined,
-    };
+    const chatContextPayload = useMemo(
+        () => ({
+            german: currentGerman || undefined,
+            swahili: currentSwahili || undefined,
+            direction,
+            level: Number.isFinite(currentLevel) ? currentLevel : undefined,
+            dueDate: currentDueDate ?? undefined,
+        }),
+        [currentGerman, currentSwahili, direction, currentLevel, currentDueDate]
+    );
+
+    useEffect(() => {
+        setTrainingContext(chatContextPayload);
+        return () => setTrainingContext(null);
+    }, [chatContextPayload]);
 
     const nextOnCorrectLevel = Math.min(currentLevel + 1, MAX_LEVEL);
     const nextOnCorrectDays = getIntervalDays(nextOnCorrectLevel);
@@ -2537,28 +2543,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             )}
 
                                             <div className="ml-auto flex items-center gap-4">
-                                                <div className="flex flex-col items-end gap-2">
-                                                    <button
-                                                        type="button"
-                                                        className="flex h-10 w-10 items-center justify-center rounded-full border text-lg"
-                                                        onClick={() => setOpenGlobalAI(true)}
-                                                        aria-label="KI-Chat öffnen"
-                                                    >
-                                                        🦁
-                                                    </button>
-                                                    <label className="flex items-center gap-2 text-xs text-muted">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="h-4 w-4"
-                                                            checked={globalAiUseContext}
-                                                            onChange={(event) =>
-                                                                setGlobalAiUseContext(event.target.checked)
-                                                            }
-                                                        />
-                                                        Karten-Kontext anhängen
-                                                    </label>
-                                                </div>
-
                                                 {/* Rechts: Bearbeiten */}
                                                 <button
                                                     type="button"
@@ -3243,27 +3227,6 @@ export default function TrainerClient({ ownerKey }: Props) {
                     </div>
                 </FullScreenSheet >
             </div >
-
-            <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3 pb-[env(safe-area-inset-bottom)]">
-                <button
-                    type="button"
-                    className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-primary text-2xl text-on-accent shadow-warm"
-                    onClick={() => setOpenGlobalAI(true)}
-                    aria-label="Globale KI öffnen"
-                >
-                    🦁
-                </button>
-            </div>
-
-            <GlobalAiChat
-                ownerKey={ownerKey}
-                open={openGlobalAI}
-                onClose={() => setOpenGlobalAI(false)}
-                context={{
-                    enabled: globalAiUseContext,
-                    payload: chatContextPayload,
-                }}
-            />
         </main >
     );
 }

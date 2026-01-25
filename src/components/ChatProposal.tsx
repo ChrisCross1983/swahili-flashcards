@@ -32,6 +32,10 @@ export default function ChatProposal({
     const missingBack =
         Boolean(proposal.missing_back) || proposal.back_text.trim().length === 0;
     const isSaving = status.state === "saving";
+    const isDuplicate = status.state === "exists";
+    const isAiSuggestion =
+        proposal.source_context_snippet === "AI_TRANSLATION" ||
+        proposal.notes?.includes("KI-Vorschlag");
     const sourceLabel =
         proposal.source_label === "last_list"
             ? "Quelle: letzte Liste"
@@ -61,7 +65,14 @@ export default function ChatProposal({
     return (
         <div className="rounded-2xl border border-soft bg-surface p-3 shadow-soft">
             <div className="flex items-center justify-between text-xs text-muted">
-                <span className="uppercase">{proposal.type === "sentence" ? "Satz" : "Vokabel"}</span>
+                <div className="flex items-center gap-2">
+                    <span className="uppercase">{proposal.type === "sentence" ? "Satz" : "Vokabel"}</span>
+                    {isAiSuggestion ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                            KI-Vorschlag
+                        </span>
+                    ) : null}
+                </div>
                 <span className="rounded-full border border-soft px-2 py-0.5">
                     {proposal.front_lang.toUpperCase()} → {proposal.back_lang.toUpperCase()}
                 </span>
@@ -108,7 +119,8 @@ export default function ChatProposal({
                 <div className="mt-3">
                     <div className="text-sm font-medium">{proposal.front_text || "—"}</div>
                     <div className="text-sm text-muted">{proposal.back_text || "Übersetzung fehlt"}</div>
-                    {proposal.source_context_snippet ? (
+                    {proposal.source_context_snippet &&
+                        proposal.source_context_snippet !== "AI_TRANSLATION" ? (
                         <div className="mt-2 text-xs text-muted">
                             Kontext: {proposal.source_context_snippet}
                         </div>
@@ -141,10 +153,10 @@ export default function ChatProposal({
                     <button
                         type="button"
                         className="rounded-xl bg-accent-primary px-3 py-2 text-sm text-on-accent disabled:opacity-60"
-                        disabled={isSaving}
+                        disabled={isSaving || isDuplicate}
                         onClick={onSave}
                     >
-                        {isSaving ? "Speichere…" : "✅ Speichern"}
+                        {isDuplicate ? "Bereits vorhanden" : isSaving ? "Speichere…" : "✅ Speichern"}
                     </button>
                 )}
                 <button
@@ -177,7 +189,7 @@ export default function ChatProposal({
             ) : null}
             {status.state === "exists" ? (
                 <div className="mt-3 rounded-xl border border-soft bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                    Schon vorhanden ⚠️
+                    Dieses Wort existiert bereits im Wörterbuch.
                     <div className="mt-2 flex gap-2">
                         <button
                             type="button"

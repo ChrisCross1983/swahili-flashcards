@@ -3,6 +3,7 @@
 import { useState } from "react";
 import GlobalQuickSearch from "@/components/GlobalQuickSearch";
 import GlobalAiChat from "@/components/GlobalAiChat";
+import { useTrainingContext } from "@/lib/aiContext";
 
 type Props = {
     ownerKey: string;
@@ -11,6 +12,7 @@ type Props = {
 export default function GlobalOverlays({ ownerKey }: Props) {
     const [openSearch, setOpenSearch] = useState(false);
     const [openAi, setOpenAi] = useState(false);
+    const trainingContext = useTrainingContext();
 
     return (
         <>
@@ -39,6 +41,11 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 ownerKey={ownerKey}
                 open={openAi}
                 onClose={() => setOpenAi(false)}
+                context={
+                    trainingContext
+                        ? { enabled: true, payload: trainingContext }
+                        : { enabled: false }
+                }
             />
 
             <GlobalQuickSearch
