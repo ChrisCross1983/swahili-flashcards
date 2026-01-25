@@ -9,23 +9,35 @@ type TranslateRequestBody = {
 const SYSTEM_PROMPT =
     "Du bist ein Übersetzer für kurze Wörter oder Phrasen zwischen Swahili und Deutsch. Antworte ausschließlich als JSON mit den Schlüsseln sw und de. Übersetze nur das Wort bzw. die kurze Phrase, keine Sätze, keine Erklärungen.";
 
+function safeSnippet(v: unknown, max = 400) {
+    const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
+    return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
 function extractResponseText(data: any): string | null {
+    // responses API common field
     if (typeof data?.output_text === "string") {
         const t = data.output_text.trim();
         if (t) return t;
     }
 
-    if (Array.isArray(data?.output)) {
-        const combined = data.output
+    // responses API structured output array
+    const out = data?.output;
+    if (Array.isArray(out)) {
+        const combined = out
             .flatMap((item: any) =>
                 Array.isArray(item?.content) ? item.content : []
             )
-            .map((c: any) => c?.text ?? "")
+            .map((c: any) => c?.text ?? c?.output_text ?? "")
             .join("")
             .trim();
 
         if (combined) return combined;
     }
+
+    // fallback for potential wrapper shapes
+    const alt = data?.response?.output_text ?? data?.result?.output_text;
+    if (typeof alt === "string" && alt.trim()) return alt.trim();
 
     return null;
 }
@@ -41,12 +53,23 @@ async function callOpenAI(apiKey: string, payload: any) {
     });
 
     const data = await r.json().catch(() => null);
-    return { ok: r.ok, data };
+    return { ok: r.ok, status: r.status, data };
+}
+
+function stripJsonFences(raw: string) {
+    return raw
+        .trim()
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```$/i, "")
+        .trim();
 }
 
 function parseTranslation(raw: string): { sw: string; de: string } | null {
+    const cleaned = stripJsonFences(raw);
+
     try {
-        const parsed = JSON.parse(raw);
+        const parsed = JSON.parse(cleaned);
         if (typeof parsed?.sw === "string" && typeof parsed?.de === "string") {
             return { sw: parsed.sw.trim(), de: parsed.de.trim() };
         }
@@ -54,8 +77,9 @@ function parseTranslation(raw: string): { sw: string; de: string } | null {
         // fall through
     }
 
-    const match = raw.match(/\{[\s\S]*\}/);
+    const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return null;
+
     try {
         const parsed = JSON.parse(match[0]);
         if (typeof parsed?.sw === "string" && typeof parsed?.de === "string") {
@@ -64,6 +88,7 @@ function parseTranslation(raw: string): { sw: string; de: string } | null {
     } catch {
         return null;
     }
+
     return null;
 }
 
@@ -80,7 +105,9 @@ export async function POST(req: Request) {
         typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
     const text = typeof body.text === "string" ? body.text.trim() : "";
     const sourceLang =
-        body.sourceLang === "sw" || body.sourceLang === "de" ? body.sourceLang : null;
+        body.sourceLang === "sw" || body.sourceLang === "de"
+            ? body.sourceLang
+            : null;
 
     if (!ownerKey || !text || !sourceLang) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
@@ -93,10 +120,12 @@ export async function POST(req: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-        return NextResponse.json({ error: "AI request failed" }, { status: 500 });
+        console.error("[translate] missing OPENAI_API_KEY");
+        return NextResponse.json({ error: "AI not configured" }, { status: 500 });
     }
 
-    const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
+    // safer default (override via env)
+    const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
     const payload = {
         model,
@@ -120,22 +149,56 @@ export async function POST(req: Request) {
     };
 
     try {
-        const { ok, data } = await callOpenAI(apiKey, payload);
+        const { ok, status, data } = await callOpenAI(apiKey, payload);
+
         if (!ok) {
-            return NextResponse.json({ error: "AI request failed" }, { status: 500 });
+            console.error("[translate] openai error", status, safeSnippet(data));
+            return NextResponse.json(
+                { error: "AI request failed" },
+                { status: 502 }
+            );
         }
+
         const answer = extractResponseText(data);
         if (!answer) {
-            return NextResponse.json({ error: "AI request failed" }, { status: 500 });
+            console.error("[translate] empty answer", safeSnippet(data));
+            return NextResponse.json(
+                { error: "AI returned empty output" },
+                { status: 502 }
+            );
         }
 
         const parsed = parseTranslation(answer);
-        if (!parsed?.sw || !parsed?.de) {
-            return NextResponse.json({ error: "AI request failed" }, { status: 500 });
+        if (!parsed) {
+            console.error("[translate] parse failed", safeSnippet(answer));
+            return NextResponse.json(
+                { error: "AI returned invalid JSON" },
+                { status: 502 }
+            );
         }
 
-        return NextResponse.json({ sw: parsed.sw, de: parsed.de });
-    } catch {
-        return NextResponse.json({ error: "AI request failed" }, { status: 500 });
+        let sw = parsed.sw;
+        let de = parsed.de;
+
+        // Guarantee both sides based on sourceLang (helps when model returns partial fields)
+        if (sourceLang === "sw" && (!sw || sw.toLowerCase() === "null")) sw = text;
+        if (sourceLang === "de" && (!de || de.toLowerCase() === "null")) de = text;
+
+        if (!sw || !de) {
+            console.error("[translate] missing fields", {
+                sw,
+                de,
+                answer: safeSnippet(answer),
+            });
+            return NextResponse.json(
+                { error: "AI returned incomplete translation" },
+                { status: 502 }
+            );
+        }
+
+        return NextResponse.json({ sw, de });
+    } catch (err) {
+        console.error("[translate] exception", err);
+        return NextResponse.json({ error: "AI request failed" }, { status: 502 });
     }
 }
