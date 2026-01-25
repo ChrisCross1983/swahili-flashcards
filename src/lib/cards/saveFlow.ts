@@ -1,6 +1,13 @@
 export type Lang = "sw" | "de";
 
-export type SaveSource = "last_list" | "chat_context" | "manual";
+export type SaveSource =
+    | "last_list"
+    | "chat_context"
+    | "manual"
+    | "chat"
+    | "training"
+    | "user"
+    | "assistant_list";
 export type SaveDraftStatus = "draft" | "awaiting_confirmation";
 
 export type ActiveSaveDraft = {

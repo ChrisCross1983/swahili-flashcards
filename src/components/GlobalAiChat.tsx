@@ -6,29 +6,23 @@ import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import type { CardProposal } from "@/lib/cards/proposals";
 import {
+    buildProposalsFromChat,
     detectSaveIntent,
-    extractCandidateFromUser,
     extractConceptsFromAssistantText,
-    findPairInAssistantHistory,
-    guessLang,
-    isCleanCandidate,
     LastExplainedConcept,
-    looksLikeSentence,
-    matchesImplicitReference,
     ProposalStatus,
 } from "@/lib/cards/proposals";
 import {
-    ActiveSaveDraft,
     canonicalizeToSwDe,
     looksLikeMetaText,
-    normalizeText,
 } from "@/lib/cards/saveFlow";
+import type { TrainingContext } from "@/lib/aiContext";
 
 type Props = {
     ownerKey: string;
     open: boolean;
     onClose: () => void;
-    context?: { enabled: boolean; payload?: any };
+    trainingContext?: TrainingContext | null;
 };
 
 type TextMessage = {
@@ -37,22 +31,93 @@ type TextMessage = {
     text: string;
 };
 
+type ProposalEntry = {
+    kind: "proposal";
+    proposal: CardProposal;
+    status: ProposalStatus;
+};
+
 type Msg = TextMessage;
 
-export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props) {
+type InterpretResult =
+    | { kind: "ask"; rewrittenUserMessage?: string }
+    | { kind: "save"; items: SaveItem[]; reason?: string }
+    | { kind: "clarify"; question: string; hints?: string[] };
+
+type SaveItem = {
+    type: "vocab" | "sentence";
+    sw: string;
+    de: string;
+    source: "chat" | "training" | "user" | "assistant_list";
+    confidence: number;
+    why?: string;
+};
+
+type MessageBlock =
+    | { type: "paragraph"; text: string }
+    | { type: "list"; items: string[] };
+
+function parseMessageBlocks(text: string): MessageBlock[] {
+    const lines = text.split(/\r?\n/);
+    const blocks: MessageBlock[] = [];
+    let currentParagraph: string[] = [];
+    let currentList: string[] = [];
+
+    const flushParagraph = () => {
+        if (!currentParagraph.length) return;
+        blocks.push({ type: "paragraph", text: currentParagraph.join(" ").trim() });
+        currentParagraph = [];
+    };
+
+    const flushList = () => {
+        if (!currentList.length) return;
+        blocks.push({ type: "list", items: currentList });
+        currentList = [];
+    };
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            flushParagraph();
+            flushList();
+            continue;
+        }
+
+        const listMatch = trimmed.match(/^([-*•]|\d+[.)])\s+(.+)/);
+        if (listMatch) {
+            flushParagraph();
+            currentList.push(listMatch[2].trim());
+            continue;
+        }
+
+        flushList();
+        currentParagraph.push(trimmed);
+    }
+
+    flushParagraph();
+    flushList();
+
+    if (blocks.length === 0 && text.trim()) {
+        return [{ type: "paragraph", text: text.trim() }];
+    }
+
+    return blocks;
+}
+
+export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext }: Props) {
     const [mounted, setMounted] = useState(false);
-    const [messages, setMessages] = useState<TextMessage[]>([]);
+    const [messages, setMessages] = useState<Msg[]>([]);
     const [input, setInput] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [lastGoodConcepts, setLastGoodConcepts] = useState<LastExplainedConcept[]>(
         []
     );
-    const [activeDraft, setActiveDraft] = useState<ActiveSaveDraft | null>(null);
-    const [draftStatus, setDraftStatus] = useState<ProposalStatus>({ state: "idle" });
+    const [proposals, setProposals] = useState<ProposalEntry[]>([]);
 
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
     const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
+    const proposalsRef = useRef<ProposalEntry[]>([]);
 
     useEffect(() => setMounted(true), []);
 
@@ -61,7 +126,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         inputRef.current?.focus();
     }, [open]);
 
-    const textHistory = messages
+    const textHistory: Array<{ role: "user" | "assistant"; text: string }> = messages
         .filter((message): message is TextMessage => message.kind === "text")
         .map((message) => ({ role: message.role, text: message.text }));
 
@@ -85,13 +150,8 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
     }, [open, close]);
 
     useEffect(() => {
-        if (draftStatus.state !== "saved") return;
-        const timeout = window.setTimeout(() => {
-            setActiveDraft(null);
-            setDraftStatus({ state: "idle" });
-        }, 600);
-        return () => window.clearTimeout(timeout);
-    }, [draftStatus.state]);
+        proposalsRef.current = proposals;
+    }, [proposals]);
 
     const updateLastConceptsFromAnswer = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
@@ -100,185 +160,229 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         }
     }, []);
 
-    const sanitizeDraftValue = useCallback((value: string) => {
-        const trimmed = value.trim();
-        if (!trimmed) return "";
-        if (looksLikeMetaText(trimmed)) return "";
-        return trimmed;
-    }, []);
-
-    const createDraft = useCallback(
-        (draft: Omit<ActiveSaveDraft, "id" | "detectedAt">) => {
-            const next: ActiveSaveDraft = {
-                ...draft,
-                id: crypto.randomUUID(),
-                detectedAt: Date.now(),
-            };
-            setActiveDraft(next);
-            setDraftStatus({ state: "idle" });
-            return next;
-        },
-        []
-    );
-
-    const setDraftFromValues = useCallback(
-        (draft: Omit<ActiveSaveDraft, "id" | "detectedAt">) => {
-            const sanitizedSw = sanitizeDraftValue(draft.sw);
-            const sanitizedDe = sanitizeDraftValue(draft.de);
-            const missing = !sanitizedSw || !sanitizedDe;
-            return createDraft({
-                ...draft,
-                sw: sanitizedSw,
-                de: sanitizedDe,
-                missing_de: missing,
-                status: missing ? "draft" : draft.status,
-                type: looksLikeSentence(sanitizedSw || sanitizedDe) ? "sentence" : "vocab",
-            });
-        },
-        [createDraft, sanitizeDraftValue]
-    );
-
-    useEffect(() => {
-        if (!activeDraft) return;
-        if (draftStatus.state === "saving" || draftStatus.state === "saved") return;
-        const sw = activeDraft.sw.trim();
-        const de = activeDraft.de.trim();
-        if (!sw || !de) {
-            if (draftStatus.state === "exists") {
-                setDraftStatus({ state: "idle" });
-            }
-            return;
-        }
-
-        const controller = new AbortController();
-        const checkDuplicates = async () => {
-            try {
-                const res = await fetch("/api/cards/exists", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    signal: controller.signal,
-                    body: JSON.stringify({
-                        ownerKey,
-                        sw,
-                        de,
-                    }),
-                });
-
-                const json = await res.json().catch(() => ({}));
-                if (!res.ok) return;
-                if (json.exists) {
-                    setDraftStatus({
-                        state: "exists",
-                        existingId: json.existing_id ?? "",
-                    });
-                } else if (draftStatus.state === "exists") {
-                    setDraftStatus({ state: "idle" });
-                }
-            } catch {
-                // ignore
-            }
-        };
-
-        void checkDuplicates();
-        return () => controller.abort();
-    }, [activeDraft, draftStatus.state, ownerKey]);
-
     const addAssistantMessage = useCallback((text: string) => {
         setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
     }, []);
 
-    const translateCandidate = useCallback(
-        async (candidate: string, sourceLang: "sw" | "de") => {
-            const res = await fetch("/api/ai/translate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ownerKey,
-                    text: candidate,
-                    sourceLang,
-                }),
-            });
+    const buildInterpretTrainingContext = useCallback(
+        (context: TrainingContext | null | undefined) => {
+            if (!context) return null;
+            const direction =
+                context.direction === "DE_TO_SW"
+                    ? "de->sw"
+                    : context.direction === "SW_TO_DE"
+                        ? "sw->de"
+                        : undefined;
 
-            const json = await res.json().catch(() => ({}));
-            if (!res.ok) return null;
-            const sw = typeof json.sw === "string" ? json.sw.trim() : "";
-            const de = typeof json.de === "string" ? json.de.trim() : "";
-            if (!sw || !de) return null;
-            return { sw, de };
+            if (direction === "de->sw") {
+                return {
+                    frontText: context.german || undefined,
+                    backText: context.swahili || undefined,
+                    direction,
+                };
+            }
+            if (direction === "sw->de") {
+                return {
+                    frontText: context.swahili || undefined,
+                    backText: context.german || undefined,
+                    direction,
+                };
+            }
+
+            return {
+                frontText: context.swahili || context.german || undefined,
+                backText: context.german || context.swahili || undefined,
+                direction,
+            };
+        },
+        []
+    );
+
+    const checkDuplicate = useCallback(
+        async (sw: string, de: string) => {
+            try {
+                const res = await fetch("/api/cards/exists", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ownerKey, sw, de }),
+                });
+
+                const json = await res.json().catch(() => ({}));
+                if (!res.ok) return null;
+                return json;
+            } catch {
+                return null;
+            }
         },
         [ownerKey]
     );
 
-    const handleDraftSave = useCallback(async () => {
-        if (!activeDraft) return;
-        if (draftStatus.state === "exists") return;
-        const sw = activeDraft.sw.trim();
-        const de = activeDraft.de.trim();
-        if (!sw || !de) {
-            setDraftStatus({
-                state: "error",
-                message: "Bitte beide Seiten ergänzen, bevor gespeichert wird.",
-            });
-            return;
-        }
-        if (looksLikeMetaText(sw) || looksLikeMetaText(de)) {
-            setDraftStatus({
-                state: "error",
-                message: "Bitte nur das Wortpaar speichern, kein Hinweistext.",
-            });
-            return;
-        }
+    const applyProposals = useCallback(
+        async (items: SaveItem[]) => {
+            const entries = await Promise.all(
+                items.map(async (item) => {
+                    const proposal: CardProposal = {
+                        id: crypto.randomUUID(),
+                        type: item.type,
+                        front_lang: "sw",
+                        back_lang: "de",
+                        front_text: item.sw.trim(),
+                        back_text: item.de.trim(),
+                        source_label: item.source,
+                        notes: item.why,
+                    };
+                    let status: ProposalStatus = { state: "idle" };
+                    const existsResult = await checkDuplicate(
+                        proposal.front_text,
+                        proposal.back_text
+                    );
+                    if (existsResult?.exists) {
+                        status = {
+                            state: "exists",
+                            existingId: existsResult.existing_id ?? "",
+                        };
+                    }
+                    return { kind: "proposal" as const, proposal, status };
+                })
+            );
+            setProposals(entries);
+        },
+        [checkDuplicate]
+    );
 
-        setDraftStatus({ state: "saving" });
-        const canonical = canonicalizeToSwDe({
-            front_lang: "sw",
-            back_lang: "de",
-            front_text: sw,
-            back_text: de,
-        });
+    const updateProposal = useCallback(
+        (id: string, update: Partial<CardProposal>) => {
+            setProposals((prev) =>
+                prev.map((entry) => {
+                    if (entry.proposal.id !== id) return entry;
+                    const nextProposal = { ...entry.proposal, ...update };
+                    return { ...entry, proposal: nextProposal, status: { state: "idle" } };
+                })
+            );
+        },
+        []
+    );
 
-        try {
-            const res = await fetch("/api/cards/create", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ownerKey,
-                    type: activeDraft.type,
-                    front_text: canonical.sw,
-                    back_text: canonical.de,
-                    front_lang: "sw",
-                    back_lang: "de",
-                    source: "chat",
-                    context: activeDraft.sourceSnippet ?? null,
-                }),
-            });
+    const removeProposal = useCallback((id: string) => {
+        setProposals((prev) => prev.filter((entry) => entry.proposal.id !== id));
+    }, []);
 
-            const json = await res.json().catch(() => ({}));
+    const setProposalStatus = useCallback((id: string, status: ProposalStatus) => {
+        setProposals((prev) =>
+            prev.map((entry) =>
+                entry.proposal.id === id ? { ...entry, status } : entry
+            )
+        );
+    }, []);
 
-            if (!res.ok) {
-                setDraftStatus({
+    const handleProposalSave = useCallback(
+        async (proposalId: string) => {
+            const entry = proposalsRef.current.find(
+                (item) => item.proposal.id === proposalId
+            );
+            if (!entry) return;
+            if (entry.status.state === "exists") return;
+
+            const sw = entry.proposal.front_text.trim();
+            const de = entry.proposal.back_text.trim();
+            if (!sw || !de) {
+                setProposalStatus(proposalId, {
                     state: "error",
-                    message: json?.error ?? "Speichern fehlgeschlagen.",
+                    message: "Bitte beide Seiten ergänzen, bevor gespeichert wird.",
                 });
                 return;
             }
 
-            if (json.status === "exists") {
-                setDraftStatus({
-                    state: "exists",
-                    existingId: json.existing_id,
+            if (looksLikeMetaText(sw) || looksLikeMetaText(de)) {
+                setProposalStatus(proposalId, {
+                    state: "error",
+                    message: "Bitte nur das Wortpaar speichern, kein Hinweistext.",
                 });
                 return;
             }
 
-            setDraftStatus({ state: "saved", id: json.id });
-        } catch {
-            setDraftStatus({
-                state: "error",
-                message: "Speichern fehlgeschlagen.",
+            setProposalStatus(proposalId, { state: "saving" });
+
+            const canonical = canonicalizeToSwDe({
+                front_lang: entry.proposal.front_lang,
+                back_lang: entry.proposal.back_lang,
+                front_text: sw,
+                back_text: de,
             });
-        }
-    }, [activeDraft, draftStatus.state, ownerKey]);
+
+            try {
+                const res = await fetch("/api/cards/create", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ownerKey,
+                        type: entry.proposal.type,
+                        front_text: canonical.sw,
+                        back_text: canonical.de,
+                        front_lang: "sw",
+                        back_lang: "de",
+                        source: "chat",
+                        context: entry.proposal.source_context_snippet ?? null,
+                    }),
+                });
+
+                const json = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    setProposalStatus(proposalId, {
+                        state: "error",
+                        message: json?.error ?? "Speichern fehlgeschlagen.",
+                    });
+                    return;
+                }
+
+                if (json.status === "exists") {
+                    setProposalStatus(proposalId, {
+                        state: "exists",
+                        existingId: json.existing_id ?? "",
+                    });
+                    return;
+                }
+
+                setProposalStatus(proposalId, { state: "saved", id: json.id });
+                window.setTimeout(() => removeProposal(proposalId), 600);
+            } catch {
+                setProposalStatus(proposalId, {
+                    state: "error",
+                    message: "Speichern fehlgeschlagen.",
+                });
+            }
+        },
+        [ownerKey, removeProposal, setProposalStatus]
+    );
+
+    const applyFallbackProposals = useCallback(
+        async (fallbackProposals: CardProposal[]) => {
+            const entries = await Promise.all(
+                fallbackProposals.map(async (proposal) => {
+                    let status: ProposalStatus = { state: "idle" };
+                    if (proposal.front_text.trim() && proposal.back_text.trim()) {
+                        const canonical = canonicalizeToSwDe({
+                            front_lang: proposal.front_lang,
+                            back_lang: proposal.back_lang,
+                            front_text: proposal.front_text,
+                            back_text: proposal.back_text,
+                        });
+                        const existsResult = await checkDuplicate(canonical.sw, canonical.de);
+                        if (existsResult?.exists) {
+                            status = {
+                                state: "exists",
+                                existingId: existsResult.existing_id ?? "",
+                            };
+                        }
+                    }
+                    return { kind: "proposal" as const, proposal, status };
+                })
+            );
+            setProposals(entries);
+        },
+        [checkDuplicate]
+    );
 
     const send = useCallback(async () => {
         const text = input.trim();
@@ -290,128 +394,82 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
         setMessages((prev) => [...prev, { kind: "text", role: "user", text }]);
         setInput("");
 
-        if (activeDraft && draftStatus.state !== "exists") {
-            setActiveDraft(null);
-            setDraftStatus({ state: "idle" });
+        const nextHistory: Array<{ role: "user" | "assistant"; text: string }> = [
+            ...textHistory,
+            { role: "user" as const, text },
+        ];
+
+        const interpretPayload = {
+            ownerKey,
+            userMessage: text,
+            chatHistory: nextHistory,
+            trainingContext: buildInterpretTrainingContext(trainingContext),
+        };
+
+        let interpretResult: InterpretResult | null = null;
+
+        try {
+            const res = await fetch("/api/ai/interpret", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(interpretPayload),
+            });
+
+            const json = await res.json().catch(() => null);
+            if (res.ok && json?.kind) {
+                interpretResult = json as InterpretResult;
+            } else if (process.env.NODE_ENV !== "production") {
+                console.error("[interpret] unexpected response", json);
+            }
+
+        } catch (err) {
+            if (process.env.NODE_ENV !== "production") {
+                console.error("[interpret] request failed", err);
+            }
         }
 
-        if (detectSaveIntent(text)) {
-            const candidate = extractCandidateFromUser(text);
-            const normalizedCandidate = candidate ? normalizeText(candidate) : "";
-
-            if (candidate && !isCleanCandidate(candidate)) {
-                addAssistantMessage("Welches genaue Wort soll ich speichern?");
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            const referencedConcept = lastGoodConcepts.find((concept) => {
-                const swNorm = normalizeText(concept.sw);
-                const deNorm = normalizeText(concept.de);
-                if (normalizedCandidate && swNorm.includes(normalizedCandidate)) return true;
-                if (normalizedCandidate && deNorm.includes(normalizedCandidate)) return true;
-                return false;
-            });
-
-            if (referencedConcept) {
-                setDraftFromValues({
-                    type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
-                    sw: referencedConcept.sw,
-                    de: referencedConcept.de,
-                    missing_de: false,
-                    source: "last_list",
-                    status: "awaiting_confirmation",
-                    sourceSnippet: undefined,
-                });
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            if (!candidate && lastGoodConcepts.length > 0 && matchesImplicitReference(text)) {
-                const latest = lastGoodConcepts[lastGoodConcepts.length - 1];
-                setDraftFromValues({
-                    type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
-                    sw: latest.sw,
-                    de: latest.de,
-                    missing_de: false,
-                    source: "last_list",
-                    status: "awaiting_confirmation",
-                    sourceSnippet: undefined,
-                });
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            if (candidate) {
-                const fromContext = findPairInAssistantHistory(candidate, textHistory);
-                if (fromContext) {
-                    setDraftFromValues({
-                        type: looksLikeSentence(fromContext.sw) ? "sentence" : "vocab",
-                        sw: fromContext.sw,
-                        de: fromContext.de,
-                        missing_de: false,
-                        source: "chat_context",
-                        status: "awaiting_confirmation",
-                        sourceSnippet: fromContext.snippet.slice(0, 240),
-                    });
-                    setIsSending(false);
-                    inputRef.current?.focus();
-                    return;
-                }
-            }
-
-            if (!candidate) {
-                if (matchesImplicitReference(text)) {
-                    addAssistantMessage("Welches Wort meinst du genau?");
+        if (!interpretResult) {
+            if (detectSaveIntent(text)) {
+                const fallback = buildProposalsFromChat(
+                    text,
+                    nextHistory,
+                    lastGoodConcepts
+                );
+                if (fallback.proposals.length > 0) {
+                    await applyFallbackProposals(fallback.proposals);
                 } else {
-                    addAssistantMessage("Welches Wort soll ich speichern?");
+                    addAssistantMessage(
+                        fallback.followUpText ?? "Ich bin nicht sicher—welches Wort genau?"
+                    );
                 }
                 setIsSending(false);
                 inputRef.current?.focus();
                 return;
             }
+            interpretResult = { kind: "ask" };
+        }
 
-            if (looksLikeMetaText(candidate)) {
-                addAssistantMessage("Bitte nur das Wort oder die kurze Phrase angeben.");
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
+        if (interpretResult.kind === "clarify") {
+            addAssistantMessage(interpretResult.question);
+            setIsSending(false);
+            inputRef.current?.focus();
+            return;
+        }
+
+        if (interpretResult.kind === "save") {
+            if (interpretResult.items.length === 0) {
+                addAssistantMessage("Ich bin nicht sicher—welches Wort genau?");
+            } else {
+                await applyProposals(interpretResult.items);
             }
-
-            const wordCount = candidate.split(/\s+/).filter(Boolean).length;
-            if (candidate.length > 40 || wordCount > 3) {
-                addAssistantMessage("Zu lang – welches kurze Wort oder welche kurze Phrase meinst du?");
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            const guessed = guessLang(candidate);
-            const translation = await translateCandidate(candidate, guessed);
-            if (!translation) {
-                addAssistantMessage("Ich brauche die Übersetzung dazu. Kannst du sie angeben?");
-                setIsSending(false);
-                inputRef.current?.focus();
-                return;
-            }
-
-            setDraftFromValues({
-                type: looksLikeSentence(candidate) ? "sentence" : "vocab",
-                sw: translation.sw,
-                de: translation.de,
-                missing_de: false,
-                source: "manual",
-                status: "awaiting_confirmation",
-                sourceSnippet: "AI_TRANSLATION",
-                notes: "KI-Vorschlag – bitte prüfen",
-            });
 
             setIsSending(false);
             inputRef.current?.focus();
             return;
+        }
+
+        if (proposals.length > 0) {
+            setProposals([]);
         }
 
         try {
@@ -420,8 +478,8 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ownerKey,
-                    message: text,
-                    context: context?.enabled ? context.payload : undefined,
+                    message: interpretResult.rewrittenUserMessage || text,
+                    context: trainingContext ?? undefined,
                 }),
             });
 
@@ -446,33 +504,17 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
     }, [
         input,
         isSending,
-        lastGoodConcepts,
-        ownerKey,
         textHistory,
-        updateLastConceptsFromAnswer,
-        activeDraft,
-        draftStatus.state,
+        ownerKey,
+        buildInterpretTrainingContext,
+        trainingContext,
+        lastGoodConcepts,
+        applyFallbackProposals,
         addAssistantMessage,
-        setDraftFromValues,
-        handleDraftSave,
-        context,
-        translateCandidate,
+        applyProposals,
+        proposals.length,
+        updateLastConceptsFromAnswer,
     ]);
-
-    const draftProposal: CardProposal | null = activeDraft
-        ? {
-            id: activeDraft.id,
-            type: activeDraft.type,
-            front_lang: "sw",
-            back_lang: "de",
-            front_text: activeDraft.sw,
-            back_text: activeDraft.de,
-            missing_back: !activeDraft.sw.trim() || !activeDraft.de.trim(),
-            source_context_snippet: activeDraft.sourceSnippet,
-            source_label: activeDraft.source,
-            notes: activeDraft.notes,
-        }
-        : null;
 
     if (!mounted || !document?.body) return null;
 
@@ -524,64 +566,88 @@ export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props
                                                         : "self-start bg-surface text-primary border border-soft",
                                                 ].join(" ")}
                                             >
-                                                {m.text}
+                                                {m.role === "assistant" ? (
+                                                    <div className="flex flex-col gap-2">
+                                                        {parseMessageBlocks(m.text).map(
+                                                            (block, blockIndex) =>
+                                                                block.type === "list" ? (
+                                                                    <ul
+                                                                        key={`${idx}-list-${blockIndex}`}
+                                                                        className="list-disc space-y-1 pl-5"
+                                                                    >
+                                                                        {block.items.map(
+                                                                            (item, itemIndex) => (
+                                                                                <li
+                                                                                    key={`${idx}-item-${itemIndex}`}
+                                                                                    className="text-sm"
+                                                                                >
+                                                                                    {item}
+                                                                                </li>
+                                                                            )
+                                                                        )}
+                                                                    </ul>
+                                                                ) : (
+                                                                    <p
+                                                                        key={`${idx}-p-${blockIndex}`}
+                                                                        className="whitespace-pre-wrap"
+                                                                    >
+                                                                        {block.text}
+                                                                    </p>
+                                                                )
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    m.text
+                                                )}
                                             </div>
                                         </div>
                                     ))}
-                                    {draftProposal ? (
+                                    {proposals.length > 0 ? (
                                         <div className="self-start w-full">
                                             <div className="mb-2 text-xs text-muted">
-                                                Vorschlag zum Speichern (No auto-save; always confirm)
+                                                Vorschläge zum Speichern (No auto-save; always confirm)
                                             </div>
-                                            <ChatProposal
-                                                proposal={draftProposal}
-                                                status={draftStatus}
-                                                onUpdate={(update) => {
-                                                    setActiveDraft((prev) => {
-                                                        if (!prev) return prev;
-                                                        const nextSw =
-                                                            typeof update.front_text === "string"
-                                                                ? update.front_text
-                                                                : prev.sw;
-                                                        const nextDe =
-                                                            typeof update.back_text === "string"
-                                                                ? update.back_text
-                                                                : prev.de;
-                                                        const missing = !nextSw.trim() || !nextDe.trim();
-                                                        return {
-                                                            ...prev,
-                                                            sw: nextSw,
-                                                            de: nextDe,
-                                                            missing_de: missing,
-                                                            status: missing
-                                                                ? "draft"
-                                                                : "awaiting_confirmation",
-                                                        };
-                                                    });
-                                                    setDraftStatus({ state: "idle" });
-                                                }}
-                                                onSave={() => void handleDraftSave()}
-                                                onDiscard={() => {
-                                                    setActiveDraft(null);
-                                                    setDraftStatus({ state: "idle" });
-                                                }}
-                                                onSwap={() => {
-                                                    setActiveDraft((prev) => {
-                                                        if (!prev) return prev;
-                                                        const next = {
-                                                            ...prev,
-                                                            sw: prev.de,
-                                                            de: prev.sw,
-                                                        };
-                                                        return {
-                                                            ...next,
-                                                            missing_de:
-                                                                !next.sw.trim() || !next.de.trim(),
-                                                        };
-                                                    });
-                                                    setDraftStatus({ state: "idle" });
-                                                }}
-                                            />
+                                            <div className="flex flex-col gap-3">
+                                                {proposals.map((entry) => (
+                                                    <ChatProposal
+                                                        key={entry.proposal.id}
+                                                        proposal={entry.proposal}
+                                                        status={entry.status}
+                                                        onUpdate={(update) => {
+                                                            const nextFront =
+                                                                typeof update.front_text === "string"
+                                                                    ? update.front_text
+                                                                    : entry.proposal.front_text;
+                                                            const nextBack =
+                                                                typeof update.back_text === "string"
+                                                                    ? update.back_text
+                                                                    : entry.proposal.back_text;
+                                                            updateProposal(entry.proposal.id, {
+                                                                front_text: nextFront,
+                                                                back_text: nextBack,
+                                                                missing_back:
+                                                                    !nextFront.trim() ||
+                                                                    !nextBack.trim(),
+                                                            });
+                                                        }}
+                                                        onSave={() =>
+                                                            void handleProposalSave(entry.proposal.id)
+                                                        }
+                                                        onDiscard={() =>
+                                                            removeProposal(entry.proposal.id)
+                                                        }
+                                                        onSwap={() => {
+                                                            updateProposal(entry.proposal.id, {
+                                                                front_text: entry.proposal.back_text,
+                                                                back_text: entry.proposal.front_text,
+                                                                missing_back:
+                                                                    !entry.proposal.back_text.trim() ||
+                                                                    !entry.proposal.front_text.trim(),
+                                                            });
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
                                         </div>
                                     ) : null}
                                     {isSending ? (

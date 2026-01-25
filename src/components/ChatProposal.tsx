@@ -43,7 +43,15 @@ export default function ChatProposal({
                 ? "Quelle: Chat-Kontext"
                 : proposal.source_label === "manual"
                     ? "Quelle: manuell"
-                    : null;
+                    : proposal.source_label === "assistant_list"
+                        ? "Quelle: Assistentenliste"
+                        : proposal.source_label === "training"
+                            ? "Quelle: Training"
+                            : proposal.source_label === "chat"
+                                ? "Quelle: Chat"
+                                : proposal.source_label === "user"
+                                    ? "Quelle: Nutzer"
+                                    : null;
 
     function handleFrontChange(value: string) {
         setFront(value);

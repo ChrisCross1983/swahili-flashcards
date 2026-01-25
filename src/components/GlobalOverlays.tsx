@@ -41,11 +41,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 ownerKey={ownerKey}
                 open={openAi}
                 onClose={() => setOpenAi(false)}
-                context={
-                    trainingContext
-                        ? { enabled: true, payload: trainingContext }
-                        : { enabled: false }
-                }
+                trainingContext={trainingContext}
             />
 
             <GlobalQuickSearch

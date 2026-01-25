@@ -31,21 +31,56 @@ export async function POST(req: Request) {
     const { data: existingCards, error } = await supabaseServer
         .from("cards")
         .select("id, german_text, swahili_text")
-        .eq("owner_key", ownerKey);
+        .eq("owner_key", ownerKey)
+        .order("created_at", { ascending: true });
 
     if (error) {
         console.error(error);
         return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
     }
 
-    const existingMatch = (existingCards ?? []).find((card) => {
+    let swMatch: typeof existingCards[number] | null = null;
+    let deMatch: typeof existingCards[number] | null = null;
+
+    for (const card of existingCards ?? []) {
         const existingSw = normalizeText(card.swahili_text ?? "");
         const existingDe = normalizeText(card.german_text ?? "");
-        return existingSw === normalizedSw || existingDe === normalizedDe;
-    });
+        const isPair = existingSw === normalizedSw && existingDe === normalizedDe;
+        const isSwap = existingSw === normalizedDe && existingDe === normalizedSw;
 
-    if (existingMatch) {
-        return NextResponse.json({ exists: true, existing_id: existingMatch.id });
+        if (isPair) {
+            return NextResponse.json({
+                exists: true,
+                existing_id: card.id,
+                match: "pair",
+            });
+        }
+        if (isSwap) {
+            return NextResponse.json({
+                exists: true,
+                existing_id: card.id,
+                match: "swap",
+            });
+        }
+
+        if (!swMatch && existingSw === normalizedSw) swMatch = card;
+        if (!deMatch && existingDe === normalizedDe) deMatch = card;
+    }
+
+    if (swMatch) {
+        return NextResponse.json({
+            exists: true,
+            existing_id: swMatch.id,
+            match: "sw",
+        });
+    }
+
+    if (deMatch) {
+        return NextResponse.json({
+            exists: true,
+            existing_id: deMatch.id,
+            match: "de",
+        });
     }
 
     return NextResponse.json({ exists: false });
