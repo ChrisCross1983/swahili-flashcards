@@ -91,13 +91,24 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Speichern fehlgeschlagen." }, { status: 500 });
     }
 
+    let legacySwappedDetected = false;
     const existingMatch = (existingCards ?? []).find((card) => {
         const existingFront = normalizeText(card.swahili_text ?? "");
         const existingBack = normalizeText(card.german_text ?? "");
-        return existingFront === normalizedFront && existingBack === normalizedBack;
+        const exactMatch =
+            existingFront === normalizedFront && existingBack === normalizedBack;
+        const partialMatch =
+            existingFront === normalizedFront || existingBack === normalizedBack;
+        const legacySwapped =
+            existingFront === normalizedBack && existingBack === normalizedFront;
+        if (legacySwapped) legacySwappedDetected = true;
+        return exactMatch || partialMatch || legacySwapped;
     });
 
     if (existingMatch) {
+        if (legacySwappedDetected) {
+            console.warn("legacy_swapped_detected", { ownerKey });
+        }
         return NextResponse.json({
             status: "exists",
             existing_id: existingMatch.id,

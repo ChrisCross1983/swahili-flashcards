@@ -234,7 +234,10 @@ export function extractConceptsFromAssistantText(
 }
 
 export function guessLang(candidate: string): Lang {
-    const normalized = candidate.trim().toLowerCase();
+    const raw = candidate.trim();
+    const normalized = raw.toLowerCase();
+    const hasSwPattern = /(ng'|ny|sh|gh|dh|kw|mw|bw|mb|nd|nj)/.test(normalized);
+    if (!hasSwPattern && /^[A-ZÄÖÜ][a-zäöüß]+$/.test(raw)) return "de";
     if (/[äöüß]/.test(normalized)) return "de";
     if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) return "de";
     if (/(chen|lein|ung|keit|heit|schaft|tion|ismus|ieren|lich|ig|isch|en|er)$/.test(normalized)) return "de";

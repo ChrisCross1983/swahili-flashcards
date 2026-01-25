@@ -29,17 +29,42 @@ export function canonicalizeToSwDe(input: {
     front_text: string;
     back_text: string;
 }): { sw: string; de: string } {
-    if (input.front_lang === "sw" && input.back_lang === "de") {
-        return { sw: input.front_text.trim(), de: input.back_text.trim() };
+    const frontText = input.front_text.trim();
+    const backText = input.back_text.trim();
+    let shouldSwap = input.front_lang === "de" && input.back_lang === "sw";
+
+    if (!shouldSwap) {
+        const frontGuess = inferLangFromText(frontText);
+        const backGuess = inferLangFromText(backText);
+        if (frontGuess === "de" && backGuess === "sw") {
+            shouldSwap = true;
+        }
     }
-    if (input.front_lang === "de" && input.back_lang === "sw") {
-        return { sw: input.back_text.trim(), de: input.front_text.trim() };
+    if (shouldSwap) {
+        return { sw: backText, de: frontText };
     }
-    return { sw: input.front_text.trim(), de: input.back_text.trim() };
+    return { sw: frontText, de: backText };
 }
 
 function looksLikeSentence(text: string) {
     return text.trim().split(/\s+/).length > 2 || /[.!?]$/.test(text.trim());
+}
+
+function inferLangFromText(value: string): Lang | null {
+    const raw = value.trim();
+    const normalized = raw.toLowerCase();
+    if (!normalized) return null;
+    const hasSwPattern = /(ng'|ny|sh|gh|dh|kw|mw|bw|mb|nd|nj)/.test(normalized);
+    if (!hasSwPattern && /^[A-ZÄÖÜ][a-zäöüß]+$/.test(raw)) return "de";
+    if (/[äöüß]/.test(normalized)) return "de";
+    if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) {
+        return "de";
+    }
+    if (/(chen|lein|ung|keit|heit|schaft|tion|ismus|ieren|lich|ig|isch|en|er)$/.test(normalized)) {
+        return "de";
+    }
+    if (/^[a-z\s'-]+$/.test(normalized)) return "sw";
+    return null;
 }
 
 export function looksLikeMetaText(value: string): boolean {

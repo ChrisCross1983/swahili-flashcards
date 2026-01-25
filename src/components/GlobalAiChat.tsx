@@ -27,6 +27,7 @@ type Props = {
     ownerKey: string;
     open: boolean;
     onClose: () => void;
+    context?: { enabled: boolean; payload?: any };
 };
 
 type TextMessage = {
@@ -37,7 +38,7 @@ type TextMessage = {
 
 type Msg = TextMessage;
 
-export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
+export default function GlobalAiChat({ ownerKey, open, onClose, context }: Props) {
     const [mounted, setMounted] = useState(false);
     const [messages, setMessages] = useState<TextMessage[]>([]);
     const [input, setInput] = useState("");
@@ -82,6 +83,15 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         return () => document.removeEventListener("keydown", onKey);
     }, [open, close]);
 
+    useEffect(() => {
+        if (draftStatus.state !== "saved" && draftStatus.state !== "exists") return;
+        const timeout = window.setTimeout(() => {
+            setActiveDraft(null);
+            setDraftStatus({ state: "idle" });
+        }, 600);
+        return () => window.clearTimeout(timeout);
+    }, [draftStatus.state]);
+
     const updateLastConceptsFromAnswer = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
         if (concepts.length > 0) {
@@ -94,6 +104,17 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         if (!trimmed) return "";
         if (looksLikeMetaText(trimmed)) return "";
         return trimmed;
+    }, []);
+
+    const isDraftCompletion = useCallback((text: string, draft: ActiveSaveDraft) => {
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        if (trimmed.includes("?")) return false;
+        const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+        if (wordCount > 4) return false;
+        if (draft.missing_de && !draft.de.trim()) return true;
+        if (!draft.sw.trim()) return true;
+        return false;
     }, []);
 
     const createDraft = useCallback(
@@ -241,73 +262,54 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                 return;
             }
 
-            if (!detectSaveIntent(text)) {
-                let followUpText: string | null = null;
-                const pairMatch = text.match(/(.+?)\s*[-–—:]\s*(.+)$/);
-                if (pairMatch) {
-                    const left = pairMatch[1].trim();
-                    const right = pairMatch[2].trim();
-                    const leftLang = guessLang(left);
-                    const rightLang = guessLang(right);
-                    const swCandidate = leftLang === "sw" && rightLang === "de" ? left : right;
-                    const deCandidate = leftLang === "sw" && rightLang === "de" ? right : left;
-                    setActiveDraft((prev) => {
-                        if (!prev) return prev;
-                        const nextSw = sanitizeDraftValue(swCandidate || prev.sw);
-                        const nextDe = sanitizeDraftValue(deCandidate || prev.de);
-                        const missing = !nextSw || !nextDe;
-                        return {
-                            ...prev,
-                            sw: nextSw,
-                            de: nextDe,
-                            missing_de: missing,
-                            status: missing ? "draft" : "awaiting_confirmation",
-                        };
-                    });
+            if (detectSaveIntent(text)) {
+                if (!activeDraft.missing_de) {
+                    void handleDraftSave();
                 } else {
-                    if (activeDraft) {
-                        const cleaned = sanitizeDraftValue(text);
-                        let updatedSw = activeDraft.sw;
-                        let updatedDe = activeDraft.de;
-                        if (!updatedSw.trim() && !updatedDe.trim()) {
-                            const guessed = guessLang(cleaned);
-                            if (guessed === "sw") {
-                                updatedSw = cleaned;
-                            } else {
-                                updatedDe = cleaned;
-                            }
-                        } else if (!updatedSw.trim()) {
-                            updatedSw = cleaned;
-                        } else if (!updatedDe.trim()) {
-                            updatedDe = cleaned;
-                        }
-                        const missing = !updatedSw.trim() || !updatedDe.trim();
-                        setActiveDraft({
-                            ...activeDraft,
-                            sw: updatedSw,
-                            de: updatedDe,
-                            missing_de: missing,
-                            status: missing ? "draft" : "awaiting_confirmation",
-                        });
-
-                        if (!updatedSw && !updatedDe) {
-                            followUpText =
-                                "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)";
-                        } else if (updatedSw && !updatedDe) {
-                            followUpText = `Was bedeutet „${updatedSw}“ auf Deutsch?`;
-                        } else if (!updatedSw && updatedDe) {
-                            followUpText = `Wie lautet das swahilische Wort für „${updatedDe}“?`;
-                        }
-                    }
+                    addAssistantMessage("Bitte ergänze zuerst die fehlende Seite.");
                 }
-                if (followUpText) {
-                    addAssistantMessage(followUpText);
-                }
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
             }
 
-            setIsSending(false);
-            inputRef.current?.focus();
-            return;
+            if (isDraftCompletion(text, activeDraft)) {
+                const cleaned = sanitizeDraftValue(text);
+                let updatedSw = activeDraft.sw;
+                let updatedDe = activeDraft.de;
+                if (activeDraft.missing_de && !activeDraft.de.trim()) {
+                    updatedDe = cleaned;
+                } else if (!activeDraft.sw.trim()) {
+                    updatedSw = cleaned;
+                }
+                const missing = !updatedSw.trim() || !updatedDe.trim();
+                setActiveDraft({
+                    ...activeDraft,
+                    sw: updatedSw,
+                    de: updatedDe,
+                    missing_de: missing,
+                    status: missing ? "draft" : "awaiting_confirmation",
+                });
+
+                if (missing) {
+                    if (updatedSw && !updatedDe) {
+                        addAssistantMessage(`Was bedeutet „${updatedSw}“ auf Deutsch?`);
+                    } else if (!updatedSw && updatedDe) {
+                        addAssistantMessage(
+                            `Wie lautet das swahilische Wort für „${updatedDe}“?`
+                        );
+                    } else {
+                        addAssistantMessage(
+                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)"
+                        );
+                    }
+                }
+                setIsSending(false);
+                inputRef.current?.focus();
+                return;
+            }
+            setActiveDraft(null);
+            setDraftStatus({ state: "idle" });
         }
 
         if (detectSaveIntent(text)) {
@@ -403,7 +405,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                     status: "draft",
                     sourceSnippet: undefined,
                 });
-                addAssistantMessage("Welches Wort soll ich speichern?");
+                addAssistantMessage(
+                    "Welches Wort oder welchen Satz soll ich speichern? (Du kannst auch 'sw — de' schreiben.)"
+                );
             }
 
             setIsSending(false);
@@ -418,7 +422,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                 body: JSON.stringify({
                     ownerKey,
                     message: text,
-                    // bewusst KEIN context -> globale KI
+                    context: context?.enabled ? context.payload : undefined,
                 }),
             });
 
@@ -451,6 +455,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
         addAssistantMessage,
         sanitizeDraftValue,
         setDraftFromValues,
+        handleDraftSave,
+        isDraftCompletion,
+        context,
     ]);
 
     const draftProposal: CardProposal | null = activeDraft
@@ -593,6 +600,14 @@ export default function GlobalAiChat({ ownerKey, open, onClose }: Props) {
                                 ref={inputRef}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        if (!isSending && input.trim()) {
+                                            void send();
+                                        }
+                                    }
+                                }}
                                 placeholder="Frage eingeben…"
                                 className="w-full rounded-xl border border-soft px-4 py-3 text-base shadow-soft focus:border-accent focus:outline-none"
                             />
