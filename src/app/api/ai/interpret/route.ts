@@ -11,6 +11,7 @@ type InterpretRequestBody = {
     userMessage?: string;
     chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
     trainingContext?: TrainingContext | null;
+    lastAssistantPairs?: Array<{ sw: string; de: string }>;
 };
 
 type SaveItem = {
@@ -46,27 +47,6 @@ Regeln:
 - Wenn im letzten Assistant-Output eine Liste vorkam (z.B. "Cashew — korosho"), extrahiere exakt das Paar.
 - Niemals sw/de vertauschen. Wenn unsicher -> clarify.
 - Du darfst mehrere Items vorschlagen, aber nur wenn echte Paare vorhanden sind.
-
-Beispiele:
-Input:
-{"userMessage":"Bitte speichere Cashew ab","chatHistory":[{"role":"assistant","text":"Hier eine Liste:\\n- Cashew — korosho\\n- Mango — maembe"}],"trainingContext":null}
-Output:
-{"kind":"save","items":[{"type":"vocab","sw":"korosho","de":"Cashew","source":"assistant_list","confidence":0.91,"why":"User will Cashew aus der Liste speichern."}]}
-
-Input:
-{"userMessage":"Kannst du mir Hund abspeichern?","chatHistory":[{"role":"assistant","text":"mbwa → Hund"}],"trainingContext":null}
-Output:
-{"kind":"save","items":[{"type":"vocab","sw":"mbwa","de":"Hund","source":"chat","confidence":0.9,"why":"Paar steht im Chat-Kontext."}]}
-
-Input:
-{"userMessage":"Bitte abspeichern","chatHistory":[{"role":"assistant","text":"Hier ist das Paar: chai — Tee"}],"trainingContext":null}
-Output:
-{"kind":"save","items":[{"type":"vocab","sw":"chai","de":"Tee","source":"assistant_list","confidence":0.86,"why":"Letztes genanntes Paar."}]}
-
-Input:
-{"userMessage":"Bitte gehen ins Wörterbuch übernehmen","chatHistory":[{"role":"assistant","text":"Wir können weiterüben."}],"trainingContext":null}
-Output:
-{"kind":"clarify","question":"Welches genaue Wort oder Paar soll ich speichern?","hints":["Nenne das Swahili- und das deutsche Wort."]}
 `;
 
 function safeSnippet(v: unknown, max = 400) {
@@ -110,6 +90,13 @@ async function callOpenAI(apiKey: string, payload: any) {
 
     const data = await r.json().catch(() => null);
     return { ok: r.ok, status: r.status, data };
+}
+
+function isMaxTokenIncomplete(data: any) {
+    return (
+        data?.status === "incomplete" &&
+        data?.incomplete_details?.reason === "max_output_tokens"
+    );
 }
 
 function stripJsonFences(raw: string) {
@@ -192,7 +179,9 @@ function parseInterpretResult(raw: string): InterpretResult | null {
 
     if (parsed.kind === "save") {
         if (!Array.isArray(parsed.items) || parsed.items.length === 0) return null;
-        const items = parsed.items.filter((item: any) => isValidSaveItem(item));
+        const items = parsed.items
+            .filter((item: any) => isValidSaveItem(item))
+            .slice(0, 10);
         if (items.length === 0) return null;
         return {
             kind: "save",
@@ -244,6 +233,20 @@ export async function POST(req: Request) {
             }
             : null;
 
+    const lastAssistantPairs = Array.isArray(body.lastAssistantPairs)
+        ? body.lastAssistantPairs
+            .filter(
+                (pair) =>
+                    pair &&
+                    typeof pair.sw === "string" &&
+                    typeof pair.de === "string" &&
+                    pair.sw.trim() &&
+                    pair.de.trim()
+            )
+            .map((pair) => ({ sw: pair.sw.trim(), de: pair.de.trim() }))
+            .slice(-20)
+        : [];
+
     if (!ownerKey || !userMessage || chatHistory.length === 0) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
@@ -255,14 +258,22 @@ export async function POST(req: Request) {
     }
 
     const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-    const payload = {
+    const recentHistory = chatHistory.slice(-10);
+    const buildPayload = (maxTokens: number, extraSystemText?: string) => ({
         model,
-        max_output_tokens: 500,
+        max_output_tokens: maxTokens,
         reasoning: { effort: "low" as const },
         input: [
             {
                 role: "system",
-                content: [{ type: "input_text", text: SYSTEM_PROMPT }],
+                content: [
+                    {
+                        type: "input_text",
+                        text: extraSystemText
+                            ? `${SYSTEM_PROMPT}\n\n${extraSystemText}`
+                            : SYSTEM_PROMPT,
+                    },
+                ],
             },
             {
                 role: "user",
@@ -272,8 +283,9 @@ export async function POST(req: Request) {
                         text: JSON.stringify(
                             {
                                 userMessage,
-                                chatHistory,
+                                chatHistory: recentHistory,
                                 trainingContext,
+                                lastAssistantPairs,
                             },
                             null,
                             2
@@ -282,14 +294,40 @@ export async function POST(req: Request) {
                 ],
             },
         ],
-    };
+    });
 
     try {
-        const { ok, status, data } = await callOpenAI(apiKey, payload);
+        const { ok, status, data } = await callOpenAI(apiKey, buildPayload(220));
 
         if (!ok) {
             console.error("[interpret] openai error", status, safeSnippet(data));
             return NextResponse.json({ error: "AI request failed" }, { status: 502 });
+        }
+
+        if (isMaxTokenIncomplete(data)) {
+            const retry = await callOpenAI(
+                apiKey,
+                buildPayload(150, "Return minimal valid JSON only.")
+            );
+            if (!retry.ok) {
+                console.error(
+                    "[interpret] retry openai error",
+                    retry.status,
+                    safeSnippet(retry.data)
+                );
+                return NextResponse.json({ kind: "ask" });
+            }
+            const retryAnswer = extractResponseText(retry.data);
+            if (!retryAnswer) {
+                console.error("[interpret] retry empty answer", safeSnippet(retry.data));
+                return NextResponse.json({ kind: "ask" });
+            }
+            const retryParsed = parseInterpretResult(retryAnswer);
+            if (!retryParsed) {
+                console.error("[interpret] retry parse failed", safeSnippet(retryAnswer));
+                return NextResponse.json({ kind: "ask" });
+            }
+            return NextResponse.json(retryParsed);
         }
 
         const answer = extractResponseText(data);

@@ -53,6 +53,8 @@ type SaveItem = {
     why?: string;
 };
 
+type AssistantPair = { sw: string; de: string };
+
 type MessageBlock =
     | { type: "paragraph"; text: string }
     | { type: "list"; items: string[] };
@@ -113,6 +115,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
     const [lastGoodConcepts, setLastGoodConcepts] = useState<LastExplainedConcept[]>(
         []
     );
+    const [lastAssistantPairs, setLastAssistantPairs] = useState<AssistantPair[]>([]);
     const [proposals, setProposals] = useState<ProposalEntry[]>([]);
 
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -153,6 +156,14 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         proposalsRef.current = proposals;
     }, [proposals]);
 
+    const updateLastAssistantPairsFromAnswer = useCallback((answer: string) => {
+        const concepts = extractConceptsFromAssistantText(answer, "assistant");
+        if (concepts.length === 0) return;
+        setLastAssistantPairs(
+            concepts.map((concept) => ({ sw: concept.sw, de: concept.de })).slice(-20)
+        );
+    }, []);
+
     const updateLastConceptsFromAnswer = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
         if (concepts.length > 0) {
@@ -160,9 +171,13 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         }
     }, []);
 
-    const addAssistantMessage = useCallback((text: string) => {
-        setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
-    }, []);
+    const addAssistantMessage = useCallback(
+        (text: string) => {
+            setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
+            updateLastAssistantPairsFromAnswer(text);
+        },
+        [updateLastAssistantPairsFromAnswer]
+    );
 
     const buildInterpretTrainingContext = useCallback(
         (context: TrainingContext | null | undefined) => {
@@ -245,7 +260,23 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                     return { kind: "proposal" as const, proposal, status };
                 })
             );
-            setProposals(entries);
+            const dedupMerge = (
+                prev: ProposalEntry[],
+                next: ProposalEntry[]
+            ): ProposalEntry[] => {
+                const keyFor = (entry: ProposalEntry) =>
+                    `${entry.proposal.front_text.trim().toLowerCase()}||${entry.proposal.back_text
+                        .trim()
+                        .toLowerCase()}`;
+                const merged = new Map<string, ProposalEntry>();
+                prev.forEach((entry) => merged.set(keyFor(entry), entry));
+                next.forEach((entry) => {
+                    const key = keyFor(entry);
+                    if (!merged.has(key)) merged.set(key, entry);
+                });
+                return Array.from(merged.values());
+            };
+            setProposals((prev) => dedupMerge(prev, entries));
         },
         [checkDuplicate]
     );
@@ -404,6 +435,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             userMessage: text,
             chatHistory: nextHistory,
             trainingContext: buildInterpretTrainingContext(trainingContext),
+            lastAssistantPairs,
         };
 
         let interpretResult: InterpretResult | null = null;
@@ -468,9 +500,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             return;
         }
 
-        if (proposals.length > 0) {
-            setProposals([]);
-        }
+        setProposals([]);
 
         try {
             const r = await fetch("/api/ai/chat", {
@@ -490,10 +520,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 return;
             }
 
-            setMessages((prev) => [
-                ...prev,
-                { kind: "text", role: "assistant", text: String(data.answer) },
-            ]);
+            addAssistantMessage(String(data.answer));
             updateLastConceptsFromAnswer(String(data.answer));
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
@@ -512,7 +539,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         applyFallbackProposals,
         addAssistantMessage,
         applyProposals,
-        proposals.length,
+        lastAssistantPairs,
         updateLastConceptsFromAnswer,
     ]);
 
