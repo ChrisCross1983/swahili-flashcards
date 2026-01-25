@@ -6,10 +6,9 @@ import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import type { CardProposal } from "@/lib/cards/proposals";
 import {
-    buildProposalsFromChat,
     detectSaveIntent,
     extractConceptsFromAssistantText,
-    LastExplainedConcept,
+    looksLikeSentence,
     ProposalStatus,
 } from "@/lib/cards/proposals";
 import {
@@ -41,8 +40,8 @@ type Msg = TextMessage;
 
 type InterpretResult =
     | { kind: "ask"; rewrittenUserMessage?: string }
-    | { kind: "save"; items: SaveItem[]; reason?: string }
-    | { kind: "clarify"; question: string; hints?: string[] };
+    | { kind: "save"; items: SaveItem[] }
+    | { kind: "clarify"; question: string };
 
 type SaveItem = {
     type: "vocab" | "sentence";
@@ -50,7 +49,6 @@ type SaveItem = {
     de: string;
     source: "chat" | "training" | "user" | "assistant_list";
     confidence: number;
-    why?: string;
 };
 
 type AssistantPair = { sw: string; de: string };
@@ -112,9 +110,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
     const [input, setInput] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [lastGoodConcepts, setLastGoodConcepts] = useState<LastExplainedConcept[]>(
-        []
-    );
     const [lastAssistantPairs, setLastAssistantPairs] = useState<AssistantPair[]>([]);
     const [proposals, setProposals] = useState<ProposalEntry[]>([]);
 
@@ -158,17 +153,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
 
     const updateLastAssistantPairsFromAnswer = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "assistant");
-        if (concepts.length === 0) return;
         setLastAssistantPairs(
             concepts.map((concept) => ({ sw: concept.sw, de: concept.de })).slice(-20)
         );
-    }, []);
-
-    const updateLastConceptsFromAnswer = useCallback((answer: string) => {
-        const concepts = extractConceptsFromAssistantText(answer, "answer");
-        if (concepts.length > 0) {
-            setLastGoodConcepts((prev) => [...prev, ...concepts].slice(-3));
-        }
     }, []);
 
     const addAssistantMessage = useCallback(
@@ -244,7 +231,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                         front_text: item.sw.trim(),
                         back_text: item.de.trim(),
                         source_label: item.source,
-                        notes: item.why,
                     };
                     let status: ProposalStatus = { state: "idle" };
                     const existsResult = await checkDuplicate(
@@ -415,6 +401,48 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         [checkDuplicate]
     );
 
+    const containsAllRequest = useCallback((text: string) => {
+        return /\b(alle|alles)\b/i.test(text) || /\bdiese\s+liste\b/i.test(text);
+    }, []);
+
+    const handleSaveIntentAskFallback = useCallback(
+        async (text: string) => {
+            if (containsAllRequest(text) && lastAssistantPairs.length > 0) {
+                const items: SaveItem[] = lastAssistantPairs.slice(0, 10).map((pair) => ({
+                    type: looksLikeSentence(pair.sw) ? "sentence" : "vocab",
+                    sw: pair.sw,
+                    de: pair.de,
+                    source: "assistant_list",
+                    confidence: 0.9,
+                }));
+                await applyProposals(items);
+                return;
+            }
+
+            const emptyProposal: CardProposal = {
+                id: crypto.randomUUID(),
+                type: "vocab",
+                front_lang: "sw",
+                back_lang: "de",
+                front_text: "",
+                back_text: "",
+                missing_back: true,
+                source_label: "manual",
+            };
+            await applyFallbackProposals([emptyProposal]);
+            addAssistantMessage(
+                "Welches Wort genau? (Du kannst auch 2-3 Wörter nennen oder 'alle aus der Liste')"
+            );
+        },
+        [
+            addAssistantMessage,
+            applyFallbackProposals,
+            applyProposals,
+            containsAllRequest,
+            lastAssistantPairs,
+        ]
+    );
+
     const send = useCallback(async () => {
         const text = input.trim();
         if (!text || isSending) return;
@@ -430,6 +458,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             { role: "user" as const, text },
         ];
 
+        const isSaveIntent = detectSaveIntent(text);
         const interpretPayload = {
             ownerKey,
             userMessage: text,
@@ -441,19 +470,25 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         let interpretResult: InterpretResult | null = null;
 
         try {
-            const res = await fetch("/api/ai/interpret", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(interpretPayload),
-            });
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+            try {
+                const res = await fetch("/api/ai/interpret", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(interpretPayload),
+                    signal: controller.signal,
+                });
 
-            const json = await res.json().catch(() => null);
-            if (res.ok && json?.kind) {
-                interpretResult = json as InterpretResult;
-            } else if (process.env.NODE_ENV !== "production") {
-                console.error("[interpret] unexpected response", json);
+                const json = await res.json().catch(() => null);
+                if (res.ok && json?.kind) {
+                    interpretResult = json as InterpretResult;
+                } else if (process.env.NODE_ENV !== "production") {
+                    console.error("[interpret] unexpected response", json);
+                }
+            } finally {
+                window.clearTimeout(timeoutId);
             }
-
         } catch (err) {
             if (process.env.NODE_ENV !== "production") {
                 console.error("[interpret] request failed", err);
@@ -461,19 +496,8 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         }
 
         if (!interpretResult) {
-            if (detectSaveIntent(text)) {
-                const fallback = buildProposalsFromChat(
-                    text,
-                    nextHistory,
-                    lastGoodConcepts
-                );
-                if (fallback.proposals.length > 0) {
-                    await applyFallbackProposals(fallback.proposals);
-                } else {
-                    addAssistantMessage(
-                        fallback.followUpText ?? "Ich bin nicht sicher—welches Wort genau?"
-                    );
-                }
+            if (isSaveIntent) {
+                await handleSaveIntentAskFallback(text);
                 setIsSending(false);
                 inputRef.current?.focus();
                 return;
@@ -500,6 +524,13 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             return;
         }
 
+        if (isSaveIntent) {
+            await handleSaveIntentAskFallback(text);
+            setIsSending(false);
+            inputRef.current?.focus();
+            return;
+        }
+
         setProposals([]);
 
         try {
@@ -521,7 +552,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             }
 
             addAssistantMessage(String(data.answer));
-            updateLastConceptsFromAnswer(String(data.answer));
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
         } finally {
@@ -535,12 +565,10 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         ownerKey,
         buildInterpretTrainingContext,
         trainingContext,
-        lastGoodConcepts,
-        applyFallbackProposals,
         addAssistantMessage,
         applyProposals,
         lastAssistantPairs,
-        updateLastConceptsFromAnswer,
+        handleSaveIntentAskFallback,
     ]);
 
     if (!mounted || !document?.body) return null;

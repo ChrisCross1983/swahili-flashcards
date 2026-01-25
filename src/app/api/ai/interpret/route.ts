@@ -20,34 +20,70 @@ type SaveItem = {
     de: string;
     source: "chat" | "training" | "user" | "assistant_list";
     confidence: number;
-    why?: string;
 };
 
 type InterpretResult =
     | { kind: "ask"; rewrittenUserMessage?: string }
-    | { kind: "save"; items: SaveItem[]; reason?: string }
-    | { kind: "clarify"; question: string; hints?: string[] };
+    | { kind: "save"; items: SaveItem[] }
+    | { kind: "clarify"; question: string };
 
-const SYSTEM_PROMPT = `Du bist ein Action Router für eine Swahili/Deutsch Sprachlern-App.
-Du erkennst ausschließlich: (1) Intent (ask/save/clarify), (2) extrahierst strukturierte Paare, (3) ggf. Rückfrage.
+const SYSTEM_PROMPT =
+    "You are an intent router. Output ONLY valid JSON. No explanations.";
 
-Output ist ausschließlich gültiges JSON nach dem InterpretResult Schema:
-- {"kind":"ask","rewrittenUserMessage"?}
-- {"kind":"save","items":[...], "reason"?}
-- {"kind":"clarify","question":"...", "hints"?: ["..."]}
-
-Regeln:
-- Keine zusätzlichen Keys, kein Markdown, keine Erklärungen außerhalb des JSON.
-- Wenn unsicher: lieber "clarify" statt raten.
-- sw/de müssen sauber getrennt sein, keine Satzfragmente in den Feldern.
-- Max 3 Wörter ODER max 40 Zeichen je Feld, sonst -> "clarify".
-- Wenn der User "speichere X" sagt:
-  - Wenn X deutsch ist, suche das swahilische Pendant im Kontext (Chat/Training), sonst frage nach.
-  - Wenn X swahili ist, suche die deutsche Bedeutung, sonst frage nach.
-- Wenn im letzten Assistant-Output eine Liste vorkam (z.B. "Cashew — korosho"), extrahiere exakt das Paar.
-- Niemals sw/de vertauschen. Wenn unsicher -> clarify.
-- Du darfst mehrere Items vorschlagen, aber nur wenn echte Paare vorhanden sind.
-`;
+const RESPONSE_SCHEMA = {
+    name: "interpret_result",
+    strict: true,
+    schema: {
+        type: "object",
+        oneOf: [
+            {
+                type: "object",
+                properties: {
+                    kind: { const: "ask" },
+                    rewrittenUserMessage: { type: "string" },
+                },
+                required: ["kind"],
+                additionalProperties: false,
+            },
+            {
+                type: "object",
+                properties: {
+                    kind: { const: "save" },
+                    items: {
+                        type: "array",
+                        maxItems: 10,
+                        items: {
+                            type: "object",
+                            properties: {
+                                type: { enum: ["vocab", "sentence"] },
+                                sw: { type: "string" },
+                                de: { type: "string" },
+                                source: {
+                                    enum: ["chat", "training", "user", "assistant_list"],
+                                },
+                                confidence: { type: "number" },
+                            },
+                            required: ["type", "sw", "de", "source", "confidence"],
+                            additionalProperties: false,
+                        },
+                    },
+                },
+                required: ["kind", "items"],
+                additionalProperties: false,
+            },
+            {
+                type: "object",
+                properties: {
+                    kind: { const: "clarify" },
+                    question: { type: "string" },
+                },
+                required: ["kind", "question"],
+                additionalProperties: false,
+            },
+        ],
+        additionalProperties: false,
+    },
+} as const;
 
 function safeSnippet(v: unknown, max = 400) {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -161,19 +197,9 @@ function parseInterpretResult(raw: string): InterpretResult | null {
         if (typeof parsed.question !== "string" || !parsed.question.trim()) {
             return null;
         }
-        if (
-            parsed.hints !== undefined &&
-            !(
-                Array.isArray(parsed.hints) &&
-                parsed.hints.every((hint: any) => typeof hint === "string")
-            )
-        ) {
-            return null;
-        }
         return {
             kind: "clarify",
             question: parsed.question.trim(),
-            hints: parsed.hints,
         };
     }
 
@@ -191,9 +217,7 @@ function parseInterpretResult(raw: string): InterpretResult | null {
                 de: item.de.trim(),
                 source: item.source,
                 confidence: Math.max(0, Math.min(1, item.confidence)),
-                why: typeof item.why === "string" ? item.why.trim() : undefined,
             })),
-            reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
         };
     }
 
@@ -258,20 +282,32 @@ export async function POST(req: Request) {
     }
 
     const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-    const recentHistory = chatHistory.slice(-10);
-    const buildPayload = (maxTokens: number, extraSystemText?: string) => ({
+    const recentHistory = chatHistory.slice(-6);
+    const userPayload: Record<string, unknown> = {
+        userMessage,
+        lastAssistantPairs,
+        chatHistory: recentHistory,
+    };
+    if (trainingContext) {
+        userPayload.trainingContext = trainingContext;
+    }
+
+    const buildPayload = () => ({
         model,
-        max_output_tokens: maxTokens,
+        max_output_tokens: 120,
+        temperature: 0.2,
         reasoning: { effort: "low" as const },
+        response_format: {
+            type: "json_schema",
+            json_schema: RESPONSE_SCHEMA,
+        },
         input: [
             {
                 role: "system",
                 content: [
                     {
                         type: "input_text",
-                        text: extraSystemText
-                            ? `${SYSTEM_PROMPT}\n\n${extraSystemText}`
-                            : SYSTEM_PROMPT,
+                        text: SYSTEM_PROMPT,
                     },
                 ],
             },
@@ -280,16 +316,7 @@ export async function POST(req: Request) {
                 content: [
                     {
                         type: "input_text",
-                        text: JSON.stringify(
-                            {
-                                userMessage,
-                                chatHistory: recentHistory,
-                                trainingContext,
-                                lastAssistantPairs,
-                            },
-                            null,
-                            2
-                        ),
+                        text: JSON.stringify(userPayload),
                     },
                 ],
             },
@@ -297,60 +324,33 @@ export async function POST(req: Request) {
     });
 
     try {
-        const { ok, status, data } = await callOpenAI(apiKey, buildPayload(220));
+        const { ok, status, data } = await callOpenAI(apiKey, buildPayload());
 
         if (!ok) {
             console.error("[interpret] openai error", status, safeSnippet(data));
-            return NextResponse.json({ error: "AI request failed" }, { status: 502 });
+            return NextResponse.json({ kind: "ask" });
         }
 
-        if (isMaxTokenIncomplete(data)) {
-            const retry = await callOpenAI(
-                apiKey,
-                buildPayload(150, "Return minimal valid JSON only.")
-            );
-            if (!retry.ok) {
-                console.error(
-                    "[interpret] retry openai error",
-                    retry.status,
-                    safeSnippet(retry.data)
-                );
-                return NextResponse.json({ kind: "ask" });
-            }
-            const retryAnswer = extractResponseText(retry.data);
-            if (!retryAnswer) {
-                console.error("[interpret] retry empty answer", safeSnippet(retry.data));
-                return NextResponse.json({ kind: "ask" });
-            }
-            const retryParsed = parseInterpretResult(retryAnswer);
-            if (!retryParsed) {
-                console.error("[interpret] retry parse failed", safeSnippet(retryAnswer));
-                return NextResponse.json({ kind: "ask" });
-            }
-            return NextResponse.json(retryParsed);
+        if (data?.status === "incomplete" || isMaxTokenIncomplete(data)) {
+            console.error("[interpret] incomplete", safeSnippet(data));
+            return NextResponse.json({ kind: "ask" });
         }
 
         const answer = extractResponseText(data);
         if (!answer) {
             console.error("[interpret] empty answer", safeSnippet(data));
-            return NextResponse.json(
-                { error: "AI returned empty output" },
-                { status: 502 }
-            );
+            return NextResponse.json({ kind: "ask" });
         }
 
         const parsed = parseInterpretResult(answer);
         if (!parsed) {
             console.error("[interpret] parse failed", safeSnippet(answer));
-            return NextResponse.json({
-                kind: "clarify",
-                question: "Ich bin nicht sicher—welches Wort genau?",
-            });
+            return NextResponse.json({ kind: "ask" });
         }
 
         return NextResponse.json(parsed);
     } catch (err) {
         console.error("[interpret] exception", err);
-        return NextResponse.json({ error: "AI request failed" }, { status: 502 });
+        return NextResponse.json({ kind: "ask" });
     }
 }
