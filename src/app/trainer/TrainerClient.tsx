@@ -15,12 +15,22 @@ import {
     MAX_LEVEL,
 } from "@/lib/leitner";
 import {
-    buildProposalsFromChat,
-    extractConceptsFromAssistantText,
-    LastExplainedConcept,
     detectSaveIntent,
+    extractCandidateFromUser,
+    extractConceptsFromAssistantText,
+    findPairInAssistantHistory,
+    guessLang,
+    LastExplainedConcept,
+    looksLikeSentence,
+    matchesImplicitReference,
     ProposalStatus,
 } from "@/lib/cards/proposals";
+import {
+    ActiveSaveDraft,
+    canonicalizeToSwDe,
+    looksLikeMetaText,
+    normalizeText,
+} from "@/lib/cards/saveFlow";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -30,55 +40,18 @@ type Props = {
 
 type Lang = "sw" | "de";
 
-type ProposalDraft = {
-    id: string;
-    type: "vocab" | "sentence";
-    front_lang: Lang;
-    back_lang: Lang;
-    front_text: string;
-    back_text: string;
-    missing_back?: boolean;
-    tags?: string[];
-    notes?: string;
-    source_context_snippet?: string;
-};
-
-type ProposalMessage = {
-    kind: "proposal";
-    role: "assistant";
-    proposals: Array<{
-        id: string;
-        type: "vocab" | "sentence";
-        front_lang: Lang;
-        back_lang: Lang;
-        front_text: string;
-        back_text: string;
-        missing_back?: boolean;
-        tags?: string[];
-        notes?: string;
-        source_context_snippet?: string;
-        status: ProposalStatus;
-    }>;
-};
-
 type TextMessage = {
     kind: "text";
     role: "user" | "assistant";
     text: string;
 };
 
-type ChatMessage = ProposalMessage | TextMessage;
+type ChatMessage = TextMessage;
 
 const mkText = (role: TextMessage["role"], text: string): TextMessage => ({
     kind: "text",
     role,
     text,
-});
-
-const mkProposal = (proposals: ProposalMessage["proposals"]): ProposalMessage => ({
-    kind: "proposal",
-    role: "assistant",
-    proposals,
 });
 
 const IMAGE_BASE_URL =
@@ -149,11 +122,19 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
     const [openGlobalAI, setOpenGlobalAI] = useState(false);
-    const [aiLastExplainedConcepts, setAiLastExplainedConcepts] = useState<
+    const [aiLastGoodConcepts, setAiLastGoodConcepts] = useState<
         LastExplainedConcept[]
     >([]);
-    const [globalLastExplainedConcepts, setGlobalLastExplainedConcepts] =
+    const [globalLastGoodConcepts, setGlobalLastGoodConcepts] =
         useState<LastExplainedConcept[]>([]);
+    const [aiActiveDraft, setAiActiveDraft] = useState<ActiveSaveDraft | null>(null);
+    const [aiDraftStatus, setAiDraftStatus] = useState<ProposalStatus>({ state: "idle" });
+    const [globalActiveDraft, setGlobalActiveDraft] = useState<ActiveSaveDraft | null>(
+        null
+    );
+    const [globalDraftStatus, setGlobalDraftStatus] = useState<ProposalStatus>({
+        state: "idle",
+    });
     const [globalAiInput, setGlobalAiInput] = useState("");
     const [globalAiLoading, setGlobalAiLoading] = useState(false);
     const [globalAiError, setGlobalAiError] = useState<string | null>(null);
@@ -1640,278 +1621,206 @@ export default function TrainerClient({ ownerKey }: Props) {
         return `fällig ${formatDays(diffDays)}`;
     })();
 
-    const updateAiProposal = useCallback(
-        (
-            proposalId: string,
-            updater: (proposal: ProposalMessage["proposals"][number]) => ProposalMessage["proposals"][number]
-        ) => {
-            setAiState((prev) => ({
-                ...prev,
-                messages: prev.messages.map((message) => {
-                    if (message.kind !== "proposal") return message;
-                    return {
-                        ...message,
-                        proposals: message.proposals.map((proposal) =>
-                            proposal.id === proposalId ? updater(proposal) : proposal
-                        ),
-                    };
+    const sanitizeDraftValue = useCallback((value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) return "";
+        if (looksLikeMetaText(trimmed)) return "";
+        return trimmed;
+    }, []);
+
+    const setAiDraftFromValues = useCallback(
+        (draft: Omit<ActiveSaveDraft, "id" | "detectedAt">) => {
+            const sanitizedSw = sanitizeDraftValue(draft.sw);
+            const sanitizedDe = sanitizeDraftValue(draft.de);
+            const missing = !sanitizedSw || !sanitizedDe;
+            const next: ActiveSaveDraft = {
+                ...draft,
+                sw: sanitizedSw,
+                de: sanitizedDe,
+                missing_de: missing,
+                status: missing ? "draft" : draft.status,
+                type: looksLikeSentence(sanitizedSw || sanitizedDe) ? "sentence" : "vocab",
+                id: crypto.randomUUID(),
+                detectedAt: Date.now(),
+            };
+            setAiActiveDraft(next);
+            setAiDraftStatus({ state: "idle" });
+        },
+        [sanitizeDraftValue]
+    );
+
+    const setGlobalDraftFromValues = useCallback(
+        (draft: Omit<ActiveSaveDraft, "id" | "detectedAt">) => {
+            const sanitizedSw = sanitizeDraftValue(draft.sw);
+            const sanitizedDe = sanitizeDraftValue(draft.de);
+            const missing = !sanitizedSw || !sanitizedDe;
+            const next: ActiveSaveDraft = {
+                ...draft,
+                sw: sanitizedSw,
+                de: sanitizedDe,
+                missing_de: missing,
+                status: missing ? "draft" : draft.status,
+                type: looksLikeSentence(sanitizedSw || sanitizedDe) ? "sentence" : "vocab",
+                id: crypto.randomUUID(),
+                detectedAt: Date.now(),
+            };
+            setGlobalActiveDraft(next);
+            setGlobalDraftStatus({ state: "idle" });
+        },
+        [sanitizeDraftValue]
+    );
+
+    const handleAiDraftSave = useCallback(async () => {
+        if (!aiActiveDraft) return;
+        const sw = aiActiveDraft.sw.trim();
+        const de = aiActiveDraft.de.trim();
+        if (!sw || !de) {
+            setAiDraftStatus({
+                state: "error",
+                message: "Bitte beide Seiten ergänzen, bevor gespeichert wird.",
+            });
+            return;
+        }
+        if (looksLikeMetaText(sw) || looksLikeMetaText(de)) {
+            setAiDraftStatus({
+                state: "error",
+                message: "Bitte nur das Wortpaar speichern, kein Hinweistext.",
+            });
+            return;
+        }
+
+        setAiDraftStatus({ state: "saving" });
+        const canonical = canonicalizeToSwDe({
+            front_lang: "sw",
+            back_lang: "de",
+            front_text: sw,
+            back_text: de,
+        });
+
+        try {
+            const res = await fetch("/api/cards/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    type: aiActiveDraft.type,
+                    front_text: canonical.sw,
+                    back_text: canonical.de,
+                    front_lang: "sw",
+                    back_lang: "de",
+                    source: "chat",
+                    context: aiActiveDraft.sourceSnippet ?? null,
                 }),
-            }));
-        },
-        []
-    );
+            });
 
-    const removeAiProposal = useCallback((proposalId: string) => {
-        setAiState((prev) => ({
-            ...prev,
-            messages: prev.messages
-                .map((message) => {
-                    if (message.kind !== "proposal") return message;
-                    return {
-                        ...message,
-                        proposals: message.proposals.filter(
-                            (proposal) => proposal.id !== proposalId
-                        ),
-                    };
-                })
-                .filter((message) =>
-                    message.kind === "proposal" ? message.proposals.length > 0 : true
-                ),
-        }));
-    }, []);
+            const json = await res.json().catch(() => ({}));
 
-    const handleAiSave = useCallback(
-        async (proposalId: string) => {
-            const proposalMessage = aiMessages.find(
-                (message) => message.kind === "proposal" && message.proposals.some((p) => p.id === proposalId)
-            ) as ProposalMessage | undefined;
-
-            const proposal = proposalMessage?.proposals.find((p) => p.id === proposalId);
-            if (!proposal || proposal.missing_back) return;
-
-            updateAiProposal(proposalId, (current) => ({
-                ...current,
-                status: { state: "saving" },
-            }));
-
-            try {
-                const res = await fetch("/api/cards/create", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        ownerKey,
-                        type: proposal.type,
-                        front_text: proposal.front_text,
-                        back_text: proposal.back_text,
-                        front_lang: proposal.front_lang,
-                        back_lang: proposal.back_lang,
-                        source: "chat",
-                        context: proposal.source_context_snippet,
-                        tags: proposal.tags ?? [],
-                        notes: proposal.notes ?? null,
-                    }),
+            if (!res.ok) {
+                setAiDraftStatus({
+                    state: "error",
+                    message: json?.error ?? "Speichern fehlgeschlagen.",
                 });
-
-                const json = await res.json().catch(() => ({}));
-
-                if (!res.ok) {
-                    updateAiProposal(proposalId, (current) => ({
-                        ...current,
-                        status: {
-                            state: "error",
-                            message: json?.error ?? "Speichern fehlgeschlagen.",
-                        },
-                    }));
-                    return;
-                }
-
-                if (json.status === "exists") {
-                    updateAiProposal(proposalId, (current) => ({
-                        ...current,
-                        status: {
-                            state: "exists",
-                            existingId: json.existing_id,
-                        },
-                    }));
-                    return;
-                }
-
-                updateAiProposal(proposalId, (current) => ({
-                    ...current,
-                    status: { state: "saved", id: json.id },
-                }));
-            } catch {
-                updateAiProposal(proposalId, (current) => ({
-                    ...current,
-                    status: {
-                        state: "error",
-                        message: "Speichern fehlgeschlagen.",
-                    },
-                }));
+                return;
             }
-        },
-        [aiMessages, ownerKey, updateAiProposal]
-    );
 
-    const updateGlobalProposal = useCallback(
-        (
-            proposalId: string,
-            updater: (proposal: ProposalMessage["proposals"][number]) => ProposalMessage["proposals"][number]
-        ) => {
-            setGlobalAiMessages((prev) =>
-                prev.map((message) => {
-                    if (message.kind !== "proposal") return message;
-                    return {
-                        ...message,
-                        proposals: message.proposals.map((proposal) =>
-                            proposal.id === proposalId ? updater(proposal) : proposal
-                        ),
-                    };
-                })
-            );
-        },
-        []
-    );
-
-    const removeGlobalProposal = useCallback((proposalId: string) => {
-        setGlobalAiMessages((prev) =>
-            prev
-                .map((message) => {
-                    if (message.kind !== "proposal") return message;
-                    return {
-                        ...message,
-                        proposals: message.proposals.filter(
-                            (proposal) => proposal.id !== proposalId
-                        ),
-                    };
-                })
-                .filter((message) =>
-                    message.kind === "proposal" ? message.proposals.length > 0 : true
-                )
-        );
-    }, []);
-
-    const handleGlobalSave = useCallback(
-        async (proposalId: string) => {
-            const proposalMessage = globalAiMessages.find(
-                (message) => message.kind === "proposal" && message.proposals.some((p) => p.id === proposalId)
-            ) as ProposalMessage | undefined;
-
-            const proposal = proposalMessage?.proposals.find((p) => p.id === proposalId);
-            if (!proposal || proposal.missing_back) return;
-
-            updateGlobalProposal(proposalId, (current) => ({
-                ...current,
-                status: { state: "saving" },
-            }));
-
-            try {
-                const res = await fetch("/api/cards/create", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        ownerKey,
-                        type: proposal.type,
-                        front_text: proposal.front_text,
-                        back_text: proposal.back_text,
-                        front_lang: proposal.front_lang,
-                        back_lang: proposal.back_lang,
-                        source: "chat",
-                        context: proposal.source_context_snippet,
-                        tags: proposal.tags ?? [],
-                        notes: proposal.notes ?? null,
-                    }),
+            if (json.status === "exists") {
+                setAiDraftStatus({
+                    state: "exists",
+                    existingId: json.existing_id,
                 });
-
-                const json = await res.json().catch(() => ({}));
-
-                if (!res.ok) {
-                    updateGlobalProposal(proposalId, (current) => ({
-                        ...current,
-                        status: {
-                            state: "error",
-                            message: json?.error ?? "Speichern fehlgeschlagen.",
-                        },
-                    }));
-                    return;
-                }
-
-                if (json.status === "exists") {
-                    updateGlobalProposal(proposalId, (current) => ({
-                        ...current,
-                        status: {
-                            state: "exists",
-                            existingId: json.existing_id,
-                        },
-                    }));
-                    return;
-                }
-
-                updateGlobalProposal(proposalId, (current) => ({
-                    ...current,
-                    status: { state: "saved", id: json.id },
-                }));
-            } catch {
-                updateGlobalProposal(proposalId, (current) => ({
-                    ...current,
-                    status: {
-                        state: "error",
-                        message: "Speichern fehlgeschlagen.",
-                    },
-                }));
+                return;
             }
-        },
-        [globalAiMessages, ownerKey, updateGlobalProposal]
-    );
 
-    const checkExistingForProposal = useCallback(
-        async (proposal: ProposalDraft) => {
-            const german =
-                proposal.front_lang === "de"
-                    ? proposal.front_text
-                    : proposal.back_lang === "de"
-                        ? proposal.back_text
-                        : "";
-            const swahili =
-                proposal.front_lang === "sw"
-                    ? proposal.front_text
-                    : proposal.back_lang === "sw"
-                        ? proposal.back_text
-                        : "";
+            setAiDraftStatus({ state: "saved", id: json.id });
+        } catch {
+            setAiDraftStatus({
+                state: "error",
+                message: "Speichern fehlgeschlagen.",
+            });
+        }
+    }, [aiActiveDraft, ownerKey]);
 
-            if (!german && !swahili) return false;
+    const handleGlobalDraftSave = useCallback(async () => {
+        if (!globalActiveDraft) return;
+        const sw = globalActiveDraft.sw.trim();
+        const de = globalActiveDraft.de.trim();
+        if (!sw || !de) {
+            setGlobalDraftStatus({
+                state: "error",
+                message: "Bitte beide Seiten ergänzen, bevor gespeichert wird.",
+            });
+            return;
+        }
+        if (looksLikeMetaText(sw) || looksLikeMetaText(de)) {
+            setGlobalDraftStatus({
+                state: "error",
+                message: "Bitte nur das Wortpaar speichern, kein Hinweistext.",
+            });
+            return;
+        }
 
-            try {
-                const res = await fetch("/api/cards/check-existing", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        ownerKey,
-                        german: german || undefined,
-                        swahili: swahili || undefined,
-                    }),
+        setGlobalDraftStatus({ state: "saving" });
+        const canonical = canonicalizeToSwDe({
+            front_lang: "sw",
+            back_lang: "de",
+            front_text: sw,
+            back_text: de,
+        });
+
+        try {
+            const res = await fetch("/api/cards/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ownerKey,
+                    type: globalActiveDraft.type,
+                    front_text: canonical.sw,
+                    back_text: canonical.de,
+                    front_lang: "sw",
+                    back_lang: "de",
+                    source: "chat",
+                    context: globalActiveDraft.sourceSnippet ?? null,
+                }),
+            });
+
+            const json = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setGlobalDraftStatus({
+                    state: "error",
+                    message: json?.error ?? "Speichern fehlgeschlagen.",
                 });
-                const json = await res.json().catch(() => ({}));
-                if (!res.ok) return false;
-                return Boolean(json?.exists);
-            } catch {
-                return false;
+                return;
             }
-        },
-        [ownerKey]
-    );
+
+            if (json.status === "exists") {
+                setGlobalDraftStatus({
+                    state: "exists",
+                    existingId: json.existing_id,
+                });
+                return;
+            }
+
+            setGlobalDraftStatus({ state: "saved", id: json.id });
+        } catch {
+            setGlobalDraftStatus({
+                state: "error",
+                message: "Speichern fehlgeschlagen.",
+            });
+        }
+    }, [globalActiveDraft, ownerKey]);
 
     const updateAiLastConcepts = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
         if (concepts.length > 0) {
-            setAiLastExplainedConcepts(concepts);
+            setAiLastGoodConcepts(concepts);
         }
     }, []);
 
     const updateGlobalLastConcepts = useCallback((answer: string) => {
         const concepts = extractConceptsFromAssistantText(answer, "answer");
         if (concepts.length > 0) {
-            setGlobalLastExplainedConcepts(concepts);
+            setGlobalLastGoodConcepts(concepts);
         }
     }, []);
 
@@ -1927,61 +1836,198 @@ export default function TrainerClient({ ownerKey }: Props) {
             messages: [...prev.messages, { kind: "text", role: "user", text: trimmed }],
         }));
 
-        if (detectSaveIntent(trimmed)) {
-            const result = buildProposalsFromChat(
-                trimmed,
-                aiTextHistory,
-                aiLastExplainedConcepts
-            );
-            const existingChecks = await Promise.all(
-                result.proposals.map(async (proposal) => ({
-                    proposal,
-                    exists: await checkExistingForProposal(proposal),
-                }))
-            );
-            const existingMessages = existingChecks
-                .filter((item) => item.exists)
-                .map(
-                    (item) =>
-                        `„${item.proposal.front_text}“ hast du schon gespeichert.`
-                );
-            const remainingProposals = existingChecks
-                .filter((item) => !item.exists)
-                .map((item) => item.proposal);
-            setAiState((prev) => {
-                const followUp: ChatMessage[] = result.followUpText
-                    ? [
-                        mkText("assistant", result.followUpText),
-                    ]
-                    : [];
-
-                const proposalMessages =
-                    remainingProposals.length > 0
-                        ? [
-                            mkProposal(
-                                remainingProposals.map((proposal) => ({
-                                    ...proposal,
-                                    status: { state: "idle" },
-                                }))
-                            ),
-                        ]
-                        : [];
-                const existingNotes = existingMessages.map((message) =>
-                    mkText("assistant", message)
-                );
-                return {
+        if (aiActiveDraft) {
+            const lowered = trimmed.toLowerCase();
+            if (/(abbrechen|verwerfen|doch nicht|nicht speichern)/i.test(lowered)) {
+                setAiActiveDraft(null);
+                setAiDraftStatus({ state: "idle" });
+                setAiState((prev) => ({
                     ...prev,
                     loading: false,
-                    messages: [
-                        ...prev.messages,
-                        ...existingNotes,
-                        ...proposalMessages,
-                        ...(remainingProposals.length > 0 || result.proposals.length === 0
-                            ? followUp
-                            : []),
-                    ],
-                };
+                    messages: [...prev.messages, mkText("assistant", "Alles klar, verworfen.")],
+                }));
+                return;
+            }
+
+            if (/(tausch|swap|wechsel)/i.test(lowered)) {
+                setAiActiveDraft((prev) => {
+                    if (!prev) return prev;
+                    const next = { ...prev, sw: prev.de, de: prev.sw };
+                    return {
+                        ...next,
+                        missing_de: !next.sw.trim() || !next.de.trim(),
+                    };
+                });
+                setAiDraftStatus({ state: "idle" });
+                setAiState((prev) => ({ ...prev, loading: false }));
+                return;
+            }
+
+            if (!detectSaveIntent(trimmed)) {
+                let followUpText: string | null = null;
+                const pairMatch = trimmed.match(/(.+?)\s*[-–—:]\s*(.+)$/);
+                if (pairMatch) {
+                    const left = pairMatch[1].trim();
+                    const right = pairMatch[2].trim();
+                    const leftLang = guessLang(left);
+                    const rightLang = guessLang(right);
+                    const swCandidate = leftLang === "sw" && rightLang === "de" ? left : right;
+                    const deCandidate = leftLang === "sw" && rightLang === "de" ? right : left;
+                    setAiActiveDraft((prev) => {
+                        if (!prev) return prev;
+                        const nextSw = sanitizeDraftValue(swCandidate || prev.sw);
+                        const nextDe = sanitizeDraftValue(deCandidate || prev.de);
+                        const missing = !nextSw || !nextDe;
+                        return {
+                            ...prev,
+                            sw: nextSw,
+                            de: nextDe,
+                            missing_de: missing,
+                            status: missing ? "draft" : "awaiting_confirmation",
+                        };
+                    });
+                } else if (aiActiveDraft) {
+                    const cleaned = sanitizeDraftValue(trimmed);
+                    let updatedSw = aiActiveDraft.sw;
+                    let updatedDe = aiActiveDraft.de;
+                    if (!updatedSw.trim() && !updatedDe.trim()) {
+                        const guessed = guessLang(cleaned);
+                        if (guessed === "sw") {
+                            updatedSw = cleaned;
+                        } else {
+                            updatedDe = cleaned;
+                        }
+                    } else if (!updatedSw.trim()) {
+                        updatedSw = cleaned;
+                    } else if (!updatedDe.trim()) {
+                        updatedDe = cleaned;
+                    }
+                    const missing = !updatedSw.trim() || !updatedDe.trim();
+                    setAiActiveDraft({
+                        ...aiActiveDraft,
+                        sw: updatedSw,
+                        de: updatedDe,
+                        missing_de: missing,
+                        status: missing ? "draft" : "awaiting_confirmation",
+                    });
+
+                    if (!updatedSw && !updatedDe) {
+                        followUpText =
+                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)";
+                    } else if (updatedSw && !updatedDe) {
+                        followUpText = `Was bedeutet „${updatedSw}“ auf Deutsch?`;
+                    } else if (!updatedSw && updatedDe) {
+                        followUpText = `Wie lautet das swahilische Wort für „${updatedDe}“?`;
+                    }
+                }
+                setAiState((prev) => ({
+                    ...prev,
+                    loading: false,
+                    messages: followUpText
+                        ? [...prev.messages, mkText("assistant", followUpText)]
+                        : prev.messages,
+                }));
+            } else {
+                setAiState((prev) => ({ ...prev, loading: false }));
+            }
+            return;
+        }
+
+        if (detectSaveIntent(trimmed)) {
+            let followUpText: string | null = null;
+            let draftCreated = false;
+            const candidate = extractCandidateFromUser(trimmed);
+            const normalizedCandidate = candidate ? normalizeText(candidate) : "";
+
+            const referencedConcept = aiLastGoodConcepts.find((concept) => {
+                const swNorm = normalizeText(concept.sw);
+                const deNorm = normalizeText(concept.de);
+                if (normalizedCandidate && swNorm.includes(normalizedCandidate)) return true;
+                if (normalizedCandidate && deNorm.includes(normalizedCandidate)) return true;
+                return false;
             });
+
+            if (referencedConcept) {
+                setAiDraftFromValues({
+                    type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
+                    sw: referencedConcept.sw,
+                    de: referencedConcept.de,
+                    missing_de: false,
+                    source: "last_list",
+                    status: "awaiting_confirmation",
+                    sourceSnippet: undefined,
+                });
+                draftCreated = true;
+            } else if (!candidate && aiLastGoodConcepts.length > 0 && matchesImplicitReference(trimmed)) {
+                const latest = aiLastGoodConcepts[aiLastGoodConcepts.length - 1];
+                setAiDraftFromValues({
+                    type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
+                    sw: latest.sw,
+                    de: latest.de,
+                    missing_de: false,
+                    source: "last_list",
+                    status: "awaiting_confirmation",
+                    sourceSnippet: undefined,
+                });
+                draftCreated = true;
+            } else if (candidate) {
+                const fromContext = findPairInAssistantHistory(candidate, aiTextHistory);
+                if (fromContext) {
+                    setAiDraftFromValues({
+                        type: looksLikeSentence(fromContext.sw) ? "sentence" : "vocab",
+                        sw: fromContext.sw,
+                        de: fromContext.de,
+                        missing_de: false,
+                        source: "chat_context",
+                        status: "awaiting_confirmation",
+                        sourceSnippet: fromContext.snippet.slice(0, 240),
+                    });
+                    draftCreated = true;
+                } else if (candidate && !looksLikeMetaText(candidate)) {
+                    const guessed = guessLang(candidate);
+                    const swCandidate = guessed === "sw" ? candidate : "";
+                    const deCandidate = guessed === "de" ? candidate : "";
+                    setAiDraftFromValues({
+                        type: looksLikeSentence(candidate) ? "sentence" : "vocab",
+                        sw: swCandidate,
+                        de: deCandidate,
+                        missing_de: true,
+                        source: "manual",
+                        status: "draft",
+                        sourceSnippet: undefined,
+                    });
+                    draftCreated = true;
+                    if (swCandidate) {
+                        followUpText = `Was bedeutet „${swCandidate}“ auf Deutsch?`;
+                    } else if (deCandidate) {
+                        followUpText = `Wie lautet das swahilische Wort für „${deCandidate}“?`;
+                    } else {
+                        followUpText =
+                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)";
+                    }
+                }
+            }
+
+            if (!draftCreated) {
+                setAiDraftFromValues({
+                    type: "vocab",
+                    sw: "",
+                    de: "",
+                    missing_de: true,
+                    source: "manual",
+                    status: "draft",
+                    sourceSnippet: undefined,
+                });
+                followUpText = "Welches Wort soll ich speichern?";
+            }
+
+            setAiState((prev) => ({
+                ...prev,
+                loading: false,
+                messages: followUpText
+                    ? [...prev.messages, mkText("assistant", followUpText)]
+                    : prev.messages,
+            }));
             return;
         }
 
@@ -2054,57 +2100,205 @@ export default function TrainerClient({ ownerKey }: Props) {
             { kind: "text", role: "user", text: trimmed },
         ]);
 
-        if (detectSaveIntent(trimmed)) {
-            const result = buildProposalsFromChat(
-                trimmed,
-                globalTextHistory,
-                globalLastExplainedConcepts
-            );
-            const existingChecks = await Promise.all(
-                result.proposals.map(async (proposal) => ({
-                    proposal,
-                    exists: await checkExistingForProposal(proposal),
-                }))
-            );
-            const existingMessages = existingChecks
-                .filter((item) => item.exists)
-                .map(
-                    (item) =>
-                        `„${item.proposal.front_text}“ hast du schon gespeichert.`
-                );
-            const remainingProposals = existingChecks
-                .filter((item) => !item.exists)
-                .map((item) => item.proposal);
-            setGlobalAiMessages((prev) => {
-                const followUp: ChatMessage[] = result.followUpText
-                    ? [
-                        mkText("assistant", result.followUpText),
-                    ]
-                    : [];
-
-                const proposalMessages =
-                    remainingProposals.length > 0
-                        ? [
-                            mkProposal(
-                                remainingProposals.map((proposal) => ({
-                                    ...proposal,
-                                    status: { state: "idle" },
-                                }))
-                            ),
-                        ]
-                        : [];
-                const existingNotes = existingMessages.map((message) =>
-                    mkText("assistant", message)
-                );
-                return [
+        if (globalActiveDraft) {
+            const lowered = trimmed.toLowerCase();
+            if (/(abbrechen|verwerfen|doch nicht|nicht speichern)/i.test(lowered)) {
+                setGlobalActiveDraft(null);
+                setGlobalDraftStatus({ state: "idle" });
+                setGlobalAiMessages((prev) => [
                     ...prev,
-                    ...existingNotes,
-                    ...proposalMessages,
-                    ...(remainingProposals.length > 0 || result.proposals.length === 0
-                        ? followUp
-                        : []),
-                ];
+                    mkText("assistant", "Alles klar, verworfen."),
+                ]);
+                setGlobalAiLoading(false);
+                setGlobalAiInput("");
+                return;
+            }
+
+            if (/(tausch|swap|wechsel)/i.test(lowered)) {
+                setGlobalActiveDraft((prev) => {
+                    if (!prev) return prev;
+                    const next = { ...prev, sw: prev.de, de: prev.sw };
+                    return {
+                        ...next,
+                        missing_de: !next.sw.trim() || !next.de.trim(),
+                    };
+                });
+                setGlobalDraftStatus({ state: "idle" });
+                setGlobalAiLoading(false);
+                setGlobalAiInput("");
+                return;
+            }
+
+            if (!detectSaveIntent(trimmed)) {
+                let followUpText: string | null = null;
+                const pairMatch = trimmed.match(/(.+?)\s*[-–—:]\s*(.+)$/);
+                if (pairMatch) {
+                    const left = pairMatch[1].trim();
+                    const right = pairMatch[2].trim();
+                    const leftLang = guessLang(left);
+                    const rightLang = guessLang(right);
+                    const swCandidate = leftLang === "sw" && rightLang === "de" ? left : right;
+                    const deCandidate = leftLang === "sw" && rightLang === "de" ? right : left;
+                    setGlobalActiveDraft((prev) => {
+                        if (!prev) return prev;
+                        const nextSw = sanitizeDraftValue(swCandidate || prev.sw);
+                        const nextDe = sanitizeDraftValue(deCandidate || prev.de);
+                        const missing = !nextSw || !nextDe;
+                        return {
+                            ...prev,
+                            sw: nextSw,
+                            de: nextDe,
+                            missing_de: missing,
+                            status: missing ? "draft" : "awaiting_confirmation",
+                        };
+                    });
+                } else if (globalActiveDraft) {
+                    const cleaned = sanitizeDraftValue(trimmed);
+                    let updatedSw = globalActiveDraft.sw;
+                    let updatedDe = globalActiveDraft.de;
+                    if (!updatedSw.trim() && !updatedDe.trim()) {
+                        const guessed = guessLang(cleaned);
+                        if (guessed === "sw") {
+                            updatedSw = cleaned;
+                        } else {
+                            updatedDe = cleaned;
+                        }
+                    } else if (!updatedSw.trim()) {
+                        updatedSw = cleaned;
+                    } else if (!updatedDe.trim()) {
+                        updatedDe = cleaned;
+                    }
+                    const missing = !updatedSw.trim() || !updatedDe.trim();
+                    setGlobalActiveDraft({
+                        ...globalActiveDraft,
+                        sw: updatedSw,
+                        de: updatedDe,
+                        missing_de: missing,
+                        status: missing ? "draft" : "awaiting_confirmation",
+                    });
+
+                    if (!updatedSw && !updatedDe) {
+                        followUpText =
+                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)";
+                    } else if (updatedSw && !updatedDe) {
+                        followUpText = `Was bedeutet „${updatedSw}“ auf Deutsch?`;
+                    } else if (!updatedSw && updatedDe) {
+                        followUpText = `Wie lautet das swahilische Wort für „${updatedDe}“?`;
+                    }
+                }
+                if (followUpText) {
+                    setGlobalAiMessages((prev) => [
+                        ...prev,
+                        mkText("assistant", followUpText),
+                    ]);
+                }
+                setGlobalAiLoading(false);
+                setGlobalAiInput("");
+                return;
+            }
+            setGlobalAiLoading(false);
+            setGlobalAiInput("");
+            return;
+        }
+
+        if (detectSaveIntent(trimmed)) {
+            let followUpText: string | null = null;
+            let draftCreated = false;
+            const candidate = extractCandidateFromUser(trimmed);
+            const normalizedCandidate = candidate ? normalizeText(candidate) : "";
+
+            const referencedConcept = globalLastGoodConcepts.find((concept) => {
+                const swNorm = normalizeText(concept.sw);
+                const deNorm = normalizeText(concept.de);
+                if (normalizedCandidate && swNorm.includes(normalizedCandidate)) return true;
+                if (normalizedCandidate && deNorm.includes(normalizedCandidate)) return true;
+                return false;
             });
+
+            if (referencedConcept) {
+                setGlobalDraftFromValues({
+                    type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
+                    sw: referencedConcept.sw,
+                    de: referencedConcept.de,
+                    missing_de: false,
+                    source: "last_list",
+                    status: "awaiting_confirmation",
+                    sourceSnippet: undefined,
+                });
+                draftCreated = true;
+            } else if (
+                !candidate &&
+                globalLastGoodConcepts.length > 0 &&
+                matchesImplicitReference(trimmed)
+            ) {
+                const latest = globalLastGoodConcepts[globalLastGoodConcepts.length - 1];
+                setGlobalDraftFromValues({
+                    type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
+                    sw: latest.sw,
+                    de: latest.de,
+                    missing_de: false,
+                    source: "last_list",
+                    status: "awaiting_confirmation",
+                    sourceSnippet: undefined,
+                });
+                draftCreated = true;
+            } else if (candidate) {
+                const fromContext = findPairInAssistantHistory(candidate, globalTextHistory);
+                if (fromContext) {
+                    setGlobalDraftFromValues({
+                        type: looksLikeSentence(fromContext.sw) ? "sentence" : "vocab",
+                        sw: fromContext.sw,
+                        de: fromContext.de,
+                        missing_de: false,
+                        source: "chat_context",
+                        status: "awaiting_confirmation",
+                        sourceSnippet: fromContext.snippet.slice(0, 240),
+                    });
+                    draftCreated = true;
+                } else if (candidate && !looksLikeMetaText(candidate)) {
+                    const guessed = guessLang(candidate);
+                    const swCandidate = guessed === "sw" ? candidate : "";
+                    const deCandidate = guessed === "de" ? candidate : "";
+                    setGlobalDraftFromValues({
+                        type: looksLikeSentence(candidate) ? "sentence" : "vocab",
+                        sw: swCandidate,
+                        de: deCandidate,
+                        missing_de: true,
+                        source: "manual",
+                        status: "draft",
+                        sourceSnippet: undefined,
+                    });
+                    draftCreated = true;
+                    if (swCandidate) {
+                        followUpText = `Was bedeutet „${swCandidate}“ auf Deutsch?`;
+                    } else if (deCandidate) {
+                        followUpText = `Wie lautet das swahilische Wort für „${deCandidate}“?`;
+                    } else {
+                        followUpText =
+                            "Ist das Wort deutsch oder swahili? (oder gib beide Seiten an)";
+                    }
+                }
+            }
+
+            if (!draftCreated) {
+                setGlobalDraftFromValues({
+                    type: "vocab",
+                    sw: "",
+                    de: "",
+                    missing_de: true,
+                    source: "manual",
+                    status: "draft",
+                    sourceSnippet: undefined,
+                });
+                followUpText = "Welches Wort soll ich speichern?";
+            }
+
+            if (followUpText) {
+                setGlobalAiMessages((prev) => [
+                    ...prev,
+                    mkText("assistant", followUpText),
+                ]);
+            }
             setGlobalAiInput("");
             setGlobalAiLoading(false);
             return;
@@ -3366,51 +3560,86 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         <div className="flex flex-col gap-3">
                                             {aiMessages.map((message, index) => (
                                                 <div key={`${message.role}-${index}`} className="flex flex-col">
-                                                    {message.kind === "text" ? (
-                                                        <div
-                                                            className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
-                                                                ? "self-end bg-accent-primary text-on-accent"
-                                                                : "self-start bg-surface text-primary"
-                                                                }`}
-                                                        >
-                                                            {message.text}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="self-start w-full">
-                                                            <div className="mb-2 text-xs text-muted">
-                                                                Vorschläge aus dem Chat (No auto-save; always confirm)
-                                                            </div>
-                                                            <div className="flex flex-col gap-3">
-                                                                {message.proposals.map((proposal) => (
-                                                                    <ChatProposal
-                                                                        key={proposal.id}
-                                                                        proposal={proposal}
-                                                                        status={proposal.status}
-                                                                        onUpdate={(update) =>
-                                                                            updateAiProposal(proposal.id, (current) => ({
-                                                                                ...current,
-                                                                                ...update,
-                                                                            }))
-                                                                        }
-                                                                        onSave={() => void handleAiSave(proposal.id)}
-                                                                        onDiscard={() => removeAiProposal(proposal.id)}
-                                                                        onSwap={() =>
-                                                                            updateAiProposal(proposal.id, (current) => ({
-                                                                                ...current,
-                                                                                front_text: current.back_text,
-                                                                                back_text: current.front_text,
-                                                                                front_lang: current.back_lang,
-                                                                                back_lang: current.front_lang,
-                                                                                missing_back: current.back_text.trim().length === 0,
-                                                                            }))
-                                                                        }
-                                                                    />
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
+                                                    <div
+                                                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
+                                                            ? "self-end bg-accent-primary text-on-accent"
+                                                            : "self-start bg-surface text-primary"
+                                                            }`}
+                                                    >
+                                                        {message.text}
+                                                    </div>
                                                 </div>
                                             ))}
+                                            {aiActiveDraft ? (
+                                                <div className="self-start w-full">
+                                                    <div className="mb-2 text-xs text-muted">
+                                                        Vorschlag zum Speichern (No auto-save; always confirm)
+                                                    </div>
+                                                    <ChatProposal
+                                                        proposal={{
+                                                            id: aiActiveDraft.id,
+                                                            type: aiActiveDraft.type,
+                                                            front_lang: "sw",
+                                                            back_lang: "de",
+                                                            front_text: aiActiveDraft.sw,
+                                                            back_text: aiActiveDraft.de,
+                                                            missing_back:
+                                                                !aiActiveDraft.sw.trim() ||
+                                                                !aiActiveDraft.de.trim(),
+                                                            source_context_snippet: aiActiveDraft.sourceSnippet,
+                                                            source_label: aiActiveDraft.source,
+                                                        }}
+                                                        status={aiDraftStatus}
+                                                        onUpdate={(update) => {
+                                                            setAiActiveDraft((prev) => {
+                                                                if (!prev) return prev;
+                                                                const nextSw =
+                                                                    typeof update.front_text === "string"
+                                                                        ? update.front_text
+                                                                        : prev.sw;
+                                                                const nextDe =
+                                                                    typeof update.back_text === "string"
+                                                                        ? update.back_text
+                                                                        : prev.de;
+                                                                const missing =
+                                                                    !nextSw.trim() || !nextDe.trim();
+                                                                return {
+                                                                    ...prev,
+                                                                    sw: nextSw,
+                                                                    de: nextDe,
+                                                                    missing_de: missing,
+                                                                    status: missing
+                                                                        ? "draft"
+                                                                        : "awaiting_confirmation",
+                                                                };
+                                                            });
+                                                            setAiDraftStatus({ state: "idle" });
+                                                        }}
+                                                        onSave={() => void handleAiDraftSave()}
+                                                        onDiscard={() => {
+                                                            setAiActiveDraft(null);
+                                                            setAiDraftStatus({ state: "idle" });
+                                                        }}
+                                                        onSwap={() => {
+                                                            setAiActiveDraft((prev) => {
+                                                                if (!prev) return prev;
+                                                                const next = {
+                                                                    ...prev,
+                                                                    sw: prev.de,
+                                                                    de: prev.sw,
+                                                                };
+                                                                return {
+                                                                    ...next,
+                                                                    missing_de:
+                                                                        !next.sw.trim() ||
+                                                                        !next.de.trim(),
+                                                                };
+                                                            });
+                                                            setAiDraftStatus({ state: "idle" });
+                                                        }}
+                                                    />
+                                                </div>
+                                            ) : null}
 
                                             {aiLoading ? (
                                                 <div className="max-w-[85%] self-start rounded-2xl bg-surface px-3 py-2 text-sm text-muted">
@@ -3540,51 +3769,85 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     <div className="flex flex-col gap-3">
                                         {globalAiMessages.map((message, index) => (
                                             <div key={`${message.role}-${index}`} className="flex flex-col">
-                                                {message.kind === "text" ? (
-                                                    <div
-                                                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
-                                                            ? "self-end bg-accent-primary text-on-accent"
-                                                            : "self-start bg-surface text-primary"
-                                                            }`}
-                                                    >
-                                                        {message.text}
-                                                    </div>
-                                                ) : (
-                                                    <div className="self-start w-full">
-                                                        <div className="mb-2 text-xs text-muted">
-                                                            Vorschläge aus dem Chat (No auto-save; always confirm)
-                                                        </div>
-                                                        <div className="flex flex-col gap-3">
-                                                            {message.proposals.map((proposal) => (
-                                                                <ChatProposal
-                                                                    key={proposal.id}
-                                                                    proposal={proposal}
-                                                                    status={proposal.status}
-                                                                    onUpdate={(update) =>
-                                                                        updateGlobalProposal(proposal.id, (current) => ({
-                                                                            ...current,
-                                                                            ...update,
-                                                                        }))
-                                                                    }
-                                                                    onSave={() => void handleGlobalSave(proposal.id)}
-                                                                    onDiscard={() => removeGlobalProposal(proposal.id)}
-                                                                    onSwap={() =>
-                                                                        updateGlobalProposal(proposal.id, (current) => ({
-                                                                            ...current,
-                                                                            front_text: current.back_text,
-                                                                            back_text: current.front_text,
-                                                                            front_lang: current.back_lang,
-                                                                            back_lang: current.front_lang,
-                                                                            missing_back: current.back_text.trim().length === 0,
-                                                                        }))
-                                                                    }
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                <div
+                                                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.role === "user"
+                                                        ? "self-end bg-accent-primary text-on-accent"
+                                                        : "self-start bg-surface text-primary"
+                                                        }`}
+                                                >
+                                                    {message.text}
+                                                </div>
                                             </div>
                                         ))}
+                                        {globalActiveDraft ? (
+                                            <div className="self-start w-full">
+                                                <div className="mb-2 text-xs text-muted">
+                                                    Vorschlag zum Speichern (No auto-save; always confirm)
+                                                </div>
+                                                <ChatProposal
+                                                    proposal={{
+                                                        id: globalActiveDraft.id,
+                                                        type: globalActiveDraft.type,
+                                                        front_lang: "sw",
+                                                        back_lang: "de",
+                                                        front_text: globalActiveDraft.sw,
+                                                        back_text: globalActiveDraft.de,
+                                                        missing_back:
+                                                            !globalActiveDraft.sw.trim() ||
+                                                            !globalActiveDraft.de.trim(),
+                                                        source_context_snippet: globalActiveDraft.sourceSnippet,
+                                                        source_label: globalActiveDraft.source,
+                                                    }}
+                                                    status={globalDraftStatus}
+                                                    onUpdate={(update) => {
+                                                        setGlobalActiveDraft((prev) => {
+                                                            if (!prev) return prev;
+                                                            const nextSw =
+                                                                typeof update.front_text === "string"
+                                                                    ? update.front_text
+                                                                    : prev.sw;
+                                                            const nextDe =
+                                                                typeof update.back_text === "string"
+                                                                    ? update.back_text
+                                                                    : prev.de;
+                                                            const missing = !nextSw.trim() || !nextDe.trim();
+                                                            return {
+                                                                ...prev,
+                                                                sw: nextSw,
+                                                                de: nextDe,
+                                                                missing_de: missing,
+                                                                status: missing
+                                                                    ? "draft"
+                                                                    : "awaiting_confirmation",
+                                                            };
+                                                        });
+                                                        setGlobalDraftStatus({ state: "idle" });
+                                                    }}
+                                                    onSave={() => void handleGlobalDraftSave()}
+                                                    onDiscard={() => {
+                                                        setGlobalActiveDraft(null);
+                                                        setGlobalDraftStatus({ state: "idle" });
+                                                    }}
+                                                    onSwap={() => {
+                                                        setGlobalActiveDraft((prev) => {
+                                                            if (!prev) return prev;
+                                                            const next = {
+                                                                ...prev,
+                                                                sw: prev.de,
+                                                                de: prev.sw,
+                                                            };
+                                                            return {
+                                                                ...next,
+                                                                missing_de:
+                                                                    !next.sw.trim() ||
+                                                                    !next.de.trim(),
+                                                            };
+                                                        });
+                                                        setGlobalDraftStatus({ state: "idle" });
+                                                    }}
+                                                />
+                                            </div>
+                                        ) : null}
                                         {globalAiLoading ? (
                                             <div className="max-w-[85%] self-start rounded-2xl bg-surface px-3 py-2 text-sm text-muted">
                                                 …

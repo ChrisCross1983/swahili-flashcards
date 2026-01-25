@@ -33,11 +33,11 @@ export default function ChatProposal({
         Boolean(proposal.missing_back) || proposal.back_text.trim().length === 0;
     const isSaving = status.state === "saving";
     const sourceLabel =
-        proposal.source_label === "letzte_liste"
+        proposal.source_label === "last_list"
             ? "Quelle: letzte Liste"
-            : proposal.source_label === "chat_kontext"
+            : proposal.source_label === "chat_context"
                 ? "Quelle: Chat-Kontext"
-                : proposal.source_label === "manuell"
+                : proposal.source_label === "manual"
                     ? "Quelle: manuell"
                     : null;
 

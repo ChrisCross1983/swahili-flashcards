@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { normalizeCardText } from "@/lib/cards/normalize";
+import { canonicalizeToSwDe, normalizeText } from "@/lib/cards/saveFlow";
 
 type CreateCardBody = {
     ownerKey?: string;
     type?: "vocab" | "sentence";
     front_text?: string;
     back_text?: string;
-    front_lang?: "sw";
-    back_lang?: "de";
+    front_lang?: "sw" | "de";
+    back_lang?: "sw" | "de";
     source?: string;
     context?: string | null;
     tags?: string[];
@@ -55,14 +55,21 @@ export async function POST(req: Request) {
     const frontText = typeof body.front_text === "string" ? body.front_text.trim() : "";
     const backText = typeof body.back_text === "string" ? body.back_text.trim() : "";
     const type = body.type;
-    const frontLang = body.front_lang;
-    const backLang = body.back_lang;
+    const frontLang = body.front_lang === "sw" || body.front_lang === "de" ? body.front_lang : "sw";
+    const backLang = body.back_lang === "sw" || body.back_lang === "de" ? body.back_lang : "de";
 
     if (!ownerKey || !frontText || !backText || !type) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    if (frontLang !== "sw" || backLang !== "de") {
+    const canonical = canonicalizeToSwDe({
+        front_lang: frontLang,
+        back_lang: backLang,
+        front_text: frontText,
+        back_text: backText,
+    });
+
+    if (!canonical.sw || !canonical.de) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
@@ -70,8 +77,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
 
-    const normalizedFront = normalizeCardText(frontText);
-    const normalizedBack = normalizeCardText(backText);
+    const normalizedFront = normalizeText(canonical.sw);
+    const normalizedBack = normalizeText(canonical.de);
 
     // No auto-save; always confirm.
     const { data: existingCards, error: selectError } = await supabaseServer
@@ -85,8 +92,8 @@ export async function POST(req: Request) {
     }
 
     const existingMatch = (existingCards ?? []).find((card) => {
-        const existingFront = normalizeCardText(card.swahili_text ?? "");
-        const existingBack = normalizeCardText(card.german_text ?? "");
+        const existingFront = normalizeText(card.swahili_text ?? "");
+        const existingBack = normalizeText(card.german_text ?? "");
         return existingFront === normalizedFront && existingBack === normalizedBack;
     });
 
@@ -101,8 +108,8 @@ export async function POST(req: Request) {
         .from("cards")
         .insert({
             owner_key: ownerKey,
-            swahili_text: frontText,
-            german_text: backText,
+            swahili_text: canonical.sw,
+            german_text: canonical.de,
         })
         .select("id")
         .single();

@@ -1,3 +1,5 @@
+import type { SaveSource } from "@/lib/cards/saveFlow";
+
 export type Lang = "sw" | "de";
 
 export type CardProposal = {
@@ -11,7 +13,7 @@ export type CardProposal = {
     tags?: string[];
     notes?: string;
     source_context_snippet?: string;
-    source_label?: "letzte_liste" | "chat_kontext" | "manuell";
+    source_label?: SaveSource;
 };
 
 export type ProposalStatus =
@@ -114,7 +116,7 @@ const IMPLICIT_REFERENCE_PATTERNS = [
     /\bdas\s+brauche\s+ich\b/i,
 ];
 
-function looksLikeSentence(text: string) {
+export function looksLikeSentence(text: string) {
     return text.trim().split(/\s+/).length > 2 || /[.!?]$/.test(text.trim());
 }
 
@@ -128,7 +130,7 @@ function normalize(text: string) {
     return text.toLowerCase().replace(/[.,!?;:()]/g, "").trim();
 }
 
-function extractCandidateFromUser(text: string) {
+export function extractCandidateFromUser(text: string) {
     const quoted = extractQuoted(text);
     if (quoted) return quoted.trim();
 
@@ -167,7 +169,7 @@ function extractCandidateFromUser(text: string) {
     return trimmedCandidate || null;
 }
 
-function parseAssistantPairs(text: string) {
+export function parseAssistantPairs(text: string) {
     const pairs: Array<{ sw: string; de: string }> = [];
     const lines = text
         .split(/\n+/)
@@ -231,7 +233,7 @@ export function extractConceptsFromAssistantText(
     }));
 }
 
-function guessLang(candidate: string): Lang {
+export function guessLang(candidate: string): Lang {
     const normalized = candidate.trim().toLowerCase();
     if (/[äöüß]/.test(normalized)) return "de";
     if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) return "de";
@@ -283,6 +285,10 @@ export function detectSaveIntent(text: string) {
     return SAVE_INTENT.some((token) => lowered.includes(token));
 }
 
+export function matchesImplicitReference(text: string) {
+    return IMPLICIT_REFERENCE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export function buildProposalsFromChat(
     userMessage: string,
     messages: Array<{ role: "user" | "assistant"; text: string }>,
@@ -309,7 +315,7 @@ export function buildProposalsFromChat(
             back_lang: "de",
             front_text: referencedConcept.sw,
             back_text: referencedConcept.de,
-            source_label: "letzte_liste",
+            source_label: "last_list",
         });
 
         return { proposals, needsFollowUp: false };
@@ -329,7 +335,7 @@ export function buildProposalsFromChat(
                 back_lang: "de",
                 front_text: latest.sw,
                 back_text: latest.de,
-                source_label: "letzte_liste",
+                source_label: "last_list",
             });
 
             return { proposals, needsFollowUp: false };
@@ -348,7 +354,7 @@ export function buildProposalsFromChat(
                 front_text: fromContext.sw,
                 back_text: fromContext.de,
                 source_context_snippet: fromContext.snippet.slice(0, 240),
-                source_label: "chat_kontext",
+                source_label: "chat_context",
             });
         }
 
@@ -361,7 +367,7 @@ export function buildProposalsFromChat(
                 front_text: candidate,
                 back_text: "",
                 missing_back: true,
-                source_label: "manuell",
+                source_label: "manual",
             });
         }
 
@@ -391,7 +397,7 @@ export function buildProposalsFromChat(
                 front_text: pair.sw,
                 back_text: pair.de,
                 source_context_snippet: message.text.slice(0, 240),
-                source_label: "chat_kontext",
+                source_label: "chat_context",
             });
         });
         break;
