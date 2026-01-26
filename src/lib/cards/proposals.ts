@@ -226,219 +226,277 @@ export function parseAssistantPairs(text: string) {
     const stripListPrefix = (value: string) =>
         value.replace(/^[-*•\d+.)\s]+/g, "").trim();
 
-    for (const line of lines) {
-        if (/^(mfano|beispiel|example)\b/i.test(line)) {
+    const stripExampleSuffix = (value: string) => {
+        const exampleMatch = value.match(/\b(mfano|beispiel|example)\b/i);
+        if (!exampleMatch) return value;
+        return value.slice(0, exampleMatch.index).trim();
+    };
+
+    const stripTrailingPunctuation = (value: string) => value.replace(/[.!?]+$/g, "").trim();
+
+    const normalizeAlias = (value: string) => {
+        const match = value.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+        if (!match) return stripTrailingPunctuation(value);
+        const primary = stripTrailingPunctuation(match[1].trim());
+        const alias = stripTrailingPunctuation(match[2].trim());
+        return alias || primary;
+    };
+
+    const fallbackLeftLooksGerman = (value: string) =>
+        /\b(der|die|das|ein|eine|einen|einem|einer)\b/i.test(value) ||
+        /^[A-ZÄÖÜ]/.test(value.trim());
+
+    const resolvePair = (leftRaw: string, rightRaw: string) => {
+        const left = normalizeAlias(stripTrailingPunctuation(stripExampleSuffix(leftRaw)));
+        const right = normalizeAlias(stripTrailingPunctuation(stripExampleSuffix(rightRaw)));
+        if (!left || !right) return null;
+        const leftLang = guessLang(left);
+        const rightLang = guessLang(right);
+        if (leftLang === "de" && rightLang === "sw") {
+            return { sw: right, de: left };
+        }
+        if (leftLang === "sw" && rightLang === "de") {
+            return { sw: left, de: right };
+        }
+        if (fallbackLeftLooksGerman(left)) {
+            return { sw: right, de: left };
+        }
+        return { sw: left, de: right };
+    };
+
+    for (const lineRaw of lines) {
+        if (/^(mfano|beispiel|example)\b/i.test(lineRaw)) {
             continue;
         }
 
-        const dashMatch = line.match(/(.+?)\s*(?:—|–|->)\s*(.+)$/);
-        if (!dashMatch) continue;
+        const cleanedLine = stripExampleSuffix(stripListPrefix(lineRaw));
+        if (!cleanedLine) continue;
 
-        const left = stripListPrefix(dashMatch[1].trim());
-        const right = stripListPrefix(dashMatch[2].trim());
-        if (!left || !right) continue;
-        if (/[.!?]/.test(left) || /[.!?]/.test(right)) continue;
-        pairs.push({ sw: left, de: right });
+        const labelMatch = cleanedLine.match(
+            /\b(swahili|kiswahili|sw)\s*:\s*(.+?)\s*(?:,|;|\s+)\s*\b(deutsch|german|de)\s*:\s*(.+)$/i
+        );
+        if (labelMatch) {
+            const swTerm = stripTrailingPunctuation(labelMatch[2].trim());
+            const deTerm = stripTrailingPunctuation(labelMatch[4].trim());
+            const resolved = resolvePair(swTerm, deTerm);
+            if (resolved) pairs.push(resolved);
+            continue;
         }
 
-        return pairs;
+        const reverseLabelMatch = cleanedLine.match(
+            /\b(deutsch|german|de)\s*:\s*(.+?)\s*(?:,|;|\s+)\s*\b(swahili|kiswahili|sw)\s*:\s*(.+)$/i
+        );
+        if (reverseLabelMatch) {
+            const deTerm = stripTrailingPunctuation(reverseLabelMatch[2].trim());
+            const swTerm = stripTrailingPunctuation(reverseLabelMatch[4].trim());
+            const resolved = resolvePair(deTerm, swTerm);
+            if (resolved) pairs.push(resolved);
+            continue;
+        }
+
+        const separatorMatch = cleanedLine.match(/(.+?)\s*(?:—|–|->|→|=)\s*(.+)$/);
+        if (!separatorMatch) continue;
+
+        const left = stripListPrefix(separatorMatch[1].trim());
+        const right = stripListPrefix(separatorMatch[2].trim());
+        const resolved = resolvePair(left, right);
+        if (!resolved) continue;
+        pairs.push(resolved);
     }
 
-    export function extractConceptsFromAssistantText(
-        text: string,
-        source: LastExplainedConcept["source"] = "answer"
-    ): LastExplainedConcept[] {
-        return parseAssistantPairs(text).map((pair) => ({
-            sw: pair.sw,
-            de: pair.de,
-            source,
-        }));
-    }
-
-    export function guessLang(candidate: string): Lang {
-        const raw = candidate.trim();
-        const normalized = raw.toLowerCase();
-        const hasSwPattern = /(ng'|ny|sh|gh|dh|kw|mw|bw|mb|nd|nj)/.test(normalized);
-        if (!hasSwPattern && /^[A-ZÄÖÜ][a-zäöüß]+$/.test(raw)) return "de";
-        if (/[äöüß]/.test(normalized)) return "de";
-        if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) return "de";
-        if (/(chen|lein|ung|keit|heit|schaft|tion|ismus|ieren|lich|ig|isch|en|er)$/.test(normalized)) return "de";
-        if (/^[a-z\s'-]+$/.test(normalized)) return "sw";
-        return "sw";
-    }
-
-    // Inline examples:
-    // "speicher mfuko" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
-    // "Dann speicher mir mal bitte mfuko ab" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
-    // "bitte chombo speichern" -> candidate: "chombo", lang: "sw", follow-up: Was bedeutet „chombo“ auf Deutsch?
-    // "Kannst du mir Hund abspeichern" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
-    // "Speicher 'Hund'" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
-    // "Speicher 'mfuko'" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
-    // "Speicher den Satz: Ninapenda chai" -> candidate: "Ninapenda chai", lang: "sw", follow-up: Was bedeutet „Ninapenda chai“ auf Deutsch?
-
-    export function findPairInAssistantHistory(
-        candidate: string,
-        messages: Array<{ role: "user" | "assistant"; text: string }>
+    if (
+        pairs.length === 0 &&
+        process.env.NODE_ENV !== "production" &&
+        /[=—→]/.test(text)
     ) {
-        const normalized = normalize(candidate);
-        if (!normalized) return null;
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-            const message = messages[i];
-            if (message.role !== "assistant") continue;
-            const pairs = parseAssistantPairs(message.text);
-            if (pairs.length === 0) continue;
-            let includesMatch: { sw: string; de: string } | null = null;
-            for (const pair of pairs) {
-                const swNorm = normalize(pair.sw);
-                const deNorm = normalize(pair.de);
-                if (swNorm === normalized || deNorm === normalized) {
-                    return { sw: pair.sw, de: pair.de, snippet: message.text };
-                }
-                if (!includesMatch && (swNorm.includes(normalized) || deNorm.includes(normalized))) {
-                    includesMatch = pair;
-                }
+        console.warn("[parseAssistantPairs] no pairs parsed", text);
+    }
+
+    return pairs;
+}
+
+export function extractConceptsFromAssistantText(
+    text: string,
+    source: LastExplainedConcept["source"] = "answer"
+): LastExplainedConcept[] {
+    return parseAssistantPairs(text).map((pair) => ({
+        sw: pair.sw,
+        de: pair.de,
+        source,
+    }));
+}
+
+export function guessLang(candidate: string): Lang {
+    const raw = candidate.trim();
+    const normalized = raw.toLowerCase();
+    const hasSwPattern = /(ng'|ny|sh|gh|dh|kw|mw|bw|mb|nd|nj)/.test(normalized);
+    if (!hasSwPattern && /^[A-ZÄÖÜ][a-zäöüß]+$/.test(raw)) return "de";
+    if (/[äöüß]/.test(normalized)) return "de";
+    if (/\b(der|die|das|ein|eine|einen|einem|einer|und|nicht|mit|ohne)\b/.test(normalized)) return "de";
+    if (/(chen|lein|ung|keit|heit|schaft|tion|ismus|ieren|lich|ig|isch|en|er)$/.test(normalized)) return "de";
+    if (/^[a-z\s'-]+$/.test(normalized)) return "sw";
+    return "sw";
+}
+
+// Inline examples:
+// "speicher mfuko" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "Dann speicher mir mal bitte mfuko ab" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "bitte chombo speichern" -> candidate: "chombo", lang: "sw", follow-up: Was bedeutet „chombo“ auf Deutsch?
+// "Kannst du mir Hund abspeichern" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
+// "Speicher 'Hund'" -> candidate: "Hund", lang: "de", follow-up: Wie lautet das swahilische Wort für „Hund“?
+// "Speicher 'mfuko'" -> candidate: "mfuko", lang: "sw", follow-up: Was bedeutet „mfuko“ auf Deutsch?
+// "Speicher den Satz: Ninapenda chai" -> candidate: "Ninapenda chai", lang: "sw", follow-up: Was bedeutet „Ninapenda chai“ auf Deutsch?
+
+export function findPairInAssistantHistory(
+    candidate: string,
+    messages: Array<{ role: "user" | "assistant"; text: string }>
+) {
+    const normalized = normalize(candidate);
+    if (!normalized) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role !== "assistant") continue;
+        const pairs = parseAssistantPairs(message.text);
+        if (pairs.length === 0) continue;
+        let includesMatch: { sw: string; de: string } | null = null;
+        for (const pair of pairs) {
+            const swNorm = normalize(pair.sw);
+            const deNorm = normalize(pair.de);
+            if (swNorm === normalized || deNorm === normalized) {
+                return { sw: pair.sw, de: pair.de, snippet: message.text };
             }
-            if (includesMatch) {
-                return { sw: includesMatch.sw, de: includesMatch.de, snippet: message.text };
+            if (!includesMatch && (swNorm.includes(normalized) || deNorm.includes(normalized))) {
+                includesMatch = pair;
             }
         }
-        return null;
+        if (includesMatch) {
+            return { sw: includesMatch.sw, de: includesMatch.de, snippet: message.text };
+        }
     }
+    return null;
+}
 
-    export function detectSaveIntent(text: string) {
-        const lowered = text.toLowerCase();
-        return SAVE_INTENT.some((token) => lowered.includes(token));
-    }
+export function detectSaveIntent(text: string) {
+    const lowered = text.toLowerCase();
+    return SAVE_INTENT.some((token) => lowered.includes(token));
+}
 
-    export function matchesImplicitReference(text: string) {
-        return IMPLICIT_REFERENCE_PATTERNS.some((pattern) => pattern.test(text));
-    }
+export function matchesImplicitReference(text: string) {
+    return IMPLICIT_REFERENCE_PATTERNS.some((pattern) => pattern.test(text));
+}
 
-    export function buildProposalsFromChat(
-        userMessage: string,
-        messages: Array<{ role: "user" | "assistant"; text: string }>,
-        lastExplainedConcepts: LastExplainedConcept[] = []
-    ): { proposals: CardProposal[]; needsFollowUp: boolean; followUpText?: string } {
-        const candidate = extractCandidateFromUser(userMessage);
-        const proposals: CardProposal[] = [];
+export function buildProposalsFromChat(
+    userMessage: string,
+    messages: Array<{ role: "user" | "assistant"; text: string }>,
+    lastExplainedConcepts: LastExplainedConcept[] = []
+): { proposals: CardProposal[]; needsFollowUp: boolean; followUpText?: string } {
+    const candidate = extractCandidateFromUser(userMessage);
+    const proposals: CardProposal[] = [];
 
-        const normalizedMessage = normalize(userMessage);
+    const normalizedMessage = normalize(userMessage);
 
-        const referencedConcept = lastExplainedConcepts.find((concept) => {
-            const swNorm = normalize(concept.sw);
-            const deNorm = normalize(concept.de);
-            if (swNorm && normalizedMessage.includes(swNorm)) return true;
-            if (deNorm && normalizedMessage.includes(deNorm)) return true;
-            return false;
+    const referencedConcept = lastExplainedConcepts.find((concept) => {
+        const swNorm = normalize(concept.sw);
+        const deNorm = normalize(concept.de);
+        if (swNorm && normalizedMessage.includes(swNorm)) return true;
+        if (deNorm && normalizedMessage.includes(deNorm)) return true;
+        return false;
+    });
+
+    if (referencedConcept) {
+        proposals.push({
+            id: crypto.randomUUID(),
+            type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
+            front_lang: "sw",
+            back_lang: "de",
+            front_text: referencedConcept.sw,
+            back_text: referencedConcept.de,
+            source_label: "last_list",
         });
 
-        if (referencedConcept) {
+        return { proposals, needsFollowUp: false };
+    }
+
+    if (!candidate && lastExplainedConcepts.length > 0) {
+        const shouldUseImplicitReference = IMPLICIT_REFERENCE_PATTERNS.some((pattern) =>
+            pattern.test(userMessage)
+        );
+
+        if (shouldUseImplicitReference) {
+            const latest = lastExplainedConcepts[lastExplainedConcepts.length - 1];
             proposals.push({
                 id: crypto.randomUUID(),
-                type: looksLikeSentence(referencedConcept.sw) ? "sentence" : "vocab",
+                type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
                 front_lang: "sw",
                 back_lang: "de",
-                front_text: referencedConcept.sw,
-                back_text: referencedConcept.de,
+                front_text: latest.sw,
+                back_text: latest.de,
                 source_label: "last_list",
             });
 
             return { proposals, needsFollowUp: false };
         }
+    }
 
-        if (!candidate && lastExplainedConcepts.length > 0) {
-            const shouldUseImplicitReference = IMPLICIT_REFERENCE_PATTERNS.some((pattern) =>
-                pattern.test(userMessage)
-            );
+    if (candidate && !isCleanCandidate(candidate)) {
+        return {
+            proposals,
+            needsFollowUp: true,
+            followUpText: "Welches genaue Wort soll ich speichern?",
+        };
+    }
 
-            if (shouldUseImplicitReference) {
-                const latest = lastExplainedConcepts[lastExplainedConcepts.length - 1];
-                proposals.push({
-                    id: crypto.randomUUID(),
-                    type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
-                    front_lang: "sw",
-                    back_lang: "de",
-                    front_text: latest.sw,
-                    back_text: latest.de,
-                    source_label: "last_list",
-                });
-
-                return { proposals, needsFollowUp: false };
-            }
-        }
-
-        if (candidate && !isCleanCandidate(candidate)) {
-            return {
-                proposals,
-                needsFollowUp: true,
-                followUpText: "Welches genaue Wort soll ich speichern?",
-            };
-        }
-
-        if (candidate) {
-            const guessedLang = guessLang(candidate);
-            const fromContext = findPairInAssistantHistory(candidate, messages);
-            if (fromContext) {
-                proposals.push({
-                    id: crypto.randomUUID(),
-                    type: looksLikeSentence(fromContext.sw) ? "sentence" : "vocab",
-                    front_lang: "sw",
-                    back_lang: "de",
-                    front_text: fromContext.sw,
-                    back_text: fromContext.de,
-                    source_context_snippet: fromContext.snippet.slice(0, 240),
-                    source_label: "chat_context",
-                });
-            }
-
-            if (proposals.length === 0) {
-                proposals.push({
-                    id: crypto.randomUUID(),
-                    type: looksLikeSentence(candidate) ? "sentence" : "vocab",
-                    front_lang: guessedLang,
-                    back_lang: guessedLang === "sw" ? "de" : "sw",
-                    front_text: candidate,
-                    back_text: "",
-                    missing_back: true,
-                    source_label: "manual",
-                });
-            }
-
-            return {
-                proposals,
-                needsFollowUp: proposals.some((proposal) => proposal.missing_back),
-                followUpText:
-                    proposals.some((proposal) => proposal.missing_back)
-                        ? guessedLang === "sw"
-                            ? `Was bedeutet „${candidate}“ auf Deutsch?`
-                            : `Wie lautet das swahilische Wort für „${candidate}“?`
-                        : undefined,
-            };
-        }
-
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-            const message = messages[i];
-            if (message.role !== "assistant") continue;
-            const pairs = parseAssistantPairs(message.text);
-            if (pairs.length === 0) continue;
-            pairs.forEach((pair) => {
-                proposals.push({
-                    id: crypto.randomUUID(),
-                    type: looksLikeSentence(pair.sw) ? "sentence" : "vocab",
-                    front_lang: "sw",
-                    back_lang: "de",
-                    front_text: pair.sw,
-                    back_text: pair.de,
-                    source_context_snippet: message.text.slice(0, 240),
-                    source_label: "chat_context",
-                });
+    if (candidate) {
+        const guessedLang = guessLang(candidate);
+        const fromContext = findPairInAssistantHistory(candidate, messages);
+        if (fromContext) {
+            proposals.push({
+                id: crypto.randomUUID(),
+                type: looksLikeSentence(fromContext.sw) ? "sentence" : "vocab",
+                front_lang: "sw",
+                back_lang: "de",
+                front_text: fromContext.sw,
+                back_text: fromContext.de,
+                source_context_snippet: fromContext.snippet.slice(0, 240),
+                source_label: "chat_context",
             });
-            break;
         }
 
         return {
             proposals,
             needsFollowUp: proposals.length === 0,
-            followUpText: proposals.length === 0 ? "Welches Wort soll ich speichern?" : undefined,
+            followUpText:
+                proposals.length === 0
+                    ? guessedLang === "sw"
+                        ? `Was bedeutet „${candidate}“ auf Deutsch?`
+                        : `Wie lautet das swahilische Wort für „${candidate}“?`
+                    : undefined,
         };
     }
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role !== "assistant") continue;
+        const pairs = parseAssistantPairs(message.text);
+        if (pairs.length === 0) continue;
+        pairs.forEach((pair) => {
+            proposals.push({
+                id: crypto.randomUUID(),
+                type: looksLikeSentence(pair.sw) ? "sentence" : "vocab",
+                front_lang: "sw",
+                back_lang: "de",
+                front_text: pair.sw,
+                back_text: pair.de,
+                source_context_snippet: message.text.slice(0, 240),
+                source_label: "chat_context",
+            });
+        });
+        break;
+    }
+
+    return {
+        proposals,
+        needsFollowUp: proposals.length === 0,
+        followUpText: proposals.length === 0 ? "Welches Wort soll ich speichern?" : undefined,
+    };
+}
