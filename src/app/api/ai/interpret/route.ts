@@ -155,12 +155,27 @@ const STOP_COMMAND_WORDS = new Set([
     "die",
     "das",
     "den",
+    "kannst",
+    "kann",
+    "könntest",
+    "koenntest",
+    "du",
+    "dir",
+    "mir",
+    "mal",
     "bitte",
+    "auch",
+    "eben",
+    "gerne",
+    "danke",
     "speicher",
     "speichere",
     "speichern",
     "abspeichern",
     "ablegen",
+    "leg",
+    "lege",
+    "an",
     "anlegen",
     "hinzufügen",
     "hinzufugen",
@@ -176,6 +191,22 @@ function isListCommand(text: string) {
 }
 
 function extractRequestedTerms(text: string) {
+    const quoteMatches = Array.from(
+        text.matchAll(/["'„“”‚‘’]([^"'„“”‚‘’]+)["'“”‚‘’]/g)
+    )
+        .map((match) => match[1].trim())
+        .filter(Boolean);
+
+    if (quoteMatches.length > 0) {
+        const seen = new Set<string>();
+        return quoteMatches.filter((term) => {
+            const normalized = normalizeText(term);
+            if (!normalized || seen.has(normalized)) return false;
+            seen.add(normalized);
+            return true;
+        });
+    }
+
     const cleaned = text
         .replace(/[.!?]/g, " ")
         .replace(/\b(und|oder|&)\b/gi, ",")
@@ -187,18 +218,50 @@ function extractRequestedTerms(text: string) {
         .map((chunk) => chunk.trim())
         .filter(Boolean);
 
+    const connectorTokens = new Set(["wa", "ya", "la", "cha", "za", "vya", "kwa", "na"]);
     const terms: string[] = [];
+    const seen = new Set<string>();
+
+    const shouldKeepTwoTokens = (tokens: string[]) => {
+        if (tokens.length !== 2) return false;
+        const [first, second] = tokens;
+        if (connectorTokens.has(first.toLowerCase())) return true;
+        if (
+            first[0] &&
+            second[0] &&
+            first[0] === first[0].toUpperCase() &&
+            second[0] === second[0].toUpperCase()
+        ) {
+            return true;
+        }
+        return false;
+    };
+
     chunks.forEach((chunk) => {
         const parts = chunk.split(/\s+/).filter(Boolean);
-        const filtered = parts.filter((part) => !STOP_COMMAND_WORDS.has(part.toLowerCase()));
-        const term = filtered.join(" ").trim();
+        const filtered = parts.filter(
+            (part) => !STOP_COMMAND_WORDS.has(part.toLowerCase())
+        );
+        if (filtered.length === 0) return;
+
+        let selectedTokens = filtered;
+        if (filtered.length > 2) {
+            const lastTwo = filtered.slice(-2);
+            selectedTokens = shouldKeepTwoTokens(lastTwo)
+                ? lastTwo
+                : [filtered[filtered.length - 1]];
+        }
+
+        const term = selectedTokens.join(" ").trim();
         if (!term) return;
         const normalized = normalizeText(term);
         if (!normalized || STOP_COMMAND_WORDS.has(normalized)) return;
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
         terms.push(term);
     });
 
-    return Array.from(new Set(terms));
+    return terms;
 }
 
 function buildSaveItems(
@@ -376,12 +439,24 @@ export async function POST(req: Request) {
     });
 
     try {
+        const saveIntent = detectSaveIntent(userMessage);
         const shouldSave =
-            detectSaveIntent(userMessage) ||
+            saveIntent ||
             isListCommand(userMessage);
 
         const resolveSave = () => {
-            if (isListCommand(userMessage)) {
+            const listCommand = isListCommand(userMessage);
+            const terms = listCommand ? [] : extractRequestedTerms(userMessage);
+
+            if (saveIntent) {
+                console.debug("[interpret] save terms", {
+                    userMessage,
+                    terms,
+                    bufferSize: conceptBuffer.length,
+                });
+            }
+
+            if (listCommand) {
                 const listConcepts =
                     lastAnswerConcepts.length > 0
                         ? lastAnswerConcepts
@@ -395,7 +470,6 @@ export async function POST(req: Request) {
                 } satisfies InterpretResult;
             }
 
-            const terms = extractRequestedTerms(userMessage);
             if (terms.length === 0) {
                 return {
                     kind: "clarify",
