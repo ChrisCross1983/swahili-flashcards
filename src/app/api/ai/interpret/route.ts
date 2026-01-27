@@ -139,7 +139,6 @@ const LIST_COMMAND_PATTERNS = [
     /\balle\b/i,
     /\balles\b/i,
     /\brestlichen?\b/i,
-    /\bnoch\b/i,
     /\bdiese\b/i,
     /\bdie\s+restlichen\b/i,
 ];
@@ -176,6 +175,7 @@ const STOP_COMMAND_WORDS = new Set([
     "leg",
     "lege",
     "an",
+    "ab",
     "anlegen",
     "hinzufügen",
     "hinzufugen",
@@ -288,6 +288,12 @@ function extractRequestedTerms(text: string) {
             selectedTokens = shouldKeepTwoTokens(lastTwo)
                 ? lastTwo
                 : [filtered[filtered.length - 1]];
+            while (
+                selectedTokens.length > 1 &&
+                STOP_COMMAND_WORDS.has(normalizeText(selectedTokens[selectedTokens.length - 1]))
+            ) {
+                selectedTokens = selectedTokens.slice(0, -1);
+            }
         }
 
         const term = selectedTokens.join(" ").trim();
@@ -349,7 +355,13 @@ function matchConceptsFromBuffer(
         const swNorm = normalizeText(concept.sw);
         const deNorm = normalizeText(concept.de);
         if (
-            normalizedTerms.some((term) => swNorm.includes(term) || deNorm.includes(term))
+            normalizedTerms.some(
+                (term) =>
+                    swNorm.includes(term) ||
+                    deNorm.includes(term) ||
+                    term.includes(swNorm) ||
+                    term.includes(deNorm)
+            )
         ) {
             addConcept(concept);
         }
@@ -484,7 +496,13 @@ export async function POST(req: Request) {
 
         const resolveSave = () => {
             const listCommand = isListCommand(userMessage);
-            const terms = listCommand ? [] : extractRequestedTerms(userMessage);
+
+            const hasExplicitListWord =
+                /\b(alle|alles|die restlichen|alles speichern)\b/i.test(userMessage);
+
+            const terms = (listCommand && hasExplicitListWord)
+                ? []
+                : extractRequestedTerms(userMessage);
 
             if (saveIntent) {
                 console.debug("[interpret] save terms", {
@@ -493,9 +511,6 @@ export async function POST(req: Request) {
                     bufferSize: conceptBuffer.length,
                 });
             }
-
-            const hasExplicitListWord =
-                /\b(alle|alles|die restlichen|alles speichern)\b/i.test(userMessage);
 
             if (listCommand && hasExplicitListWord) {
                 const listConcepts =
@@ -518,8 +533,7 @@ export async function POST(req: Request) {
                 } satisfies InterpretResult;
             }
 
-            const primaryBuffer = lastAnswerConcepts.length > 0 ? lastAnswerConcepts : conceptBuffer;
-            const matches = matchConceptsFromBuffer(terms, primaryBuffer);
+            const matches = matchConceptsFromBuffer(terms, conceptBuffer);
             if (matches.length > 0) {
                 return {
                     kind: "save",
