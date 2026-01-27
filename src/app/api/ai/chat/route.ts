@@ -81,17 +81,22 @@ function extractConceptJsonBlock(rawText: string): {
     answerText: string;
     conceptsJsonText: string | null;
 } {
-    const regex = new RegExp(
-        `${CONCEPT_BLOCK_START}\\s*([\\s\\S]*?)\\s*${CONCEPT_BLOCK_END}`,
-        "i"
-    );
-    const match = rawText.match(regex);
-    if (!match) {
+    const startIdx = rawText.indexOf(CONCEPT_BLOCK_START);
+    if (startIdx === -1) {
         return { answerText: rawText.trim(), conceptsJsonText: null };
     }
-    const withoutBlock = rawText.replace(match[0], "").trim();
-    const jsonText = match[1]?.trim() || null;
-    return { answerText: withoutBlock, conceptsJsonText: jsonText };
+
+    const endIdx = rawText.indexOf(CONCEPT_BLOCK_END, startIdx + CONCEPT_BLOCK_START.length);
+
+    if (endIdx === -1) {
+        return { answerText: rawText.slice(0, startIdx).trim(), conceptsJsonText: null };
+    }
+
+    const jsonStart = startIdx + CONCEPT_BLOCK_START.length;
+    const jsonText = rawText.slice(jsonStart, endIdx).trim();
+    const answerText = (rawText.slice(0, startIdx) + rawText.slice(endIdx + CONCEPT_BLOCK_END.length)).trim();
+
+    return { answerText, conceptsJsonText: jsonText || null };
 }
 
 function normalizeText(value: string) {
@@ -130,7 +135,10 @@ const STOP_COMMAND_WORDS = new Set([
 ]);
 
 function looksSentenceLike(text: string) {
-    return text.trim().split(/\s+/).length > 3 || /[.!?]$/.test(text.trim());
+    const t = text.trim();
+    if (!t) return false;
+    if (/[.!?]$/.test(t)) return true;
+    return t.length > 60;
 }
 
 function sanitizeConcept(raw: {
@@ -193,6 +201,14 @@ async function callOpenAI(apiKey: string, payload: any) {
 
     const data = await r.json().catch(() => null);
     return { ok: r.ok, data };
+}
+
+function isIncomplete(data: any) {
+    return data?.status === "incomplete";
+}
+
+function extractBestEffortTextEvenIfIncomplete(data: any): string | null {
+    return extractResponseText(data);
 }
 
 export async function POST(req: Request) {
@@ -259,8 +275,18 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "AI request failed" }, { status: 500 });
         }
 
-        const rawAnswer = extractResponseText(data);
+        if (isIncomplete(data)) {
+            const raw = extractBestEffortTextEvenIfIncomplete(data) ?? "";
+            const { answerText } = extractConceptJsonBlock(raw);
 
+            return NextResponse.json({
+                answerText: answerText || "Antwort war zu lang – bitte nochmal kürzer fragen.",
+                explainedConcepts: [],
+                meta: { incomplete: true },
+            });
+        }
+
+        const rawAnswer = extractResponseText(data);
         if (!rawAnswer) {
             return NextResponse.json({ error: "AI request failed" }, { status: 500 });
         }
@@ -268,7 +294,12 @@ export async function POST(req: Request) {
         const { answerText, conceptsJsonText } = extractConceptJsonBlock(rawAnswer);
         const explainedConcepts = parseConceptsJson(conceptsJsonText);
 
-        return NextResponse.json({ answerText, explainedConcepts });
+        return NextResponse.json({
+            answerText,
+            explainedConcepts,
+            meta: { incomplete: false },
+        });
+
     } catch {
         return NextResponse.json({ error: "AI request failed" }, { status: 500 });
     }

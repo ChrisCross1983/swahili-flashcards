@@ -494,7 +494,10 @@ export async function POST(req: Request) {
                 });
             }
 
-            if (listCommand) {
+            const hasExplicitListWord =
+                /\b(alle|alles|die restlichen|alles speichern)\b/i.test(userMessage);
+
+            if (listCommand && hasExplicitListWord) {
                 const listConcepts =
                     lastAnswerConcepts.length > 0
                         ? lastAnswerConcepts

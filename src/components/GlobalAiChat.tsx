@@ -564,8 +564,10 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             }
 
             addAssistantMessage(String(data.answerText));
+
             if (Array.isArray(data.explainedConcepts) && data.explainedConcepts.length > 0) {
                 const mapped = data.explainedConcepts as ExplainedConcept[];
+
                 setLastAnswerConcepts(
                     mapped.map((concept) => ({
                         type: concept.type,
@@ -573,9 +575,8 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                         de: concept.de,
                     }))
                 );
+
                 appendConceptsToBuffer(mapped);
-            } else {
-                setLastAnswerConcepts([]);
             }
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
