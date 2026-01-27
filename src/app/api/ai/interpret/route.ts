@@ -132,7 +132,7 @@ function normalizeText(value: string) {
         .toLowerCase()
         .trim()
         .replace(/\s+/g, " ")
-        .replace(/[.,!?;:()]/g, "");
+        .replace(/[^a-z0-9äöüß'\s-]/gi, "");
 }
 
 const LIST_COMMAND_PATTERNS = [
@@ -184,6 +184,38 @@ const STOP_COMMAND_WORDS = new Set([
     "satz",
     "add",
     "merken",
+    "zu",
+    "zum",
+    "zur",
+    "als",
+    "nächstes",
+    "naechstes",
+    "dann",
+    "versuch",
+    "versuche",
+    "versuchmal",
+    "mal",
+    "okay",
+    "ok",
+    "bitte",
+    "kannst",
+    "kann",
+    "könntest",
+    "koenntest",
+    "du",
+    "dir",
+    "mir",
+    "mich",
+    "dich",
+    "noch",
+    "einfach",
+    "bitte",
+    "abspeichern",
+    "speichern",
+    "speichere",
+    "speicher",
+    "save",
+    "store",
 ]);
 
 function isListCommand(text: string) {
@@ -239,13 +271,19 @@ function extractRequestedTerms(text: string) {
 
     chunks.forEach((chunk) => {
         const parts = chunk.split(/\s+/).filter(Boolean);
-        const filtered = parts.filter(
-            (part) => !STOP_COMMAND_WORDS.has(part.toLowerCase())
-        );
+        const filtered = parts.filter((part) => {
+            const norm = normalizeText(part);
+            return norm && !STOP_COMMAND_WORDS.has(norm);
+        });
+
         if (filtered.length === 0) return;
 
         let selectedTokens = filtered;
-        if (filtered.length > 2) {
+
+        const hasConnector = filtered.some((t) => connectorTokens.has(normalizeText(t)));
+        if (hasConnector) {
+            selectedTokens = filtered.slice(0, 4);
+        } else if (filtered.length > 2) {
             const lastTwo = filtered.slice(-2);
             selectedTokens = shouldKeepTwoTokens(lastTwo)
                 ? lastTwo
@@ -403,7 +441,7 @@ export async function POST(req: Request) {
 
     // reasoning-capable model (no temperature / top_p allowed)
     const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-    const recentHistory = chatHistory.slice(-6);
+    const recentHistory = chatHistory.slice(-3);
     const userPayload: Record<string, unknown> = {
         userMessage,
         chatHistory: recentHistory,
@@ -477,7 +515,8 @@ export async function POST(req: Request) {
                 } satisfies InterpretResult;
             }
 
-            const matches = matchConceptsFromBuffer(terms, conceptBuffer);
+            const primaryBuffer = lastAnswerConcepts.length > 0 ? lastAnswerConcepts : conceptBuffer;
+            const matches = matchConceptsFromBuffer(terms, primaryBuffer);
             if (matches.length > 0) {
                 return {
                     kind: "save",
@@ -486,9 +525,20 @@ export async function POST(req: Request) {
             }
 
             if (terms.length === 1) {
+                const lastList = lastAnswerConcepts.length > 0 ? lastAnswerConcepts : conceptBuffer.slice(-10);
+
+                const suggestions = lastList
+                    .map((c) => c.de)
+                    .filter(Boolean)
+                    .slice(0, 6);
+
                 return {
                     kind: "clarify",
-                    question: `Ich habe „${terms[0]}“ nicht im aktuellen Kontext gefunden. Soll ich es übersetzen?`,
+                    question:
+                        `Ich finde „${terms[0]}“ nicht in der letzten Liste.` +
+                        (suggestions.length
+                            ? ` Meinst du einen dieser Begriffe? ${suggestions.join(", ")}`
+                            : ` Soll ich „${terms[0]}“ automatisch übersetzen?`),
                 } satisfies InterpretResult;
             }
 
