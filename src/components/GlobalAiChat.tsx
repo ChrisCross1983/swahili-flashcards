@@ -4,20 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
-import type { CardProposal } from "@/lib/cards/proposals";
+import type { CardProposal, ExplainedConcept } from "@/lib/cards/proposals";
 import {
     detectSaveIntent,
-    extractCandidateFromUser,
-    extractConceptsFromAssistantText,
-    findPairInAssistantHistory,
-    looksLikeSentence,
-    matchesImplicitReference,
-    parseAssistantPairs,
     ProposalStatus,
 } from "@/lib/cards/proposals";
 import {
     canonicalizeToSwDe,
     looksLikeMetaText,
+    normalizeText,
 } from "@/lib/cards/saveFlow";
 import type { TrainingContext } from "@/lib/aiContext";
 
@@ -55,7 +50,7 @@ type SaveItem = {
     confidence: number;
 };
 
-type AssistantPair = { sw: string; de: string };
+type AssistantPair = { type: "vocab" | "sentence"; sw: string; de: string };
 
 type MessageBlock =
     | { type: "paragraph"; text: string }
@@ -109,14 +104,22 @@ function parseMessageBlocks(text: string): MessageBlock[] {
 }
 
 export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext }: Props) {
+    // Manual test checklist:
+    // 1) Frage nach Liste (Tiere/Berufe/Geräte) -> Antwort + Buffer füllt sich.
+    // 2) "speichere Polizist, Bauarbeiter und Arzt" -> 3 Vorschläge, Duplikate markiert.
+    // 3) "speichere alle" -> nutzt letzte Antwort, nicht das Wort "alle".
+    // 4) Nach Save weiterfragen/speichern möglich.
+    // 5) Neue Frage bei offenen Vorschlägen -> Vorschläge schließen.
+    // 6) front_lang="sw", back_lang="de" korrekt.
     const [mounted, setMounted] = useState(false);
     const [messages, setMessages] = useState<Msg[]>([]);
     const [input, setInput] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [lastAssistantPairs, setLastAssistantPairs] = useState<AssistantPair[]>([]);
-    const [lastAssistantMessage, setLastAssistantMessage] = useState<string | null>(null);
+    const [conceptBuffer, setConceptBuffer] = useState<ExplainedConcept[]>([]);
+    const [lastAnswerConcepts, setLastAnswerConcepts] = useState<AssistantPair[]>([]);
     const [proposals, setProposals] = useState<ProposalEntry[]>([]);
+    const [isSavingAll, setIsSavingAll] = useState(false);
 
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
     const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
@@ -156,32 +159,27 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         proposalsRef.current = proposals;
     }, [proposals]);
 
-    const updateLastAssistantPairsFromAnswer = useCallback((answer: string) => {
-        const concepts = extractConceptsFromAssistantText(answer, "assistant");
-        const recentFirst = concepts
-            .map((concept) => ({ sw: concept.sw, de: concept.de }))
-            .reverse();
-        setLastAssistantPairs((prev) => {
-            const merged = [...recentFirst, ...prev];
-            const seen = new Set<string>();
-            const unique = merged.filter((pair) => {
-                const key = `${pair.sw.toLowerCase()}||${pair.de.toLowerCase()}`;
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-            });
-            return unique.slice(0, 3);
-        });
+    const addAssistantMessage = useCallback((text: string) => {
+        setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
     }, []);
 
-    const addAssistantMessage = useCallback(
-        (text: string) => {
-            setMessages((prev) => [...prev, { kind: "text", role: "assistant", text }]);
-            updateLastAssistantPairsFromAnswer(text);
-            setLastAssistantMessage(text);
-        },
-        [updateLastAssistantPairsFromAnswer]
-    );
+    const appendConceptsToBuffer = useCallback((concepts: ExplainedConcept[]) => {
+        if (concepts.length === 0) return;
+        setConceptBuffer((prev) => {
+            const merged = [...prev, ...concepts];
+            const seen = new Set<string>();
+            const dedupedNewest: ExplainedConcept[] = [];
+            for (let i = merged.length - 1; i >= 0; i -= 1) {
+                const concept = merged[i];
+                const key = `${normalizeText(concept.sw)}|${normalizeText(concept.de)}`;
+                if (!key.trim()) continue;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                dedupedNewest.push(concept);
+            }
+            return dedupedNewest.reverse().slice(-80);
+        });
+    }, []);
 
     const buildInterpretTrainingContext = useCallback(
         (context: TrainingContext | null | undefined) => {
@@ -247,22 +245,22 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
             }
             const entries = await Promise.all(
                 filteredItems.map(async (item) => {
+                    const canonical = canonicalizeToSwDe({
+                        front_lang: "sw",
+                        back_lang: "de",
+                        front_text: item.sw.trim(),
+                        back_text: item.de.trim(),
+                    });
                     const proposal: CardProposal = {
                         id: crypto.randomUUID(),
                         type: item.type,
                         front_lang: "sw",
                         back_lang: "de",
-                        front_text: item.sw.trim(),
-                        back_text: item.de.trim(),
+                        front_text: canonical.sw,
+                        back_text: canonical.de,
                         source_label: item.source,
                     };
                     let status: ProposalStatus = { state: "idle" };
-                    const canonical = canonicalizeToSwDe({
-                        front_lang: proposal.front_lang,
-                        back_lang: proposal.back_lang,
-                        front_text: proposal.front_text,
-                        back_text: proposal.back_text,
-                    });
                     const existsResult = await checkDuplicate(canonical.sw, canonical.de);
                     if (existsResult?.exists) {
                         status = {
@@ -308,7 +306,13 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
     );
 
     const removeProposal = useCallback((id: string) => {
-        setProposals((prev) => prev.filter((entry) => entry.proposal.id !== id));
+        setProposals((prev) => {
+            const next = prev.filter((entry) => entry.proposal.id !== id);
+            if (next.length === 0) {
+                return [];
+            }
+            return next;
+        });
     }, []);
 
     const setProposalStatus = useCallback((id: string, status: ProposalStatus) => {
@@ -389,7 +393,15 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 }
 
                 setProposalStatus(proposalId, { state: "saved", id: json.id });
-                window.setTimeout(() => removeProposal(proposalId), 600);
+                window.setTimeout(() => {
+                    removeProposal(proposalId);
+                    const remaining = proposalsRef.current.filter(
+                        (item) => item.proposal.id !== proposalId
+                    );
+                    if (remaining.length === 0) {
+                        setProposals([]);
+                    }
+                }, 600);
             } catch {
                 setProposalStatus(proposalId, {
                     state: "error",
@@ -400,129 +412,43 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         [ownerKey, removeProposal, setProposalStatus]
     );
 
-    const applyFallbackProposals = useCallback(
-        async (fallbackProposals: CardProposal[]) => {
-            const validFallbacks = fallbackProposals.filter(
-                (proposal) => proposal.front_text.trim() && proposal.back_text.trim()
-            );
-            if (validFallbacks.length === 0) {
-                addAssistantMessage(
-                    "Ich habe kein vollständiges Wortpaar im Kontext gefunden. Soll ich die Übersetzung automatisch ermitteln?"
-                );
-                return;
-            }
-            const entries = await Promise.all(
-                validFallbacks.map(async (proposal) => {
-                    let status: ProposalStatus = { state: "idle" };
-                    if (proposal.front_text.trim() && proposal.back_text.trim()) {
-                        const canonical = canonicalizeToSwDe({
-                            front_lang: proposal.front_lang,
-                            back_lang: proposal.back_lang,
-                            front_text: proposal.front_text,
-                            back_text: proposal.back_text,
-                        });
-                        const existsResult = await checkDuplicate(canonical.sw, canonical.de);
-                        if (existsResult?.exists) {
-                            status = {
-                                state: "exists",
-                                existingId: existsResult.existing_id ?? "",
-                            };
-                        }
-                    }
-                    return { kind: "proposal" as const, proposal, status };
-                })
-            );
-            setProposals(entries);
-        },
-        [addAssistantMessage, checkDuplicate]
-    );
-
-    const containsAllRequest = useCallback((text: string) => {
-        return /\b(alle|alles)\b/i.test(text) || /\bdiese\s+liste\b/i.test(text);
-    }, []);
-
     const handleSaveIntentAskFallback = useCallback(
         async (text: string) => {
-            const candidate = extractCandidateFromUser(text);
-            const lastAssistantText = lastAssistantMessage;
-            const lastPairs = lastAssistantText ? parseAssistantPairs(lastAssistantText) : [];
-            const contextPair = candidate
-                ? findPairInAssistantHistory(candidate, textHistory)
-                : null;
-
-            if (process.env.NODE_ENV !== "production") {
-                console.debug("[save-intent]", {
-                    candidate,
-                    foundPair: Boolean(contextPair),
-                    numberOfPairsInLastAssistant: lastPairs.length,
-                });
-            }
-
-            if (containsAllRequest(text)) {
-                if (lastPairs.length > 0) {
-                    const items: SaveItem[] = lastPairs.slice(0, 10).map((pair) => ({
-                        type: looksLikeSentence(pair.sw) ? "sentence" : "vocab",
-                        sw: pair.sw,
-                        de: pair.de,
+            const trimmed = text.trim();
+            const isListCommand =
+                /\b(alle|alles|restlichen?|noch)\b/i.test(trimmed) ||
+                /\bdie\s+restlichen\b/i.test(trimmed);
+            if (isListCommand && lastAnswerConcepts.length > 0) {
+                await applyProposals(
+                    lastAnswerConcepts.map((concept) => ({
+                        type: concept.type,
+                        sw: concept.sw,
+                        de: concept.de,
                         source: "assistant_list",
                         confidence: 0.9,
-                    }));
-                    await applyProposals(items);
-                    return;
-                }
-                addAssistantMessage(
-                    "Ich habe keine klaren Wortpaare in der letzten Liste erkannt — soll ich die Liste in Wortpaare umwandeln?"
+                    }))
                 );
-                return;
-            }
-
-            if (contextPair) {
-                await applyProposals([
-                    {
-                        type: looksLikeSentence(contextPair.sw) ? "sentence" : "vocab",
-                        sw: contextPair.sw,
-                        de: contextPair.de,
-                        source: "chat",
-                        confidence: 0.95,
-                    },
-                ]);
-                return;
-            }
-
-            if (candidate) {
-                addAssistantMessage(
-                    `Ich habe „${candidate}“ erkannt, aber keine Übersetzung im Chat gefunden. Soll ich sie automatisch ermitteln?`
-                );
-                return;
-            }
-
-            if (matchesImplicitReference(text) && lastAssistantPairs.length > 0) {
-                const latest = lastAssistantPairs[0];
-                await applyProposals([
-                    {
-                        type: looksLikeSentence(latest.sw) ? "sentence" : "vocab",
-                        sw: latest.sw,
-                        de: latest.de,
-                        source: "assistant_list",
-                        confidence: 0.8,
-                    },
-                ]);
                 return;
             }
 
             addAssistantMessage(
-                "Welches Wort genau? (Du kannst auch 2-3 Wörter nennen oder 'alle aus der Liste')"
+                "Ich bin nicht sicher, welche Begriffe du meinst. Nenne die Wörter oder sag „alle aus der letzten Antwort“."
             );
         },
-        [
-            addAssistantMessage,
-            applyProposals,
-            containsAllRequest,
-            lastAssistantPairs,
-            lastAssistantMessage,
-            textHistory,
-        ]
+        [addAssistantMessage, applyProposals, lastAnswerConcepts]
     );
+
+    const handleSaveAll = useCallback(async () => {
+        if (isSavingAll) return;
+        setIsSavingAll(true);
+        const current = proposalsRef.current;
+        for (const entry of current) {
+            if (entry.status.state === "exists" || entry.status.state === "error") continue;
+            if (entry.status.state === "saved" || entry.status.state === "saving") continue;
+            await handleProposalSave(entry.proposal.id);
+        }
+        setIsSavingAll(false);
+    }, [handleProposalSave, isSavingAll]);
 
     const send = useCallback(async () => {
         const text = input.trim();
@@ -543,9 +469,14 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         const interpretPayload = {
             ownerKey,
             userMessage: text,
-            chatHistory: nextHistory,
+            chatHistory: nextHistory.slice(-6),
             trainingContext: buildInterpretTrainingContext(trainingContext),
-            lastAssistantPairs,
+            lastAnswerConcepts,
+            conceptBuffer: conceptBuffer.slice(-30).map((concept) => ({
+                type: concept.type,
+                sw: concept.sw,
+                de: concept.de,
+            })),
         };
 
         let interpretResult: InterpretResult | null = null;
@@ -627,12 +558,25 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
 
             const data = await r.json().catch(() => null);
 
-            if (!r.ok || !data?.answer) {
+            if (!r.ok || !data?.answerText) {
                 setError("KI-Anfrage fehlgeschlagen.");
                 return;
             }
 
-            addAssistantMessage(String(data.answer));
+            addAssistantMessage(String(data.answerText));
+            if (Array.isArray(data.explainedConcepts) && data.explainedConcepts.length > 0) {
+                const mapped = data.explainedConcepts as ExplainedConcept[];
+                setLastAnswerConcepts(
+                    mapped.map((concept) => ({
+                        type: concept.type,
+                        sw: concept.sw,
+                        de: concept.de,
+                    }))
+                );
+                appendConceptsToBuffer(mapped);
+            } else {
+                setLastAnswerConcepts([]);
+            }
         } catch {
             setError("KI-Anfrage fehlgeschlagen.");
         } finally {
@@ -648,7 +592,9 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         trainingContext,
         addAssistantMessage,
         applyProposals,
-        lastAssistantPairs,
+        lastAnswerConcepts,
+        conceptBuffer,
+        appendConceptsToBuffer,
         handleSaveIntentAskFallback,
     ]);
 
@@ -743,6 +689,18 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                                             <div className="mb-2 text-xs text-muted">
                                                 Vorschläge zum Speichern (No auto-save; always confirm)
                                             </div>
+                                            {proposals.length > 1 ? (
+                                                <div className="mb-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleSaveAll()}
+                                                        disabled={isSavingAll}
+                                                        className="rounded-lg border border-soft bg-surface px-3 py-2 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-60"
+                                                    >
+                                                        {isSavingAll ? "Speichere…" : "✅ Alle speichern"}
+                                                    </button>
+                                                </div>
+                                            ) : null}
                                             <div className="flex flex-col gap-3">
                                                 {proposals.map((entry) => (
                                                     <ChatProposal

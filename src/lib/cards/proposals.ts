@@ -2,6 +2,21 @@ import type { SaveSource } from "@/lib/cards/saveFlow";
 
 export type Lang = "sw" | "de";
 
+export type ExplainedConcept = {
+    id: string;
+    type: "vocab" | "sentence";
+    sw: string;
+    de: string;
+    source: "answer" | "training" | "assistant";
+    createdAt: number;
+    confidence?: number;
+};
+
+export type ChatAnswerPayload = {
+    answerText: string;
+    explainedConcepts?: ExplainedConcept[];
+};
+
 export type CardProposal = {
     id: string;
     type: "vocab" | "sentence";

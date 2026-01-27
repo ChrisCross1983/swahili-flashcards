@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { detectSaveIntent } from "@/lib/cards/proposals";
 
 type TrainingContext = {
     frontText?: string;
@@ -11,7 +12,8 @@ type InterpretRequestBody = {
     userMessage?: string;
     chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
     trainingContext?: TrainingContext | null;
-    lastAssistantPairs?: Array<{ sw: string; de: string }>;
+    lastAnswerConcepts?: Array<{ type: "vocab" | "sentence"; sw: string; de: string }>;
+    conceptBuffer?: Array<{ type: "vocab" | "sentence"; sw: string; de: string }>;
 };
 
 type SaveItem = {
@@ -27,63 +29,15 @@ type InterpretResult =
     | { kind: "save"; items: SaveItem[] }
     | { kind: "clarify"; question: string };
 
-const SYSTEM_PROMPT =
-    "You are an intent router. Output ONLY valid JSON. No explanations.";
-
-const RESPONSE_SCHEMA = {
-    name: "interpret_result",
-    strict: true,
-    schema: {
-        type: "object",
-        oneOf: [
-            {
-                type: "object",
-                properties: {
-                    kind: { const: "ask" },
-                    rewrittenUserMessage: { type: "string" },
-                },
-                required: ["kind"],
-                additionalProperties: false,
-            },
-            {
-                type: "object",
-                properties: {
-                    kind: { const: "save" },
-                    items: {
-                        type: "array",
-                        maxItems: 10,
-                        items: {
-                            type: "object",
-                            properties: {
-                                type: { enum: ["vocab", "sentence"] },
-                                sw: { type: "string" },
-                                de: { type: "string" },
-                                source: {
-                                    enum: ["chat", "training", "user", "assistant_list"],
-                                },
-                                confidence: { type: "number" },
-                            },
-                            required: ["type", "sw", "de", "source", "confidence"],
-                            additionalProperties: false,
-                        },
-                    },
-                },
-                required: ["kind", "items"],
-                additionalProperties: false,
-            },
-            {
-                type: "object",
-                properties: {
-                    kind: { const: "clarify" },
-                    question: { type: "string" },
-                },
-                required: ["kind", "question"],
-                additionalProperties: false,
-            },
-        ],
-        additionalProperties: false,
-    },
-} as const;
+const SYSTEM_PROMPT = [
+    "You are an intent router for a language learning app.",
+    "Return ONLY valid JSON. No markdown or extra text.",
+    "Output one of:",
+    '{"kind":"ask"}',
+    '{"kind":"save"}',
+    '{"kind":"clarify","question":"..."}',
+    "Use kind=save only if the user explicitly wants to save/remember words or sentences.",
+].join("\n");
 
 function safeSnippet(v: unknown, max = 400) {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -144,28 +98,9 @@ function stripJsonFences(raw: string) {
         .trim();
 }
 
-function isValidSaveItem(item: any): item is SaveItem {
-    if (!item || typeof item !== "object") return false;
-    if (item.type !== "vocab" && item.type !== "sentence") return false;
-    if (item.source !== "chat" && item.source !== "training" && item.source !== "user" && item.source !== "assistant_list") {
-        return false;
-    }
-    if (typeof item.sw !== "string" || typeof item.de !== "string") return false;
-    if (typeof item.confidence !== "number") return false;
-    const sw = item.sw.trim();
-    const de = item.de.trim();
-    if (!sw || !de) return false;
-    const swWordCount = sw.split(/\s+/).filter(Boolean).length;
-    const deWordCount = de.split(/\s+/).filter(Boolean).length;
-    if (sw.length > 40 || de.length > 40) return false;
-    if (swWordCount > 3 || deWordCount > 3) return false;
-    return true;
-}
-
-function parseInterpretResult(raw: string): InterpretResult | null {
+function parseIntentResult(raw: string): InterpretResult | null {
     const cleaned = stripJsonFences(raw);
     let parsed: any;
-
     try {
         parsed = JSON.parse(cleaned);
     } catch {
@@ -179,49 +114,147 @@ function parseInterpretResult(raw: string): InterpretResult | null {
     }
 
     if (!parsed || typeof parsed !== "object") return null;
-
     if (parsed.kind === "ask") {
-        if (
-            parsed.rewrittenUserMessage !== undefined &&
-            typeof parsed.rewrittenUserMessage !== "string"
-        ) {
-            return null;
-        }
-        return {
-            kind: "ask",
-            rewrittenUserMessage: parsed.rewrittenUserMessage?.trim() || undefined,
-        };
+        return { kind: "ask" };
     }
-
-    if (parsed.kind === "clarify") {
-        if (typeof parsed.question !== "string" || !parsed.question.trim()) {
-            return null;
-        }
-        return {
-            kind: "clarify",
-            question: parsed.question.trim(),
-        };
-    }
-
     if (parsed.kind === "save") {
-        if (!Array.isArray(parsed.items) || parsed.items.length === 0) return null;
-        const items = parsed.items
-            .filter((item: any) => isValidSaveItem(item))
-            .slice(0, 10);
-        if (items.length === 0) return null;
-        return {
-            kind: "save",
-            items: items.map((item: SaveItem) => ({
-                type: item.type,
-                sw: item.sw.trim(),
-                de: item.de.trim(),
-                source: item.source,
-                confidence: Math.max(0, Math.min(1, item.confidence)),
-            })),
-        };
+        return { kind: "save", items: [] };
     }
-
+    if (parsed.kind === "clarify") {
+        if (typeof parsed.question !== "string" || !parsed.question.trim()) return null;
+        return { kind: "clarify", question: parsed.question.trim() };
+    }
     return null;
+}
+
+function normalizeText(value: string) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ")
+        .replace(/[.,!?;:()]/g, "");
+}
+
+const LIST_COMMAND_PATTERNS = [
+    /\balle\b/i,
+    /\balles\b/i,
+    /\brestlichen?\b/i,
+    /\bnoch\b/i,
+    /\bdiese\b/i,
+    /\bdie\s+restlichen\b/i,
+];
+
+const STOP_COMMAND_WORDS = new Set([
+    "alle",
+    "alles",
+    "restlichen",
+    "restliche",
+    "noch",
+    "diese",
+    "dieses",
+    "die",
+    "das",
+    "den",
+    "bitte",
+    "speicher",
+    "speichere",
+    "speichern",
+    "abspeichern",
+    "ablegen",
+    "anlegen",
+    "hinzufügen",
+    "hinzufugen",
+    "karte",
+    "vokabel",
+    "satz",
+    "add",
+    "merken",
+]);
+
+function isListCommand(text: string) {
+    return LIST_COMMAND_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function extractRequestedTerms(text: string) {
+    const cleaned = text
+        .replace(/[.!?]/g, " ")
+        .replace(/\b(und|oder|&)\b/gi, ",")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const chunks = cleaned
+        .split(",")
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+    const terms: string[] = [];
+    chunks.forEach((chunk) => {
+        const parts = chunk.split(/\s+/).filter(Boolean);
+        const filtered = parts.filter((part) => !STOP_COMMAND_WORDS.has(part.toLowerCase()));
+        const term = filtered.join(" ").trim();
+        if (!term) return;
+        const normalized = normalizeText(term);
+        if (!normalized || STOP_COMMAND_WORDS.has(normalized)) return;
+        terms.push(term);
+    });
+
+    return Array.from(new Set(terms));
+}
+
+function buildSaveItems(
+    concepts: Array<{ type: "vocab" | "sentence"; sw: string; de: string }>,
+    source: SaveItem["source"],
+    confidence: number
+): SaveItem[] {
+    return concepts.map((concept) => ({
+        type: concept.type,
+        sw: concept.sw.trim(),
+        de: concept.de.trim(),
+        source,
+        confidence,
+    }));
+}
+
+function matchConceptsFromBuffer(
+    terms: string[],
+    conceptBuffer: Array<{ type: "vocab" | "sentence"; sw: string; de: string }>
+): Array<{ type: "vocab" | "sentence"; sw: string; de: string }> {
+    if (conceptBuffer.length === 0) return [];
+    const normalizedTerms = terms.map((term) => normalizeText(term)).filter(Boolean);
+    const seen = new Set<string>();
+    const results: Array<{ type: "vocab" | "sentence"; sw: string; de: string }> = [];
+
+    const addConcept = (concept: { type: "vocab" | "sentence"; sw: string; de: string }) => {
+        const key = `${normalizeText(concept.sw)}|${normalizeText(concept.de)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        results.push(concept);
+    };
+
+    conceptBuffer.forEach((concept) => {
+        const swNorm = normalizeText(concept.sw);
+        const deNorm = normalizeText(concept.de);
+        if (!swNorm || !deNorm) return;
+        if (
+            normalizedTerms.some((term) => term === swNorm || term === deNorm)
+        ) {
+            addConcept(concept);
+        }
+    });
+
+    if (results.length > 0) return results;
+
+    conceptBuffer.forEach((concept) => {
+        const swNorm = normalizeText(concept.sw);
+        const deNorm = normalizeText(concept.de);
+        if (
+            normalizedTerms.some((term) => swNorm.includes(term) || deNorm.includes(term))
+        ) {
+            addConcept(concept);
+        }
+    });
+
+    return results;
 }
 
 export async function POST(req: Request) {
@@ -257,21 +290,45 @@ export async function POST(req: Request) {
             }
             : null;
 
-    const lastAssistantPairs = Array.isArray(body.lastAssistantPairs)
-        ? body.lastAssistantPairs
+    const lastAnswerConcepts = Array.isArray(body.lastAnswerConcepts)
+        ? body.lastAnswerConcepts
             .filter(
-                (pair) =>
-                    pair &&
-                    typeof pair.sw === "string" &&
-                    typeof pair.de === "string" &&
-                    pair.sw.trim() &&
-                    pair.de.trim()
+                (concept) =>
+                    concept &&
+                    (concept.type === "vocab" || concept.type === "sentence") &&
+                    typeof concept.sw === "string" &&
+                    typeof concept.de === "string" &&
+                    concept.sw.trim() &&
+                    concept.de.trim()
             )
-            .map((pair) => ({ sw: pair.sw.trim(), de: pair.de.trim() }))
+            .map((concept) => ({
+                type: concept.type,
+                sw: concept.sw.trim(),
+                de: concept.de.trim(),
+            }))
             .slice(-20)
         : [];
 
-    if (!ownerKey || !userMessage || chatHistory.length === 0) {
+    const conceptBuffer = Array.isArray(body.conceptBuffer)
+        ? body.conceptBuffer
+            .filter(
+                (concept) =>
+                    concept &&
+                    (concept.type === "vocab" || concept.type === "sentence") &&
+                    typeof concept.sw === "string" &&
+                    typeof concept.de === "string" &&
+                    concept.sw.trim() &&
+                    concept.de.trim()
+            )
+            .map((concept) => ({
+                type: concept.type,
+                sw: concept.sw.trim(),
+                de: concept.de.trim(),
+            }))
+            .slice(-30)
+        : [];
+
+    if (!ownerKey || !userMessage) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
@@ -281,11 +338,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "AI not configured" }, { status: 500 });
     }
 
+    // reasoning-capable model (no temperature / top_p allowed)
     const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
     const recentHistory = chatHistory.slice(-6);
     const userPayload: Record<string, unknown> = {
         userMessage,
-        lastAssistantPairs,
         chatHistory: recentHistory,
     };
     if (trainingContext) {
@@ -295,12 +352,7 @@ export async function POST(req: Request) {
     const buildPayload = () => ({
         model,
         max_output_tokens: 120,
-        temperature: 0.2,
         reasoning: { effort: "low" as const },
-        response_format: {
-            type: "json_schema",
-            json_schema: RESPONSE_SCHEMA,
-        },
         input: [
             {
                 role: "system",
@@ -324,14 +376,73 @@ export async function POST(req: Request) {
     });
 
     try {
-        const { ok, status, data } = await callOpenAI(apiKey, buildPayload());
+        const shouldSave =
+            detectSaveIntent(userMessage) ||
+            isListCommand(userMessage);
+
+        const resolveSave = () => {
+            if (isListCommand(userMessage)) {
+                const listConcepts =
+                    lastAnswerConcepts.length > 0
+                        ? lastAnswerConcepts
+                        : conceptBuffer.slice(-10);
+                if (listConcepts.length === 0) {
+                    return { kind: "clarify", question: "Welche Begriffe möchtest du speichern?" } as InterpretResult;
+                }
+                return {
+                    kind: "save",
+                    items: buildSaveItems(listConcepts, "assistant_list", 0.95),
+                } satisfies InterpretResult;
+            }
+
+            const terms = extractRequestedTerms(userMessage);
+            if (terms.length === 0) {
+                return {
+                    kind: "clarify",
+                    question: "Welche Begriffe möchtest du speichern?",
+                } satisfies InterpretResult;
+            }
+
+            const matches = matchConceptsFromBuffer(terms, conceptBuffer);
+            if (matches.length > 0) {
+                return {
+                    kind: "save",
+                    items: buildSaveItems(matches, "assistant_list", 0.9),
+                } satisfies InterpretResult;
+            }
+
+            if (terms.length === 1) {
+                return {
+                    kind: "clarify",
+                    question: `Ich habe „${terms[0]}“ nicht im aktuellen Kontext gefunden. Soll ich es übersetzen?`,
+                } satisfies InterpretResult;
+            }
+
+            return {
+                kind: "clarify",
+                question: "Welche der genannten Begriffe soll ich speichern?",
+            } satisfies InterpretResult;
+        };
+
+        if (shouldSave) {
+            return NextResponse.json(resolveSave());
+        }
+
+        let { ok, status, data } = await callOpenAI(apiKey, buildPayload());
+
+        if (ok && isMaxTokenIncomplete(data)) {
+            ({ ok, status, data } = await callOpenAI(apiKey, {
+                ...buildPayload(),
+                max_output_tokens: 240,
+            }));
+        }
 
         if (!ok) {
             console.error("[interpret] openai error", status, safeSnippet(data));
             return NextResponse.json({ kind: "ask" });
         }
 
-        if (data?.status === "incomplete" || isMaxTokenIncomplete(data)) {
+        if (data?.status === "incomplete") {
             console.error("[interpret] incomplete", safeSnippet(data));
             return NextResponse.json({ kind: "ask" });
         }
@@ -342,10 +453,14 @@ export async function POST(req: Request) {
             return NextResponse.json({ kind: "ask" });
         }
 
-        const parsed = parseInterpretResult(answer);
+        const parsed = parseIntentResult(answer);
         if (!parsed) {
             console.error("[interpret] parse failed", safeSnippet(answer));
             return NextResponse.json({ kind: "ask" });
+        }
+
+        if (parsed.kind === "save") {
+            return NextResponse.json(resolveSave());
         }
 
         return NextResponse.json(parsed);
