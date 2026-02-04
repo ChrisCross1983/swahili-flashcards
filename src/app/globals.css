@@ -1,29 +1,30 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f9f4ea;
-  --foreground: #1f1b16;
-  --surface: #fff9f1;
-  --surface-elevated: #fff1e0;
-  --border: #e2d3c2;
-  --text-muted: #6b5f52;
+  /* Contrast & warmth tuning */
+  --background: #f6efe4;
+  --foreground: #201a14;
+  --surface: #fff7ec;
+  --surface-elevated: #fbe6cf;
+  --border: #d9c6b2;
+  --text-muted: #5a4d42;
   --text-on-accent: #fff7ee;
-  --accent-primary: #f2c14f;
-  --accent-primary-strong: #e3a93a;
-  --accent-cta: #e36f2a;
-  --accent-cta-strong: #c95e1f;
-  --accent-cta-soft: rgba(227, 111, 42, 0.14);
-  --accent-success: #2f7d4b;
-  --accent-success-strong: #256a3f;
-  --accent-success-soft: rgba(47, 125, 75, 0.14);
-  --accent-danger: #c24a36;
-  --accent-danger-strong: #a53d2e;
-  --accent-danger-soft: rgba(194, 74, 54, 0.14);
-  --accent-secondary: #2f6b57;
-  --overlay: rgba(32, 24, 16, 0.55);
-  --overlay-focus: rgba(20, 15, 10, 0.45);
-  --shadow-warm: 0 18px 36px rgba(47, 28, 12, 0.2);
-  --shadow-soft: 0 10px 24px rgba(47, 28, 12, 0.12);
+  --accent-primary: #f0c15a;
+  --accent-primary-strong: #dba741;
+  --accent-cta: #e2702c;
+  --accent-cta-strong: #c95b1b;
+  --accent-cta-soft: rgba(226, 112, 44, 0.16);
+  --accent-success: #1f7a43;
+  --accent-success-strong: #166636;
+  --accent-success-soft: rgba(31, 122, 67, 0.18);
+  --accent-danger: #c2452c;
+  --accent-danger-strong: #a43620;
+  --accent-danger-soft: rgba(194, 69, 44, 0.18);
+  --accent-secondary: #2e5f4f;
+  --overlay: rgba(32, 24, 16, 0.6);
+  --overlay-focus: rgba(20, 15, 10, 0.5);
+  --shadow-warm: 0 18px 36px rgba(32, 20, 8, 0.24);
+  --shadow-soft: 0 10px 24px rgba(32, 20, 8, 0.14);
 
   /* Font Variables */
   --color-background: var(--background);
@@ -39,20 +40,20 @@
     --surface: #242018;
     --surface-elevated: #2d271f;
     --border: #3d3428;
-    --text-muted: #b5a897;
-    --text-on-accent: #1c1914;
-    --accent-primary: #f2c86a;
-    --accent-primary-strong: #e5b853;
-    --accent-cta: #f08a45;
-    --accent-cta-strong: #d86e2f;
-    --accent-cta-soft: rgba(240, 138, 69, 0.2);
-    --accent-success: #51a46b;
-    --accent-success-strong: #3f8f58;
-    --accent-success-soft: rgba(81, 164, 107, 0.2);
-    --accent-danger: #e06d58;
-    --accent-danger-strong: #c95a48;
-    --accent-danger-soft: rgba(224, 109, 88, 0.2);
-    --accent-secondary: #5aa386;
+    --text-muted: #c1b29f;
+    --text-on-accent: #1b1712;
+    --accent-primary: #f2c96c;
+    --accent-primary-strong: #e2b552;
+    --accent-cta: #f2904c;
+    --accent-cta-strong: #d86f2a;
+    --accent-cta-soft: rgba(242, 144, 76, 0.22);
+    --accent-success: #5bb073;
+    --accent-success-strong: #42985a;
+    --accent-success-soft: rgba(91, 176, 115, 0.24);
+    --accent-danger: #e46a52;
+    --accent-danger-strong: #c95440;
+    --accent-danger-soft: rgba(228, 106, 82, 0.24);
+    --accent-secondary: #6cb291;
     --overlay: rgba(18, 14, 10, 0.7);
     --overlay-focus: rgba(18, 14, 10, 0.55);
     --shadow-warm: 0 14px 32px rgba(0, 0, 0, 0.45);
@@ -62,11 +63,17 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-transparent px-4 py-2 text-sm font-semibold tracking-wide transition shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--background)];
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-transparent px-4 py-2 text-sm font-semibold tracking-wide transition transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--background)];
+    box-shadow: var(--shadow-soft);
   }
 
   .btn:disabled {
-    @apply cursor-not-allowed opacity-60;
+    @apply cursor-not-allowed opacity-60 shadow-none;
+  }
+
+  .btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-warm);
   }
 
   .btn-primary {
@@ -77,6 +84,12 @@
 
   .btn-primary:hover:not(:disabled) {
     background-color: var(--accent-cta-strong);
+  }
+
+  .btn-primary:disabled {
+    background-color: var(--accent-cta-soft);
+    color: var(--foreground);
+    border-color: var(--border);
   }
 
   .btn-secondary {
@@ -126,10 +139,27 @@
     border-color: var(--border);
   }
 
-  .hint-card {
-    @apply rounded-2xl border px-4 py-3 text-sm shadow-soft;
+  .count-badge {
+    @apply inline-flex min-w-9 items-center justify-center rounded-full border px-2.5 py-0.5 text-xs font-semibold;
     background-color: var(--surface);
+    color: var(--foreground);
+    border-color: var(--accent-primary-strong);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .hint-card {
+    @apply rounded-2xl border px-4 py-3 text-sm;
+    background-color: var(--surface-elevated);
     color: var(--text-muted);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .swahili-chip {
+    @apply inline-flex items-center rounded-full border px-3 py-1 text-xl font-semibold;
+    background-color: var(--accent-success-soft);
+    color: var(--accent-success-strong);
+    border-color: var(--accent-success);
+    box-shadow: var(--shadow-soft);
   }
 }
 

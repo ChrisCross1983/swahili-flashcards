@@ -1805,7 +1805,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                     {!learnStarted && (
                         <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
                             <div className="text-sm font-semibold text-primary">Einstellungen</div>
-                            <div className="mt-2 rounded-xl border border-soft bg-surface-elevated px-3 py-2 text-sm text-muted">
+                            {/* Hint card for setup guidance */}
+                            <div className="mt-2 hint-card border border-soft">
                                 Wähle Lernmethode, Abfragerichtung – dann starten wir.
                             </div>
 
@@ -1848,7 +1849,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="badge absolute right-4 top-4 bg-accent-primary text-primary border-accent-primary-strong">
+                                                {/* Count badge */}
+                                                <div className="count-badge absolute right-4 top-4">
                                                     {setupCountsLoading ? "…" : setupCounts.todayDue}
                                                 </div>
                                             </button>
@@ -1886,7 +1888,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="badge absolute right-4 top-4 bg-accent-primary text-primary border-accent-primary-strong">
+                                                {/* Count badge */}
+                                                <div className="count-badge absolute right-4 top-4">
                                                     {setupCountsLoading ? "…" : setupCounts.totalCards}
                                                 </div>
                                             </button>
@@ -1939,7 +1942,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                             }}
                                                         >
                                                             <span>Alle Karten</span>
-                                                            <span className="badge bg-accent-primary text-primary border-accent-primary-strong">
+                                                            {/* Count badge */}
+                                                            <span className="count-badge">
                                                                 {setupCountsLoading ? "…" : setupCounts.totalCards}
                                                             </span>
                                                         </button>
@@ -1955,7 +1959,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                             }}
                                                         >
                                                             <span>Zuletzt nicht gewusst</span>
-                                                            <span className="badge bg-accent-primary text-primary border-accent-primary-strong">
+                                                            {/* Count badge */}
+                                                            <span className="count-badge">
                                                                 {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
                                                             </span>
                                                         </button>
@@ -1963,7 +1968,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 ) : null}
                                             </div>
                                             {drillSource === null ? (
-                                                <div className="mt-2 text-sm text-muted">
+                                                <div className="mt-2 hint-card border border-soft">
+                                                    {/* Drill hint */}
                                                     <div>Bitte Quelle auswählen.</div>
                                                     {!setupCountsLoading && setupCounts.lastMissedCount > 0 ? (
                                                         <div className="mt-1">
@@ -2049,12 +2055,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 </div>
                             </div>
 
+                            {/* Primary CTA */}
                             <button
-                                className={`mt-4 w-full btn py-3 text-base ${startDisabled
-                                    ? "bg-surface-elevated text-muted border border-soft shadow-none"
-                                    : "btn-primary"
-                                    }`}
+                                className={`mt-4 w-full btn btn-primary py-3 text-base`}
                                 type="button"
+                                disabled={startDisabled}
                                 onClick={async () => {
 
                                     if (!learnMode) {
@@ -2112,6 +2117,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                             {startHint ? (
                                 <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                    {/* Start hint */}
                                     {startHint}
                                 </div>
                             ) : null}
@@ -2454,9 +2460,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 </span>
                                             </div>
 
+                                            {/* Secondary action */}
                                             <button
                                                 type="button"
-                                                className="btn btn-ghost text-sm whitespace-nowrap text-sm whitespace-nowrap"
+                                                className="btn btn-ghost text-sm whitespace-nowrap"
                                                 onClick={() => setOpenDirectionChange((v) => !v)}
                                             >
                                                 Richtung ändern
@@ -2522,7 +2529,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             {!todayItems[currentIndex]?.audio_path ? (
                                                 <button
                                                     type="button"
-                                                    className="rbtn btn-ghost text-sm"
+                                                    className="btn btn-ghost text-sm"
                                                     onClick={toggleLearnRecording}
                                                 >
                                                     {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
@@ -2562,11 +2569,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 {direction === "DE_TO_SW" ? "Deutsch" : "Swahili"}
                                             </div>
                                             <div className="mt-1">
+                                                {/* Swahili highlight chip */}
                                                 <span
                                                     className={
                                                         direction === "DE_TO_SW"
                                                             ? "text-2xl font-semibold text-primary"
-                                                            : "inline-flex items-center rounded-lg border border-success bg-accent-success-soft px-3 py-1 text-2xl font-semibold text-accent-success-strong shadow-soft"
+                                                            : "swahili-chip text-2xl"
                                                     }
                                                 >
                                                     {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
@@ -2588,10 +2596,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         {direction === "DE_TO_SW" ? "Swahili" : "Deutsch"}
                                                     </div>
                                                     <div className="mt-1">
+                                                        {/* Swahili highlight chip */}
                                                         <span
                                                             className={
                                                                 direction === "DE_TO_SW"
-                                                                    ? "inline-flex items-center rounded-lg border border-success bg-accent-success-soft px-3 py-1 text-xl font-semibold text-accent-success-strong shadow-soft"
+                                                                    ? "swahili-chip text-xl"
                                                                     : "text-xl font-semibold text-primary"
                                                             }
                                                         >
