@@ -1644,13 +1644,10 @@ export default function TrainerClient({ ownerKey }: Props) {
     return (
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
-                <h1 className="text-2xl font-semibold">Swahili Flashcards (MVP)</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">Swahili Flashcards (MVP)</h1>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
-                    <button
-                        className="rounded-xl border px-3 py-2 text-sm"
-                        onClick={() => router.push("/")}
-                    >
+                    <button className="btn btn-ghost text-sm" onClick={() => router.push("/")}>
                         ← Home
                     </button>
 
@@ -1658,14 +1655,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                         Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
                     </div>
 
-                    <button className="rounded-xl border px-3 py-2 text-sm" onClick={logout}>
+                    <button className="btn btn-ghost text-sm" onClick={logout}>
                         Logout
                     </button>
                 </div>
 
                 {showMigrate ? (
-                    <div className="mt-4 rounded-2xl border p-4 bg-surface">
-                        <div className="font-semibold">Alte Karten gefunden</div>
+                    <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
+                        <div className="font-semibold text-primary">Alte Karten gefunden</div>
                         <div className="mt-1 text-sm text-muted">
                             Deine Karten aus der alten App-Version sind noch da, aber unter einem anderen Schlüssel gespeichert.
                             Mit einem Klick übernehmen wir sie in deinen Login.
@@ -1676,19 +1673,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                         ) : null}
 
                         <div className="mt-3 flex gap-3">
-                            <button
-                                className="rounded-xl bg-accent-primary text-on-accent px-4 py-2 text-sm"
-                                type="button"
-                                onClick={migrateLegacyData}
-                            >
+                            <button className="btn btn-secondary" type="button" onClick={migrateLegacyData}>
                                 Jetzt übernehmen
                             </button>
 
-                            <button
-                                className="rounded-xl border px-4 py-2 text-sm"
-                                type="button"
-                                onClick={() => setShowMigrate(false)}
-                            >
+                            <button className="btn btn-ghost" type="button" onClick={() => setShowMigrate(false)}>
                                 Später
                             </button>
                         </div>
@@ -1814,11 +1803,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                 >
                     {/* === SETUP === */}
                     {!learnStarted && (
-                        <div className="mt-4 rounded-2xl border p-4 bg-surface">
-                            <div className="text-sm font-medium">Einstellungen</div>
-                            <p className="mt-1 text-sm text-muted">
+                        <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
+                            <div className="text-sm font-semibold text-primary">Einstellungen</div>
+                            <div className="mt-2 rounded-xl border border-soft bg-surface-elevated px-3 py-2 text-sm text-muted">
                                 Wähle Lernmethode, Abfragerichtung – dann starten wir.
-                            </p>
+                            </div>
 
                             <div
                                 ref={learnModeRef}
@@ -1831,8 +1820,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             : ""
                                     }
                                 >
-                                    <div className="rounded-2xl bg-surface p-4">
-                                        <div className="text-sm font-medium">Lernmethode</div>
+                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                        <div className="text-sm font-semibold text-primary">Lernmethode</div>
                                         <div className="mt-2 grid grid-cols-1 gap-3">
                                             <button
                                                 type="button"
@@ -1841,8 +1830,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     setDrillMenuOpen(false);
                                                 }}
                                                 className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
-                                                    ? "border-accent bg-surface"
-                                                    : "border-soft bg-surface hover:bg-surface"
+                                                    ? "border-accent bg-surface shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
                                                 <div className="flex items-start justify-between gap-3 pr-10">
@@ -1854,12 +1843,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     </div>
 
                                                     {isLeitnerSelected ? (
-                                                        <div className="shrink-0 rounded-full border border-accent px-2 py-1 text-xs">
+                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                                             ✓
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="absolute right-4 top-4 rounded-full border border-soft bg-surface px-2 py-0.5 text-xs text-muted">
+                                                <div className="badge absolute right-4 top-4 bg-accent-primary text-primary border-accent-primary-strong">
                                                     {setupCountsLoading ? "…" : setupCounts.todayDue}
                                                 </div>
                                             </button>
@@ -1879,8 +1868,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     }
                                                 }}
                                                 className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
-                                                    ? "border-accent bg-surface"
-                                                    : "border-soft bg-surface hover:bg-surface"
+                                                    ? "border-accent bg-surface shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
                                                 <div className="flex items-start justify-between gap-3 pr-10">
@@ -1892,12 +1881,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     </div>
 
                                                     {isDrillSelected ? (
-                                                        <div className="shrink-0 rounded-full border border-accent px-2 py-1 text-xs">
+                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                                             ✓
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="absolute right-4 top-4 rounded-full border border-soft bg-surface px-2 py-0.5 text-xs text-muted">
+                                                <div className="badge absolute right-4 top-4 bg-accent-primary text-primary border-accent-primary-strong">
                                                     {setupCountsLoading ? "…" : setupCounts.totalCards}
                                                 </div>
                                             </button>
@@ -1918,12 +1907,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 : ""
                                         }
                                     >
-                                        <div className="rounded-2xl bg-surface p-4">
-                                            <div className="text-sm font-medium">Was willst du trainieren?</div>
+                                        <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                            <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
                                             <div className="mt-2" ref={drillMenuRef}>
                                                 <button
                                                     type="button"
-                                                    className="flex w-full items-center justify-between rounded-xl border bg-surface p-3 text-left"
+                                                    className="flex w-full items-center justify-between rounded-xl border bg-surface p-3 text-left shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
                                                     onClick={() => setDrillMenuOpen((prev) => !prev)}
                                                 >
                                                     <span className={drillSource ? "text-primary" : "text-muted"}>
@@ -1941,8 +1930,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         <button
                                                             type="button"
                                                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "ALL"
-                                                                ? "bg-surface"
-                                                                : "hover:bg-surface"
+                                                                ? "bg-surface-elevated"
+                                                                : "hover:bg-surface-elevated"
                                                                 }`}
                                                             onClick={() => {
                                                                 setDrillSource("ALL");
@@ -1950,15 +1939,15 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                             }}
                                                         >
                                                             <span>Alle Karten</span>
-                                                            <span className="rounded-full border border-soft bg-surface px-2 py-0.5 text-xs text-muted">
+                                                            <span className="badge bg-accent-primary text-primary border-accent-primary-strong">
                                                                 {setupCountsLoading ? "…" : setupCounts.totalCards}
                                                             </span>
                                                         </button>
                                                         <button
                                                             type="button"
                                                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "LAST_MISSED"
-                                                                ? "bg-surface"
-                                                                : "hover:bg-surface"
+                                                                ? "bg-surface-elevated"
+                                                                : "hover:bg-surface-elevated"
                                                                 }`}
                                                             onClick={() => {
                                                                 setDrillSource("LAST_MISSED");
@@ -1966,7 +1955,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                             }}
                                                         >
                                                             <span>Zuletzt nicht gewusst</span>
-                                                            <span className="rounded-full border border-soft bg-surface px-2 py-0.5 text-xs text-muted">
+                                                            <span className="badge bg-accent-primary text-primary border-accent-primary-strong">
                                                                 {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
                                                             </span>
                                                         </button>
@@ -1999,21 +1988,21 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             : ""
                                     }
                                 >
-                                    <div className="rounded-2xl bg-surface p-4">
-                                        <div className="text-sm font-medium">Abfragerichtung</div>
+                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                        <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
                                         <div className="mt-2 grid grid-cols-1 gap-3">
                                             <button
                                                 type="button"
                                                 onClick={() => setDirectionMode("DE_TO_SW")}
                                                 className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
-                                                    ? "border-accent bg-surface"
-                                                    : "border-soft bg-surface hover:bg-surface"
+                                                    ? "border-accent bg-surface shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
                                                 <div className="flex items-center justify-between">
                                                     <span>Deutsch → Swahili</span>
                                                     {directionMode === "DE_TO_SW" ? (
-                                                        <div className="shrink-0 rounded-full border border-accent px-2 py-1 text-xs">
+                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                                             ✓
                                                         </div>
                                                     ) : null}
@@ -2024,14 +2013,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 type="button"
                                                 onClick={() => setDirectionMode("SW_TO_DE")}
                                                 className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
-                                                    ? "border-accent bg-surface"
-                                                    : "border-soft bg-surface hover:bg-surface"
+                                                    ? "border-accent bg-surface shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
                                                 <div className="flex items-center justify-between">
                                                     <span>Swahili → Deutsch</span>
                                                     {directionMode === "SW_TO_DE" ? (
-                                                        <div className="shrink-0 rounded-full border border-accent px-2 py-1 text-xs">
+                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                                             ✓
                                                         </div>
                                                     ) : null}
@@ -2042,14 +2031,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 type="button"
                                                 onClick={() => setDirectionMode("RANDOM")}
                                                 className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
-                                                    ? "border-accent bg-surface"
-                                                    : "border-soft bg-surface hover:bg-surface"
+                                                    ? "border-accent bg-surface shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
                                                 <div className="flex items-center justify-between">
                                                     <span>Zufällig (Abwechslung)</span>
                                                     {directionMode === "RANDOM" ? (
-                                                        <div className="shrink-0 rounded-full border border-accent px-2 py-1 text-xs">
+                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                                             ✓
                                                         </div>
                                                     ) : null}
@@ -2061,7 +2050,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </div>
 
                             <button
-                                className={`mt-4 w-full rounded-xl p-3 ${startDisabled ? "bg-[color:var(--border)] text-muted" : "bg-accent-primary text-on-accent"
+                                className={`mt-4 w-full btn py-3 text-base ${startDisabled
+                                    ? "bg-surface-elevated text-muted border border-soft shadow-none"
+                                    : "btn-primary"
                                     }`}
                                 type="button"
                                 onClick={async () => {
@@ -2119,13 +2110,11 @@ export default function TrainerClient({ ownerKey }: Props) {
                                 Start
                             </button>
 
-                            {
-                                startHint ? (
-                                    <div className="mt-3 rounded-xl border border-cta bg-accent-cta-soft p-3 text-sm text-accent-cta">
-                                        {startHint}
-                                    </div>
-                                ) : null
-                            }
+                            {startHint ? (
+                                <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                    {startHint}
+                                </div>
+                            ) : null}
                         </div >
                     )
                     }
@@ -2172,7 +2161,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         })()}
 
                                         <button
-                                            className="mt-6 w-full rounded-xl bg-accent-primary text-on-accent p-3"
+                                            className="mt-6 w-full btn btn-primary py-3 text-base"
                                             type="button"
                                             onClick={() => {
                                                 setLearnStarted(false);
@@ -2194,7 +2183,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </button>
                                     </div>
                                 ) : learnMode === "LEITNER_TODAY" ? (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface">
+                                    <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
                                         <div className="text-lg font-semibold">
                                             {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
                                         </div>
@@ -2222,7 +2211,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         {sessionWrongIds.size > 0 ? (
                                             <button
-                                                className="mt-4 w-full rounded-xl border p-3"
+                                                className="mt-4 w-full btn btn-ghost py-3"
                                                 type="button"
                                                 onClick={() => {
                                                     const repeatItems = Object.values(sessionWrongItems);
@@ -2247,12 +2236,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         ) : null}
 
                                         {/* Lernstand */}
-                                        <div className="mt-4 rounded-2xl border p-6">
+                                        <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
                                             {/* 1) Heute */}
-                                            <div className="text-sm font-medium">📊 Heute</div>
+                                            <div className="text-sm font-semibold text-primary">📊 Heute</div>
 
                                             {sessionTotal > 0 ? (
-                                                <div className="mt-3 rounded-2xl border p-4">
+                                                <div className="mt-3 rounded-2xl border p-4 bg-surface-elevated">
                                                     <div className="text-base font-semibold flex items-center justify-between gap-3">
                                                         <span>
                                                             {sessionCorrect} von {sessionTotal} Karten sicher{" "}
@@ -2265,12 +2254,12 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                         {sessionTotal - sessionCorrect} Karten üben wir nochmal
                                                     </div>
 
-                                                    <div className="mt-3 h-2 w-full rounded-full border">
+                                                    <div className="mt-3 h-2 w-full rounded-full border border-soft">
                                                         <div
                                                             className="h-2 rounded-full"
                                                             style={{
                                                                 width: `${Math.round((sessionCorrect / sessionTotal) * 100)}%`,
-                                                                backgroundColor: "var(--accent-primary)",
+                                                                backgroundColor: "var(--accent-success)",
                                                             }}
                                                         />
                                                     </div>
@@ -2280,9 +2269,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             )}
 
                                             {/* 2) Gesamt */}
-                                            <div className="mt-6 text-sm font-medium">🌱 Dein Lernstand</div>
+                                            <div className="mt-6 text-sm font-semibold text-primary">🌱 Dein Lernstand</div>
 
-                                            <div className="mt-3 rounded-2xl border p-4 text-sm">
+                                            <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
                                                 <div className="flex items-center justify-between">
                                                     <span className="text-muted">Karten insgesamt</span>
                                                     <span className="font-semibold">{leitnerUi.total}</span>
@@ -2307,19 +2296,19 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             </div>
 
                                             {/* 3) Nächstes */}
-                                            <div className="mt-6 text-sm font-medium">⏰ Nächstes Training</div>
-                                            <div className="mt-2 rounded-2xl border p-4 text-sm text-muted">
+                                            <div className="mt-6 text-sm font-semibold text-primary">⏰ Nächstes Training</div>
+                                            <div className="mt-2 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
                                                 Nächste Karten sind {leitnerUi.nextText} dran.
                                             </div>
 
                                             {/* 4) Tipp */}
-                                            <div className="mt-4 rounded-2xl border p-4 text-sm text-muted">
+                                            <div className="mt-4 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
                                                 Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
                                             </div>
                                         </div>
 
                                         <button
-                                            className="mt-4 w-full rounded-xl bg-accent-primary text-on-accent p-3"
+                                            className="mt-4 w-full btn btn-primary py-3 text-base"
                                             type="button"
                                             onClick={() => {
                                                 setLearnStarted(false);
@@ -2341,7 +2330,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </button>
                                     </div>
                                 ) : learnMode === "DRILL" && drillSource === "LAST_MISSED" && lastMissedEmpty ? (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface">
+                                    <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
                                         <div className="text-lg font-semibold">
                                             Keine zuletzt nicht gewussten Karten 🎉
                                         </div>
@@ -2350,7 +2339,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </div>
 
                                         <button
-                                            className="mt-4 w-full rounded-xl bg-accent-primary text-on-accent p-3"
+                                            className="mt-4 w-full btn btn-primary py-3 text-base"
                                             type="button"
                                             onClick={() => {
                                                 setLearnStarted(false);
@@ -2372,8 +2361,8 @@ export default function TrainerClient({ ownerKey }: Props) {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center">
-                                        <div className="text-sm font-medium">Session abgeschlossen ✅</div>
+                                    <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
+                                        <div className="text-sm font-semibold text-primary">Session abgeschlossen ✅</div>
 
                                         {(() => {
                                             const total = sessionTotal > 0 ? sessionTotal : Math.max(sessionCorrect, 1);
@@ -2391,7 +2380,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                     <div className="mt-6 flex justify-center w-full">
                                                         <button
-                                                            className="rounded-xl bg-accent-primary text-on-accent px-10 py-3"
+                                                            className="btn btn-primary px-10 py-3 text-base"
                                                             type="button"
                                                             onClick={() => {
                                                                 setLearnStarted(false);
@@ -2443,7 +2432,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 <span className="font-medium text-primary">{sessionTotal}</span>
                                             </div>
 
-                                            <div className="rounded-full border px-3 py-1 text-sm text-muted bg-surface">
+                                            <div className="rounded-full border px-3 py-1 text-sm text-muted bg-surface shadow-soft">
                                                 ✔︎{" "}
                                                 <span className="font-medium">
                                                     {answeredCount === 0 ? "—" : `${safePct}%`}
@@ -2467,7 +2456,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
+                                                className="btn btn-ghost text-sm whitespace-nowrap text-sm whitespace-nowrap"
                                                 onClick={() => setOpenDirectionChange((v) => !v)}
                                             >
                                                 Richtung ändern
@@ -2476,13 +2465,13 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         {/* Dropdown */}
                                         {openDirectionChange ? (
-                                            <div className="mt-3 rounded-2xl border p-3 bg-surface">
-                                                <div className="text-sm font-medium">Abfragerichtung</div>
+                                            <div className="mt-3 rounded-2xl border p-3 bg-surface shadow-soft">
+                                                <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
 
                                                 <div className="mt-2 grid grid-cols-1 gap-2">
                                                     <button
                                                         type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface"
+                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
                                                         onClick={() => {
                                                             setDirectionMode("DE_TO_SW");
                                                             setDirection("DE_TO_SW");
@@ -2494,7 +2483,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                     <button
                                                         type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface"
+                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
                                                         onClick={() => {
                                                             setDirectionMode("SW_TO_DE");
                                                             setDirection("SW_TO_DE");
@@ -2506,7 +2495,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                     <button
                                                         type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface"
+                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
                                                         onClick={() => {
                                                             setDirectionMode("RANDOM");
                                                             const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
@@ -2526,14 +2515,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </div>
 
                                     {/* ===== Card ===== */}
-                                    <div className="mt-3 rounded-2xl border p-6">
+                                    <div className="mt-3 rounded-2xl border p-6 shadow-soft bg-surface">
                                         {/* Top Actions Row */}
                                         <div className="flex items-center justify-between gap-3">
                                             {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
                                             {!todayItems[currentIndex]?.audio_path ? (
                                                 <button
                                                     type="button"
-                                                    className="rounded-xl border px-4 py-2 text-sm"
+                                                    className="rbtn btn-ghost text-sm"
                                                     onClick={toggleLearnRecording}
                                                 >
                                                     {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
@@ -2546,7 +2535,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 {/* Rechts: Bearbeiten */}
                                                 <button
                                                     type="button"
-                                                    className="rounded-xl border px-4 py-2 text-sm whitespace-nowrap"
+                                                    className="btn btn-ghost text-sm whitespace-nowrap"
                                                     onClick={startEditFromLearn}
                                                 >
                                                     ✏️ Bearbeiten
@@ -2556,7 +2545,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                         {/* Bild */}
                                         {reveal && currentImagePath ? (
-                                            <div className="mt-6 rounded-2xl border bg-surface overflow-hidden">
+                                            <div className="mt-6 rounded-2xl border bg-surface overflow-hidden shadow-soft">
                                                 <div className="w-full h-56 flex items-center justify-center bg-surface">
                                                     <img
                                                         src={`${IMAGE_BASE_URL}/${currentImagePath}`}
@@ -2572,17 +2561,22 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             <div className="text-xs text-muted uppercase tracking-wide">
                                                 {direction === "DE_TO_SW" ? "Deutsch" : "Swahili"}
                                             </div>
-                                            <div
-                                                className={`mt-1 text-2xl font-semibold ${direction === "DE_TO_SW" ? "text-primary" : "text-accent-success"
-                                                    }`}
-                                            >
-                                                {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                            <div className="mt-1">
+                                                <span
+                                                    className={
+                                                        direction === "DE_TO_SW"
+                                                            ? "text-2xl font-semibold text-primary"
+                                                            : "inline-flex items-center rounded-lg border border-success bg-accent-success-soft px-3 py-1 text-2xl font-semibold text-accent-success-strong shadow-soft"
+                                                    }
+                                                >
+                                                    {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                                </span>
                                             </div>
                                         </div>
 
                                         {!reveal ? (
                                             <button
-                                                className="mt-8 w-full rounded-xl bg-accent-primary text-on-accent p-3"
+                                                className="mt-8 w-full btn btn-secondary py-3 text-base"
                                                 onClick={revealCard}
                                             >
                                                 Aufdecken
@@ -2593,11 +2587,16 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     <div className="text-xs text-muted uppercase tracking-wide">
                                                         {direction === "DE_TO_SW" ? "Swahili" : "Deutsch"}
                                                     </div>
-                                                    <div
-                                                        className={`mt-1 text-xl font-semibold ${direction === "DE_TO_SW" ? "text-accent-success" : "text-primary"
-                                                            }`}
-                                                    >
-                                                        {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                    <div className="mt-1">
+                                                        <span
+                                                            className={
+                                                                direction === "DE_TO_SW"
+                                                                    ? "inline-flex items-center rounded-lg border border-success bg-accent-success-soft px-3 py-1 text-xl font-semibold text-accent-success-strong shadow-soft"
+                                                                    : "text-xl font-semibold text-primary"
+                                                            }
+                                                        >
+                                                            {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                        </span>
                                                     </div>
                                                 </div>
 
@@ -2606,7 +2605,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     <div className="mt-6">
                                                         <button
                                                             type="button"
-                                                            className="rounded-xl border px-4 py-2 text-sm"
+                                                            className="btn btn-ghost text-sm"
                                                             onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
                                                         >
                                                             🔊 Abspielen
@@ -2617,7 +2616,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 <div className="mt-10 grid grid-cols-2 gap-6">
                                                     <button
                                                         type="button"
-                                                        className="rounded-2xl border p-4 text-sm font-medium bg-accent-cta-soft border-cta text-accent-cta active:scale-[0.99]"
+                                                        className="btn btn-danger py-4 text-base active:scale-[0.99]"
                                                         onClick={() => gradeCurrent(false)}
                                                     >
                                                         Nicht gewusst
@@ -2625,7 +2624,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                                     <button
                                                         type="button"
-                                                        className="rounded-2xl p-4 text-sm font-medium bg-accent-success text-on-accent active:scale-[0.99]"
+                                                        className="btn btn-success py-4 text-base active:scale-[0.99]"
                                                         onClick={() => gradeCurrent(true)}
                                                     >
                                                         Gewusst
@@ -2983,7 +2982,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                 <div className="flex gap-2 pt-2">
                                     <button
-                                        className="flex-1 rounded-xl border px-3 py-2 text-sm"
+                                        className="btn btn-ghost flex-1 text-sm"
                                         onClick={() => {
                                             setDuplicateHint(null);
                                             setDuplicatePreview(null);
@@ -2993,7 +2992,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                                     </button>
 
                                     <button
-                                        className="flex-1 rounded-xl bg-accent-primary text-on-accent px-3 py-2 text-sm"
+                                        className="btn btn-primary flex-1 text-sm"
                                         onClick={() => createCard(true)}
                                     >
                                         Trotzdem speichern
@@ -3004,7 +3003,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                         <div className="mt-6 grid grid-cols-2 gap-4">
                             <button
-                                className="rounded-xl bg-accent-primary text-on-accent p-3 disabled:opacity-50"
+                                className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
                                 onClick={saveCard}
                                 disabled={!german || !swahili}
                                 type="button"
@@ -3013,7 +3012,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             </button>
 
                             <button
-                                className="rounded-xl border p-3"
+                                className="btn btn-ghost py-3 text-base"
                                 type="button"
                                 onClick={handleCancelEdit}
                             >
@@ -3024,7 +3023,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         {editingId && (
                             <button
                                 type="button"
-                                className="mt-3 w-full rounded-xl border p-3 text-accent-cta"
+                                className="mt-3 w-full btn btn-ghost py-3 text-accent-cta"
                                 onClick={async () => {
                                     if (!editingId) return;
 
@@ -3060,7 +3059,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         suggestLoading ? (
                             <div className="mt-4 text-sm text-muted" > Lade Vorschläge…</div>
                         ) : suggestError ? (
-                            <div className="mt-4 rounded-xl border border-cta bg-accent-cta-soft p-3 text-sm text-accent-cta">
+                            <div className="mt-4 hint-card border-cta bg-accent-cta-soft text-accent-cta">
                                 {suggestError}
                             </div>
                         ) : suggestItems.length === 0 ? (
