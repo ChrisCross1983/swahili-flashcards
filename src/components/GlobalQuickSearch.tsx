@@ -86,6 +86,43 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     }, [open]);
 
     useEffect(() => {
+        if (!open) return;
+        // Reset overflow/zoom state while search is open.
+        const html = document.documentElement;
+        const body = document.body;
+        const prev = {
+            htmlOverflowX: html.style.overflowX,
+            htmlWidth: html.style.width,
+            htmlTransform: html.style.transform,
+            htmlZoom: (html.style as CSSStyleDeclaration & { zoom?: string }).zoom,
+            bodyOverflowX: body.style.overflowX,
+            bodyWidth: body.style.width,
+            bodyTransform: body.style.transform,
+            bodyZoom: (body.style as CSSStyleDeclaration & { zoom?: string }).zoom,
+        };
+
+        html.style.overflowX = "hidden";
+        html.style.width = "100%";
+        html.style.transform = "none";
+        (html.style as CSSStyleDeclaration & { zoom?: string }).zoom = "1";
+        body.style.overflowX = "hidden";
+        body.style.width = "100%";
+        body.style.transform = "none";
+        (body.style as CSSStyleDeclaration & { zoom?: string }).zoom = "1";
+
+        return () => {
+            html.style.overflowX = prev.htmlOverflowX;
+            html.style.width = prev.htmlWidth;
+            html.style.transform = prev.htmlTransform;
+            (html.style as CSSStyleDeclaration & { zoom?: string }).zoom = prev.htmlZoom ?? "";
+            body.style.overflowX = prev.bodyOverflowX;
+            body.style.width = prev.bodyWidth;
+            body.style.transform = prev.bodyTransform;
+            (body.style as CSSStyleDeclaration & { zoom?: string }).zoom = prev.bodyZoom ?? "";
+        };
+    }, [open]);
+
+    useEffect(() => {
         setMounted(true);
     }, []);
 

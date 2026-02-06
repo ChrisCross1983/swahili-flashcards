@@ -2568,12 +2568,13 @@ export default function TrainerClient({ ownerKey }: Props) {
                                             <div className="text-xs text-muted uppercase tracking-wide">
                                                 {direction === "DE_TO_SW" ? "Deutsch" : "Swahili"}
                                             </div>
-                                            <div className="mt-1">
+                                            <div className="mt-2">
+                                                {/* Preserve line breaks for prompt text. */}
                                                 {/* Swahili highlight chip */}
                                                 <span
                                                     className={
                                                         direction === "DE_TO_SW"
-                                                            ? "text-2xl font-semibold text-primary"
+                                                            ? "text-2xl font-semibold text-primary whitespace-pre-wrap break-words"
                                                             : "swahili-chip text-2xl"
                                                     }
                                                 >
@@ -2595,13 +2596,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                     <div className="text-xs text-muted uppercase tracking-wide">
                                                         {direction === "DE_TO_SW" ? "Swahili" : "Deutsch"}
                                                     </div>
-                                                    <div className="mt-1">
+                                                    <div className="mt-2">
+                                                        {/* Preserve line breaks for answer text. */}
                                                         {/* Swahili highlight chip */}
                                                         <span
                                                             className={
                                                                 direction === "DE_TO_SW"
                                                                     ? "swahili-chip text-xl"
-                                                                    : "text-xl font-semibold text-primary"
+                                                                    : "text-xl font-semibold text-primary whitespace-pre-wrap break-words"
                                                             }
                                                         >
                                                             {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
@@ -2723,20 +2725,24 @@ export default function TrainerClient({ ownerKey }: Props) {
                     onClose={handleCancelEdit}
                 >
                     <div className="rounded-2xl border p-6 shadow-soft bg-surface">
+                        {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium">Deutsch</label>
-                        <input
-                            className="mt-1 w-full rounded-xl border p-3"
+                        <textarea
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
                             value={german}
                             onChange={(e) => setGerman(e.target.value)}
                             placeholder="z.B. Guten Morgen"
+                            rows={3}
                         />
 
+                        {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium mt-4">Swahili</label>
-                        <input
-                            className="mt-1 w-full rounded-xl border p-3"
+                        <textarea
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
                             value={swahili}
                             onChange={(e) => setSwahili(e.target.value)}
                             placeholder="z.B. Habari za asubuhi"
+                            rows={3}
                         />
 
                         <div className="mt-6 text-sm font-medium">Medien</div>

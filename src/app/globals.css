@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+@layer base {
+
+  /* Guard against horizontal drift after overlays/zoom. */
+  html,
+  body {
+    width: 100%;
+    overflow-x: hidden;
+  }
+}
+
 :root {
   /* Contrast & warmth tuning */
   --background: #f6efe4;
@@ -154,12 +164,15 @@
     box-shadow: var(--shadow-soft);
   }
 
+  /* Ensure swahili chip has symmetric padding + no clipping. */
   .swahili-chip {
-    @apply inline-flex items-center rounded-full border px-3 py-1 text-xl font-semibold;
+    @apply inline-flex max-w-full items-center rounded-full border px-4 py-1.5 text-xl font-semibold leading-snug whitespace-pre-wrap break-words align-middle;
+    ;
     background-color: var(--accent-success-soft);
     color: var(--accent-success-strong);
     border-color: var(--accent-success);
     box-shadow: var(--shadow-soft);
+    overflow: visible;
   }
 }
 
