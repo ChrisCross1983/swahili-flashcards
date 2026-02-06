@@ -605,11 +605,12 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         <>
             {open ? (
                 <div
-                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-[rgba(0,0,0,0.32)] p-4 sm:items-center"
+                    className="fixed inset-0 z-[2147483646] flex items-start justify-center bg-overlay p-4 sm:items-center"
                     onClick={close}
                 >
+                    {/* Sync AI trainer surface to app theme. */}
                     <div
-                        className="w-full max-w-xl rounded-2xl border-2 border-[rgba(255,240,220,0.45)] bg-[#a45f32] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)]"
+                        className="w-full max-w-xl rounded-2xl border border-soft bg-surface-elevated p-4 shadow-warm"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="mb-3 flex items-center justify-between">
@@ -621,13 +622,14 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                             </div>
 
                             <div className="flex items-center gap-2">
-                                <span className="rounded-full border border-[rgba(255,240,220,0.45)] bg-[rgba(255,240,220,0.1)] px-2 py-1 text-[11px] font-semibold text-[rgba(255,240,220,0.8)]">
+                                {/* Match badge styling with trainer tokens. */}
+                                <span className="badge border-accent bg-accent-success-soft text-accent-success-strong">
                                     KI aktiv
                                 </span>
                                 <button
                                     type="button"
                                     aria-label="Schließen"
-                                    className="rounded-full border border-soft px-3 py-1 text-sm text-muted transition hover:bg-surface"
+                                    className="btn btn-ghost text-sm"
                                     onClick={close}
                                 >
                                     ✕
@@ -696,7 +698,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                                                         type="button"
                                                         onClick={() => void handleSaveAll()}
                                                         disabled={isSavingAll}
-                                                        className="rounded-lg border border-soft bg-surface px-3 py-2 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-60"
+                                                        className="btn btn-secondary text-xs"
                                                     >
                                                         {isSavingAll ? "Speichere…" : "✅ Alle speichern"}
                                                     </button>
@@ -761,6 +763,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                             </div>
                         ) : null}
 
+                        {/* Align inputs/buttons with trainer tokens. */}
                         <div className="flex items-center gap-2">
                             <textarea
                                 ref={inputRef}
@@ -782,7 +785,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                                 type="button"
                                 onClick={send}
                                 disabled={isSending || !input.trim()}
-                                className="rounded-xl bg-accent-primary px-4 py-3 text-sm text-on-accent disabled:opacity-60"
+                                className="btn btn-primary"
                             >
                                 {isSending ? "…" : "Senden"}
                             </button>

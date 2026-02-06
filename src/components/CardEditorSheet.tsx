@@ -396,20 +396,24 @@ export default function CardEditorSheet({
                     </div>
                 ) : (
                     <div className="rounded-2xl border border-soft p-6 shadow-soft bg-surface">
+                        {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium">Deutsch</label>
-                        <input
-                            className="mt-1 w-full rounded-xl border p-3"
+                        <textarea
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
                             value={german}
                             onChange={(e) => setGerman(e.target.value)}
                             placeholder="z.B. Guten Morgen"
+                            rows={3}
                         />
 
+                        {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium mt-4">Swahili</label>
-                        <input
-                            className="mt-1 w-full rounded-xl border p-3"
+                        <textarea
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
                             value={swahili}
                             onChange={(e) => setSwahili(e.target.value)}
                             placeholder="z.B. Habari za asubuhi"
+                            rows={3}
                         />
 
                         <div className="mt-6 text-sm font-medium">Medien</div>

@@ -219,20 +219,24 @@ export default function BasicsClient({ ownerKey }: Props) {
       >
         <div className="space-y-4">
           <div>
+            {/* Enable multi-line entry for sentences/paragraphs. */}
             <label className="block text-sm font-medium">Deutsch</label>
-            <input
-              className="mt-1 w-full rounded-xl border p-3"
+            <textarea
+              className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
               value={draftGerman}
               onChange={(e) => setDraftGerman(e.target.value)}
+              rows={3}
             />
           </div>
 
           <div>
+            {/* Enable multi-line entry for sentences/paragraphs. */}
             <label className="block text-sm font-medium">Swahili</label>
-            <input
-              className="mt-1 w-full rounded-xl border p-3"
+            <textarea
+              className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
               value={draftSwahili}
               onChange={(e) => setDraftSwahili(e.target.value)}
+              rows={3}
             />
           </div>
 
