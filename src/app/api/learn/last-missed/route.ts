@@ -4,6 +4,9 @@ import { supabaseServer } from "@/lib/supabaseServer";
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey")?.trim();
+    const typeParam = searchParams.get("type");
+    const resolvedType =
+        typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey missing" }, { status: 400 });
@@ -38,11 +41,19 @@ export async function GET(req: Request) {
             return NextResponse.json({ items: [], cards: [] });
         }
 
-        const { data: cards, error: cardsError } = await supabaseServer
+        let cardsQuery = supabaseServer
             .from("cards")
             .select("id, german_text, swahili_text, image_path, audio_path")
             .eq("owner_key", ownerKey)
             .in("id", cardIds);
+
+        if (resolvedType === "sentence") {
+            cardsQuery = cardsQuery.eq("type", "sentence");
+        } else if (resolvedType === "vocab") {
+            cardsQuery = cardsQuery.or("type.is.null,type.eq.vocab");
+        }
+
+        const { data: cards, error: cardsError } = await cardsQuery;
 
         if (cardsError) {
             console.error("last-missed cards lookup error", {

@@ -8,5 +8,5 @@ export default async function SentenceTrainerPage() {
 
     if (!user) redirect("/login");
 
-    return <SentenceTrainerClient />;
+    return <SentenceTrainerClient ownerKey={user.id} />;
 }

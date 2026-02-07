@@ -26,6 +26,9 @@ function addDaysYmd(base: Date, days: number) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const ownerKey = searchParams.get("ownerKey");
+  const typeParam = searchParams.get("type");
+  const resolvedType =
+    typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
   if (!ownerKey) {
     return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
@@ -35,10 +38,20 @@ export async function GET(req: Request) {
   const today = todayDate.toISOString().slice(0, 10); // YYYY-MM-DD
   const tomorrow = addDaysYmd(todayDate, 1);
 
-  const { data, error } = await supabaseServer
+  let query = supabaseServer
     .from("card_progress")
-    .select("level, due_date")
+    .select("level, due_date, cards!inner(type)")
     .eq("owner_key", ownerKey);
+
+  if (resolvedType === "sentence") {
+    query = query.eq("cards.type", "sentence");
+  }
+
+  if (resolvedType === "vocab") {
+    query = query.or("type.is.null,type.eq.vocab", { foreignTable: "cards" });
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

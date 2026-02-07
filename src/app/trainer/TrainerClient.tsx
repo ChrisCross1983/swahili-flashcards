@@ -18,6 +18,7 @@ const LEGACY_KEY_NAME = "ramona_owner_key";
 
 type Props = {
     ownerKey: string;
+    cardType?: "vocab" | "sentence";
 };
 
 const IMAGE_BASE_URL =
@@ -33,7 +34,26 @@ function shuffleArray<T>(array: T[]): T[] {
     return a;
 }
 
-export default function TrainerClient({ ownerKey }: Props) {
+export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
+    const isSentenceTrainer = cardType === "sentence";
+    const trainerTitle = isSentenceTrainer ? "Satztrainer" : "Swahili Flashcards (MVP)";
+    const learnLabel = isSentenceTrainer ? "Sätze trainieren" : "Vokabeln lernen";
+    const learnHint = isSentenceTrainer
+        ? "Starte deine fälligen Sätze im Fokus-Modus."
+        : "Starte deine fälligen Karten im Fokus-Modus.";
+    const createLabel = isSentenceTrainer ? "Neue Sätze anlegen" : "Neue Wörter anlegen";
+    const createHint = isSentenceTrainer
+        ? "Neue Sätze anlegen (Deutsch ↔ Swahili)."
+        : "Neue Karte anlegen (Deutsch ↔ Swahili).";
+    const cardsLabel = isSentenceTrainer ? "Meine Sätze" : "Meine Karten";
+    const cardsCountLabel = isSentenceTrainer ? "Sätze insgesamt" : "Karten insgesamt";
+    const searchLabel = isSentenceTrainer ? "Satz suchen" : "Karte suchen";
+    const searchHint = isSentenceTrainer
+        ? "Tippe einen deutschen oder swahilischen Satz."
+        : "Tippe ein deutsches oder swahilisches Wort.";
+    const editTitle = isSentenceTrainer ? "Satz bearbeiten" : "Karte bearbeiten";
+    const createTitle = isSentenceTrainer ? "Neue Sätze" : "Neue Wörter";
+    const saveCardLabel = isSentenceTrainer ? "Satz speichern" : "Karte speichern";
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
@@ -97,6 +117,9 @@ export default function TrainerClient({ ownerKey }: Props) {
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
 
     const router = useRouter();
+    const typeQuery = `type=${encodeURIComponent(cardType)}`;
+    const withTypeParam = (url: string) =>
+        url.includes("?") ? `${url}&${typeQuery}` : `${url}?${typeQuery}`;
 
     const editingCard = cards.find((c) => c.id === editingId) ?? null;
 
@@ -203,7 +226,9 @@ export default function TrainerClient({ ownerKey }: Props) {
         setSetupCountsLoading(true);
 
         try {
-            const res = await fetch(`/api/learn/setup-counts?ownerKey=${ownerKey}`);
+            const res = await fetch(
+                withTypeParam(`/api/learn/setup-counts?ownerKey=${ownerKey}`)
+            );
             const json = await res.json();
             if (!res.ok) {
                 throw new Error(json.error ?? "Setup counts failed");
@@ -449,14 +474,21 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     async function createCard(skipWarning = false) {
         try {
+            const trimmedGerman = german.trim();
+            const trimmedSwahili = swahili.trim();
 
             // Warnung nur beim ersten Versuch
             if (!skipWarning) {
-                const exists = await checkExistingGerman();
+                const exists = await checkExistingGerman(trimmedGerman, trimmedSwahili);
                 if (exists) {
                     setStatus(""); // Status leeren, Warnbox übernimmt
                     return;
                 }
+            }
+
+            if (!trimmedGerman || !trimmedSwahili) {
+                setStatus("Bitte Deutsch und Swahili ausfüllen.");
+                return;
             }
 
             setStatus("Speichere...");
@@ -468,9 +500,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ownerKey,
-                    german,
-                    swahili,
+                    german: trimmedGerman,
+                    swahili: trimmedSwahili,
                     imagePath,
+                    type: cardType,
                 }),
             });
 
@@ -552,6 +585,13 @@ export default function TrainerClient({ ownerKey }: Props) {
                 return;
             }
 
+            const trimmedGerman = german.trim();
+            const trimmedSwahili = swahili.trim();
+            if (!trimmedGerman || !trimmedSwahili) {
+                setStatus("Bitte Deutsch und Swahili ausfüllen.");
+                return;
+            }
+
             let imagePath: string | null | undefined = undefined;
 
             if (suggestedImagePath) {
@@ -564,8 +604,8 @@ export default function TrainerClient({ ownerKey }: Props) {
             const body: any = {
                 ownerKey,
                 id: editingId,
-                german,
-                swahili,
+                german: trimmedGerman,
+                swahili: trimmedSwahili,
             };
 
             if (imagePath !== undefined) body.imagePath = imagePath;
@@ -684,10 +724,14 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         if (!silent) setStatus("Lade Karten...");
 
-        const url =
-            q && q.trim().length > 0
-                ? `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&q=${encodeURIComponent(q)}`
-                : `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}`;
+        const searchParams = new URLSearchParams({
+            ownerKey,
+            type: cardType,
+        });
+        if (q && q.trim().length > 0) {
+            searchParams.set("q", q);
+        }
+        const url = `/api/cards?${searchParams.toString()}`;
 
         const res = await fetch(url);
         const json = await res.json();
@@ -815,13 +859,20 @@ export default function TrainerClient({ ownerKey }: Props) {
         setStatus("");
     }
 
-    async function checkExistingGerman(): Promise<boolean> {
+    async function checkExistingGerman(
+        germanText: string = german,
+        swahiliText: string = swahili
+    ): Promise<boolean> {
+        const resolvedGerman = germanText.trim();
+        const resolvedSwahili = swahiliText.trim();
         const res = await fetch("/api/cards/check-existing", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 ownerKey,
-                german,
+                german: resolvedGerman,
+                swahili: resolvedSwahili,
+                type: cardType,
             }),
         });
 
@@ -834,7 +885,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
         if (json.exists) {
             setDuplicateHint(
-                `Hinweis: Für „${german}“ gibt es bereits Karten. Prüfe kurz, ob es eine Variante oder ein Tippfehler ist.`
+                `Hinweis: Für „${resolvedGerman}“ gibt es bereits Karten. Prüfe kurz, ob es eine Variante oder ein Tippfehler ist.`
             );
 
             setDuplicatePreview(json.cards ?? null);
@@ -898,7 +949,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         setStatus("Lade fällige Karten...");
 
         const res = await fetch(
-            `/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
+            withTypeParam(`/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`),
+            { cache: "no-store" }
         );
         const json = await res.json();
 
@@ -935,7 +987,8 @@ export default function TrainerClient({ ownerKey }: Props) {
         setLastMissedEmpty(false);
 
         const res = await fetch(
-            `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`, { cache: "no-store" }
+            withTypeParam(`/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`),
+            { cache: "no-store" }
         );
 
         const json = await res.json();
@@ -972,7 +1025,7 @@ export default function TrainerClient({ ownerKey }: Props) {
         setLastMissedEmpty(false);
 
         const res = await fetch(
-            `/api/learn/last-missed?ownerKey=${encodeURIComponent(ownerKey)}`,
+            withTypeParam(`/api/learn/last-missed?ownerKey=${encodeURIComponent(ownerKey)}`),
             { cache: "no-store" }
         );
 
@@ -1023,7 +1076,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
     async function loadLeitnerStats() {
         const res = await fetch(
-            `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`,
+            withTypeParam(`/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`),
             { cache: "no-store" }
         );
         const json = await res.json();
@@ -1644,7 +1697,7 @@ export default function TrainerClient({ ownerKey }: Props) {
     return (
         <main className="min-h-screen p-6 flex justify-center">
             <div className="w-full max-w-xl">
-                <h1 className="text-2xl font-semibold tracking-tight">Swahili Flashcards (MVP)</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">{trainerTitle}</h1>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
                     <button className="btn btn-ghost text-sm" onClick={() => router.push("/")}>
@@ -1711,9 +1764,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
-                        <div className="text-xl font-semibold">Vokabeln lernen</div>
+                        <div className="text-xl font-semibold">{learnLabel}</div>
                         <div className="mt-2 text-sm text-muted">
-                            Starte deine fälligen Karten im Fokus-Modus.
+                            {learnHint}
                         </div>
                     </button>
 
@@ -1734,9 +1787,9 @@ export default function TrainerClient({ ownerKey }: Props) {
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
-                        <div className="text-xl font-semibold">Neue Wörter anlegen</div>
+                        <div className="text-xl font-semibold">{createLabel}</div>
                         <div className="mt-2 text-sm text-muted">
-                            Neue Karte anlegen (Deutsch ↔ Swahili).
+                            {createHint}
                         </div>
                     </button>
                     <button
@@ -1749,7 +1802,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         }}
                         className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                     >
-                        <div className="text-xl font-semibold">Meine Karten</div>
+                        <div className="text-xl font-semibold">{cardsLabel}</div>
                         <div className="mt-2 text-sm text-muted">
                             Durchsuchen, bearbeiten und aufräumen.
                         </div>
@@ -1761,7 +1814,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                             loadCards(undefined, { silent: true });
                         }}
                     >
-                        <div className="text-xl font-semibold">Karte suchen</div>
+                        <div className="text-xl font-semibold">{searchLabel}</div>
                         <div className="mt-2 text-sm text-muted">
                             Deutsch oder Swahili.
                         </div>
@@ -2279,7 +2332,7 @@ export default function TrainerClient({ ownerKey }: Props) {
 
                                             <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
                                                 <div className="flex items-center justify-between">
-                                                    <span className="text-muted">Karten insgesamt</span>
+                                                    <span className="text-muted">{cardsCountLabel}</span>
                                                     <span className="font-semibold">{leitnerUi.total}</span>
                                                 </div>
 
@@ -2721,14 +2774,14 @@ export default function TrainerClient({ ownerKey }: Props) {
                 {/* Create Modal */}
                 < FullScreenSheet
                     open={openCreate}
-                    title={editingId ? "Karte bearbeiten" : "Neue Wörter"}
+                    title={editingId ? editTitle : createTitle}
                     onClose={handleCancelEdit}
                 >
                     <div className="rounded-2xl border p-6 shadow-soft bg-surface">
                         {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium">Deutsch</label>
                         <textarea
-                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
                             value={german}
                             onChange={(e) => setGerman(e.target.value)}
                             placeholder="z.B. Guten Morgen"
@@ -2738,7 +2791,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                         {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium mt-4">Swahili</label>
                         <textarea
-                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
+                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
                             value={swahili}
                             onChange={(e) => setSwahili(e.target.value)}
                             placeholder="z.B. Habari za asubuhi"
@@ -3020,10 +3073,10 @@ export default function TrainerClient({ ownerKey }: Props) {
                             <button
                                 className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
                                 onClick={saveCard}
-                                disabled={!german || !swahili}
+                                disabled={!german.trim() || !swahili.trim()}
                                 type="button"
                             >
-                                {editingId ? "Speichern" : "Karte speichern"}
+                                {editingId ? "Speichern" : saveCardLabel}
                             </button>
 
                             <button
@@ -3101,7 +3154,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 {/* My Cards Modal */}
                 < FullScreenSheet
                     open={openCards}
-                    title="Meine Karten"
+                    title={cardsLabel}
                     onClose={() => setOpenCards(false)
                     }
                 >
@@ -3113,16 +3166,27 @@ export default function TrainerClient({ ownerKey }: Props) {
                         ) : null}
 
                         <div className="mt-3 text-sm text-muted">
-                            {cards.length} Karten insgesamt.
+                            {cards.length} {cardsCountLabel}.
                         </div>
 
                         {/* Liste */}
                         <div className="mt-4 space-y-3">
                             {filteredCards.map((c) => (
                                 <div key={c.id} className="rounded-xl border p-3">
-                                    <div className="text-sm font-medium">
-                                        {c.german_text} — {c.swahili_text}
-                                    </div>
+                                    {isSentenceTrainer ? (
+                                        <div className="space-y-1 text-sm font-medium">
+                                            <div className="whitespace-pre-wrap break-words">
+                                                {c.german_text}
+                                            </div>
+                                            <div className="whitespace-pre-wrap break-words text-muted">
+                                                {c.swahili_text}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm font-medium">
+                                            {c.german_text} — {c.swahili_text}
+                                        </div>
+                                    )}
 
                                     <div className="mt-2 flex items-center gap-2">
                                         {c.image_path ? (
@@ -3180,7 +3244,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                 {/* Search Modal */}
                 < FullScreenSheet
                     open={openSearch}
-                    title="Karte suchen"
+                    title={searchLabel}
                     onClose={() => {
                         setOpenSearch(false);
                         setSearch("");
@@ -3196,7 +3260,7 @@ export default function TrainerClient({ ownerKey }: Props) {
                     <div className="mt-4 space-y-2">
                         {search.trim().length === 0 ? (
                             <p className="text-sm text-muted">
-                                Tippe ein deutsches oder swahilisches Wort.
+                                {searchHint}
                             </p>
                         ) : filteredCards.length === 0 ? (
                             <p className="text-sm text-muted">
@@ -3216,9 +3280,20 @@ export default function TrainerClient({ ownerKey }: Props) {
                                                 setOpenCreate(true);
                                             }}
                                         >
-                                            <div className="font-medium">
-                                                {c.german_text} — {c.swahili_text}
-                                            </div>
+                                            {isSentenceTrainer ? (
+                                                <div className="space-y-1 font-medium">
+                                                    <div className="whitespace-pre-wrap break-words">
+                                                        {c.german_text}
+                                                    </div>
+                                                    <div className="whitespace-pre-wrap break-words text-muted">
+                                                        {c.swahili_text}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="font-medium">
+                                                    {c.german_text} — {c.swahili_text}
+                                                </div>
+                                            )}
                                         </button>
 
                                         <button
