@@ -6,12 +6,18 @@ type CreateCardBody = {
     german: string;
     swahili: string;
     imagePath?: string | null;
+    type?: "vocab" | "sentence";
 };
 
 export async function POST(req: Request) {
     const body = (await req.json()) as CreateCardBody;
 
-    if (!body.ownerKey || !body.german || !body.swahili) {
+    const ownerKey = body.ownerKey?.trim();
+    const german = body.german?.trim();
+    const swahili = body.swahili?.trim();
+    const type = body.type === "sentence" ? "sentence" : "vocab";
+
+    if (!ownerKey || !german || !swahili) {
         return NextResponse.json(
             { error: "ownerKey, german and swahili are required" },
             { status: 400 }
@@ -21,12 +27,13 @@ export async function POST(req: Request) {
     const { data: card, error } = await supabaseServer
         .from("cards")
         .insert({
-            owner_key: body.ownerKey,
-            german_text: body.german,
-            swahili_text: body.swahili,
+            owner_key: ownerKey,
+            german_text: german,
+            swahili_text: swahili,
             image_path: body.imagePath ?? null,
+            type,
         })
-        .select("id, german_text, swahili_text, image_path, audio_path, created_at")
+        .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
         .single();
 
     if (error) {
@@ -49,7 +56,7 @@ export async function POST(req: Request) {
         .from("card_progress")
         .insert({
             card_id: card.id,
-            owner_key: body.ownerKey,
+            owner_key: ownerKey,
             level: 0,
         });
 
@@ -69,6 +76,9 @@ export async function GET(req: Request) {
     const ownerKey = searchParams.get("ownerKey");
     const q = searchParams.get("q");
     const id = searchParams.get("id");
+    const typeParam = searchParams.get("type");
+    const resolvedType =
+        typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
@@ -76,11 +86,19 @@ export async function GET(req: Request) {
 
     let query = supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text, image_path, audio_path, created_at")
+        .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
         .eq("owner_key", ownerKey);
 
     if (id) {
         query = query.eq("id", id);
+    }
+
+    if (resolvedType === "sentence") {
+        query = query.eq("type", "sentence");
+    }
+
+    if (resolvedType === "vocab") {
+        query = query.or("type.is.null,type.eq.vocab");
     }
 
     if (q && q.trim().length > 0) {
@@ -145,6 +163,7 @@ type UpdateCardBody = {
     german?: string;
     swahili?: string;
     imagePath?: string | null;
+    type?: "vocab" | "sentence";
 };
 
 export async function PATCH(req: Request) {
@@ -158,9 +177,10 @@ export async function PATCH(req: Request) {
     }
 
     const updates: any = {};
-    if (typeof body.german === "string") updates.german_text = body.german;
-    if (typeof body.swahili === "string") updates.swahili_text = body.swahili;
+    if (typeof body.german === "string") updates.german_text = body.german.trim();
+    if (typeof body.swahili === "string") updates.swahili_text = body.swahili.trim();
     if ("imagePath" in body) updates.image_path = body.imagePath;
+    if (body.type === "vocab" || body.type === "sentence") updates.type = body.type;
 
     const { data, error } = await supabaseServer
         .from("cards")

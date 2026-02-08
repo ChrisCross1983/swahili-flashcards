@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
 import { createPortal } from "react-dom";
+import CardText from "@/components/ui/CardText";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -279,9 +280,9 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                                         –
                                                     </div>
                                                 )}
-                                                <div>
-                                                    <div className="font-medium text-primary">{card.german_text}</div>
-                                                    <div className="text-muted">{card.swahili_text}</div>
+                                                <div className="min-w-0">
+                                                    <CardText className="font-medium text-primary">{card.german_text}</CardText>
+                                                    <CardText className="text-muted">{card.swahili_text}</CardText>
                                                 </div>
                                             </button>
                                         ))}
@@ -292,9 +293,9 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                             {selected ? (
                                 <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft">
                                     <div className="mb-3 flex items-start justify-between">
-                                        <div>
-                                            <p className="text-sm font-semibold text-primary">{selected.german_text}</p>
-                                            <p className="text-sm text-muted">{selected.swahili_text}</p>
+                                        <div className="min-w-0">
+                                            <CardText className="text-sm font-semibold text-primary">{selected.german_text}</CardText>
+                                            <CardText className="text-sm text-muted">{selected.swahili_text}</CardText>
                                         </div>
 
                                         <div className="flex items-center gap-2">

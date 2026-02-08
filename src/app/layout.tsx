@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { supabaseServer } from "@/lib/supabase/server";
 import GlobalOverlays from "@/components/GlobalOverlays";
+import WhatsNewToast from "@/components/WhatsNewToast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,6 +43,7 @@ export default async function RootLayout({
       >
         {children}
         {user ? <GlobalOverlays ownerKey={user.id} /> : null}
+        <WhatsNewToast />
       </body>
     </html>
   );

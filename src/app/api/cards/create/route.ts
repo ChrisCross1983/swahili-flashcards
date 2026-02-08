@@ -121,6 +121,7 @@ export async function POST(req: Request) {
             owner_key: ownerKey,
             swahili_text: canonical.sw,
             german_text: canonical.de,
+            type,
         })
         .select("id")
         .single();

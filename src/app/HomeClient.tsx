@@ -128,6 +128,7 @@ export default function HomeClient({ ownerKey }: Props) {
                     german,
                     swahili,
                     imagePath,
+                    type: "vocab",
                 }),
             });
 
@@ -171,6 +172,7 @@ export default function HomeClient({ ownerKey }: Props) {
                     id: editingId,
                     german,
                     swahili,
+                    type: "vocab",
                 }),
             });
 
@@ -210,8 +212,8 @@ export default function HomeClient({ ownerKey }: Props) {
         setStatus("Lade Karten...");
         const url =
             q && q.trim().length > 0
-                ? `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&q=${encodeURIComponent(q)}`
-                : `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}`;
+                ? `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&q=${encodeURIComponent(q)}&type=vocab`
+                : `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&type=vocab`;
 
         const res = await fetch(url);
 
@@ -229,7 +231,7 @@ export default function HomeClient({ ownerKey }: Props) {
 
     async function loadLeitnerStats() {
         const res = await fetch(
-            `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`,
+            `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}&type=vocab`,
             { cache: "no-store" }
         );
         const json = await res.json();
@@ -262,6 +264,7 @@ export default function HomeClient({ ownerKey }: Props) {
             body: JSON.stringify({
                 ownerKey,
                 german,
+                type: "vocab",
             }),
         });
 
@@ -304,7 +307,9 @@ export default function HomeClient({ ownerKey }: Props) {
 
     async function loadToday() {
         setStatus("Lade fällige Karten...");
-        const res = await fetch(`/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`);
+        const res = await fetch(
+            `/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}&type=vocab`
+        );
         const json = await res.json();
 
         if (!res.ok) {

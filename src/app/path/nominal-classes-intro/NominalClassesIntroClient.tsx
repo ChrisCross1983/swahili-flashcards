@@ -39,7 +39,9 @@ export default function NominalClassesIntroClient({ ownerKey }: Props) {
 
   async function loadExisting() {
     setLoadingExisting(true);
-    const res = await fetch(`/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`);
+    const res = await fetch(
+      `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}&type=vocab`
+    );
     const json = await res.json();
     if (res.ok) {
       const set = new Set<string>(
@@ -68,6 +70,7 @@ export default function NominalClassesIntroClient({ ownerKey }: Props) {
         german,
         swahili,
         imagePath: null,
+        type: "vocab",
       }),
     });
 

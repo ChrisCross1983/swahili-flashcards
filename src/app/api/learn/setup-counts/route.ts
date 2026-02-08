@@ -12,11 +12,12 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
 
 async function safeCount(
     table: string,
-    applyFilters?: (q: any) => any
+    applyFilters?: (q: any) => any,
+    select = "*"
 ) {
     let q = supabaseServer
         .from(table)
-        .select("*", { count: "exact", head: true });
+        .select(select, { count: "exact", head: true });
 
     if (applyFilters) q = applyFilters(q);
 
@@ -33,6 +34,9 @@ async function safeCount(
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
+    const typeParam = searchParams.get("type");
+    const resolvedType =
+        typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
@@ -42,11 +46,45 @@ export async function GET(req: Request) {
 
     try {
         const [todayDue, totalCards, lastMissedCount] = await Promise.all([
-            safeCount("card_progress", (q) =>
-                q.eq("owner_key", ownerKey).lte("due_date", today)
+            safeCount(
+                "card_progress",
+                (q) => {
+                    let query = q.eq("owner_key", ownerKey).lte("due_date", today);
+                    if (resolvedType === "sentence") {
+                        query = query.eq("cards.type", "sentence");
+                    } else if (resolvedType === "vocab") {
+                        query = query.or("type.is.null,type.eq.vocab", {
+                            foreignTable: "cards",
+                        });
+                    }
+                    return query;
+                },
+                "card_id, cards!inner(type)"
             ),
-            safeCount("cards", (q) => q.eq("owner_key", ownerKey)),
-            safeCount("learn_last_missed", (q) => q.eq("owner_key", ownerKey)),
+            safeCount("cards", (q) => {
+                let query = q.eq("owner_key", ownerKey);
+                if (resolvedType === "sentence") {
+                    query = query.eq("type", "sentence");
+                } else if (resolvedType === "vocab") {
+                    query = query.or("type.is.null,type.eq.vocab");
+                }
+                return query;
+            }),
+            safeCount(
+                "learn_last_missed",
+                (q) => {
+                    let query = q.eq("owner_key", ownerKey);
+                    if (resolvedType === "sentence") {
+                        query = query.eq("cards.type", "sentence");
+                    } else if (resolvedType === "vocab") {
+                        query = query.or("type.is.null,type.eq.vocab", {
+                            foreignTable: "cards",
+                        });
+                    }
+                    return query;
+                },
+                "card_id, cards!inner(type)"
+            ),
         ]);
 
         return NextResponse.json({ todayDue, totalCards, lastMissedCount });

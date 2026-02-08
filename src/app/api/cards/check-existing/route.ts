@@ -3,7 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { ownerKey, german, swahili } = body;
+  const { ownerKey, german, swahili, type } = body;
 
   const resolvedGerman =
     typeof german === "string" ? german.trim() : "";
@@ -21,6 +21,12 @@ export async function POST(req: Request) {
     .from("cards")
     .select("id, german_text, swahili_text, image_path, audio_path")
     .eq("owner_key", ownerKey);
+
+  if (type === "sentence") {
+    query = query.eq("type", "sentence");
+  } else if (type === "vocab") {
+    query = query.or("type.is.null,type.eq.vocab");
+  }
 
   if (resolvedGerman && resolvedSwahili) {
     query = query.or(
