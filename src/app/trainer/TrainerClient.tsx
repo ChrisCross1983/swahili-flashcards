@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import CardText from "@/components/ui/CardText";
 import {
     formatDays,
     getIntervalDays,
@@ -2624,15 +2625,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <div className="mt-2">
                                                 {/* Preserve line breaks for prompt text. */}
                                                 {/* Swahili highlight chip */}
-                                                <span
+                                                <CardText
+                                                    as="span"
                                                     className={
                                                         direction === "DE_TO_SW"
-                                                            ? "text-2xl font-semibold text-primary whitespace-pre-wrap break-words"
+                                                            ? "text-2xl font-semibold text-primary"
                                                             : "swahili-chip text-2xl"
                                                     }
                                                 >
                                                     {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
-                                                </span>
+                                                </CardText>
                                             </div>
                                         </div>
 
@@ -2652,15 +2654,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     <div className="mt-2">
                                                         {/* Preserve line breaks for answer text. */}
                                                         {/* Swahili highlight chip */}
-                                                        <span
+                                                        <CardText
+                                                            as="span"
                                                             className={
                                                                 direction === "DE_TO_SW"
                                                                     ? "swahili-chip text-xl"
-                                                                    : "text-xl font-semibold text-primary whitespace-pre-wrap break-words"
+                                                                    : "text-xl font-semibold text-primary"
                                                             }
                                                         >
                                                             {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                                        </span>
+                                                        </CardText>
                                                     </div>
                                                 </div>
 
@@ -3039,9 +3042,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     )
                                                 }
 
-                                                <div className="text-sm" >
-                                                    <div className="font-medium">{c.german_text}</div>
-                                                    <div className="text-muted">{c.swahili_text}</div>
+                                                <div className="text-sm min-w-0" >
+                                                    <CardText className="font-medium">{c.german_text}</CardText>
+                                                    <CardText className="text-muted">{c.swahili_text}</CardText>
                                                 </div>
                                             </button>
                                         ))}
@@ -3174,17 +3177,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             {filteredCards.map((c) => (
                                 <div key={c.id} className="rounded-xl border p-3">
                                     {isSentenceTrainer ? (
-                                        <div className="space-y-1 text-sm font-medium">
-                                            <div className="whitespace-pre-wrap break-words">
-                                                {c.german_text}
-                                            </div>
-                                            <div className="whitespace-pre-wrap break-words text-muted">
-                                                {c.swahili_text}
-                                            </div>
+                                        <div className="space-y-1 text-sm font-medium min-w-0">
+                                            <CardText>{c.german_text}</CardText>
+                                            <CardText className="text-muted">{c.swahili_text}</CardText>
                                         </div>
                                     ) : (
-                                        <div className="text-sm font-medium">
-                                            {c.german_text} — {c.swahili_text}
+                                        <div className="text-sm font-medium min-w-0">
+                                            <CardText>{c.german_text} — {c.swahili_text}</CardText>
                                         </div>
                                     )}
 
@@ -3281,17 +3280,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             }}
                                         >
                                             {isSentenceTrainer ? (
-                                                <div className="space-y-1 font-medium">
-                                                    <div className="whitespace-pre-wrap break-words">
-                                                        {c.german_text}
-                                                    </div>
-                                                    <div className="whitespace-pre-wrap break-words text-muted">
-                                                        {c.swahili_text}
-                                                    </div>
+                                                <div className="space-y-1 font-medium min-w-0">
+                                                    <CardText>{c.german_text}</CardText>
+                                                    <CardText className="text-muted">{c.swahili_text}</CardText>
                                                 </div>
                                             ) : (
-                                                <div className="font-medium">
-                                                    {c.german_text} — {c.swahili_text}
+                                                <div className="font-medium min-w-0">
+                                                    <CardText>{c.german_text} — {c.swahili_text}</CardText>
                                                 </div>
                                             )}
                                         </button>

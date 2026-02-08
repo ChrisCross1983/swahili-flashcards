@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import CardText from "@/components/ui/CardText";
 
 type ExerciseOption = {
     id: string;
@@ -115,7 +116,7 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                         <>
                             <div className="text-sm text-muted">Setze ein Wort ein:</div>
                             <div className="mt-2 text-2xl font-semibold">
-                                {exercise ? exercise.prompt_de : "Lade Übung ..."}
+                                {exercise ? <CardText>{exercise.prompt_de}</CardText> : "Lade Übung ..."}
                             </div>
 
                             <div className="mt-6 space-y-3">
@@ -127,8 +128,8 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
                                         onClick={() => setSelectedId(option.id)}
                                         type="button"
                                     >
-                                        <div>{option.de}</div>
-                                        <div className="text-sm font-normal text-muted">{option.sw}</div>
+                                        <CardText>{option.de}</CardText>
+                                        <CardText className="text-sm font-normal text-muted">{option.sw}</CardText>
                                     </button>
                                 ))}
 
