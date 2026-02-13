@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 import { detectSaveIntent } from "@/lib/cards/proposals";
 
 type TrainingContext = {
@@ -371,6 +372,9 @@ function matchConceptsFromBuffer(
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: InterpretRequestBody;
 
     try {
@@ -444,6 +448,9 @@ export async function POST(req: Request) {
     if (!ownerKey || !userMessage) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {

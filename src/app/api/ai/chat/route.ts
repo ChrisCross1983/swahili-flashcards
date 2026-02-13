@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 import type { ExplainedConcept } from "@/lib/cards/proposals";
 
 type ChatContext = {
@@ -212,6 +213,9 @@ function extractBestEffortTextEvenIfIncomplete(data: any): string | null {
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: ChatRequestBody;
 
     try {
@@ -228,6 +232,9 @@ export async function POST(req: Request) {
     if (!ownerKey || !message) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 type CreateCardBody = {
     ownerKey: string;
@@ -10,6 +11,9 @@ type CreateCardBody = {
 };
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     const body = (await req.json()) as CreateCardBody;
 
     const ownerKey = body.ownerKey?.trim();
@@ -23,6 +27,9 @@ export async function POST(req: Request) {
             { status: 400 }
         );
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const { data: card, error } = await supabaseServer
         .from("cards")
@@ -72,6 +79,9 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
     const q = searchParams.get("q");
@@ -83,6 +93,9 @@ export async function GET(req: Request) {
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     let query = supabaseServer
         .from("cards")
@@ -129,6 +142,9 @@ export async function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
     const id = searchParams.get("id");
@@ -139,6 +155,9 @@ export async function DELETE(req: Request) {
             { status: 400 }
         );
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const { error } = await supabaseServer
         .from("cards")
@@ -167,6 +186,9 @@ type UpdateCardBody = {
 };
 
 export async function PATCH(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     const body = (await req.json()) as UpdateCardBody;
 
     if (!body.ownerKey || !body.id) {
@@ -175,6 +197,9 @@ export async function PATCH(req: Request) {
             { status: 400 }
         );
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(body.ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const updates: any = {};
     if (typeof body.german === "string") updates.german_text = body.german.trim();

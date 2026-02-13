@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 import {
   getIntervalDays,
@@ -32,6 +33,9 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+  const { user, response } = await requireUser();
+  if (response || !user) return response;
+
   let body: Body;
 
   try {
@@ -49,6 +53,9 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+
+  const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+  if (ownerCheckResponse) return ownerCheckResponse;
 
   const lvlRaw = Number.isFinite(body.currentLevel)
     ? (body.currentLevel as number)
@@ -71,7 +78,7 @@ export async function POST(req: Request) {
   const nowIso = new Date().toISOString();
 
   console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
-  
+
   const { data, error } = await supabaseServer
     .from("card_progress")
     .upsert(

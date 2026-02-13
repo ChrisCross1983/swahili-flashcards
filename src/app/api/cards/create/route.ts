@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { canonicalizeToSwDe, normalizeText } from "@/lib/cards/saveFlow";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 type CreateCardBody = {
     ownerKey?: string;
@@ -43,6 +44,9 @@ function checkRateLimit(key: string) {
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: CreateCardBody;
 
     try {
@@ -61,6 +65,9 @@ export async function POST(req: Request) {
     if (!ownerKey || !frontText || !backText || !type) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const canonical = canonicalizeToSwDe({
         front_lang: frontLang,

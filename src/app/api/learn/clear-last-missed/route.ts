@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     try {
         const body = await req.json();
         const ownerKey = String(body?.ownerKey ?? "").trim();
@@ -15,6 +19,9 @@ export async function POST(req: Request) {
                 { status: 400 }
             );
         }
+
+        const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+        if (ownerCheckResponse) return ownerCheckResponse;
 
         const { error: deleteError } = await supabaseServer
             .from("learn_last_missed")

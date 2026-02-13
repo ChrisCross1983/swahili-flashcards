@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 type Body = {
     ownerKey: string;
@@ -10,6 +11,9 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: Body;
 
     try {
@@ -32,6 +36,9 @@ export async function POST(req: Request) {
             { status: 400 }
         );
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const { error } = await supabaseServer.from("learn_sessions").insert({
         owner_key: ownerKey,

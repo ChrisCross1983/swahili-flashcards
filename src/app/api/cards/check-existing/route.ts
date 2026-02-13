@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export async function POST(req: Request) {
+  const { user, response } = await requireUser();
+  if (response || !user) return response;
+
   const body = await req.json();
   const { ownerKey, german, swahili, type } = body;
 
@@ -16,6 +20,9 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+
+  const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+  if (ownerCheckResponse) return ownerCheckResponse;
 
   let query = supabaseServer
     .from("cards")

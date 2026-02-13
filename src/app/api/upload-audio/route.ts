@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,9 @@ function pickExt(contentType: string) {
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     try {
         const form = await req.formData();
 
@@ -31,6 +35,9 @@ export async function POST(req: Request) {
                 { status: 400 }
             );
         }
+
+        const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+        if (ownerCheckResponse) return ownerCheckResponse;
 
         const cardId = String(cardIdRaw).trim();
         if (!cardId || cardId === "undefined" || cardId === "null") {

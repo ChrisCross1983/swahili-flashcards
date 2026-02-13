@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 type TranslateRequestBody = {
     ownerKey?: string;
@@ -93,6 +94,9 @@ function parseTranslation(raw: string): { sw: string; de: string } | null {
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: TranslateRequestBody;
 
     try {
@@ -112,6 +116,9 @@ export async function POST(req: Request) {
     if (!ownerKey || !text || !sourceLang) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const wordCount = text.split(/\s+/).filter(Boolean).length;
     if (text.length > 40 || wordCount > 3) {

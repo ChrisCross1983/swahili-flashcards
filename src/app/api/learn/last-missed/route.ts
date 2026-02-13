@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export async function GET(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey")?.trim();
     const typeParam = searchParams.get("type");
@@ -11,6 +15,9 @@ export async function GET(req: Request) {
     if (!ownerKey) {
         return NextResponse.json({ error: "ownerKey missing" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     try {
         const { data: lastMissedRows, error: lastMissedError } = await supabaseServer
@@ -88,6 +95,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     try {
         const body = await req.json();
         const ownerKey = String(body?.ownerKey ?? "").trim();
@@ -100,6 +110,9 @@ export async function POST(req: Request) {
                 { status: 400 }
             );
         }
+
+        const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+        if (ownerCheckResponse) return ownerCheckResponse;
 
         if (action === "add") {
             const { error } = await supabaseServer

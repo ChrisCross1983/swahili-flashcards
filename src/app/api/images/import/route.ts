@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 const BUCKET = "card-images";
 
 export async function POST(req: Request) {
+  const { user, response } = await requireUser();
+  if (response || !user) return response;
+
   const body = await req.json();
   const { ownerKey, imageUrl } = body as { ownerKey: string; imageUrl: string };
 
   if (!ownerKey || !imageUrl) {
     return NextResponse.json({ error: "ownerKey and imageUrl are required" }, { status: 400 });
   }
+
+  const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+  if (ownerCheckResponse) return ownerCheckResponse;
 
   // Bild herunterladen
   const imgRes = await fetch(imageUrl);

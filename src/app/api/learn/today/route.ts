@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export async function GET(req: Request) {
+  const { user, response } = await requireUser();
+  if (response || !user) return response;
+
   const { searchParams } = new URL(req.url);
   const ownerKey = searchParams.get("ownerKey");
   const typeParam = searchParams.get("type");
@@ -11,6 +15,9 @@ export async function GET(req: Request) {
   if (!ownerKey) {
     return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
   }
+
+  const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+  if (ownerCheckResponse) return ownerCheckResponse;
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 

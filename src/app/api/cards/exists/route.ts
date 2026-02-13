@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 import { normalizeText } from "@/lib/cards/saveFlow";
 
 type ExistsRequestBody = {
@@ -9,6 +10,9 @@ type ExistsRequestBody = {
 };
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response || !user) return response;
+
     let body: ExistsRequestBody;
 
     try {
@@ -24,6 +28,9 @@ export async function POST(req: Request) {
     if (!ownerKey || !sw || !de) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+
+    const ownerCheckResponse = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (ownerCheckResponse) return ownerCheckResponse;
 
     const normalizedSw = normalizeText(sw);
     const normalizedDe = normalizeText(de);
