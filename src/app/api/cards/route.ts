@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 type CreateCardBody = {
     ownerKey: string;
@@ -10,6 +11,9 @@ type CreateCardBody = {
 };
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+
     const body = (await req.json()) as CreateCardBody;
 
     const ownerKey = body.ownerKey?.trim();
@@ -17,7 +21,10 @@ export async function POST(req: Request) {
     const swahili = body.swahili?.trim();
     const type = body.type === "sentence" ? "sentence" : "vocab";
 
-    if (!ownerKey || !german || !swahili) {
+    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (denied) return denied;
+
+    if (!german || !swahili) {
         return NextResponse.json(
             { error: "ownerKey, german and swahili are required" },
             { status: 400 }
@@ -37,8 +44,7 @@ export async function POST(req: Request) {
         .single();
 
     if (error) {
-        // Postgres unique violation => Duplikat
-        if ((error as any).code === "23505") {
+        if ((error as { code?: string }).code === "23505") {
             return NextResponse.json(
                 { error: "Diese Karte existiert bereits." },
                 { status: 409 }
@@ -72,6 +78,9 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
     const q = searchParams.get("q");
@@ -80,9 +89,8 @@ export async function GET(req: Request) {
     const resolvedType =
         typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
-    if (!ownerKey) {
-        return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-    }
+    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (denied) return denied;
 
     let query = supabaseServer
         .from("cards")
@@ -102,9 +110,7 @@ export async function GET(req: Request) {
     }
 
     if (q && q.trim().length > 0) {
-        query = query.or(
-            `german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`
-        );
+        query = query.or(`german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`);
     }
 
     const { data, error } = id
@@ -129,29 +135,23 @@ export async function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+
     const { searchParams } = new URL(req.url);
     const ownerKey = searchParams.get("ownerKey");
     const id = searchParams.get("id");
 
-    if (!ownerKey || !id) {
-        return NextResponse.json(
-            { error: "ownerKey and id are required" },
-            { status: 400 }
-        );
-    }
+    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
+    if (denied) return denied;
 
-    const { error } = await supabaseServer
-        .from("cards")
-        .delete()
-        .eq("id", id)
-        .eq("owner_key", ownerKey);
+    if (!id) {
+        return NextResponse.json({ error: "ownerKey and id are required" }, { status: 400 });
+    }
 
     if (error) {
         console.error(error);
-        return NextResponse.json(
-            { error: "Löschen fehlgeschlagen." },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true });
@@ -167,19 +167,21 @@ type UpdateCardBody = {
 };
 
 export async function PATCH(req: Request) {
-    const body = (await req.json()) as UpdateCardBody;
+    const { user, response } = await requireUser();
+    if (response) return response;
 
-    if (!body.ownerKey || !body.id) {
-        return NextResponse.json(
-            { error: "ownerKey and id are required" },
-            { status: 400 }
-        );
+    const body = (await req.json()) as UpdateCardBody;
+    const denied = assertOwnerKeyMatchesUser(body.ownerKey, user.id);
+    if (denied) return denied;
+
+    if (!body.id) {
+        return NextResponse.json({ error: "ownerKey and id are required" }, { status: 400 });
     }
 
-    const updates: any = {};
+    const updates: Record<string, string | null> = {};
     if (typeof body.german === "string") updates.german_text = body.german.trim();
     if (typeof body.swahili === "string") updates.swahili_text = body.swahili.trim();
-    if ("imagePath" in body) updates.image_path = body.imagePath;
+    if ("imagePath" in body) updates.image_path = body.imagePath ?? null;
     if (body.type === "vocab" || body.type === "sentence") updates.type = body.type;
 
     const { data, error } = await supabaseServer
@@ -191,12 +193,13 @@ export async function PATCH(req: Request) {
         .single();
 
     if (error) {
-        if ((error as any).code === "23505") {
+        if ((error as { code?: string }).code === "23505") {
             return NextResponse.json(
                 { error: "Diese Karte existiert bereits." },
                 { status: 409 }
             );
         }
+
         console.error(error);
         return NextResponse.json(
             { error: "Aktualisieren fehlgeschlagen." },

@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
 
 export async function GET(req: Request) {
+  const { user, response } = await requireUser();
+  if (response) return response;
+
   const { searchParams } = new URL(req.url);
   const ownerKey = searchParams.get("ownerKey");
   const typeParam = searchParams.get("type");
   const resolvedType =
     typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
 
-  if (!ownerKey) {
-    return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-  }
+  const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
+  if (denied) return denied;
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
