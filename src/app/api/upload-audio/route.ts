@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireUser } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 
@@ -19,15 +20,18 @@ function pickExt(contentType: string) {
 
 export async function POST(req: Request) {
     try {
+        const { user, response } = await requireUser();
+        if (response) return response;
+
         const form = await req.formData();
 
         const file = form.get("file") as File | null;
-        const ownerKey = form.get("ownerKey") as string | null;
+        const ownerKey = user.id;
         const cardIdRaw = form.get("cardId") as string | null;
 
-        if (!file || !ownerKey || !cardIdRaw) {
+        if (!file || !cardIdRaw) {
             return NextResponse.json(
-                { error: "Missing file, ownerKey or cardId" },
+                { error: "Missing file or cardId" },
                 { status: 400 }
             );
         }

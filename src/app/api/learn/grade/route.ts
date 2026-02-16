@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 import {
   getIntervalDays,
@@ -25,7 +26,6 @@ function addDaysYmdUtc(base: Date, days: number) {
 }
 
 type Body = {
-  ownerKey: string;
   cardId: string;
   correct: boolean;
   currentLevel?: number;
@@ -40,12 +40,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const ownerKey = (body.ownerKey ?? "").trim();
+  const { user, response } = await requireUser();
+  if (response) return response;
+
+  const ownerKey = user.id;
   const cardId = (body.cardId ?? "").trim();
 
-  if (!ownerKey || !cardId) {
+  if (!cardId) {
     return NextResponse.json(
-      { error: "ownerKey and cardId are required" },
+      { error: "cardId is required" },
       { status: 400 }
     );
   }
@@ -71,7 +74,7 @@ export async function POST(req: Request) {
   const nowIso = new Date().toISOString();
 
   console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
-  
+
   const { data, error } = await supabaseServer
     .from("card_progress")
     .upsert(

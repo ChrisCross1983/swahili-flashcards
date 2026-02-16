@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
     try {
+        const { user, response } = await requireUser();
+        if (response) return response;
+
         const body = await req.json();
-        const ownerKey = String(body?.ownerKey ?? "").trim();
+        const ownerKey = user.id;
         const cardId = String(body?.cardId ?? "").trim();
 
-        if (!ownerKey || !cardId) {
+        if (!cardId) {
             return NextResponse.json(
-                { error: "ownerKey und cardId sind erforderlich." },
+                { error: "cardId ist erforderlich." },
                 { status: 400 }
             );
         }

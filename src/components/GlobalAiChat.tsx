@@ -221,7 +221,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 const res = await fetch("/api/cards/exists", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ownerKey, sw, de }),
+                    body: JSON.stringify({ sw, de }),
                 });
 
                 const json = await res.json().catch(() => ({}));
@@ -231,7 +231,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 return null;
             }
         },
-        [ownerKey]
+        []
     );
 
     const applyProposals = useCallback(
@@ -363,7 +363,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        ownerKey,
                         type: entry.proposal.type,
                         front_text: canonical.sw,
                         back_text: canonical.de,

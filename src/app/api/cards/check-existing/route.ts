@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 export async function POST(req: Request) {
+  const { user, response } = await requireUser();
+  if (response) return response;
+
   const body = await req.json();
-  const { ownerKey, german, swahili, type } = body;
+  const { german, swahili, type } = body;
+  const ownerKey = user.id;
 
   const resolvedGerman =
     typeof german === "string" ? german.trim() : "";
   const resolvedSwahili =
     typeof swahili === "string" ? swahili.trim() : "";
 
-  if (!ownerKey || (!resolvedGerman && !resolvedSwahili)) {
+  if (!resolvedGerman && !resolvedSwahili) {
     return NextResponse.json(
-      { error: "ownerKey and german or swahili are required" },
+      { error: "german or swahili are required" },
       { status: 400 }
     );
   }

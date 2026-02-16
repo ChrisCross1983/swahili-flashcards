@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 type Body = {
-    ownerKey: string;
     mode: "LEITNER" | "DRILL";
     totalCount: number;
     correctCount: number;
@@ -18,7 +18,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const ownerKey = (body.ownerKey ?? "").trim();
+    const { user, response } = await requireUser();
+    if (response) return response;
+
+    const ownerKey = user.id;
     const mode = body.mode;
     const totalCount = Number(body.totalCount ?? 0);
     const correctCount = Number(body.correctCount ?? 0);
@@ -26,9 +29,9 @@ export async function POST(req: Request) {
         ? body.wrongCardIds.filter((id) => String(id).trim().length > 0)
         : [];
 
-    if (!ownerKey || !mode) {
+    if (!mode) {
         return NextResponse.json(
-            { error: "ownerKey and mode are required" },
+            { error: "mode is required" },
             { status: 400 }
         );
     }

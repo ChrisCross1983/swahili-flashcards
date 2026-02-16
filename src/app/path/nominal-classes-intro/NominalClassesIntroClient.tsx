@@ -18,6 +18,7 @@ type Props = {
 };
 
 export default function NominalClassesIntroClient({ ownerKey }: Props) {
+  void ownerKey;
   const items = useMemo(() => NOMINAL_CLASSES_INTRO_PACK, []);
   const total = items.length;
 
@@ -40,7 +41,7 @@ export default function NominalClassesIntroClient({ ownerKey }: Props) {
   async function loadExisting() {
     setLoadingExisting(true);
     const res = await fetch(
-      `/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}&type=vocab`
+      `/api/cards/all?type=vocab`
     );
     const json = await res.json();
     if (res.ok) {
@@ -66,7 +67,6 @@ export default function NominalClassesIntroClient({ ownerKey }: Props) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ownerKey,
         german,
         swahili,
         imagePath: null,

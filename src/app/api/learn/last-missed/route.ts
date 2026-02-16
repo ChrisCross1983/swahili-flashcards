@@ -1,23 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 export async function GET(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+
     const { searchParams } = new URL(req.url);
-    const ownerKey = searchParams.get("ownerKey")?.trim();
+    const ownerKey = user.id;
     const typeParam = searchParams.get("type");
     const resolvedType =
         typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
-
-    if (!ownerKey) {
-        return NextResponse.json({ error: "ownerKey missing" }, { status: 400 });
-    }
 
     try {
         const { data: lastMissedRows, error: lastMissedError } = await supabaseServer
             .from("learn_last_missed")
             .select("card_id, created_at")
             .eq("owner_key", ownerKey)
-            .order("created_at", { ascending: false })
+            .order("created_at", { ascending: false });
 
         if (lastMissedError) {
             console.error("last-missed query error", {
@@ -69,10 +69,7 @@ export async function GET(req: Request) {
             });
         }
 
-        const cardMap = new Map(
-            (cards ?? []).map((card) => [String(card.id), card])
-        );
-
+        const cardMap = new Map((cards ?? []).map((card) => [String(card.id), card]));
         const orderedCards = cardIds
             .map((id) => cardMap.get(String(id)))
             .filter(Boolean);
@@ -89,14 +86,17 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
     try {
+        const { user, response } = await requireUser();
+        if (response) return response;
+
         const body = await req.json();
-        const ownerKey = String(body?.ownerKey ?? "").trim();
+        const ownerKey = user.id;
         const cardId = String(body?.cardId ?? "").trim();
         const action = String(body?.action ?? "").trim();
 
-        if (!ownerKey || !cardId) {
+        if (!cardId) {
             return NextResponse.json(
-                { error: "ownerKey und cardId sind erforderlich." },
+                { error: "cardId ist erforderlich." },
                 { status: 400 }
             );
         }
@@ -116,27 +116,6 @@ export async function POST(req: Request) {
             return NextResponse.json({ ok: true });
         }
 
-        if (action === "add") {
-            const { error } = await supabaseServer
-                .from("learn_last_missed")
-                .upsert(
-                    { owner_key: ownerKey, card_id: cardId },
-                    { onConflict: "owner_key,card_id" }
-                );
-
-            if (error) {
-                console.error("last-missed add error", {
-                    message: error.message,
-                    details: error.details,
-                    hint: error.hint,
-                    code: error.code,
-                });
-                return NextResponse.json({ error: error.message }, { status: 500 });
-            }
-
-            return NextResponse.json({ ok: true });
-        }
-
         if (action === "remove") {
             const { error } = await supabaseServer
                 .from("learn_last_missed")
@@ -145,12 +124,6 @@ export async function POST(req: Request) {
                 .eq("card_id", cardId);
 
             if (error) {
-                console.error("last-missed remove error", {
-                    message: error.message,
-                    details: error.details,
-                    hint: error.hint,
-                    code: error.code,
-                });
                 return NextResponse.json({ error: error.message }, { status: 500 });
             }
 

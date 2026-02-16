@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
+import { requireUser } from "@/lib/api/auth";
 
 type CreateCardBody = {
-    ownerKey: string;
     german: string;
     swahili: string;
     imagePath?: string | null;
@@ -16,17 +15,14 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as CreateCardBody;
 
-    const ownerKey = body.ownerKey?.trim();
+    const ownerKey = user.id;
     const german = body.german?.trim();
     const swahili = body.swahili?.trim();
     const type = body.type === "sentence" ? "sentence" : "vocab";
 
-    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
-    if (denied) return denied;
-
     if (!german || !swahili) {
         return NextResponse.json(
-            { error: "ownerKey, german and swahili are required" },
+            { error: "german and swahili are required" },
             { status: 400 }
         );
     }
@@ -82,15 +78,12 @@ export async function GET(req: Request) {
     if (response) return response;
 
     const { searchParams } = new URL(req.url);
-    const ownerKey = searchParams.get("ownerKey");
+    const ownerKey = user.id;
     const q = searchParams.get("q");
     const id = searchParams.get("id");
     const typeParam = searchParams.get("type");
     const resolvedType =
         typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
-
-    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
-    if (denied) return denied;
 
     let query = supabaseServer
         .from("cards")
@@ -139,14 +132,11 @@ export async function DELETE(req: Request) {
     if (response) return response;
 
     const { searchParams } = new URL(req.url);
-    const ownerKey = searchParams.get("ownerKey");
+    const ownerKey = user.id;
     const id = searchParams.get("id");
 
-    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
-    if (denied) return denied;
-
     if (!id) {
-        return NextResponse.json({ error: "ownerKey and id are required" }, { status: 400 });
+        return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
     const { error } = await supabaseServer
@@ -164,7 +154,6 @@ export async function DELETE(req: Request) {
 }
 
 type UpdateCardBody = {
-    ownerKey: string;
     id: string;
     german?: string;
     swahili?: string;
@@ -177,11 +166,10 @@ export async function PATCH(req: Request) {
     if (response) return response;
 
     const body = (await req.json()) as UpdateCardBody;
-    const denied = assertOwnerKeyMatchesUser(body.ownerKey, user.id);
-    if (denied) return denied;
+    const ownerKey = user.id;
 
     if (!body.id) {
-        return NextResponse.json({ error: "ownerKey and id are required" }, { status: 400 });
+        return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
     const updates: Record<string, string | null> = {};
@@ -194,7 +182,7 @@ export async function PATCH(req: Request) {
         .from("cards")
         .update(updates)
         .eq("id", body.id)
-        .eq("owner_key", body.ownerKey)
+        .eq("owner_key", ownerKey)
         .select()
         .single();
 

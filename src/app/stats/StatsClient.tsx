@@ -29,6 +29,7 @@ function formatDayLabel(date: string) {
 }
 
 export default function StatsClient({ ownerKey }: { ownerKey: string }) {
+    void ownerKey;
     const router = useRouter();
     const [filter, setFilter] = useState<FilterType>("all");
     const [loading, setLoading] = useState(true);
@@ -43,7 +44,7 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
             setError(null);
 
             const res = await fetch(
-                `/api/stats/overview?ownerKey=${encodeURIComponent(ownerKey)}&type=${encodeURIComponent(filter)}`,
+                `/api/stats/overview?type=${encodeURIComponent(filter)}`,
                 { cache: "no-store", signal: controller.signal }
             );
             const json = await res.json();

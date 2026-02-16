@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { normalizeText } from "@/lib/cards/saveFlow";
+import { requireUser } from "@/lib/api/auth";
 
 type ExistsRequestBody = {
-    ownerKey?: string;
     sw?: string;
     de?: string;
 };
 
 export async function POST(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+
     let body: ExistsRequestBody;
 
     try {
@@ -17,11 +20,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ownerKey = typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
+    const ownerKey = user.id;
     const sw = typeof body.sw === "string" ? body.sw.trim() : "";
     const de = typeof body.de === "string" ? body.de.trim() : "";
 
-    if (!ownerKey || !sw || !de) {
+    if (!sw || !de) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 

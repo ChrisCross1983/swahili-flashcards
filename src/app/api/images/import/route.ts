@@ -1,19 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 const BUCKET = "card-images";
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { ownerKey, imageUrl } = body as { ownerKey: string; imageUrl: string };
+  const { user, response } = await requireUser();
+  if (response) return response;
 
-  if (!ownerKey || !imageUrl) {
-    return NextResponse.json({ error: "ownerKey and imageUrl are required" }, { status: 400 });
+  const body = await req.json();
+  const ownerKey = user.id;
+  const { imageUrl } = body as { imageUrl: string };
+
+  if (!imageUrl) {
+    return NextResponse.json({ error: "imageUrl is required" }, { status: 400 });
   }
 
-  // Bild herunterladen
   const imgRes = await fetch(imageUrl);
-  const maxBytes = 2_000_000; // 2 MB
+  const maxBytes = 2_000_000;
   const len = Number(imgRes.headers.get("content-length") ?? "0");
   if (len && len > maxBytes) {
     return NextResponse.json(
@@ -30,7 +34,6 @@ export async function POST(req: Request) {
   const arrayBuffer = await imgRes.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
 
-  // Dateiendung grob aus Content-Type ableiten
   const ext =
     contentType.includes("png") ? "png" :
       contentType.includes("webp") ? "webp" :
@@ -50,6 +53,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Upload to storage failed" }, { status: 500 });
   }
 
-  // WICHTIG: wir geben nur den Pfad im Bucket zurück (so wie du es überall nutzt)
   return NextResponse.json({ path: filename });
 }

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { canonicalizeToSwDe, normalizeText } from "@/lib/cards/saveFlow";
+import { requireUser } from "@/lib/api/auth";
 
 type CreateCardBody = {
-    ownerKey?: string;
     type?: "vocab" | "sentence";
     front_text?: string;
     back_text?: string;
@@ -51,14 +51,17 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ownerKey = typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
+    const { user, response } = await requireUser();
+    if (response) return response;
+
+    const ownerKey = user.id;
     const frontText = typeof body.front_text === "string" ? body.front_text.trim() : "";
     const backText = typeof body.back_text === "string" ? body.back_text.trim() : "";
     const type = body.type;
     const frontLang = body.front_lang === "sw" || body.front_lang === "de" ? body.front_lang : "sw";
     const backLang = body.back_lang === "sw" || body.back_lang === "de" ? body.back_lang : "de";
 
-    if (!ownerKey || !frontText || !backText || !type) {
+    if (!frontText || !backText || !type) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 

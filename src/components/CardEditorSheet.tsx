@@ -96,7 +96,7 @@ export default function CardEditorSheet({
 
         try {
             const res = await fetch(
-                `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&id=${encodeURIComponent(cardId)}`,
+                `/api/cards?id=${encodeURIComponent(cardId)}`,
                 { cache: "no-store" }
             );
             const json = await res.json();
@@ -226,7 +226,7 @@ export default function CardEditorSheet({
             const res = await fetch("/api/images/import", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ownerKey, imageUrl }),
+                body: JSON.stringify({ imageUrl }),
             });
             const json = await res.json();
 
@@ -289,7 +289,6 @@ export default function CardEditorSheet({
             const fd = new FormData();
             fd.append("file", new File([blob], "recording", { type: blob.type }));
             fd.append("cardId", resolvedCardId);
-            fd.append("ownerKey", ownerKey);
 
             const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
             const json = await res.json();
@@ -332,7 +331,6 @@ export default function CardEditorSheet({
             }
 
             const body: any = {
-                ownerKey,
                 id: cardId,
                 german,
                 swahili,
@@ -373,7 +371,7 @@ export default function CardEditorSheet({
         if (!yes) return;
 
         const res = await fetch(
-            `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&id=${encodeURIComponent(cardId)}`,
+            `/api/cards?id=${encodeURIComponent(cardId)}`,
             { method: "DELETE" }
         );
         const json = await res.json();

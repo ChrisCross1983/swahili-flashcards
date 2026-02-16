@@ -62,13 +62,6 @@ async function run() {
         throw new Error(`Supabase sign-in failed: ${signIn.error?.message ?? "unknown"}`);
     }
 
-    const userResult = await supabase.auth.getUser();
-    if (userResult.error || !userResult.data.user) {
-        throw new Error(`Supabase getUser failed: ${userResult.error?.message ?? "unknown"}`);
-    }
-
-    const userId = userResult.data.user.id;
-
     const loginResponse = await fetch(`${baseUrl}/api/dev/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -85,23 +78,22 @@ async function run() {
     }
 
     const endpoints = [
-        "/api/stats/overview?ownerKey={ownerKey}&type=vocab",
-        "/api/learn/today?ownerKey={ownerKey}&type=vocab",
-        "/api/cards?ownerKey={ownerKey}&type=vocab",
+        "/api/stats/overview?type=vocab",
+        "/api/learn/today?type=vocab",
+        "/api/cards?type=vocab",
     ];
 
     const checks = [
-        { name: "unauthenticated", ownerKey: userId, cookie: null, expected: 401 },
-        { name: "wrong-owner", ownerKey: "not-my-id", cookie: authCookieHeader, expected: 403 },
-        { name: "correct-owner", ownerKey: userId, cookie: authCookieHeader, expected: 200 },
+        { name: "unauthenticated", endpointSuffix: "", cookie: null, expected: 401 },
+        { name: "authenticated", endpointSuffix: "", cookie: authCookieHeader, expected: 200 },
+        { name: "ownerKey-ignored", endpointSuffix: "&ownerKey=not-my-id", cookie: authCookieHeader, expected: 200 },
     ];
 
     let failures = 0;
 
-    for (const endpointTemplate of endpoints) {
+    for (const endpoint of endpoints) {
         for (const check of checks) {
-            const endpoint = endpointTemplate.replace("{ownerKey}", encodeURIComponent(check.ownerKey));
-            const url = `${baseUrl}${endpoint}`;
+            const url = `${baseUrl}${endpoint}${check.endpointSuffix}`;
 
             const headers = {};
             if (check.cookie) {
@@ -113,7 +105,7 @@ async function run() {
             if (!pass) failures += 1;
 
             console.log(
-                `[${pass ? "PASS" : "FAIL"}] ${endpoint} | ${check.name} | expected ${check.expected}, got ${response.status}`
+                `[${pass ? "PASS" : "FAIL"}] ${endpoint}${check.endpointSuffix} | ${check.name} | expected ${check.expected}, got ${response.status}`
             );
         }
     }

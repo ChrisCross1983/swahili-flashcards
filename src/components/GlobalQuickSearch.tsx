@@ -144,7 +144,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
             try {
                 setIsLoading(true);
                 const response = await fetch(
-                    `/api/cards?ownerKey=${ownerKey}&q=${encodeURIComponent(trimmed)}`,
+                    `/api/cards?q=${encodeURIComponent(trimmed)}`,
                     { signal: controller.signal }
                 );
 

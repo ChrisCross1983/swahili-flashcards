@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { assertOwnerKeyMatchesUser, requireUser } from "@/lib/api/auth";
+import { requireUser } from "@/lib/api/auth";
 
 type CardTypeFilter = "all" | "vocab" | "sentence";
 
@@ -46,11 +46,8 @@ export async function GET(req: Request) {
     if (response) return response;
 
     const { searchParams } = new URL(req.url);
-    const ownerKey = searchParams.get("ownerKey");
+    const ownerKey = user.id;
     const typeFilter = getTypeFilter(searchParams.get("type"));
-
-    const denied = assertOwnerKeyMatchesUser(ownerKey, user.id);
-    if (denied) return denied;
 
     const last7d = getLast7Days();
     const startDate = last7d[0];

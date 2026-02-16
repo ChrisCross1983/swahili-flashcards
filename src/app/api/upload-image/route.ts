@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 export async function POST(req: Request) {
+  const { user, response } = await requireUser();
+  if (response) return response;
+
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
 
@@ -10,7 +14,7 @@ export async function POST(req: Request) {
   }
 
   const ext = file.name.split(".").pop();
-  const fileName = `${crypto.randomUUID()}.${ext}`;
+  const fileName = `${user.id}/${crypto.randomUUID()}.${ext}`;
   const filePath = fileName;
 
   const { error } = await supabaseServer.storage

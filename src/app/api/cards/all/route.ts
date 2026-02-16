@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 export async function GET(req: Request) {
+  const { user, response } = await requireUser();
+  if (response) return response;
+
   const { searchParams } = new URL(req.url);
-  const ownerKey = searchParams.get("ownerKey");
+  const ownerKey = user.id;
   const typeParam = searchParams.get("type");
   const resolvedType =
     typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
-
-  if (!ownerKey) {
-    return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-  }
 
   const { data, error } = await supabaseServer
     .from("cards")

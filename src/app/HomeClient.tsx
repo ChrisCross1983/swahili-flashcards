@@ -23,6 +23,7 @@ function getTypeFilter(typeParam: string | null): CardTypeFilter {
 }
 
 export default function HomeClient({ ownerKey }: Props) {
+  void ownerKey;
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [leitnerStats, setLeitnerStats] = useState<LeitnerStats | null>(null);
@@ -60,7 +61,7 @@ export default function HomeClient({ ownerKey }: Props) {
   async function loadLeitnerStats() {
     const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
     const res = await fetch(
-      `/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}&type=${typeFilter}`,
+      `/api/learn/stats?type=${typeFilter}`,
       { cache: "no-store" }
     );
     const json = await res.json();

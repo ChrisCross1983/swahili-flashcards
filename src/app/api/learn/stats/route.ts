@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { getIntervalDays } from "@/lib/leitner";
+import { requireUser } from "@/lib/api/auth";
 
 function labelForLevel(level: number) {
   const days = getIntervalDays(level);
@@ -24,15 +25,14 @@ function addDaysYmd(base: Date, days: number) {
 }
 
 export async function GET(req: Request) {
+  const { user, response } = await requireUser();
+  if (response) return response;
+
   const { searchParams } = new URL(req.url);
-  const ownerKey = searchParams.get("ownerKey");
+  const ownerKey = user.id;
   const typeParam = searchParams.get("type");
   const resolvedType =
     typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
-
-  if (!ownerKey) {
-    return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-  }
 
   const todayDate = new Date();
   const today = todayDate.toISOString().slice(0, 10); // YYYY-MM-DD

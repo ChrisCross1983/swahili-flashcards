@@ -228,7 +228,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
         try {
             const res = await fetch(
-                withTypeParam(`/api/learn/setup-counts?ownerKey=${ownerKey}`)
+                withTypeParam(`/api/learn/setup-counts`)
             );
             const json = await res.json();
             if (!res.ok) {
@@ -331,7 +331,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const res = await fetch("/api/images/import", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ownerKey, imageUrl }),
+                body: JSON.stringify({ imageUrl }),
             });
             const json = await res.json();
 
@@ -400,7 +400,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const fd = new FormData();
             fd.append("file", new File([blob], "recording", { type: blob.type }));
             fd.append("cardId", resolvedCardId);
-            fd.append("ownerKey", ownerKey);
 
             const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
             const json = await res.json();
@@ -500,7 +499,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ownerKey,
                     german: trimmedGerman,
                     swahili: trimmedSwahili,
                     imagePath,
@@ -532,7 +530,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     new File([pendingAudioBlob], "recording", { type: pendingAudioType ?? "audio/mp4" })
                 );
                 fd.append("cardId", String(created.id));
-                fd.append("ownerKey", ownerKey);
 
                 const up = await fetch("/api/upload-audio", { method: "POST", body: fd });
                 const upJson = await up.json();
@@ -603,7 +600,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             }
 
             const body: any = {
-                ownerKey,
                 id: editingId,
                 german: trimmedGerman,
                 swahili: trimmedSwahili,
@@ -726,7 +722,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!silent) setStatus("Lade Karten...");
 
         const searchParams = new URLSearchParams({
-            ownerKey,
             type: cardType,
         });
         if (q && q.trim().length > 0) {
@@ -807,7 +802,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const fd = new FormData();
             fd.append("file", new File([blob], "recording", { type: blob.type }));
             fd.append("cardId", resolvedCardId);
-            fd.append("ownerKey", ownerKey);
 
             const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
             const json = await res.json();
@@ -870,7 +864,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                ownerKey,
                 german: resolvedGerman,
                 swahili: resolvedSwahili,
                 type: cardType,
@@ -902,7 +895,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!yes) return false;
 
         const res = await fetch(
-            `/api/cards?ownerKey=${encodeURIComponent(ownerKey)}&id=${encodeURIComponent(id)}`,
+            `/api/cards?id=${encodeURIComponent(id)}`,
             { method: "DELETE" }
         );
         const json = await res.json();
@@ -950,7 +943,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setStatus("Lade fällige Karten...");
 
         const res = await fetch(
-            withTypeParam(`/api/learn/today?ownerKey=${encodeURIComponent(ownerKey)}`),
+            withTypeParam(`/api/learn/today`),
             { cache: "no-store" }
         );
         const json = await res.json();
@@ -988,7 +981,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         const res = await fetch(
-            withTypeParam(`/api/cards/all?ownerKey=${encodeURIComponent(ownerKey)}`),
+            withTypeParam(`/api/cards/all`),
             { cache: "no-store" }
         );
 
@@ -1026,7 +1019,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         const res = await fetch(
-            withTypeParam(`/api/learn/last-missed?ownerKey=${encodeURIComponent(ownerKey)}`),
+            withTypeParam(`/api/learn/last-missed`),
             { cache: "no-store" }
         );
 
@@ -1077,7 +1070,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     async function loadLeitnerStats() {
         const res = await fetch(
-            withTypeParam(`/api/learn/stats?ownerKey=${encodeURIComponent(ownerKey)}`),
+            withTypeParam(`/api/learn/stats`),
             { cache: "no-store" }
         );
         const json = await res.json();
@@ -1118,7 +1111,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ownerKey,
                     mode: params.mode,
                     totalCount: params.totalCount,
                     correctCount: params.correctCount,
@@ -1180,7 +1172,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const res = await fetch("/api/learn/last-missed", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ownerKey, cardId, action }),
+                body: JSON.stringify({ cardId, action }),
             });
             if (!res.ok) {
                 const json = await res.json().catch(() => ({}));
@@ -1359,7 +1351,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ownerKey,
                     cardId: resolveCardId(item),
                     correct,
                     currentLevel: Number.isFinite(item?.level) ? item.level : 0,
