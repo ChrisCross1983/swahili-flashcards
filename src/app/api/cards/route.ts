@@ -149,6 +149,12 @@ export async function DELETE(req: Request) {
         return NextResponse.json({ error: "ownerKey and id are required" }, { status: 400 });
     }
 
+    const { error } = await supabaseServer
+        .from("cards")
+        .delete()
+        .eq("id", id)
+        .eq("owner_key", ownerKey);
+
     if (error) {
         console.error(error);
         return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
