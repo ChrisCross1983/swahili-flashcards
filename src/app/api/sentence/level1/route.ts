@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/api/auth";
 
 type Template = {
     prompt_de: string;
@@ -100,12 +101,10 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 export async function GET(req: Request) {
-    const { searchParams } = new URL(req.url);
-    const ownerKey = searchParams.get("ownerKey");
+    const { user, response } = await requireUser();
+    if (response) return response;
 
-    if (!ownerKey) {
-        return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-    }
+    const ownerKey = user.id;
 
     const { data, error } = await supabaseServer
         .from("cards")

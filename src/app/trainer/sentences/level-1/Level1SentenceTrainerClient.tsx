@@ -19,11 +19,7 @@ type Exercise = {
     answerId: string;
 };
 
-type Props = {
-    ownerKey: string;
-};
-
-export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
+export default function Level1SentenceTrainerClient() {
     const router = useRouter();
     const [exercise, setExercise] = useState<Exercise | null>(null);
     const [loading, setLoading] = useState(false);
@@ -36,10 +32,7 @@ export default function Level1SentenceTrainerClient({ ownerKey }: Props) {
         setSelectedId(null);
 
         try {
-            const res = await fetch(
-                `/api/sentence/level1?ownerKey=${encodeURIComponent(ownerKey)}`,
-                { cache: "no-store" },
-            );
+            const res = await fetch("/api/sentence/level1", { cache: "no-store" });
             const json = await res.json();
 
             if (!res.ok) {

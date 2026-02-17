@@ -8,5 +8,5 @@ export default async function SentenceLevelOnePage() {
 
     if (!user) redirect("/login");
 
-    return <Level1SentenceTrainerClient ownerKey={user.id} />;
+    return <Level1SentenceTrainerClient />;
 }

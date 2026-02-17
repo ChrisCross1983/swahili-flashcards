@@ -17,7 +17,6 @@ import {
 import type { TrainingContext } from "@/lib/aiContext";
 
 type Props = {
-    ownerKey: string;
     open: boolean;
     onClose: () => void;
     trainingContext?: TrainingContext | null;
@@ -103,7 +102,7 @@ function parseMessageBlocks(text: string): MessageBlock[] {
     return blocks;
 }
 
-export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext }: Props) {
+export default function GlobalAiChat({ open, onClose, trainingContext }: Props) {
     // Manual test checklist:
     // 1) Frage nach Liste (Tiere/Berufe/Geräte) -> Antwort + Buffer füllt sich.
     // 2) "speichere Polizist, Bauarbeiter und Arzt" -> 3 Vorschläge, Duplikate markiert.
@@ -408,7 +407,7 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 });
             }
         },
-        [ownerKey, removeProposal, setProposalStatus]
+        [removeProposal, setProposalStatus]
     );
 
     const handleSaveIntentAskFallback = useCallback(
@@ -466,7 +465,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
 
         const isSaveIntent = detectSaveIntent(text);
         const interpretPayload = {
-            ownerKey,
             userMessage: text,
             chatHistory: nextHistory.slice(-6),
             trainingContext: buildInterpretTrainingContext(trainingContext),
@@ -549,7 +547,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ownerKey,
                     message: interpretResult.rewrittenUserMessage || text,
                     context: trainingContext ?? undefined,
                 }),
@@ -587,7 +584,6 @@ export default function GlobalAiChat({ ownerKey, open, onClose, trainingContext 
         input,
         isSending,
         textHistory,
-        ownerKey,
         buildInterpretTrainingContext,
         trainingContext,
         addAssistantMessage,

@@ -38,7 +38,6 @@ export default function GlobalOverlays({ ownerKey }: Props) {
             </div>
 
             <GlobalAiChat
-                ownerKey={ownerKey}
                 open={openAi}
                 onClose={() => setOpenAi(false)}
                 trainingContext={trainingContext}

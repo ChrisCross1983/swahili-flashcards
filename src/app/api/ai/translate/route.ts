@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/api/auth";
 
 type TranslateRequestBody = {
-    ownerKey?: string;
     text?: string;
     sourceLang?: "sw" | "de";
 };
@@ -101,15 +101,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ownerKey =
-        typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
+    const { response } = await requireUser();
+    if (response) return response;
+
     const text = typeof body.text === "string" ? body.text.trim() : "";
     const sourceLang =
         body.sourceLang === "sw" || body.sourceLang === "de"
             ? body.sourceLang
             : null;
 
-    if (!ownerKey || !text || !sourceLang) {
+    if (!text || !sourceLang) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 

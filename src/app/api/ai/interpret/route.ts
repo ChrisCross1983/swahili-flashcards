@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { detectSaveIntent } from "@/lib/cards/proposals";
+import { requireUser } from "@/lib/api/auth";
 
 type TrainingContext = {
     frontText?: string;
@@ -8,7 +9,6 @@ type TrainingContext = {
 };
 
 type InterpretRequestBody = {
-    ownerKey?: string;
     userMessage?: string;
     chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
     trainingContext?: TrainingContext | null;
@@ -379,8 +379,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ownerKey =
-        typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
+    const { response } = await requireUser();
+    if (response) return response;
+
     const userMessage =
         typeof body.userMessage === "string" ? body.userMessage.trim() : "";
     const chatHistory = Array.isArray(body.chatHistory) ? body.chatHistory : [];
@@ -441,7 +442,7 @@ export async function POST(req: Request) {
             .slice(-30)
         : [];
 
-    if (!ownerKey || !userMessage) {
+    if (!userMessage) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 

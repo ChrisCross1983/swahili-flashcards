@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/api/auth";
 import type { ExplainedConcept } from "@/lib/cards/proposals";
 
 type ChatContext = {
@@ -10,7 +11,6 @@ type ChatContext = {
 };
 
 type ChatRequestBody = {
-    ownerKey?: string;
     message?: string;
     context?: ChatContext;
 };
@@ -220,12 +220,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ownerKey =
-        typeof body.ownerKey === "string" ? body.ownerKey.trim() : "";
+    const { response } = await requireUser();
+    if (response) return response;
+
     const message =
         typeof body.message === "string" ? body.message.trim() : "";
 
-    if (!ownerKey || !message) {
+    if (!message) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 

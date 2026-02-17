@@ -19,20 +19,3 @@ export async function requireUser(): Promise<RequireUserResult> {
 
     return { user: data.user, response: null };
 }
-
-export function assertOwnerKeyMatchesUser(
-    ownerKey: string | null | undefined,
-    userId: string
-): NextResponse | null {
-    const normalizedOwnerKey = ownerKey?.trim();
-
-    if (!normalizedOwnerKey) {
-        return NextResponse.json({ error: "ownerKey is required" }, { status: 400 });
-    }
-
-    if (normalizedOwnerKey !== userId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    return null;
-}
