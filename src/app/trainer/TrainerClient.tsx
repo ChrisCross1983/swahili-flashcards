@@ -14,26 +14,40 @@ import {
     MAX_LEVEL,
 } from "@/lib/leitner";
 import { setTrainingContext } from "@/lib/aiContext";
+import {
+    fetchAllCardsForDrill,
+    fetchLastMissedItems,
+    fetchLeitnerStats,
+    fetchSetupCounts,
+    fetchTodayItems,
+    postGrade,
+    postLastMissed,
+    postLearnSession,
+} from "@/lib/trainer/api";
+import { findNextUnansweredIndex } from "@/lib/trainer/engine";
+import type { CardType, Direction, LeitnerStats, TodayItem } from "@/lib/trainer/types";
+import { readGerman, readSwahili, resolveCardId, shuffleArray } from "@/lib/trainer/utils";
+import TrainerStatus from "@/components/trainer/TrainerStatus";
+import TrainerCard from "@/components/trainer/TrainerCard";
+import TrainerControls from "@/components/trainer/TrainerControls";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
+type SuggestItem = {
+    pageId: string;
+    importUrl: string;
+    thumb: string;
+    title: string;
+};
+
 type Props = {
     ownerKey: string;
-    cardType?: "vocab" | "sentence";
+    cardType?: CardType;
 };
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
-
-function shuffleArray<T>(array: T[]): T[] {
-    const a = [...array];
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const isSentenceTrainer = cardType === "sentence";
@@ -64,13 +78,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [search, setSearch] = useState("");
     const [openSearch, setOpenSearch] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [todayItems, setTodayItems] = useState<any[]>([]);
+    const [todayItems, setTodayItems] = useState<TodayItem[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [reveal, setReveal] = useState(false);
-    const [direction, setDirection] = useState<"DE_TO_SW" | "SW_TO_DE">("DE_TO_SW");
+    const [direction, setDirection] = useState<Direction>("DE_TO_SW");
     const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
-    const [duplicatePreview, setDuplicatePreview] = useState<any | null>(null);
+    const [duplicatePreview, setDuplicatePreview] = useState<unknown | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSource, setEditSource] = useState<"cards" | "create">("create");
     const [openLearn, setOpenLearn] = useState(false);
@@ -86,7 +100,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [learnDone, setLearnDone] = useState(false);
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
-    const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, any>>({});
+    const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, TodayItem>>({});
     const [answeredCardIds, setAnsweredCardIds] = useState<Set<string>>(new Set());
     const [incorrectThisSession, setIncorrectThisSession] = useState<string[]>([]);
     const [sessionTotal, setSessionTotal] = useState(0);
@@ -101,7 +115,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [selectedSuggestUrl, setSelectedSuggestUrl] = useState<string | null>(null);
     const [selectedSuggestPath, setSelectedSuggestPath] = useState<string | null>(null);
-    const [suggestItems, setSuggestItems] = useState<any[]>([]);
+    const [suggestItems, setSuggestItems] = useState<SuggestItem[]>([]);
     const [suggestError, setSuggestError] = useState<string | null>(null);
     const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
@@ -127,15 +141,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const editingImagePath =
         selectedSuggestPath ?? (editingCard?.image_path ?? null);
 
-    const [leitnerStats, setLeitnerStats] = useState<null | {
-        total: number;
-        byLevel: { level: number; label: string; count: number }[];
-        dueTodayCount: number;
-        dueTomorrowCount: number;
-        dueLaterCount: number;
-        nextDueDate: string | null;
-        nextDueInDays: number | null;
-    }>(null);
+    const [leitnerStats, setLeitnerStats] = useState<LeitnerStats | null>(null);
 
     const [isRecording, setIsRecording] = useState(false);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -227,19 +233,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setSetupCountsLoading(true);
 
         try {
-            const res = await fetch(
-                withTypeParam(`/api/learn/setup-counts`)
-            );
-            const json = await res.json();
-            if (!res.ok) {
-                throw new Error(json.error ?? "Setup counts failed");
-            }
-
-            setSetupCounts({
-                todayDue: json.todayDue ?? 0,
-                totalCards: json.totalCards ?? 0,
-                lastMissedCount: json.lastMissedCount ?? 0,
-            });
+            const counts = await fetchSetupCounts(cardType);
+            setSetupCounts(counts);
         } catch {
             setSetupCounts({
                 todayDue: 0,
@@ -249,7 +244,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         } finally {
             setSetupCountsLoading(false);
         }
-    }, [ownerKey]);
+    }, [cardType]);
 
     useEffect(() => {
         if (!openLearn) return;
@@ -942,125 +937,85 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     async function loadToday() {
         setStatus("Lade fällige Karten...");
 
-        const res = await fetch(
-            withTypeParam(`/api/learn/today`),
-            { cache: "no-store" }
-        );
-        const json = await res.json();
+        try {
+            const items = await fetchTodayItems(cardType);
 
-        if (!res.ok) {
-            setStatus(json.error ?? "Aktion fehlgeschlagen.");
+            if (DEBUG_LEITNER) {
+                console.log("[LEITNER] session init", {
+                    total: items.length,
+                    ids: items.map((card) => resolveCardId(card)).slice(0, 20),
+                });
+            }
+
+            setSessionTotal(items.length);
+            setTodayItems(shuffleArray(items));
+            setSessionCorrect(0);
+            setCurrentIndex(0);
+            setReveal(false);
+
+            setSetupCounts((prev) => ({ ...prev, todayDue: items.length }));
+            await refreshSetupCounts();
+
+            setStatus(`Fällig heute: ${items.length}`);
+            return items;
+        } catch (error) {
+            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
             return null;
         }
-
-        const items = Array.isArray(json.items) ? json.items : [];
-
-        if (DEBUG_LEITNER) {
-            console.log("[LEITNER] session init", {
-                total: items.length,
-                ids: items.map((card: any) => resolveCardId(card)).slice(0, 20),
-            });
-        }
-
-        setSessionTotal(items.length);
-
-        setTodayItems(shuffleArray(items));
-        setSessionCorrect(0);
-        setCurrentIndex(0);
-        setReveal(false);
-
-        setSetupCounts((prev) => ({ ...prev, todayDue: items.length }));
-        await refreshSetupCounts();
-
-        setStatus(`Fällig heute: ${items.length}`);
-        return items;
     }
 
     async function loadAllForDrill() {
         setStatus("Lade alle Karten...");
         setLastMissedEmpty(false);
 
-        const res = await fetch(
-            withTypeParam(`/api/cards/all`),
-            { cache: "no-store" }
-        );
+        try {
+            const items = await fetchAllCardsForDrill(cardType);
 
-        const json = await res.json();
+            setSessionTotal(items.length);
+            setTodayItems(shuffleArray(items));
+            setCurrentIndex(0);
+            setReveal(false);
 
-        if (!res.ok) {
-            setStatus(json.error ?? "Aktion fehlgeschlagen.");
-            return;
+            setSetupCounts((prev) => ({ ...prev, totalCards: items.length }));
+            await refreshSetupCounts();
+
+            setStatus(`Alle Karten: ${items.length}`);
+        } catch (error) {
+            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
         }
-
-        const items = (json.items ?? json.cards ?? []).map((c: any) => ({
-            cardId: c.id,
-            level: 0,
-            dueDate: null,
-            german: c.german_text,
-            swahili: c.swahili_text,
-            imagePath: c.image_path ?? null,
-            audio_path: c.audio_path ?? null,
-        }));
-
-        setSessionTotal(items.length);
-
-        setTodayItems(shuffleArray(items));
-        setCurrentIndex(0);
-        setReveal(false);
-
-        setSetupCounts((prev) => ({ ...prev, totalCards: items.length }));
-        await refreshSetupCounts();
-
-        setStatus(`Alle Karten: ${items.length}`);
     }
 
     async function loadLastMissed() {
         setStatus("Lade zuletzt nicht gewusste Karten...");
         setLastMissedEmpty(false);
 
-        const res = await fetch(
-            withTypeParam(`/api/learn/last-missed`),
-            { cache: "no-store" }
-        );
+        try {
+            const items = await fetchLastMissedItems(cardType);
 
-        const json = await res.json();
+            setSessionTotal(items.length);
+            setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
+            await refreshSetupCounts();
 
-        if (!res.ok) {
-            setStatus(json.error ?? "Aktion fehlgeschlagen.");
-            return;
-        }
+            if (items.length === 0) {
+                setTodayItems([]);
+                setCurrentIndex(0);
+                setReveal(false);
+                setLastMissedEmpty(true);
+                setStatus("Keine zuletzt nicht gewussten Karten.");
+                return;
+            }
 
-        const items = (json.items ?? json.cards ?? []).map((c: any) => ({
-            cardId: c.id,
-            level: 0,
-            dueDate: null,
-            german: c.german_text,
-            swahili: c.swahili_text,
-            imagePath: c.image_path ?? null,
-            audio_path: c.audio_path ?? null,
-        }));
-
-        setSessionTotal(items.length);
-        setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
-        await refreshSetupCounts();
-
-        if (items.length === 0) {
-            setTodayItems([]);
+            setTodayItems(shuffleArray(items));
             setCurrentIndex(0);
             setReveal(false);
-            setLastMissedEmpty(true);
-            setStatus("Keine zuletzt nicht gewussten Karten.");
-            return;
+
+            setStatus(`Zuletzt nicht gewusst: ${items.length}`);
+        } catch (error) {
+            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
         }
-
-        setTodayItems(shuffleArray(items));
-        setCurrentIndex(0);
-        setReveal(false);
-
-        setStatus(`Zuletzt nicht gewusst: ${items.length}`);
     }
 
-    function startDrillWithItems(items: any[]) {
+    function startDrillWithItems(items: TodayItem[]) {
         setLastMissedEmpty(false);
         setSessionTotal(items.length);
         setTodayItems(shuffleArray(items));
@@ -1069,14 +1024,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }
 
     async function loadLeitnerStats() {
-        const res = await fetch(
-            withTypeParam(`/api/learn/stats`),
-            { cache: "no-store" }
-        );
-        const json = await res.json();
-        if (!res.ok) return;
-
-        setLeitnerStats(json);
+        try {
+            const stats = await fetchLeitnerStats(cardType);
+            setLeitnerStats(stats);
+        } catch {
+            // keep previous stats when loading fails
+        }
     }
 
     function resetSessionTracking() {
@@ -1107,15 +1060,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         sessionSavedRef.current = true;
 
         try {
-            await fetch("/api/learn/sessions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    mode: params.mode,
-                    totalCount: params.totalCount,
-                    correctCount: params.correctCount,
-                    wrongCardIds: params.wrongCardIds,
-                }),
+            await postLearnSession({
+                mode: params.mode,
+                totalCount: params.totalCount,
+                correctCount: params.correctCount,
+                wrongCardIds: params.wrongCardIds,
             });
         } catch (e) {
             console.error("Failed to persist learn session", e);
@@ -1154,39 +1103,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEndedEarly(true);
     }
 
-    function resolveCardId(item: any) {
-        return String(item?.cardId ?? item?.card_id ?? item?.id ?? "").trim();
-    }
-
-    function findNextUnansweredIndex(items: any[], answered: Set<string>, startIndex: number) {
-        for (let i = startIndex; i < items.length; i += 1) {
-            const id = resolveCardId(items[i]);
-            if (!id || !answered.has(id)) return i;
-        }
-        return -1;
-    }
-
     async function updateLastMissed(action: "add" | "remove", cardId: string) {
         if (!cardId) return false;
         try {
-            const res = await fetch("/api/learn/last-missed", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ cardId, action }),
-            });
-            if (!res.ok) {
-                const json = await res.json().catch(() => ({}));
-                console.error("last-missed update failed", json?.error ?? res.statusText);
-                if (process.env.NODE_ENV === "development") {
-                    setStatus(json?.error ?? "Last-Missed Update fehlgeschlagen.");
-                }
-                return false;
-            }
+            await postLastMissed(action, cardId);
             return true;
         } catch (e) {
             console.error("Failed to update last missed", e);
             if (process.env.NODE_ENV === "development") {
-                setStatus("Last-Missed Update fehlgeschlagen.");
+                setStatus(e instanceof Error ? e.message : "Last-Missed Update fehlgeschlagen.");
             }
             return false;
         }
@@ -1347,14 +1272,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
         // === LEITNER MODUS: DB UPDATE ===
         try {
-            await fetch("/api/learn/grade", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    cardId: resolveCardId(item),
-                    correct,
-                    currentLevel: Number.isFinite(item?.level) ? item.level : 0,
-                }),
+            await postGrade({
+                cardId: resolveCardId(item),
+                correct,
+                currentLevel: Number.isFinite(item?.level) ? item.level : 0,
             });
         } catch (e) {
             console.error(e);
@@ -1524,11 +1445,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const currentItem = todayItems[currentIndex] ?? null;
 
-    const currentGerman =
-        currentItem?.german_text ?? currentItem?.german ?? currentItem?.de ?? "";
+    const currentGerman = readGerman(currentItem);
 
-    const currentSwahili =
-        currentItem?.swahili_text ?? currentItem?.swahili ?? currentItem?.sw ?? "";
+    const currentSwahili = readSwahili(currentItem);
 
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
@@ -2476,44 +2395,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 <>
                                     {/* ===== Session Header (clean) ===== */}
                                     <div className="mb-3">
-                                        {/* Row 1: Progress + % */}
-                                        <div className="flex items-center justify-between">
-                                            <div className="text-sm text-muted">
-                                                Karte <span className="font-medium text-primary">{currentNumber}</span> von{" "}
-                                                <span className="font-medium text-primary">{sessionTotal}</span>
-                                            </div>
-
-                                            <div className="rounded-full border px-3 py-1 text-sm text-muted bg-surface shadow-soft">
-                                                ✔︎{" "}
-                                                <span className="font-medium">
-                                                    {answeredCount === 0 ? "—" : `${safePct}%`}
-                                                </span>{" "}
-                                                <span className="text-muted">sicher</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Row 2: Direction + Change Button */}
-                                        <div className="mt-2 flex items-center justify-between gap-3">
-                                            <div className="text-sm text-muted">
-                                                Richtung:{" "}
-                                                <span className="font-medium text-primary">
-                                                    {directionMode === "RANDOM"
-                                                        ? "Zufällig (Abwechslung)"
-                                                        : direction === "DE_TO_SW"
-                                                            ? "Deutsch → Swahili"
-                                                            : "Swahili → Deutsch"}
-                                                </span>
-                                            </div>
-
-                                            {/* Secondary action */}
-                                            <button
-                                                type="button"
-                                                className="btn btn-ghost text-sm whitespace-nowrap"
-                                                onClick={() => setOpenDirectionChange((v) => !v)}
-                                            >
-                                                Richtung ändern
-                                            </button>
-                                        </div>
+                                        <TrainerStatus
+                                            currentNumber={currentNumber}
+                                            sessionTotal={sessionTotal}
+                                            answeredCount={answeredCount}
+                                            safePct={safePct}
+                                            direction={direction}
+                                            directionMode={directionMode}
+                                            onToggleDirectionMenu={() => setOpenDirectionChange((v) => !v)}
+                                        />
 
                                         {/* Dropdown */}
                                         {openDirectionChange ? (
@@ -2608,88 +2498,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </div>
                                         ) : null}
 
-                                        {/* Prompt */}
                                         <div className="mt-8">
-                                            <div className="text-xs text-muted uppercase tracking-wide">
-                                                {direction === "DE_TO_SW" ? "Deutsch" : "Swahili"}
-                                            </div>
-                                            <div className="mt-2">
-                                                {/* Preserve line breaks for prompt text. */}
-                                                {/* Swahili highlight chip */}
-                                                <CardText
-                                                    as="span"
-                                                    className={
-                                                        direction === "DE_TO_SW"
-                                                            ? "text-2xl font-semibold text-primary"
-                                                            : "swahili-chip text-2xl"
-                                                    }
-                                                >
-                                                    {direction === "DE_TO_SW" ? currentGerman : currentSwahili}
-                                                </CardText>
-                                            </div>
+                                            <TrainerCard
+                                                reveal={reveal}
+                                                prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                                answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                imagePath={reveal ? currentImagePath : null}
+                                                imageBaseUrl={IMAGE_BASE_URL}
+                                            />
                                         </div>
 
-                                        {!reveal ? (
-                                            <button
-                                                className="mt-8 w-full btn btn-secondary py-3 text-base"
-                                                onClick={revealCard}
-                                            >
-                                                Aufdecken
-                                            </button>
-                                        ) : (
-                                            <>
-                                                <div className="mt-4 border-t pt-4">
-                                                    <div className="text-xs text-muted uppercase tracking-wide">
-                                                        {direction === "DE_TO_SW" ? "Swahili" : "Deutsch"}
-                                                    </div>
-                                                    <div className="mt-2">
-                                                        {/* Preserve line breaks for answer text. */}
-                                                        {/* Swahili highlight chip */}
-                                                        <CardText
-                                                            as="span"
-                                                            className={
-                                                                direction === "DE_TO_SW"
-                                                                    ? "swahili-chip text-xl"
-                                                                    : "text-xl font-semibold text-primary"
-                                                            }
-                                                        >
-                                                            {direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                                        </CardText>
-                                                    </div>
-                                                </div>
-
-                                                {/* Audio abspielen */}
-                                                {todayItems[currentIndex]?.audio_path ? (
-                                                    <div className="mt-6">
-                                                        <button
-                                                            type="button"
-                                                            className="btn btn-ghost text-sm"
-                                                            onClick={() => playCardAudioIfExists(todayItems[currentIndex])}
-                                                        >
-                                                            🔊 Abspielen
-                                                        </button>
-                                                    </div>
-                                                ) : null}
-
-                                                <div className="mt-10 grid grid-cols-2 gap-6">
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-danger py-4 text-base active:scale-[0.99]"
-                                                        onClick={() => gradeCurrent(false)}
-                                                    >
-                                                        Nicht gewusst
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-success py-4 text-base active:scale-[0.99]"
-                                                        onClick={() => gradeCurrent(true)}
-                                                    >
-                                                        Gewusst
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
+                                        <TrainerControls
+                                            reveal={reveal}
+                                            hasAudio={Boolean(todayItems[currentIndex]?.audio_path)}
+                                            onReveal={revealCard}
+                                            onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                            onWrong={() => gradeCurrent(false)}
+                                            onCorrect={() => gradeCurrent(true)}
+                                        />
 
                                         {isLeitnerSelected ? (
                                             <div className="mt-10 flex items-start justify-between gap-2 text-xs text-muted">
