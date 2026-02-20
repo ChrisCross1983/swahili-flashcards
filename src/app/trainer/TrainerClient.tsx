@@ -2485,19 +2485,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </div>
                                         </div>
 
-                                        {/* Bild */}
-                                        {reveal && currentImagePath ? (
-                                            <div className="mt-6 rounded-2xl border bg-surface overflow-hidden shadow-soft">
-                                                <div className="w-full h-56 flex items-center justify-center bg-surface">
-                                                    <img
-                                                        src={`${IMAGE_BASE_URL}/${currentImagePath}`}
-                                                        alt="Bild"
-                                                        className="max-h-full max-w-full object-contain"
-                                                    />
-                                                </div>
-                                            </div>
-                                        ) : null}
-
                                         <div className="mt-8">
                                             <TrainerCard
                                                 reveal={reveal}
