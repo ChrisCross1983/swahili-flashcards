@@ -3,7 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 
 type Body = {
-    mode: "LEITNER" | "DRILL";
+    mode: "LEITNER" | "DRILL" | "ai";
     totalCount: number;
     correctCount: number;
     wrongCardIds: string[];

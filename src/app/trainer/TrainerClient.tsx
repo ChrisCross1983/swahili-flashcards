@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -30,6 +30,8 @@ import { readGerman, readSwahili, resolveCardId, shuffleArray } from "@/lib/trai
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerControls from "@/components/trainer/TrainerControls";
+import ModeSwitch from "@/components/trainer/ModeSwitch";
+import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -132,9 +134,31 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
 
     const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const [mode, setMode] = useState<"leitner" | "ai">("leitner");
     const typeQuery = `type=${encodeURIComponent(cardType)}`;
     const withTypeParam = (url: string) =>
         url.includes("?") ? `${url}&${typeQuery}` : `${url}?${typeQuery}`;
+
+    useEffect(() => {
+        const queryMode = searchParams.get("mode");
+        setMode(queryMode === "ai" ? "ai" : "leitner");
+    }, [searchParams]);
+
+    const handleModeChange = useCallback((nextMode: "leitner" | "ai") => {
+        setMode(nextMode);
+        const params = new URLSearchParams(searchParams.toString());
+
+        if (nextMode === "ai") {
+            params.set("mode", "ai");
+        } else {
+            params.delete("mode");
+        }
+
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname);
+    }, [pathname, router, searchParams]);
 
     const editingCard = cards.find((c) => c.id === editingId) ?? null;
 
@@ -1624,1496 +1648,1503 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     </button>
                 </div>
 
-                {showMigrate ? (
-                    <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                        <div className="font-semibold text-primary">Alte Karten gefunden</div>
-                        <div className="mt-1 text-sm text-muted">
-                            Deine Karten aus der alten App-Version sind noch da, aber unter einem anderen Schlüssel gespeichert.
-                            Mit einem Klick übernehmen wir sie in deinen Login.
-                        </div>
+                <ModeSwitch mode={mode} onChange={handleModeChange} />
 
-                        {migrateStatus ? (
-                            <div className="mt-2 text-sm text-muted">{migrateStatus}</div>
-                        ) : null}
-
-                        <div className="mt-3 flex gap-3">
-                            <button className="btn btn-secondary" type="button" onClick={migrateLegacyData}>
-                                Jetzt übernehmen
-                            </button>
-
-                            <button className="btn btn-ghost" type="button" onClick={() => setShowMigrate(false)}>
-                                Später
-                            </button>
-                        </div>
-                    </div>
-                ) : null}
-
-                {/* Bubbles */}
-                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <button
-                        onClick={() => {
-                            setOpenLearn(true);
-
-                            // Setup sauber zurücksetzen
-                            setLearnStarted(false);
-                            setLearnDone(false);
-                            setShowSummary(false);
-
-                            // NICHTS vorauswählen (UX!)
-                            setLearnMode(null);
-                            setDirectionMode(null);
-                            setDrillSource(null);
-                            setDrillMenuOpen(false);
-
-                            // Session reset
-                            setTodayItems([]);
-                            setCurrentIndex(0);
-                            setReveal(false);
-                            resetSessionTracking();
-
-                            setStatus("");
-                        }}
-                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-                    >
-                        <div className="text-xl font-semibold">{learnLabel}</div>
-                        <div className="mt-2 text-sm text-muted">
-                            {learnHint}
-                        </div>
-                    </button>
-
-                    <button
-                        onClick={() => {
-                            setStatus("");
-                            setDuplicateHint(null);
-                            resetImageInputs();
-
-                            setEditSource("create");
-                            setEditAudioPath(null);
-                            setEditingId(null);
-
-                            setPendingAudioBlob(null);
-                            setPendingAudioType(null);
-
-                            setOpenCreate(true);
-                        }}
-                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-                    >
-                        <div className="text-xl font-semibold">{createLabel}</div>
-                        <div className="mt-2 text-sm text-muted">
-                            {createHint}
-                        </div>
-                    </button>
-                    <button
-                        onClick={() => {
-                            setStatus("");
-                            setDuplicateHint(null);
-                            setDuplicatePreview(null);
-                            setOpenCards(true);
-                            loadCards();
-                        }}
-                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-                    >
-                        <div className="text-xl font-semibold">{cardsLabel}</div>
-                        <div className="mt-2 text-sm text-muted">
-                            Durchsuchen, bearbeiten und aufräumen.
-                        </div>
-                    </button>
-                    <button
-                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-                        onClick={() => {
-                            setOpenSearch(true);
-                            loadCards(undefined, { silent: true });
-                        }}
-                    >
-                        <div className="text-xl font-semibold">{searchLabel}</div>
-                        <div className="mt-2 text-sm text-muted">
-                            Deutsch oder Swahili.
-                        </div>
-                    </button>
-                </div>
-
-                {/* Learn Modal */}
-                <FullScreenSheet
-                    open={openLearn}
-                    title="Vokabeln lernen"
-                    onClose={() => {
-                        if (isSessionRunning) {
-                            setExitConfirmOpen(true);
-                            return;
-                        }
-
-                        if (learnStarted || showSummary || todayItems.length > 0 || learnDone || endedEarly) {
-                            setLearnStarted(false);
-                            setLearnDone(false);
-                            setShowSummary(false);
-                            setEndedEarly(false);
-                            setTodayItems([]);
-                            setCurrentIndex(0);
-                            setReveal(false);
-                            setStatus("");
-
-                            setLearnMode(null);
-                            setDirectionMode(null);
-                            setDrillSource(null);
-                            setDrillMenuOpen(false);
-                            resetSessionTracking();
-
-                            return;
-                        }
-
-                        setOpenLearn(false);
-                        setDrillMenuOpen(false);
-                    }}
-                >
-                    {/* === SETUP === */}
-                    {!learnStarted && (
-                        <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                            <div className="text-sm font-semibold text-primary">Einstellungen</div>
-                            {/* Hint card for setup guidance */}
-                            <div className="mt-2 hint-card border border-soft">
-                                Wähle Lernmethode, Abfragerichtung – dann starten wir.
-                            </div>
-
-                            <div
-                                ref={learnModeRef}
-                                className="mt-4"
-                            >
-                                <div
-                                    className={
-                                        learnModeHighlight
-                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                            : ""
-                                    }
-                                >
-                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Lernmethode</div>
-                                        <div className="mt-2 grid grid-cols-1 gap-3">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setLearnMode("LEITNER_TODAY");
-                                                    setDrillMenuOpen(false);
-                                                }}
-                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
-                                                    ? "border-accent bg-surface shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="flex items-start justify-between gap-3 pr-10">
-                                                    <div>
-                                                        <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
-                                                        <div className="mt-1 text-sm text-muted">
-                                                            Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
-                                                        </div>
-                                                    </div>
-
-                                                    {isLeitnerSelected ? (
-                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                            ✓
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                                {/* Count badge */}
-                                                <div className="count-badge absolute right-4 top-4">
-                                                    {setupCountsLoading ? "…" : setupCounts.todayDue}
-                                                </div>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setLearnMode("DRILL");
-                                                    setDrillMenuOpen(false);
-                                                    if (!drillSource) {
-                                                        setTimeout(() => {
-                                                            drillSourceRef.current?.scrollIntoView({
-                                                                behavior: "smooth",
-                                                                block: "center",
-                                                            });
-                                                        }, 0);
-                                                    }
-                                                }}
-                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
-                                                    ? "border-accent bg-surface shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="flex items-start justify-between gap-3 pr-10">
-                                                    <div>
-                                                        <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
-                                                        <div className="mt-1 text-sm text-muted">
-                                                            Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
-                                                        </div>
-                                                    </div>
-
-                                                    {isDrillSelected ? (
-                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                            ✓
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                                {/* Count badge */}
-                                                <div className="count-badge absolute right-4 top-4">
-                                                    {setupCountsLoading ? "…" : setupCounts.totalCards}
-                                                </div>
-                                            </button>
-                                        </div>
+                {mode === "ai" ? <AiCoachPanel cardType={cardType} />
+                    : (
+                        <>
+                            {showMigrate ? (
+                                <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
+                                    <div className="font-semibold text-primary">Alte Karten gefunden</div>
+                                    <div className="mt-1 text-sm text-muted">
+                                        Deine Karten aus der alten App-Version sind noch da, aber unter einem anderen Schlüssel gespeichert.
+                                        Mit einem Klick übernehmen wir sie in deinen Login.
                                     </div>
-                                </div>
-                            </div>
 
-                            {learnMode === "DRILL" ? (
-                                <div
-                                    ref={drillSourceRef}
-                                    className="mt-4"
-                                >
-                                    <div
-                                        className={
-                                            drillSourceHighlight
-                                                ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                : ""
-                                        }
-                                    >
-                                        <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                            <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
-                                            <div className="mt-2" ref={drillMenuRef}>
-                                                <button
-                                                    type="button"
-                                                    className="flex w-full items-center justify-between rounded-xl border bg-surface p-3 text-left shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
-                                                    onClick={() => setDrillMenuOpen((prev) => !prev)}
-                                                >
-                                                    <span className={drillSource ? "text-primary" : "text-muted"}>
-                                                        {drillSource === "ALL"
-                                                            ? "Alle Karten"
-                                                            : drillSource === "LAST_MISSED"
-                                                                ? "Zuletzt nicht gewusst"
-                                                                : "Bitte auswählen…"}
-                                                    </span>
-                                                    <span className="text-xs text-muted">▾</span>
-                                                </button>
+                                    {migrateStatus ? (
+                                        <div className="mt-2 text-sm text-muted">{migrateStatus}</div>
+                                    ) : null}
 
-                                                {drillMenuOpen ? (
-                                                    <div className="mt-2 space-y-2 rounded-xl border bg-surface p-2 shadow-soft">
-                                                        <button
-                                                            type="button"
-                                                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "ALL"
-                                                                ? "bg-surface-elevated"
-                                                                : "hover:bg-surface-elevated"
-                                                                }`}
-                                                            onClick={() => {
-                                                                setDrillSource("ALL");
-                                                                setDrillMenuOpen(false);
-                                                            }}
-                                                        >
-                                                            <span>Alle Karten</span>
-                                                            {/* Count badge */}
-                                                            <span className="count-badge">
-                                                                {setupCountsLoading ? "…" : setupCounts.totalCards}
-                                                            </span>
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "LAST_MISSED"
-                                                                ? "bg-surface-elevated"
-                                                                : "hover:bg-surface-elevated"
-                                                                }`}
-                                                            onClick={() => {
-                                                                setDrillSource("LAST_MISSED");
-                                                                setDrillMenuOpen(false);
-                                                            }}
-                                                        >
-                                                            <span>Zuletzt nicht gewusst</span>
-                                                            {/* Count badge */}
-                                                            <span className="count-badge">
-                                                                {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
-                                                            </span>
-                                                        </button>
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                            {drillSource === null ? (
-                                                <div className="mt-2 hint-card border border-soft">
-                                                    {/* Drill hint */}
-                                                    <div>Bitte Quelle auswählen.</div>
-                                                    {!setupCountsLoading && setupCounts.lastMissedCount > 0 ? (
-                                                        <div className="mt-1">
-                                                            Es warten {setupCounts.lastMissedCount} Karten im &quot;Zuletzt nicht gewusst&quot; Topf.
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            ) : null}
-                                        </div>
+                                    <div className="mt-3 flex gap-3">
+                                        <button className="btn btn-secondary" type="button" onClick={migrateLegacyData}>
+                                            Jetzt übernehmen
+                                        </button>
+
+                                        <button className="btn btn-ghost" type="button" onClick={() => setShowMigrate(false)}>
+                                            Später
+                                        </button>
                                     </div>
                                 </div>
                             ) : null}
 
-                            <div
-                                ref={directionRef}
-                                className="mt-4"
-                            >
-                                <div
-                                    className={
-                                        directionHighlight
-                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                            : ""
-                                    }
+                            {/* Bubbles */}
+                            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <button
+                                    onClick={() => {
+                                        setOpenLearn(true);
+
+                                        // Setup sauber zurücksetzen
+                                        setLearnStarted(false);
+                                        setLearnDone(false);
+                                        setShowSummary(false);
+
+                                        // NICHTS vorauswählen (UX!)
+                                        setLearnMode(null);
+                                        setDirectionMode(null);
+                                        setDrillSource(null);
+                                        setDrillMenuOpen(false);
+
+                                        // Session reset
+                                        setTodayItems([]);
+                                        setCurrentIndex(0);
+                                        setReveal(false);
+                                        resetSessionTracking();
+
+                                        setStatus("");
+                                    }}
+                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
-                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
-                                        <div className="mt-2 grid grid-cols-1 gap-3">
-                                            <button
-                                                type="button"
-                                                onClick={() => setDirectionMode("DE_TO_SW")}
-                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
-                                                    ? "border-accent bg-surface shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <span>Deutsch → Swahili</span>
-                                                    {directionMode === "DE_TO_SW" ? (
-                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                            ✓
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => setDirectionMode("SW_TO_DE")}
-                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
-                                                    ? "border-accent bg-surface shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <span>Swahili → Deutsch</span>
-                                                    {directionMode === "SW_TO_DE" ? (
-                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                            ✓
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => setDirectionMode("RANDOM")}
-                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
-                                                    ? "border-accent bg-surface shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <span>Zufällig (Abwechslung)</span>
-                                                    {directionMode === "RANDOM" ? (
-                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                            ✓
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            </button>
-                                        </div>
+                                    <div className="text-xl font-semibold">{learnLabel}</div>
+                                    <div className="mt-2 text-sm text-muted">
+                                        {learnHint}
                                     </div>
-                                </div>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setStatus("");
+                                        setDuplicateHint(null);
+                                        resetImageInputs();
+
+                                        setEditSource("create");
+                                        setEditAudioPath(null);
+                                        setEditingId(null);
+
+                                        setPendingAudioBlob(null);
+                                        setPendingAudioType(null);
+
+                                        setOpenCreate(true);
+                                    }}
+                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                >
+                                    <div className="text-xl font-semibold">{createLabel}</div>
+                                    <div className="mt-2 text-sm text-muted">
+                                        {createHint}
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setStatus("");
+                                        setDuplicateHint(null);
+                                        setDuplicatePreview(null);
+                                        setOpenCards(true);
+                                        loadCards();
+                                    }}
+                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                >
+                                    <div className="text-xl font-semibold">{cardsLabel}</div>
+                                    <div className="mt-2 text-sm text-muted">
+                                        Durchsuchen, bearbeiten und aufräumen.
+                                    </div>
+                                </button>
+                                <button
+                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                    onClick={() => {
+                                        setOpenSearch(true);
+                                        loadCards(undefined, { silent: true });
+                                    }}
+                                >
+                                    <div className="text-xl font-semibold">{searchLabel}</div>
+                                    <div className="mt-2 text-sm text-muted">
+                                        Deutsch oder Swahili.
+                                    </div>
+                                </button>
                             </div>
 
-                            {/* Primary CTA */}
-                            <button
-                                className={`mt-4 w-full btn btn-primary py-3 text-base`}
-                                type="button"
-                                disabled={startDisabled}
-                                onClick={async () => {
-
-                                    if (!learnMode) {
-                                        triggerSetupHighlight("LEARNMODE");
+                            {/* Learn Modal */}
+                            <FullScreenSheet
+                                open={openLearn}
+                                title="Vokabeln lernen"
+                                onClose={() => {
+                                    if (isSessionRunning) {
+                                        setExitConfirmOpen(true);
                                         return;
                                     }
 
-                                    if (!directionMode) {
-                                        triggerSetupHighlight("DIRECTION");
+                                    if (learnStarted || showSummary || todayItems.length > 0 || learnDone || endedEarly) {
+                                        setLearnStarted(false);
+                                        setLearnDone(false);
+                                        setShowSummary(false);
+                                        setEndedEarly(false);
+                                        setTodayItems([]);
+                                        setCurrentIndex(0);
+                                        setReveal(false);
+                                        setStatus("");
+
+                                        setLearnMode(null);
+                                        setDirectionMode(null);
+                                        setDrillSource(null);
+                                        setDrillMenuOpen(false);
+                                        resetSessionTracking();
+
                                         return;
                                     }
 
-                                    if (learnMode === "DRILL" && !drillSource) {
-                                        triggerSetupHighlight("DRILLSOURCE");
-                                        return;
-                                    }
-
-                                    resetSessionTracking();
-
-                                    const chosen =
-                                        directionMode === "RANDOM"
-                                            ? Math.random() < 0.5
-                                                ? "DE_TO_SW"
-                                                : "SW_TO_DE"
-                                            : directionMode;
-
-                                    setDirection(chosen);
-                                    setReveal(false);
-                                    setCurrentIndex(0);
-
-                                    if (learnMode === "LEITNER_TODAY") {
-                                        const items = await loadToday();          // ✅ FIX: items existiert jetzt
-                                        await loadLeitnerStats();                 // ✅ Lernstand aktualisieren
-                                        if (items && items.length === 0) {
-                                            await persistLearnSession({
-                                                mode: "LEITNER",
-                                                totalCount: 0,
-                                                correctCount: 0,
-                                                wrongCardIds: [],
-                                            });
-                                        }
-                                    } else {
-                                        if (drillSource === "ALL") {
-                                            await loadAllForDrill();
-                                        } else {
-                                            await loadLastMissed();
-                                        }
-                                    }
-
-                                    setLearnStarted(true);
+                                    setOpenLearn(false);
+                                    setDrillMenuOpen(false);
                                 }}
                             >
-                                Start
-                            </button>
-
-                            {startHint ? (
-                                <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                                    {/* Start hint */}
-                                    {startHint}
-                                </div>
-                            ) : null}
-                        </div >
-                    )
-                    }
-
-                    {/* === KEINE KARTEN / ENDE === */}
-                    {
-                        learnStarted && todayItems.length === 0 && (
-                            <>
-                                {endedEarly ? (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface">
-                                        <div className="text-lg font-semibold">Session beendet</div>
-                                        <div className="mt-2 text-sm text-muted">
-                                            Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis.
+                                {/* === SETUP === */}
+                                {!learnStarted && (
+                                    <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
+                                        <div className="text-sm font-semibold text-primary">Einstellungen</div>
+                                        {/* Hint card for setup guidance */}
+                                        <div className="mt-2 hint-card border border-soft">
+                                            Wähle Lernmethode, Abfragerichtung – dann starten wir.
                                         </div>
 
-                                        {(() => {
-                                            const answeredCount = sessionTotal;
-                                            const wrongCount = sessionWrongIds.size;
-                                            const pct =
-                                                answeredCount > 0
-                                                    ? Math.round((sessionCorrect / answeredCount) * 100)
-                                                    : 0;
-
-                                            return (
-                                                <div className="mt-4 space-y-2 text-sm text-muted">
-                                                    <div>
-                                                        Gewusst:{" "}
-                                                        <span className="font-medium">
-                                                            {sessionCorrect}/{answeredCount}
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        Nicht gewusst:{" "}
-                                                        <span className="font-medium">
-                                                            {wrongCount}/{answeredCount}
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        Trefferquote:{" "}
-                                                        <span className="font-medium">{pct}%</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        <button
-                                            className="mt-6 w-full btn btn-primary py-3 text-base"
-                                            type="button"
-                                            onClick={() => {
-                                                setLearnStarted(false);
-                                                setLearnDone(false);
-                                                setShowSummary(false);
-
-                                                setTodayItems([]);
-                                                setCurrentIndex(0);
-                                                setReveal(false);
-                                                setStatus("");
-
-                                                setLearnMode(null);
-                                                setDirectionMode(null);
-                                                setDrillSource(null);
-                                                resetSessionTracking();
-                                            }}
+                                        <div
+                                            ref={learnModeRef}
+                                            className="mt-4"
                                         >
-                                            Fertig
-                                        </button>
-                                    </div>
-                                ) : learnMode === "LEITNER_TODAY" ? (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
-                                        <div className="text-lg font-semibold">
-                                            {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
-                                        </div>
-
-                                        <div className="mt-2 text-sm text-muted">
-                                            {learnDone
-                                                ? "Für heute bist du fertig. Morgen geht’s entspannt weiter."
-                                                : "Für heute ist nichts offen — dein Rhythmus passt."}
-                                        </div>
-
-                                        {(() => {
-                                            const total = sessionTotal;
-                                            const pct = total > 0 ? Math.round((sessionCorrect / total) * 100) : 0;
-
-                                            return (
-                                                <div className="mt-3 text-sm text-muted">
-                                                    Ergebnis:{" "}
-                                                    <span className="font-medium">
-                                                        {sessionCorrect}/{total}
-                                                    </span>{" "}
-                                                    gewusst ({pct}%)
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {sessionWrongIds.size > 0 ? (
-                                            <button
-                                                className="mt-4 w-full btn btn-ghost py-3"
-                                                type="button"
-                                                onClick={() => {
-                                                    const repeatItems = Object.values(sessionWrongItems);
-                                                    if (repeatItems.length === 0) return;
-
-                                                    resetSessionTracking();
-
-                                                    if (directionMode === "RANDOM") {
-                                                        setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
-                                                    }
-
-                                                    setLearnMode("DRILL");
-                                                    setDrillSource("LAST_MISSED");
-                                                    setLearnStarted(true);
-                                                    setStatus("");
-
-                                                    startDrillWithItems(repeatItems);
-                                                }}
+                                            <div
+                                                className={
+                                                    learnModeHighlight
+                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                        : ""
+                                                }
                                             >
-                                                Nicht gewusste wiederholen
-                                            </button>
-                                        ) : null}
-
-                                        {/* Lernstand */}
-                                        <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
-                                            {/* 1) Heute */}
-                                            <div className="text-sm font-semibold text-primary">📊 Heute</div>
-
-                                            {sessionTotal > 0 ? (
-                                                <div className="mt-3 rounded-2xl border p-4 bg-surface-elevated">
-                                                    <div className="text-base font-semibold flex items-center justify-between gap-3">
-                                                        <span>
-                                                            {sessionCorrect} von {sessionTotal} Karten sicher{" "}
-                                                            <span className="text-muted font-medium">
-                                                                ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}% gewusst)
-                                                            </span>
-                                                        </span>
-                                                    </div>
-                                                    <div className="mt-2 text-sm text-muted">
-                                                        {sessionTotal - sessionCorrect} Karten üben wir nochmal
-                                                    </div>
-
-                                                    <div className="mt-3 h-2 w-full rounded-full border border-soft">
-                                                        <div
-                                                            className="h-2 rounded-full"
-                                                            style={{
-                                                                width: `${Math.round((sessionCorrect / sessionTotal) * 100)}%`,
-                                                                backgroundColor: "var(--accent-success)",
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="mt-2 text-sm text-muted">Keine Session-Daten.</div>
-                                            )}
-
-                                            {/* 2) Gesamt */}
-                                            <div className="mt-6 text-sm font-semibold text-primary">🌱 Dein Lernstand</div>
-
-                                            <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-muted">{cardsCountLabel}</span>
-                                                    <span className="font-semibold">{leitnerUi.total}</span>
-                                                </div>
-
-                                                <div className="mt-4 space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-muted">📅 Heute fällig</span>
-                                                        <span className="font-medium">{leitnerUi.todayCount}</span>
-                                                    </div>
-
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-muted">🔁 Morgen dran</span>
-                                                        <span className="font-medium">{leitnerUi.tomorrowCount}</span>
-                                                    </div>
-
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-muted">✅ Später wiederholen</span>
-                                                        <span className="font-medium">{leitnerUi.laterCount}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* 3) Nächstes */}
-                                            <div className="mt-6 text-sm font-semibold text-primary">⏰ Nächstes Training</div>
-                                            <div className="mt-2 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                                                Nächste Karten sind {leitnerUi.nextText} dran.
-                                            </div>
-
-                                            {/* 4) Tipp */}
-                                            <div className="mt-4 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                                                Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
-                                            </div>
-                                        </div>
-
-                                        <button
-                                            className="mt-4 w-full btn btn-primary py-3 text-base"
-                                            type="button"
-                                            onClick={() => {
-                                                setLearnStarted(false);
-                                                setLearnDone(false);
-                                                setShowSummary(false);
-
-                                                setTodayItems([]);
-                                                setCurrentIndex(0);
-                                                setReveal(false);
-                                                setStatus("");
-
-                                                setLearnMode(null);
-                                                setDirectionMode(null);
-                                                setDrillSource(null);
-                                                resetSessionTracking();
-                                            }}
-                                        >
-                                            Fertig
-                                        </button>
-                                    </div>
-                                ) : learnMode === "DRILL" && drillSource === "LAST_MISSED" && lastMissedEmpty ? (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
-                                        <div className="text-lg font-semibold">
-                                            Keine zuletzt nicht gewussten Karten 🎉
-                                        </div>
-                                        <div className="mt-2 text-sm text-muted">
-                                            Du hast in der letzten Session alle Karten gewusst.
-                                        </div>
-
-                                        <button
-                                            className="mt-4 w-full btn btn-primary py-3 text-base"
-                                            type="button"
-                                            onClick={() => {
-                                                setLearnStarted(false);
-                                                setLearnDone(false);
-                                                setShowSummary(false);
-
-                                                setTodayItems([]);
-                                                setCurrentIndex(0);
-                                                setReveal(false);
-                                                setStatus("");
-
-                                                setLearnMode(null);
-                                                setDirectionMode(null);
-                                                setDrillSource(null);
-                                                resetSessionTracking();
-                                            }}
-                                        >
-                                            Fertig
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Session abgeschlossen ✅</div>
-
-                                        {(() => {
-                                            const total = sessionTotal > 0 ? sessionTotal : Math.max(sessionCorrect, 1);
-                                            const pct = Math.round((sessionCorrect / total) * 100);
-
-                                            return (
-                                                <>
-                                                    <div className="mt-2 text-sm text-muted">
-                                                        Ergebnis:{" "}
-                                                        <span className="font-medium">
-                                                            {sessionCorrect}/{total}
-                                                        </span>{" "}
-                                                        gewusst ({pct}%)
-                                                    </div>
-
-                                                    <div className="mt-6 flex justify-center w-full">
+                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Lernmethode</div>
+                                                    <div className="mt-2 grid grid-cols-1 gap-3">
                                                         <button
-                                                            className="btn btn-primary px-10 py-3 text-base"
                                                             type="button"
                                                             onClick={() => {
-                                                                setLearnStarted(false);
-                                                                setLearnDone(false);
-                                                                setShowSummary(false);
-
-                                                                setTodayItems([]);
-                                                                setCurrentIndex(0);
-                                                                setReveal(false);
-                                                                setStatus("");
-
-                                                                setLearnMode(null);
-                                                                setDirectionMode(null);
-                                                                setDrillSource(null);
-                                                                resetSessionTracking();
+                                                                setLearnMode("LEITNER_TODAY");
+                                                                setDrillMenuOpen(false);
                                                             }}
+                                                            className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
                                                         >
-                                                            Fertig
+                                                            <div className="flex items-start justify-between gap-3 pr-10">
+                                                                <div>
+                                                                    <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
+                                                                    <div className="mt-1 text-sm text-muted">
+                                                                        Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
+                                                                    </div>
+                                                                </div>
+
+                                                                {isLeitnerSelected ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                            {/* Count badge */}
+                                                            <div className="count-badge absolute right-4 top-4">
+                                                                {setupCountsLoading ? "…" : setupCounts.todayDue}
+                                                            </div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLearnMode("DRILL");
+                                                                setDrillMenuOpen(false);
+                                                                if (!drillSource) {
+                                                                    setTimeout(() => {
+                                                                        drillSourceRef.current?.scrollIntoView({
+                                                                            behavior: "smooth",
+                                                                            block: "center",
+                                                                        });
+                                                                    }, 0);
+                                                                }
+                                                            }}
+                                                            className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-start justify-between gap-3 pr-10">
+                                                                <div>
+                                                                    <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
+                                                                    <div className="mt-1 text-sm text-muted">
+                                                                        Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
+                                                                    </div>
+                                                                </div>
+
+                                                                {isDrillSelected ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                            {/* Count badge */}
+                                                            <div className="count-badge absolute right-4 top-4">
+                                                                {setupCountsLoading ? "…" : setupCounts.totalCards}
+                                                            </div>
                                                         </button>
                                                     </div>
-                                                </>
-                                            );
-                                        })()}
-                                    </div>
-                                )}
-                            </>
-                        )
-                    }
-
-                    {/* === LERNKARTE === */}
-                    {
-                        learnStarted && todayItems.length > 0 && (() => {
-                            const answeredCount = answeredCardIds.size; // bereits bewertete Karten
-                            const safeAnswered = Math.max(0, answeredCount);
-                            const safeCorrect = Math.min(sessionCorrect, safeAnswered);
-                            const computedPct =
-                                safeAnswered === 0 ? 0 : Math.round((safeCorrect / safeAnswered) * 100);
-                            const safePct = Math.max(0, Math.min(100, computedPct));
-                            const currentNumber = Math.min(sessionTotal, safeAnswered + 1);
-
-                            return (
-                                <>
-                                    {/* ===== Session Header (clean) ===== */}
-                                    <div className="mb-3">
-                                        <TrainerStatus
-                                            currentNumber={currentNumber}
-                                            sessionTotal={sessionTotal}
-                                            answeredCount={answeredCount}
-                                            safePct={safePct}
-                                            direction={direction}
-                                            directionMode={directionMode}
-                                            onToggleDirectionMenu={() => setOpenDirectionChange((v) => !v)}
-                                        />
-
-                                        {/* Dropdown */}
-                                        {openDirectionChange ? (
-                                            <div className="mt-3 rounded-2xl border p-3 bg-surface shadow-soft">
-                                                <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
-
-                                                <div className="mt-2 grid grid-cols-1 gap-2">
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
-                                                        onClick={() => {
-                                                            setDirectionMode("DE_TO_SW");
-                                                            setDirection("DE_TO_SW");
-                                                            setOpenDirectionChange(false);
-                                                        }}
-                                                    >
-                                                        Deutsch → Swahili
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
-                                                        onClick={() => {
-                                                            setDirectionMode("SW_TO_DE");
-                                                            setDirection("SW_TO_DE");
-                                                            setOpenDirectionChange(false);
-                                                        }}
-                                                    >
-                                                        Swahili → Deutsch
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
-                                                        onClick={() => {
-                                                            setDirectionMode("RANDOM");
-                                                            const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
-                                                            setDirection(chosen);
-                                                            setOpenDirectionChange(false);
-                                                        }}
-                                                    >
-                                                        Zufällig (Abwechslung)
-                                                    </button>
                                                 </div>
-
-                                                <p className="mt-2 text-xs text-muted">
-                                                    Tipp: „Zufällig“ würfelt ab jetzt pro Karte neu.
-                                                </p>
-                                            </div>
-                                        ) : null}
-                                    </div>
-
-                                    {/* ===== Card ===== */}
-                                    <div className="mt-3 rounded-2xl border p-6 shadow-soft bg-surface">
-                                        {/* Top Actions Row */}
-                                        <div className="flex items-center justify-between gap-3">
-                                            {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
-                                            {!todayItems[currentIndex]?.audio_path ? (
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-ghost text-sm"
-                                                    onClick={toggleLearnRecording}
-                                                >
-                                                    {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
-                                                </button>
-                                            ) : (
-                                                <div />
-                                            )}
-
-                                            <div className="ml-auto flex items-center gap-4">
-                                                {/* Rechts: Bearbeiten */}
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-ghost text-sm whitespace-nowrap"
-                                                    onClick={startEditFromLearn}
-                                                >
-                                                    ✏️ Bearbeiten
-                                                </button>
                                             </div>
                                         </div>
 
-                                        <div className="mt-8">
-                                            <TrainerCard
-                                                reveal={reveal}
-                                                prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
-                                                answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
-                                                imagePath={reveal ? currentImagePath : null}
-                                                imageBaseUrl={IMAGE_BASE_URL}
-                                            />
-                                        </div>
+                                        {learnMode === "DRILL" ? (
+                                            <div
+                                                ref={drillSourceRef}
+                                                className="mt-4"
+                                            >
+                                                <div
+                                                    className={
+                                                        drillSourceHighlight
+                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                            : ""
+                                                    }
+                                                >
+                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                        <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
+                                                        <div className="mt-2" ref={drillMenuRef}>
+                                                            <button
+                                                                type="button"
+                                                                className="flex w-full items-center justify-between rounded-xl border bg-surface p-3 text-left shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
+                                                                onClick={() => setDrillMenuOpen((prev) => !prev)}
+                                                            >
+                                                                <span className={drillSource ? "text-primary" : "text-muted"}>
+                                                                    {drillSource === "ALL"
+                                                                        ? "Alle Karten"
+                                                                        : drillSource === "LAST_MISSED"
+                                                                            ? "Zuletzt nicht gewusst"
+                                                                            : "Bitte auswählen…"}
+                                                                </span>
+                                                                <span className="text-xs text-muted">▾</span>
+                                                            </button>
 
-                                        <TrainerControls
-                                            reveal={reveal}
-                                            hasAudio={Boolean(todayItems[currentIndex]?.audio_path)}
-                                            onReveal={revealCard}
-                                            onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
-                                            onWrong={() => gradeCurrent(false)}
-                                            onCorrect={() => gradeCurrent(true)}
-                                        />
-
-                                        {isLeitnerSelected ? (
-                                            <div className="mt-10 flex items-start justify-between gap-2 text-xs text-muted">
-                                                <span>
-                                                    Leitner · Stufe {currentLevel} · nächste Wiederholung{" "}
-                                                    {formatDays(footerNextDays)}
-                                                </span>
-
-                                                <div className="relative" ref={leitnerInfoRef}>
-                                                    <button
-                                                        type="button"
-                                                        className="flex h-8 w-8 items-center justify-center rounded-full border border-soft bg-surface text-xs font-semibold text-muted shadow-soft hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
-                                                        aria-label="Warum sehe ich diese Karte?"
-                                                        onClick={() => setLeitnerInfoOpen((open) => !open)}
-                                                    >
-                                                        ?
-                                                    </button>
-
-                                                    {leitnerInfoOpen ? (
-                                                        <div className="absolute right-0 bottom-full mb-2 z-30 w-[min(90vw,420px)]">
-                                                            <div className="relative rounded-2xl border bg-surface p-4 text-xs leading-5 text-muted shadow-warm">
-                                                                <div className="flex items-start justify-between gap-2">
-                                                                    <div className="font-semibold text-primary">
-                                                                        Warum sehe ich diese Karte?
-                                                                    </div>
+                                                            {drillMenuOpen ? (
+                                                                <div className="mt-2 space-y-2 rounded-xl border bg-surface p-2 shadow-soft">
                                                                     <button
                                                                         type="button"
-                                                                        className="text-muted hover:text-muted"
-                                                                        onClick={() => setLeitnerInfoOpen(false)}
-                                                                        aria-label="Popover schließen"
+                                                                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "ALL"
+                                                                            ? "bg-surface-elevated"
+                                                                            : "hover:bg-surface-elevated"
+                                                                            }`}
+                                                                        onClick={() => {
+                                                                            setDrillSource("ALL");
+                                                                            setDrillMenuOpen(false);
+                                                                        }}
                                                                     >
-                                                                        ✕
+                                                                        <span>Alle Karten</span>
+                                                                        {/* Count badge */}
+                                                                        <span className="count-badge">
+                                                                            {setupCountsLoading ? "…" : setupCounts.totalCards}
+                                                                        </span>
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "LAST_MISSED"
+                                                                            ? "bg-surface-elevated"
+                                                                            : "hover:bg-surface-elevated"
+                                                                            }`}
+                                                                        onClick={() => {
+                                                                            setDrillSource("LAST_MISSED");
+                                                                            setDrillMenuOpen(false);
+                                                                        }}
+                                                                    >
+                                                                        <span>Zuletzt nicht gewusst</span>
+                                                                        {/* Count badge */}
+                                                                        <span className="count-badge">
+                                                                            {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
+                                                                        </span>
                                                                     </button>
                                                                 </div>
+                                                            ) : null}
+                                                        </div>
+                                                        {drillSource === null ? (
+                                                            <div className="mt-2 hint-card border border-soft">
+                                                                {/* Drill hint */}
+                                                                <div>Bitte Quelle auswählen.</div>
+                                                                {!setupCountsLoading && setupCounts.lastMissedCount > 0 ? (
+                                                                    <div className="mt-1">
+                                                                        Es warten {setupCounts.lastMissedCount} Karten im &quot;Zuletzt nicht gewusst&quot; Topf.
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : null}
 
-                                                                <div className="mt-3 space-y-2">
-                                                                    <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
-                                                                    {formattedDueDate ? (
-                                                                        <div>
-                                                                            Fällig am: {formattedDueDate}
-                                                                            {dueStatusText ? ` (${dueStatusText})` : ""}
-                                                                        </div>
-                                                                    ) : null}
-                                                                    <div>
-                                                                        Wenn gewusst: Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
-                                                                        {formatDays(nextOnCorrectDays)}
+                                        <div
+                                            ref={directionRef}
+                                            className="mt-4"
+                                        >
+                                            <div
+                                                className={
+                                                    directionHighlight
+                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                        : ""
+                                                }
+                                            >
+                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
+                                                    <div className="mt-2 grid grid-cols-1 gap-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setDirectionMode("DE_TO_SW")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Deutsch → Swahili</span>
+                                                                {directionMode === "DE_TO_SW" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
                                                                     </div>
-                                                                    <div>
-                                                                        Wenn nicht gewusst: Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
-                                                                        {formatDays(nextOnWrongDays)}
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setDirectionMode("SW_TO_DE")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Swahili → Deutsch</span>
+                                                                {directionMode === "SW_TO_DE" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
                                                                     </div>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setDirectionMode("RANDOM")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Zufällig (Abwechslung)</span>
+                                                                {directionMode === "RANDOM" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Primary CTA */}
+                                        <button
+                                            className={`mt-4 w-full btn btn-primary py-3 text-base`}
+                                            type="button"
+                                            disabled={startDisabled}
+                                            onClick={async () => {
+
+                                                if (!learnMode) {
+                                                    triggerSetupHighlight("LEARNMODE");
+                                                    return;
+                                                }
+
+                                                if (!directionMode) {
+                                                    triggerSetupHighlight("DIRECTION");
+                                                    return;
+                                                }
+
+                                                if (learnMode === "DRILL" && !drillSource) {
+                                                    triggerSetupHighlight("DRILLSOURCE");
+                                                    return;
+                                                }
+
+                                                resetSessionTracking();
+
+                                                const chosen =
+                                                    directionMode === "RANDOM"
+                                                        ? Math.random() < 0.5
+                                                            ? "DE_TO_SW"
+                                                            : "SW_TO_DE"
+                                                        : directionMode;
+
+                                                setDirection(chosen);
+                                                setReveal(false);
+                                                setCurrentIndex(0);
+
+                                                if (learnMode === "LEITNER_TODAY") {
+                                                    const items = await loadToday();          // ✅ FIX: items existiert jetzt
+                                                    await loadLeitnerStats();                 // ✅ Lernstand aktualisieren
+                                                    if (items && items.length === 0) {
+                                                        await persistLearnSession({
+                                                            mode: "LEITNER",
+                                                            totalCount: 0,
+                                                            correctCount: 0,
+                                                            wrongCardIds: [],
+                                                        });
+                                                    }
+                                                } else {
+                                                    if (drillSource === "ALL") {
+                                                        await loadAllForDrill();
+                                                    } else {
+                                                        await loadLastMissed();
+                                                    }
+                                                }
+
+                                                setLearnStarted(true);
+                                            }}
+                                        >
+                                            Start
+                                        </button>
+
+                                        {startHint ? (
+                                            <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                                {/* Start hint */}
+                                                {startHint}
+                                            </div>
+                                        ) : null}
+                                    </div >
+                                )
+                                }
+
+                                {/* === KEINE KARTEN / ENDE === */}
+                                {
+                                    learnStarted && todayItems.length === 0 && (
+                                        <>
+                                            {endedEarly ? (
+                                                <div className="mt-4 rounded-2xl border p-6 bg-surface">
+                                                    <div className="text-lg font-semibold">Session beendet</div>
+                                                    <div className="mt-2 text-sm text-muted">
+                                                        Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis.
+                                                    </div>
+
+                                                    {(() => {
+                                                        const answeredCount = sessionTotal;
+                                                        const wrongCount = sessionWrongIds.size;
+                                                        const pct =
+                                                            answeredCount > 0
+                                                                ? Math.round((sessionCorrect / answeredCount) * 100)
+                                                                : 0;
+
+                                                        return (
+                                                            <div className="mt-4 space-y-2 text-sm text-muted">
+                                                                <div>
+                                                                    Gewusst:{" "}
+                                                                    <span className="font-medium">
+                                                                        {sessionCorrect}/{answeredCount}
+                                                                    </span>
                                                                 </div>
+                                                                <div>
+                                                                    Nicht gewusst:{" "}
+                                                                    <span className="font-medium">
+                                                                        {wrongCount}/{answeredCount}
+                                                                    </span>
+                                                                </div>
+                                                                <div>
+                                                                    Trefferquote:{" "}
+                                                                    <span className="font-medium">{pct}%</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    <button
+                                                        className="mt-6 w-full btn btn-primary py-3 text-base"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setLearnStarted(false);
+                                                            setLearnDone(false);
+                                                            setShowSummary(false);
+
+                                                            setTodayItems([]);
+                                                            setCurrentIndex(0);
+                                                            setReveal(false);
+                                                            setStatus("");
+
+                                                            setLearnMode(null);
+                                                            setDirectionMode(null);
+                                                            setDrillSource(null);
+                                                            resetSessionTracking();
+                                                        }}
+                                                    >
+                                                        Fertig
+                                                    </button>
+                                                </div>
+                                            ) : learnMode === "LEITNER_TODAY" ? (
+                                                <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
+                                                    <div className="text-lg font-semibold">
+                                                        {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
+                                                    </div>
+
+                                                    <div className="mt-2 text-sm text-muted">
+                                                        {learnDone
+                                                            ? "Für heute bist du fertig. Morgen geht’s entspannt weiter."
+                                                            : "Für heute ist nichts offen — dein Rhythmus passt."}
+                                                    </div>
+
+                                                    {(() => {
+                                                        const total = sessionTotal;
+                                                        const pct = total > 0 ? Math.round((sessionCorrect / total) * 100) : 0;
+
+                                                        return (
+                                                            <div className="mt-3 text-sm text-muted">
+                                                                Ergebnis:{" "}
+                                                                <span className="font-medium">
+                                                                    {sessionCorrect}/{total}
+                                                                </span>{" "}
+                                                                gewusst ({pct}%)
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {sessionWrongIds.size > 0 ? (
+                                                        <button
+                                                            className="mt-4 w-full btn btn-ghost py-3"
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const repeatItems = Object.values(sessionWrongItems);
+                                                                if (repeatItems.length === 0) return;
+
+                                                                resetSessionTracking();
+
+                                                                if (directionMode === "RANDOM") {
+                                                                    setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
+                                                                }
+
+                                                                setLearnMode("DRILL");
+                                                                setDrillSource("LAST_MISSED");
+                                                                setLearnStarted(true);
+                                                                setStatus("");
+
+                                                                startDrillWithItems(repeatItems);
+                                                            }}
+                                                        >
+                                                            Nicht gewusste wiederholen
+                                                        </button>
+                                                    ) : null}
+
+                                                    {/* Lernstand */}
+                                                    <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
+                                                        {/* 1) Heute */}
+                                                        <div className="text-sm font-semibold text-primary">📊 Heute</div>
+
+                                                        {sessionTotal > 0 ? (
+                                                            <div className="mt-3 rounded-2xl border p-4 bg-surface-elevated">
+                                                                <div className="text-base font-semibold flex items-center justify-between gap-3">
+                                                                    <span>
+                                                                        {sessionCorrect} von {sessionTotal} Karten sicher{" "}
+                                                                        <span className="text-muted font-medium">
+                                                                            ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}% gewusst)
+                                                                        </span>
+                                                                    </span>
+                                                                </div>
+                                                                <div className="mt-2 text-sm text-muted">
+                                                                    {sessionTotal - sessionCorrect} Karten üben wir nochmal
+                                                                </div>
+
+                                                                <div className="mt-3 h-2 w-full rounded-full border border-soft">
+                                                                    <div
+                                                                        className="h-2 rounded-full"
+                                                                        style={{
+                                                                            width: `${Math.round((sessionCorrect / sessionTotal) * 100)}%`,
+                                                                            backgroundColor: "var(--accent-success)",
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-2 text-sm text-muted">Keine Session-Daten.</div>
+                                                        )}
+
+                                                        {/* 2) Gesamt */}
+                                                        <div className="mt-6 text-sm font-semibold text-primary">🌱 Dein Lernstand</div>
+
+                                                        <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-muted">{cardsCountLabel}</span>
+                                                                <span className="font-semibold">{leitnerUi.total}</span>
+                                                            </div>
+
+                                                            <div className="mt-4 space-y-2">
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-muted">📅 Heute fällig</span>
+                                                                    <span className="font-medium">{leitnerUi.todayCount}</span>
+                                                                </div>
+
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-muted">🔁 Morgen dran</span>
+                                                                    <span className="font-medium">{leitnerUi.tomorrowCount}</span>
+                                                                </div>
+
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-muted">✅ Später wiederholen</span>
+                                                                    <span className="font-medium">{leitnerUi.laterCount}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* 3) Nächstes */}
+                                                        <div className="mt-6 text-sm font-semibold text-primary">⏰ Nächstes Training</div>
+                                                        <div className="mt-2 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
+                                                            Nächste Karten sind {leitnerUi.nextText} dran.
+                                                        </div>
+
+                                                        {/* 4) Tipp */}
+                                                        <div className="mt-4 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
+                                                            Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
+                                                        </div>
+                                                    </div>
+
+                                                    <button
+                                                        className="mt-4 w-full btn btn-primary py-3 text-base"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setLearnStarted(false);
+                                                            setLearnDone(false);
+                                                            setShowSummary(false);
+
+                                                            setTodayItems([]);
+                                                            setCurrentIndex(0);
+                                                            setReveal(false);
+                                                            setStatus("");
+
+                                                            setLearnMode(null);
+                                                            setDirectionMode(null);
+                                                            setDrillSource(null);
+                                                            resetSessionTracking();
+                                                        }}
+                                                    >
+                                                        Fertig
+                                                    </button>
+                                                </div>
+                                            ) : learnMode === "DRILL" && drillSource === "LAST_MISSED" && lastMissedEmpty ? (
+                                                <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
+                                                    <div className="text-lg font-semibold">
+                                                        Keine zuletzt nicht gewussten Karten 🎉
+                                                    </div>
+                                                    <div className="mt-2 text-sm text-muted">
+                                                        Du hast in der letzten Session alle Karten gewusst.
+                                                    </div>
+
+                                                    <button
+                                                        className="mt-4 w-full btn btn-primary py-3 text-base"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setLearnStarted(false);
+                                                            setLearnDone(false);
+                                                            setShowSummary(false);
+
+                                                            setTodayItems([]);
+                                                            setCurrentIndex(0);
+                                                            setReveal(false);
+                                                            setStatus("");
+
+                                                            setLearnMode(null);
+                                                            setDirectionMode(null);
+                                                            setDrillSource(null);
+                                                            resetSessionTracking();
+                                                        }}
+                                                    >
+                                                        Fertig
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Session abgeschlossen ✅</div>
+
+                                                    {(() => {
+                                                        const total = sessionTotal > 0 ? sessionTotal : Math.max(sessionCorrect, 1);
+                                                        const pct = Math.round((sessionCorrect / total) * 100);
+
+                                                        return (
+                                                            <>
+                                                                <div className="mt-2 text-sm text-muted">
+                                                                    Ergebnis:{" "}
+                                                                    <span className="font-medium">
+                                                                        {sessionCorrect}/{total}
+                                                                    </span>{" "}
+                                                                    gewusst ({pct}%)
+                                                                </div>
+
+                                                                <div className="mt-6 flex justify-center w-full">
+                                                                    <button
+                                                                        className="btn btn-primary px-10 py-3 text-base"
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setLearnStarted(false);
+                                                                            setLearnDone(false);
+                                                                            setShowSummary(false);
+
+                                                                            setTodayItems([]);
+                                                                            setCurrentIndex(0);
+                                                                            setReveal(false);
+                                                                            setStatus("");
+
+                                                                            setLearnMode(null);
+                                                                            setDirectionMode(null);
+                                                                            setDrillSource(null);
+                                                                            resetSessionTracking();
+                                                                        }}
+                                                                    >
+                                                                        Fertig
+                                                                    </button>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            )}
+                                        </>
+                                    )
+                                }
+
+                                {/* === LERNKARTE === */}
+                                {
+                                    learnStarted && todayItems.length > 0 && (() => {
+                                        const answeredCount = answeredCardIds.size; // bereits bewertete Karten
+                                        const safeAnswered = Math.max(0, answeredCount);
+                                        const safeCorrect = Math.min(sessionCorrect, safeAnswered);
+                                        const computedPct =
+                                            safeAnswered === 0 ? 0 : Math.round((safeCorrect / safeAnswered) * 100);
+                                        const safePct = Math.max(0, Math.min(100, computedPct));
+                                        const currentNumber = Math.min(sessionTotal, safeAnswered + 1);
+
+                                        return (
+                                            <>
+                                                {/* ===== Session Header (clean) ===== */}
+                                                <div className="mb-3">
+                                                    <TrainerStatus
+                                                        currentNumber={currentNumber}
+                                                        sessionTotal={sessionTotal}
+                                                        answeredCount={answeredCount}
+                                                        safePct={safePct}
+                                                        direction={direction}
+                                                        directionMode={directionMode}
+                                                        onToggleDirectionMenu={() => setOpenDirectionChange((v) => !v)}
+                                                    />
+
+                                                    {/* Dropdown */}
+                                                    {openDirectionChange ? (
+                                                        <div className="mt-3 rounded-2xl border p-3 bg-surface shadow-soft">
+                                                            <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
+
+                                                            <div className="mt-2 grid grid-cols-1 gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
+                                                                    onClick={() => {
+                                                                        setDirectionMode("DE_TO_SW");
+                                                                        setDirection("DE_TO_SW");
+                                                                        setOpenDirectionChange(false);
+                                                                    }}
+                                                                >
+                                                                    Deutsch → Swahili
+                                                                </button>
+
+                                                                <button
+                                                                    type="button"
+                                                                    className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
+                                                                    onClick={() => {
+                                                                        setDirectionMode("SW_TO_DE");
+                                                                        setDirection("SW_TO_DE");
+                                                                        setOpenDirectionChange(false);
+                                                                    }}
+                                                                >
+                                                                    Swahili → Deutsch
+                                                                </button>
+
+                                                                <button
+                                                                    type="button"
+                                                                    className="rounded-xl border p-3 text-left hover:bg-surface-elevated"
+                                                                    onClick={() => {
+                                                                        setDirectionMode("RANDOM");
+                                                                        const chosen = Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE";
+                                                                        setDirection(chosen);
+                                                                        setOpenDirectionChange(false);
+                                                                    }}
+                                                                >
+                                                                    Zufällig (Abwechslung)
+                                                                </button>
+                                                            </div>
+
+                                                            <p className="mt-2 text-xs text-muted">
+                                                                Tipp: „Zufällig“ würfelt ab jetzt pro Karte neu.
+                                                            </p>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+
+                                                {/* ===== Card ===== */}
+                                                <div className="mt-3 rounded-2xl border p-6 shadow-soft bg-surface">
+                                                    {/* Top Actions Row */}
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
+                                                        {!todayItems[currentIndex]?.audio_path ? (
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-ghost text-sm"
+                                                                onClick={toggleLearnRecording}
+                                                            >
+                                                                {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                                            </button>
+                                                        ) : (
+                                                            <div />
+                                                        )}
+
+                                                        <div className="ml-auto flex items-center gap-4">
+                                                            {/* Rechts: Bearbeiten */}
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-ghost text-sm whitespace-nowrap"
+                                                                onClick={startEditFromLearn}
+                                                            >
+                                                                ✏️ Bearbeiten
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-8">
+                                                        <TrainerCard
+                                                            reveal={reveal}
+                                                            prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
+                                                            answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                            imagePath={reveal ? currentImagePath : null}
+                                                            imageBaseUrl={IMAGE_BASE_URL}
+                                                        />
+                                                    </div>
+
+                                                    <TrainerControls
+                                                        reveal={reveal}
+                                                        hasAudio={Boolean(todayItems[currentIndex]?.audio_path)}
+                                                        onReveal={revealCard}
+                                                        onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                                        onWrong={() => gradeCurrent(false)}
+                                                        onCorrect={() => gradeCurrent(true)}
+                                                    />
+
+                                                    {isLeitnerSelected ? (
+                                                        <div className="mt-10 flex items-start justify-between gap-2 text-xs text-muted">
+                                                            <span>
+                                                                Leitner · Stufe {currentLevel} · nächste Wiederholung{" "}
+                                                                {formatDays(footerNextDays)}
+                                                            </span>
+
+                                                            <div className="relative" ref={leitnerInfoRef}>
+                                                                <button
+                                                                    type="button"
+                                                                    className="flex h-8 w-8 items-center justify-center rounded-full border border-soft bg-surface text-xs font-semibold text-muted shadow-soft hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
+                                                                    aria-label="Warum sehe ich diese Karte?"
+                                                                    onClick={() => setLeitnerInfoOpen((open) => !open)}
+                                                                >
+                                                                    ?
+                                                                </button>
+
+                                                                {leitnerInfoOpen ? (
+                                                                    <div className="absolute right-0 bottom-full mb-2 z-30 w-[min(90vw,420px)]">
+                                                                        <div className="relative rounded-2xl border bg-surface p-4 text-xs leading-5 text-muted shadow-warm">
+                                                                            <div className="flex items-start justify-between gap-2">
+                                                                                <div className="font-semibold text-primary">
+                                                                                    Warum sehe ich diese Karte?
+                                                                                </div>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="text-muted hover:text-muted"
+                                                                                    onClick={() => setLeitnerInfoOpen(false)}
+                                                                                    aria-label="Popover schließen"
+                                                                                >
+                                                                                    ✕
+                                                                                </button>
+                                                                            </div>
+
+                                                                            <div className="mt-3 space-y-2">
+                                                                                <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
+                                                                                {formattedDueDate ? (
+                                                                                    <div>
+                                                                                        Fällig am: {formattedDueDate}
+                                                                                        {dueStatusText ? ` (${dueStatusText})` : ""}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                                <div>
+                                                                                    Wenn gewusst: Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
+                                                                                    {formatDays(nextOnCorrectDays)}
+                                                                                </div>
+                                                                                <div>
+                                                                                    Wenn nicht gewusst: Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
+                                                                                    {formatDays(nextOnWrongDays)}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
                                                             </div>
                                                         </div>
                                                     ) : null}
                                                 </div>
+                                            </>
+                                        );
+                                    })()
+                                }
+
+                                <ConfirmDialog
+                                    open={exitConfirmOpen}
+                                    title="Training beenden?"
+                                    description="Willst du die Session wirklich beenden? Dein aktuelles Ergebnis wird gespeichert."
+                                    cancelLabel="Weiterlernen"
+                                    confirmLabel="Beenden"
+                                    onCancel={() => setExitConfirmOpen(false)}
+                                    onConfirm={endSessionEarly}
+                                />
+                            </FullScreenSheet >
+
+                            {/* Create Modal */}
+                            < FullScreenSheet
+                                open={openCreate}
+                                title={editingId ? editTitle : createTitle}
+                                onClose={handleCancelEdit}
+                            >
+                                <div className="rounded-2xl border p-6 shadow-soft bg-surface">
+                                    {/* Enable multi-line entry for sentences/paragraphs. */}
+                                    <label className="block text-sm font-medium">Deutsch</label>
+                                    <textarea
+                                        className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
+                                        value={german}
+                                        onChange={(e) => setGerman(e.target.value)}
+                                        placeholder="z.B. Guten Morgen"
+                                        rows={3}
+                                    />
+
+                                    {/* Enable multi-line entry for sentences/paragraphs. */}
+                                    <label className="block text-sm font-medium mt-4">Swahili</label>
+                                    <textarea
+                                        className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
+                                        value={swahili}
+                                        onChange={(e) => setSwahili(e.target.value)}
+                                        placeholder="z.B. Habari za asubuhi"
+                                        rows={3}
+                                    />
+
+                                    <div className="mt-6 text-sm font-medium">Medien</div>
+                                    {!editingId && (
+                                        <div className="mt-2 rounded-xl border p-3">
+                                            <div className="text-sm font-medium">Aussprache</div>
+
+                                            <div className="mt-3 flex items-center gap-4">
+                                                {pendingAudioBlob ? (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-xl border px-3 py-2"
+                                                            onClick={() => {
+                                                                const url = URL.createObjectURL(pendingAudioBlob);
+                                                                stopAnyAudio();
+                                                                audioElRef.current = new Audio(url);
+                                                                audioElRef.current.play().catch(() => { });
+                                                            }}
+                                                        >
+                                                            🔊 Abspielen
+                                                        </button>
+
+                                                        {!isRecording ? (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={startRecordingForCreate}
+                                                            >
+                                                                🎙️ Neu aufnehmen
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={stopRecordingForCreate}
+                                                            >
+                                                                ⏹️ Stop
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {!isRecording ? (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={startRecordingForCreate}
+                                                            >
+                                                                🎙️ Aufnahme starten
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={stopRecordingForCreate}
+                                                            >
+                                                                ⏹️ Stop
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                )}
                                             </div>
-                                        ) : null}
-                                    </div>
-                                </>
-                            );
-                        })()
-                    }
 
-                    <ConfirmDialog
-                        open={exitConfirmOpen}
-                        title="Training beenden?"
-                        description="Willst du die Session wirklich beenden? Dein aktuelles Ergebnis wird gespeichert."
-                        cancelLabel="Weiterlernen"
-                        confirmLabel="Beenden"
-                        onCancel={() => setExitConfirmOpen(false)}
-                        onConfirm={endSessionEarly}
-                    />
-                </FullScreenSheet >
-
-                {/* Create Modal */}
-                < FullScreenSheet
-                    open={openCreate}
-                    title={editingId ? editTitle : createTitle}
-                    onClose={handleCancelEdit}
-                >
-                    <div className="rounded-2xl border p-6 shadow-soft bg-surface">
-                        {/* Enable multi-line entry for sentences/paragraphs. */}
-                        <label className="block text-sm font-medium">Deutsch</label>
-                        <textarea
-                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
-                            value={german}
-                            onChange={(e) => setGerman(e.target.value)}
-                            placeholder="z.B. Guten Morgen"
-                            rows={3}
-                        />
-
-                        {/* Enable multi-line entry for sentences/paragraphs. */}
-                        <label className="block text-sm font-medium mt-4">Swahili</label>
-                        <textarea
-                            className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
-                            value={swahili}
-                            onChange={(e) => setSwahili(e.target.value)}
-                            placeholder="z.B. Habari za asubuhi"
-                            rows={3}
-                        />
-
-                        <div className="mt-6 text-sm font-medium">Medien</div>
-                        {!editingId && (
-                            <div className="mt-2 rounded-xl border p-3">
-                                <div className="text-sm font-medium">Aussprache</div>
-
-                                <div className="mt-3 flex items-center gap-4">
-                                    {pendingAudioBlob ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                className="rounded-xl border px-3 py-2"
-                                                onClick={() => {
-                                                    const url = URL.createObjectURL(pendingAudioBlob);
-                                                    stopAnyAudio();
-                                                    audioElRef.current = new Audio(url);
-                                                    audioElRef.current.play().catch(() => { });
-                                                }}
-                                            >
-                                                🔊 Abspielen
-                                            </button>
-
-                                            {!isRecording ? (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={startRecordingForCreate}
-                                                >
-                                                    🎙️ Neu aufnehmen
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={stopRecordingForCreate}
-                                                >
-                                                    ⏹️ Stop
-                                                </button>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <>
-                                            {!isRecording ? (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={startRecordingForCreate}
-                                                >
-                                                    🎙️ Aufnahme starten
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={stopRecordingForCreate}
-                                                >
-                                                    ⏹️ Stop
-                                                </button>
-                                            )}
-                                        </>
+                                            <div className="mt-2 text-xs text-muted">
+                                                Wird automatisch beim Speichern der Karte hochgeladen.
+                                            </div>
+                                        </div>
                                     )}
-                                </div>
 
-                                <div className="mt-2 text-xs text-muted">
-                                    Wird automatisch beim Speichern der Karte hochgeladen.
-                                </div>
-                            </div>
-                        )}
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        id="image-upload"
+                                        className="hidden"
+                                        onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+                                    />
 
-                        <input
-                            type="file"
-                            accept="image/*"
-                            id="image-upload"
-                            className="hidden"
-                            onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-                        />
+                                    {editingId && (
+                                        <div className="mt-2 rounded-xl border p-2">
+                                            <div className="text-sm font-medium">Aussprache</div>
 
-                        {editingId && (
-                            <div className="mt-2 rounded-xl border p-2">
-                                <div className="text-sm font-medium">Aussprache</div>
+                                            <div className="mt-4 flex items-center gap-3">
+                                                {editAudioPath ? (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-xl border px-3 py-2"
+                                                            onClick={() => playCardAudioIfExists({ audio_path: editAudioPath })}
+                                                        >
+                                                            🔊 Abspielen
+                                                        </button>
 
-                                <div className="mt-4 flex items-center gap-3">
-                                    {editAudioPath ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                className="rounded-xl border px-3 py-2"
-                                                onClick={() => playCardAudioIfExists({ audio_path: editAudioPath })}
-                                            >
-                                                🔊 Abspielen
-                                            </button>
+                                                        {!isRecording ? (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={startRecordingForEdit}
+                                                            >
+                                                                🎙️ Neu aufnehmen
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={stopRecordingForEdit}
+                                                            >
+                                                                ⏹️ Stop & Speichern
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {!isRecording ? (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={startRecordingForEdit}
+                                                            >
+                                                                🎙️ Aufnahme starten
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-xl border px-3 py-2"
+                                                                onClick={stopRecordingForEdit}
+                                                            >
+                                                                ⏹️ Stop & Speichern
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
 
-                                            {!isRecording ? (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={startRecordingForEdit}
-                                                >
-                                                    🎙️ Neu aufnehmen
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={stopRecordingForEdit}
-                                                >
-                                                    ⏹️ Stop & Speichern
-                                                </button>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <>
-                                            {!isRecording ? (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={startRecordingForEdit}
-                                                >
-                                                    🎙️ Aufnahme starten
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="rounded-xl border px-3 py-2"
-                                                    onClick={stopRecordingForEdit}
-                                                >
-                                                    ⏹️ Stop & Speichern
-                                                </button>
-                                            )}
-                                        </>
+                                            <div className="mt-2 text-xs text-muted">
+                                                Audio kann nur bei bestehenden Karten gespeichert werden.
+                                            </div>
+                                        </div>
                                     )}
-                                </div>
 
-                                <div className="mt-2 text-xs text-muted">
-                                    Audio kann nur bei bestehenden Karten gespeichert werden.
-                                </div>
-                            </div>
-                        )}
+                                    <div className="mt-4 text-sm font-medium">Bild</div>
 
-                        <div className="mt-4 text-sm font-medium">Bild</div>
-
-                        <label
-                            htmlFor="image-upload"
-                            className="
+                                    <label
+                                        htmlFor="image-upload"
+                                        className="
                                 mt-2 flex items-center justify-center gap-3
                                 rounded-2xl border-2 border-dashed
                                 p-4 cursor-pointer
                                 transition
                                 hover:bg-surface hover:border-accent
                             "
-                        >
-                            {previewUrl ? (
-                                <>
-                                    <img
-                                        src={previewUrl}
-                                        alt="Vorschau"
-                                        className="w-16 h-16 object-cover rounded-xl border"
-                                    />
-                                    <div className="text-sm">
-                                        <div className="font-medium">Bild ändern</div>
-                                        <div className="text-xs text-muted">
-                                            Tippen zum Austauschen
-                                        </div>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <div className="text-3xl">🖼️</div>
-                                    <div className="text-sm">
-                                        <div className="font-medium">Bild hinzufügen</div>
-                                        <div className="text-xs text-muted">
-                                            Tippen, um ein Bild auszuwählen
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </label>
-
-                        <button
-                            type="button"
-                            className="mt-6 w-full rounded-xl border p-3"
-                            onClick={openImageSuggestions}
-                        >
-                            ✨ Bild vorschlagen
-                        </button>
-
-                        {suggestedImagePath ? (
-                            <div className="mt-2 text-xs text-muted">
-                                Vorschlagsbild ausgewählt ✅
-                            </div>
-                        ) : null}
-
-                        {editingImagePath ? (
-                            <div className="mt-3">
-                                <div className="text-xs text-muted mb-2">Aktuelles Bild</div>
-                                <img
-                                    src={`${IMAGE_BASE_URL}/${editingImagePath}`}
-                                    alt="Aktuelles Bild"
-                                    className="w-full max-h-56 object-contain rounded-2xl border bg-surface"
-                                />
-                            </div>
-                        ) : null}
-
-                        {duplicateHint && (
-                            <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
-                                <p className="text-sm font-medium">{duplicateHint}</p>
-
-                                {/* Vorschau vorhandener Karten */}
-                                {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
-                                    <div className="space-y-2">
-                                        <p className="text-xs text-muted">Bereits vorhandene Karten:</p>
-
-                                        {duplicatePreview.slice(0, 5).map((c: any) => (
-                                            <button
-                                                key={c.id}
-                                                type="button"
-                                                className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
-                                                onClick={() => {
-                                                    // Duplikat direkt bearbeiten
-                                                    setCreateDraft({ german, swahili });
-                                                    const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
-                                                    startEdit(full, "create");
-                                                    setDuplicateHint(null);
-                                                    setDuplicatePreview(null);
-                                                    setOpenCreate(true);
-                                                }}
-                                            >
-
-                                                {
-                                                    c.image_path ? (
-                                                        <img
-                                                            src={`${IMAGE_BASE_URL}/${c.image_path}`}
-                                                            alt="Bild"
-                                                            className="w-10 h-10 rounded-md object-cover border"
-                                                        />
-                                                    ) : (
-                                                        <div className="w-10 h-10 rounded-md border bg-surface flex items-center justify-center text-xs text-muted">
-                                                            –
-                                                        </div>
-                                                    )
-                                                }
-
-                                                <div className="text-sm min-w-0" >
-                                                    <CardText className="font-medium">{c.german_text}</CardText>
-                                                    <CardText className="text-muted">{c.swahili_text}</CardText>
+                                    >
+                                        {previewUrl ? (
+                                            <>
+                                                <img
+                                                    src={previewUrl}
+                                                    alt="Vorschau"
+                                                    className="w-16 h-16 object-cover rounded-xl border"
+                                                />
+                                                <div className="text-sm">
+                                                    <div className="font-medium">Bild ändern</div>
+                                                    <div className="text-xs text-muted">
+                                                        Tippen zum Austauschen
+                                                    </div>
                                                 </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="flex gap-2 pt-2">
-                                    <button
-                                        className="btn btn-ghost flex-1 text-sm"
-                                        onClick={() => {
-                                            setDuplicateHint(null);
-                                            setDuplicatePreview(null);
-                                        }}
-                                    >
-                                        Korrigieren
-                                    </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="text-3xl">🖼️</div>
+                                                <div className="text-sm">
+                                                    <div className="font-medium">Bild hinzufügen</div>
+                                                    <div className="text-xs text-muted">
+                                                        Tippen, um ein Bild auszuwählen
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </label>
 
                                     <button
-                                        className="btn btn-primary flex-1 text-sm"
-                                        onClick={() => createCard(true)}
-                                    >
-                                        Trotzdem speichern
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="mt-6 grid grid-cols-2 gap-4">
-                            <button
-                                className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
-                                onClick={saveCard}
-                                disabled={!german.trim() || !swahili.trim()}
-                                type="button"
-                            >
-                                {editingId ? "Speichern" : saveCardLabel}
-                            </button>
-
-                            <button
-                                className="btn btn-ghost py-3 text-base"
-                                type="button"
-                                onClick={handleCancelEdit}
-                            >
-                                Abbrechen
-                            </button>
-                        </div>
-
-                        {editingId && (
-                            <button
-                                type="button"
-                                className="mt-3 w-full btn btn-ghost py-3 text-accent-cta"
-                                onClick={async () => {
-                                    if (!editingId) return;
-
-                                    const deleted = await deleteCard(editingId);
-                                    if (!deleted) return; // <- bleibt im Edit-Sheet
-
-                                    setOpenCreate(false);
-                                    cancelEdit();
-                                    resetImageInputs();
-                                }}
-                            >
-                                🗑️ Löschen
-                            </button>
-                        )}
-                    </div>
-
-                    {
-                        status ? (
-                            <div className="mt-4 rounded-xl border bg-surface p-3 text-sm">
-                                {status}
-                            </div>
-                        ) : null
-                    }
-                </FullScreenSheet >
-
-                {/* Suggestion Modal */}
-                < FullScreenSheet
-                    open={suggestOpen}
-                    title="Bildvorschläge"
-                    onClose={() => setSuggestOpen(false)}
-                >
-                    {
-                        suggestLoading ? (
-                            <div className="mt-4 text-sm text-muted" > Lade Vorschläge…</div>
-                        ) : suggestError ? (
-                            <div className="mt-4 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                                {suggestError}
-                            </div>
-                        ) : suggestItems.length === 0 ? (
-                            <div className="mt-4 text-sm text-muted">
-                                Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
-                            </div>
-                        ) : (
-                            <div className="mt-6 grid grid-cols-2 gap-4">
-                                {suggestItems.map((it) => (
-                                    <button
-                                        key={it.pageId}
                                         type="button"
-                                        className="rounded-xl border overflow-hidden hover:shadow-soft transition"
-                                        onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
+                                        className="mt-6 w-full rounded-xl border p-3"
+                                        onClick={openImageSuggestions}
                                     >
-                                        <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
-                                        <div className="p-2 text-xs text-muted line-clamp-2">{it.title}</div>
+                                        ✨ Bild vorschlagen
                                     </button>
-                                ))}
-                            </div>
-                        )}
-                </FullScreenSheet >
 
-                {/* My Cards Modal */}
-                < FullScreenSheet
-                    open={openCards}
-                    title={cardsLabel}
-                    onClose={() => setOpenCards(false)
-                    }
-                >
-                    <div className="rounded-2xl border p-4 bg-surface">
-                        {status ? (
-                            <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
-                                {status}
-                            </div>
-                        ) : null}
-
-                        <div className="mt-3 text-sm text-muted">
-                            {cards.length} {cardsCountLabel}.
-                        </div>
-
-                        {/* Liste */}
-                        <div className="mt-4 space-y-3">
-                            {filteredCards.map((c) => (
-                                <div key={c.id} className="rounded-xl border p-3">
-                                    {isSentenceTrainer ? (
-                                        <div className="space-y-1 text-sm font-medium min-w-0">
-                                            <CardText>{c.german_text}</CardText>
-                                            <CardText className="text-muted">{c.swahili_text}</CardText>
+                                    {suggestedImagePath ? (
+                                        <div className="mt-2 text-xs text-muted">
+                                            Vorschlagsbild ausgewählt ✅
                                         </div>
-                                    ) : (
-                                        <div className="text-sm font-medium min-w-0">
-                                            <CardText>{c.german_text} — {c.swahili_text}</CardText>
+                                    ) : null}
+
+                                    {editingImagePath ? (
+                                        <div className="mt-3">
+                                            <div className="text-xs text-muted mb-2">Aktuelles Bild</div>
+                                            <img
+                                                src={`${IMAGE_BASE_URL}/${editingImagePath}`}
+                                                alt="Aktuelles Bild"
+                                                className="w-full max-h-56 object-contain rounded-2xl border bg-surface"
+                                            />
+                                        </div>
+                                    ) : null}
+
+                                    {duplicateHint && (
+                                        <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
+                                            <p className="text-sm font-medium">{duplicateHint}</p>
+
+                                            {/* Vorschau vorhandener Karten */}
+                                            {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
+                                                <div className="space-y-2">
+                                                    <p className="text-xs text-muted">Bereits vorhandene Karten:</p>
+
+                                                    {duplicatePreview.slice(0, 5).map((c: any) => (
+                                                        <button
+                                                            key={c.id}
+                                                            type="button"
+                                                            className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
+                                                            onClick={() => {
+                                                                // Duplikat direkt bearbeiten
+                                                                setCreateDraft({ german, swahili });
+                                                                const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
+                                                                startEdit(full, "create");
+                                                                setDuplicateHint(null);
+                                                                setDuplicatePreview(null);
+                                                                setOpenCreate(true);
+                                                            }}
+                                                        >
+
+                                                            {
+                                                                c.image_path ? (
+                                                                    <img
+                                                                        src={`${IMAGE_BASE_URL}/${c.image_path}`}
+                                                                        alt="Bild"
+                                                                        className="w-10 h-10 rounded-md object-cover border"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="w-10 h-10 rounded-md border bg-surface flex items-center justify-center text-xs text-muted">
+                                                                        –
+                                                                    </div>
+                                                                )
+                                                            }
+
+                                                            <div className="text-sm min-w-0" >
+                                                                <CardText className="font-medium">{c.german_text}</CardText>
+                                                                <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            <div className="flex gap-2 pt-2">
+                                                <button
+                                                    className="btn btn-ghost flex-1 text-sm"
+                                                    onClick={() => {
+                                                        setDuplicateHint(null);
+                                                        setDuplicatePreview(null);
+                                                    }}
+                                                >
+                                                    Korrigieren
+                                                </button>
+
+                                                <button
+                                                    className="btn btn-primary flex-1 text-sm"
+                                                    onClick={() => createCard(true)}
+                                                >
+                                                    Trotzdem speichern
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
 
-                                    <div className="mt-2 flex items-center gap-2">
-                                        {c.image_path ? (
-                                            <img
-                                                src={`${IMAGE_BASE_URL}/${c.image_path}`}
-                                                alt="Bild"
-                                                className="w-12 h-12 object-cover rounded-lg border"
-                                            />
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-lg border bg-surface" />
-                                        )}
+                                    <div className="mt-6 grid grid-cols-2 gap-4">
+                                        <button
+                                            className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
+                                            onClick={saveCard}
+                                            disabled={!german.trim() || !swahili.trim()}
+                                            type="button"
+                                        >
+                                            {editingId ? "Speichern" : saveCardLabel}
+                                        </button>
 
-                                        {c.audio_path ? (
-                                            <button
-                                                type="button"
-                                                className="rounded-lg border p-2 text-sm"
-                                                onClick={() => playCardAudioIfExists(c)}
-                                                aria-label="Audio abspielen"
-                                                title="Audio abspielen"
-                                            >
-                                                🔊
-                                            </button>
+                                        <button
+                                            className="btn btn-ghost py-3 text-base"
+                                            type="button"
+                                            onClick={handleCancelEdit}
+                                        >
+                                            Abbrechen
+                                        </button>
+                                    </div>
+
+                                    {editingId && (
+                                        <button
+                                            type="button"
+                                            className="mt-3 w-full btn btn-ghost py-3 text-accent-cta"
+                                            onClick={async () => {
+                                                if (!editingId) return;
+
+                                                const deleted = await deleteCard(editingId);
+                                                if (!deleted) return; // <- bleibt im Edit-Sheet
+
+                                                setOpenCreate(false);
+                                                cancelEdit();
+                                                resetImageInputs();
+                                            }}
+                                        >
+                                            🗑️ Löschen
+                                        </button>
+                                    )}
+                                </div>
+
+                                {
+                                    status ? (
+                                        <div className="mt-4 rounded-xl border bg-surface p-3 text-sm">
+                                            {status}
+                                        </div>
+                                    ) : null
+                                }
+                            </FullScreenSheet >
+
+                            {/* Suggestion Modal */}
+                            < FullScreenSheet
+                                open={suggestOpen}
+                                title="Bildvorschläge"
+                                onClose={() => setSuggestOpen(false)}
+                            >
+                                {
+                                    suggestLoading ? (
+                                        <div className="mt-4 text-sm text-muted" > Lade Vorschläge…</div>
+                                    ) : suggestError ? (
+                                        <div className="mt-4 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                            {suggestError}
+                                        </div>
+                                    ) : suggestItems.length === 0 ? (
+                                        <div className="mt-4 text-sm text-muted">
+                                            Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
+                                        </div>
+                                    ) : (
+                                        <div className="mt-6 grid grid-cols-2 gap-4">
+                                            {suggestItems.map((it) => (
+                                                <button
+                                                    key={it.pageId}
+                                                    type="button"
+                                                    className="rounded-xl border overflow-hidden hover:shadow-soft transition"
+                                                    onClick={() => chooseSuggestedImage(it.importUrl, it.thumb)}
+                                                >
+                                                    <img src={it.thumb} alt={it.title} className="w-full h-28 object-cover" />
+                                                    <div className="p-2 text-xs text-muted line-clamp-2">{it.title}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                            </FullScreenSheet >
+
+                            {/* My Cards Modal */}
+                            < FullScreenSheet
+                                open={openCards}
+                                title={cardsLabel}
+                                onClose={() => setOpenCards(false)
+                                }
+                            >
+                                <div className="rounded-2xl border p-4 bg-surface">
+                                    {status ? (
+                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
+                                            {status}
+                                        </div>
+                                    ) : null}
+
+                                    <div className="mt-3 text-sm text-muted">
+                                        {cards.length} {cardsCountLabel}.
+                                    </div>
+
+                                    {/* Liste */}
+                                    <div className="mt-4 space-y-3">
+                                        {filteredCards.map((c) => (
+                                            <div key={c.id} className="rounded-xl border p-3">
+                                                {isSentenceTrainer ? (
+                                                    <div className="space-y-1 text-sm font-medium min-w-0">
+                                                        <CardText>{c.german_text}</CardText>
+                                                        <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-sm font-medium min-w-0">
+                                                        <CardText>{c.german_text} — {c.swahili_text}</CardText>
+                                                    </div>
+                                                )}
+
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    {c.image_path ? (
+                                                        <img
+                                                            src={`${IMAGE_BASE_URL}/${c.image_path}`}
+                                                            alt="Bild"
+                                                            className="w-12 h-12 object-cover rounded-lg border"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-12 h-12 rounded-lg border bg-surface" />
+                                                    )}
+
+                                                    {c.audio_path ? (
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border p-2 text-sm"
+                                                            onClick={() => playCardAudioIfExists(c)}
+                                                            aria-label="Audio abspielen"
+                                                            title="Audio abspielen"
+                                                        >
+                                                            🔊
+                                                        </button>
+                                                    ) : null}
+                                                </div>
+
+                                                <div className="mt-3 flex gap-2">
+                                                    <button
+                                                        className="rounded-xl border px-3 py-2 text-sm"
+                                                        onClick={() => {
+                                                            startEdit(c, "cards");
+                                                            setOpenCards(false);
+                                                            setOpenCreate(true);
+                                                        }}
+                                                    >
+                                                        Bearbeiten
+                                                    </button>
+
+                                                    <button
+                                                        className="rounded-xl border px-3 py-2 text-sm"
+                                                        onClick={() => deleteCard(c.id)}
+                                                    >
+                                                        Löschen
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        {filteredCards.length === 0 ? (
+                                            <p className="text-sm text-muted">Keine Treffer.</p>
                                         ) : null}
                                     </div>
-
-                                    <div className="mt-3 flex gap-2">
-                                        <button
-                                            className="rounded-xl border px-3 py-2 text-sm"
-                                            onClick={() => {
-                                                startEdit(c, "cards");
-                                                setOpenCards(false);
-                                                setOpenCreate(true);
-                                            }}
-                                        >
-                                            Bearbeiten
-                                        </button>
-
-                                        <button
-                                            className="rounded-xl border px-3 py-2 text-sm"
-                                            onClick={() => deleteCard(c.id)}
-                                        >
-                                            Löschen
-                                        </button>
-                                    </div>
                                 </div>
-                            ))}
+                            </FullScreenSheet >
 
-                            {filteredCards.length === 0 ? (
-                                <p className="text-sm text-muted">Keine Treffer.</p>
-                            ) : null}
-                        </div>
-                    </div>
-                </FullScreenSheet >
+                            {/* Search Modal */}
+                            < FullScreenSheet
+                                open={openSearch}
+                                title={searchLabel}
+                                onClose={() => {
+                                    setOpenSearch(false);
+                                    setSearch("");
+                                }}
+                            >
+                                <input
+                                    className="w-full rounded-xl border p-3"
+                                    placeholder="Deutsch oder Swahili eingeben…"
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                />
 
-                {/* Search Modal */}
-                < FullScreenSheet
-                    open={openSearch}
-                    title={searchLabel}
-                    onClose={() => {
-                        setOpenSearch(false);
-                        setSearch("");
-                    }}
-                >
-                    <input
-                        className="w-full rounded-xl border p-3"
-                        placeholder="Deutsch oder Swahili eingeben…"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                    />
+                                <div className="mt-4 space-y-2">
+                                    {search.trim().length === 0 ? (
+                                        <p className="text-sm text-muted">
+                                            {searchHint}
+                                        </p>
+                                    ) : filteredCards.length === 0 ? (
+                                        <p className="text-sm text-muted">
+                                            Keine Karte gefunden.
+                                        </p>
+                                    ) : (
+                                        <div className="mt-4 space-y-2">
+                                            {filteredCards.map((c) => (
+                                                <div key={c.id} className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        className="flex-1 text-left rounded-xl border p-3 hover:bg-surface"
+                                                        onClick={() => {
+                                                            setOpenSearch(false);
+                                                            setSearch("");
+                                                            startEdit(c, "cards");
+                                                            setOpenCreate(true);
+                                                        }}
+                                                    >
+                                                        {isSentenceTrainer ? (
+                                                            <div className="space-y-1 font-medium min-w-0">
+                                                                <CardText>{c.german_text}</CardText>
+                                                                <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="font-medium min-w-0">
+                                                                <CardText>{c.german_text} — {c.swahili_text}</CardText>
+                                                            </div>
+                                                        )}
+                                                    </button>
 
-                    <div className="mt-4 space-y-2">
-                        {search.trim().length === 0 ? (
-                            <p className="text-sm text-muted">
-                                {searchHint}
-                            </p>
-                        ) : filteredCards.length === 0 ? (
-                            <p className="text-sm text-muted">
-                                Keine Karte gefunden.
-                            </p>
-                        ) : (
-                            <div className="mt-4 space-y-2">
-                                {filteredCards.map((c) => (
-                                    <div key={c.id} className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            className="flex-1 text-left rounded-xl border p-3 hover:bg-surface"
-                                            onClick={() => {
-                                                setOpenSearch(false);
-                                                setSearch("");
-                                                startEdit(c, "cards");
-                                                setOpenCreate(true);
-                                            }}
-                                        >
-                                            {isSentenceTrainer ? (
-                                                <div className="space-y-1 font-medium min-w-0">
-                                                    <CardText>{c.german_text}</CardText>
-                                                    <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                    <button
+                                                        type="button"
+                                                        className="rounded-xl border p-3"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            deleteCard(c.id);
+                                                        }}
+                                                        aria-label="Karte löschen"
+                                                        title="Löschen"
+                                                    >
+                                                        🗑️
+                                                    </button>
                                                 </div>
-                                            ) : (
-                                                <div className="font-medium min-w-0">
-                                                    <CardText>{c.german_text} — {c.swahili_text}</CardText>
-                                                </div>
-                                            )}
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            className="rounded-xl border p-3"
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                deleteCard(c.id);
-                                            }}
-                                            aria-label="Karte löschen"
-                                            title="Löschen"
-                                        >
-                                            🗑️
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </FullScreenSheet >
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </FullScreenSheet >
+                        </>
+                    )}
             </div >
         </main >
     );

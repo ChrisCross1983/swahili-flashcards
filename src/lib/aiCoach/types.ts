@@ -1,0 +1,81 @@
+import type { CardType, Direction } from "@/lib/trainer/types";
+
+export type AiTaskType = "translate" | "cloze";
+
+export type AiCoachTask = {
+    taskId: string;
+    cardId: string;
+    type: AiTaskType;
+    direction: Direction;
+    prompt: string;
+    expectedAnswer: string;
+    hint?: string;
+};
+
+export type AiEvaluationResult = {
+    correct: boolean;
+    score: number;
+    feedback: string;
+    suggestedNext: "translate" | "cloze" | "repeat";
+};
+
+export type AiCoachSessionStats = {
+    totalCount: number;
+    correctCount: number;
+    wrongCardIds: string[];
+    streak: number;
+};
+
+export type AiCoachStartInput = {
+    type: CardType;
+    level?: "beginner" | "intermediate";
+    direction?: Direction;
+};
+
+export type AiCoachStartResponse = {
+    sessionId: string;
+    task: AiCoachTask;
+};
+
+export type AiCoachEvaluateInput = {
+    sessionId: string;
+    task: AiCoachTask;
+    answer: string;
+};
+
+export type AiCoachEvaluateResponse = {
+    result: AiEvaluationResult;
+};
+
+export type AiCoachNextInput = {
+    sessionId: string;
+    type: CardType;
+    direction: Direction;
+    streak: number;
+    lastResult?: AiEvaluationResult;
+};
+
+export type AiCoachNextResponse = {
+    task: AiCoachTask;
+};
+
+export type AiCoachStatus =
+    | "idle"
+    | "loading"
+    | "in_task"
+    | "evaluating"
+    | "showing_result"
+    | "finished"
+    | "error";
+
+export type AiCoachState = {
+    sessionId: string | null;
+    status: AiCoachStatus;
+    currentTask: AiCoachTask | null;
+    lastResult: AiEvaluationResult | null;
+    totalCount: number;
+    correctCount: number;
+    wrongCardIds: string[];
+    streak: number;
+    error: string | null;
+};

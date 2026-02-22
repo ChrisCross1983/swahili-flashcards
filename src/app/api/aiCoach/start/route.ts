@@ -1,0 +1,56 @@
+import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/api/auth";
+import { supabaseServer } from "@/lib/supabaseServer";
+import { buildTaskFromCard } from "@/lib/aiCoach/tasks";
+import type { CardType, Direction } from "@/lib/trainer/types";
+
+type Body = {
+    type?: CardType;
+    direction?: Direction;
+};
+
+export async function POST(req: Request) {
+    let body: Body;
+    try {
+        body = (await req.json()) as Body;
+    } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    const { user, response } = await requireUser();
+    if (response) return response;
+
+    const type = body.type === "sentence" ? "sentence" : "vocab";
+    const direction = body.direction === "SW_TO_DE" ? "SW_TO_DE" : "DE_TO_SW";
+
+    let cardsQuery = supabaseServer
+        .from("cards")
+        .select("id, german_text, swahili_text, type")
+        .eq("owner_key", user.id)
+        .limit(50);
+
+    cardsQuery = type === "sentence" ? cardsQuery.eq("type", "sentence") : cardsQuery.or("type.is.null,type.eq.vocab");
+
+    const { data: cards, error } = await cardsQuery;
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (!cards || cards.length === 0) {
+        return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
+    }
+
+    const picked = cards[Math.floor(Math.random() * cards.length)];
+
+    const task = buildTaskFromCard(
+        { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
+        "translate",
+        direction
+    );
+
+    return NextResponse.json({
+        sessionId: crypto.randomUUID(),
+        task,
+    });
+}

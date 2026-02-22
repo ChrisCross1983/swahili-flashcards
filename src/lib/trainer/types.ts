@@ -2,7 +2,7 @@ export type CardType = "vocab" | "sentence";
 
 export type Direction = "DE_TO_SW" | "SW_TO_DE";
 
-export type LearnMode = "LEITNER" | "DRILL";
+export type LearnMode = "LEITNER" | "DRILL" | "ai";
 
 export type TrainerStatus = "idle" | "loading" | "in_session" | "finished" | "error";
 
