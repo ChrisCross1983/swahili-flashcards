@@ -25,21 +25,7 @@ export async function POST(req: Request) {
     }
 
     const heuristic = evaluateWithHeuristic(body.task, body.answer);
-    if (heuristic) {
-        return NextResponse.json({ result: heuristic });
-    }
+    const withAi = await evaluateWithAi(body.task, body.answer, heuristic);
 
-    const aiResult = await evaluateWithAi(body.task, body.answer);
-    if (aiResult) {
-        return NextResponse.json({ result: aiResult });
-    }
-
-    return NextResponse.json({
-        result: {
-            correct: false,
-            score: 0,
-            feedback: "Nicht ganz. Versuche es erneut oder prüfe die Grundform.",
-            suggestedNext: "repeat",
-        },
-    });
+    return NextResponse.json({ result: withAi });
 }

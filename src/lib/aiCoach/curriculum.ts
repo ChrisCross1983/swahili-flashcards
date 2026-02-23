@@ -1,8 +1,8 @@
-import type { AiEvaluationResult, AiTaskType } from "./types";
+import type { AiCoachResult, AiTaskType } from "./types";
 
-export function chooseNextTaskType(streak: number, lastResult?: AiEvaluationResult): AiTaskType {
+export function chooseNextTaskType(streak: number, lastResult?: AiCoachResult): AiTaskType {
     if (!lastResult) return "translate";
-    if (!lastResult.correct) return "translate";
-    if (streak >= 2) return "cloze";
+    if (lastResult.correctness !== "correct") return "translate";
+    if (streak >= 2 && Math.random() < 0.7) return "cloze";
     return "translate";
 }

@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { CardType, Direction } from "@/lib/trainer/types";
 import { postLearnSession } from "@/lib/trainer/api";
 import { evaluateAiCoachAnswer, fetchNextAiCoachTask, startAiCoachSession } from "./api";
-import { createInitialAiCoachState, finish, setError, setEvaluating, setLoading, setResult, setTask } from "./engine";
+import { createInitialAiCoachState, finish, setError, setEvaluating, setLoading, setResult, setTask, showHint, skipTask } from "./engine";
 import type { AiCoachState } from "./types";
 
 export function useAiCoachSession(cardType: CardType = "vocab", direction: Direction = "DE_TO_SW") {
@@ -47,6 +47,7 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
                 direction,
                 streak: state.streak,
                 lastResult: state.lastResult ?? undefined,
+                wrongCardIds: state.wrongCardIds,
             });
             setState((prev) => setTask(prev, { task: data.task }));
         } catch (error) {
@@ -68,6 +69,13 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
 
         setState((prev) => finish(prev));
     }, [state.correctCount, state.totalCount, state.wrongCardIds]);
+    const revealHint = useCallback(() => {
+        setState((prev) => showHint(prev));
+    }, []);
+
+    const skip = useCallback(() => {
+        setState((prev) => skipTask(prev));
+    }, []);
 
     const accuracy = useMemo(() => {
         if (state.totalCount === 0) return 0;
@@ -79,6 +87,8 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
         accuracy,
         startSession,
         submitAnswer,
+        revealHint,
+        skip,
         nextTask,
         endSession,
     };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialAiCoachState, setResult, setTask, finish } from "../engine";
+import { createInitialAiCoachState, setResult, setTask, finish, skipTask } from "../engine";
 import type { AiCoachTask } from "../types";
 
 function makeTask(id: string): AiCoachTask {
@@ -29,7 +29,8 @@ describe("ai coach engine", () => {
     it("increments counters on correct result", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c1") });
         const state = setResult(withTask, {
-            correct: true,
+            correctness: "correct",
+            correctAnswer: "nyumba",
             score: 1,
             feedback: "ok",
             suggestedNext: "translate",
@@ -43,7 +44,8 @@ describe("ai coach engine", () => {
     it("tracks wrong card ids on wrong result", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c1") });
         const state = setResult(withTask, {
-            correct: false,
+            correctness: "wrong",
+            correctAnswer: "nyumba",
             score: 0.2,
             feedback: "no",
             suggestedNext: "repeat",
@@ -56,5 +58,27 @@ describe("ai coach engine", () => {
     it("can finish session", () => {
         const state = finish(createInitialAiCoachState());
         expect(state.status).toBe("finished");
+    });
+
+    it("skip increments totalCount and wrongCardIds", () => {
+        const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c3") });
+        const state = skipTask(withTask);
+
+        expect(state.totalCount).toBe(1);
+        expect(state.wrongCardIds).toContain("c3");
+        expect(state.lastResult?.correctness).toBe("wrong");
+    });
+
+    it("almost does not increment correctCount", () => {
+        const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c4") });
+        const state = setResult(withTask, {
+            correctness: "almost",
+            correctAnswer: "nyumba",
+            score: 0.9,
+            feedback: "close",
+            suggestedNext: "repeat",
+        });
+
+        expect(state.correctCount).toBe(0);
     });
 });

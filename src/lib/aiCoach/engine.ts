@@ -1,4 +1,4 @@
-import type { AiCoachState, AiCoachTask, AiEvaluationResult } from "./types";
+import type { AiCoachResult, AiCoachState, AiCoachTask } from "./types";
 
 export function createInitialAiCoachState(): AiCoachState {
     return {
@@ -10,6 +10,7 @@ export function createInitialAiCoachState(): AiCoachState {
         correctCount: 0,
         wrongCardIds: [],
         streak: 0,
+        hintLevel: 0,
         error: null,
     };
 }
@@ -25,6 +26,7 @@ export function setTask(state: AiCoachState, payload: { sessionId?: string; task
         sessionId: payload.sessionId ?? state.sessionId,
         currentTask: payload.task,
         lastResult: null,
+        hintLevel: 0,
         error: null,
     };
 }
@@ -33,19 +35,47 @@ export function setEvaluating(state: AiCoachState): AiCoachState {
     return { ...state, status: "evaluating", error: null };
 }
 
-export function setResult(state: AiCoachState, result: AiEvaluationResult): AiCoachState {
-    const isWrong = !result.correct && state.currentTask?.cardId;
+export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachState {
+    const isWrong = result.correctness !== "correct" && state.currentTask?.cardId;
 
     return {
         ...state,
         status: "showing_result",
         lastResult: result,
         totalCount: state.totalCount + 1,
-        correctCount: state.correctCount + (result.correct ? 1 : 0),
-        streak: result.correct ? state.streak + 1 : 0,
+        correctCount: state.correctCount + (result.correctness === "correct" ? 1 : 0),
+        streak: result.correctness === "correct" ? state.streak + 1 : 0,
         wrongCardIds: isWrong
             ? Array.from(new Set([...state.wrongCardIds, state.currentTask!.cardId]))
             : state.wrongCardIds,
+    };
+}
+
+export function showHint(state: AiCoachState): AiCoachState {
+    const maxHints = state.currentTask?.hints?.length ?? (state.currentTask?.hint ? 1 : 0);
+    if (maxHints === 0) return state;
+    return { ...state, hintLevel: Math.min(state.hintLevel + 1, maxHints) };
+}
+
+export function skipTask(state: AiCoachState): AiCoachState {
+    if (!state.currentTask) return state;
+    return {
+        ...state,
+        status: "showing_result",
+        lastResult: {
+            correctness: "wrong",
+            correctAnswer: state.currentTask.expectedAnswer,
+            acceptedAnswers: state.currentTask.acceptedAnswers,
+            feedback: "❌ Noch nicht.",
+            why: "Du hast die Aufgabe übersprungen – schau dir die Lösung kurz an.",
+            mnemonic: "Merksatz: Erst Tipp nutzen, dann erst skippen.",
+            score: 0,
+            suggestedNext: "repeat",
+        },
+        totalCount: state.totalCount + 1,
+        streak: 0,
+        hintLevel: 0,
+        wrongCardIds: Array.from(new Set([...state.wrongCardIds, state.currentTask.cardId])),
     };
 }
 

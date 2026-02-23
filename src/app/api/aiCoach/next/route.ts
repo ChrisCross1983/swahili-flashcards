@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { chooseNextTaskType } from "@/lib/aiCoach/curriculum";
 import { buildTaskFromCard } from "@/lib/aiCoach/tasks";
-import type { AiEvaluationResult } from "@/lib/aiCoach/types";
+import type { AiCoachResult } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
 type Body = {
@@ -11,7 +11,8 @@ type Body = {
     type?: CardType;
     direction?: Direction;
     streak?: number;
-    lastResult?: AiEvaluationResult;
+    lastResult?: AiCoachResult;
+    wrongCardIds?: string[];
 };
 
 export async function POST(req: Request) {
@@ -48,7 +49,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
     }
 
-    const picked = cards[Math.floor(Math.random() * cards.length)];
+    const prioritized = body.wrongCardIds?.length
+        ? cards.find((card) => body.wrongCardIds?.includes(card.id))
+        : null;
+    const picked = prioritized ?? cards[Math.floor(Math.random() * cards.length)];
     const taskType = chooseNextTaskType(streak, body.lastResult);
     const task = buildTaskFromCard(
         { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },

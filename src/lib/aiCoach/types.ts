@@ -9,13 +9,20 @@ export type AiCoachTask = {
     direction: Direction;
     prompt: string;
     expectedAnswer: string;
+    acceptedAnswers?: string[];
     hint?: string;
+    hints?: string[];
+    meta?: { source?: "vocab" | "sentence" | "template"; difficulty?: "easy" | "medium" };
 };
 
-export type AiEvaluationResult = {
-    correct: boolean;
-    score: number;
+export type AiCoachResult = {
+    correctness: "correct" | "almost" | "wrong";
+    correctAnswer: string;
+    acceptedAnswers?: string[];
     feedback: string;
+    why?: string;
+    mnemonic?: string;
+    score?: number;
     suggestedNext: "translate" | "cloze" | "repeat";
 };
 
@@ -44,7 +51,7 @@ export type AiCoachEvaluateInput = {
 };
 
 export type AiCoachEvaluateResponse = {
-    result: AiEvaluationResult;
+    result: AiCoachResult;
 };
 
 export type AiCoachNextInput = {
@@ -52,7 +59,8 @@ export type AiCoachNextInput = {
     type: CardType;
     direction: Direction;
     streak: number;
-    lastResult?: AiEvaluationResult;
+    lastResult?: AiCoachResult;
+    wrongCardIds?: string[];
 };
 
 export type AiCoachNextResponse = {
@@ -72,10 +80,11 @@ export type AiCoachState = {
     sessionId: string | null;
     status: AiCoachStatus;
     currentTask: AiCoachTask | null;
-    lastResult: AiEvaluationResult | null;
+    lastResult: AiCoachResult | null;
     totalCount: number;
     correctCount: number;
     wrongCardIds: string[];
     streak: number;
+    hintLevel: number;
     error: string | null;
 };

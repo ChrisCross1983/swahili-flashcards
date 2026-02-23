@@ -9,10 +9,13 @@ type Props = {
 };
 
 export default function AiCoachPanel({ cardType }: Props) {
-    const { state, accuracy, startSession, submitAnswer, nextTask, endSession } = useAiCoachSession(cardType);
+    const { state, accuracy, startSession, submitAnswer, revealHint, skip, nextTask, endSession } = useAiCoachSession(cardType);
     const [answer, setAnswer] = useState("");
 
     const canSubmit = state.status === "in_task" && answer.trim().length > 0;
+
+    const visibleHints = state.currentTask?.hints?.slice(0, state.hintLevel) ?? (state.hintLevel > 0 && state.currentTask?.hint ? [state.currentTask.hint] : []);
+    const hasHints = Boolean(state.currentTask?.hints?.length || state.currentTask?.hint);
 
     return (
         <div className="mt-6 rounded-3xl border border-soft bg-surface p-6 shadow-soft space-y-4">
@@ -31,7 +34,13 @@ export default function AiCoachPanel({ cardType }: Props) {
                 <div className="rounded-2xl bg-surface-elevated p-4">
                     <div className="text-sm text-muted">Aufgabe ({state.currentTask.type})</div>
                     <div className="mt-1 font-semibold">{state.currentTask.prompt}</div>
-                    {state.currentTask.hint ? <div className="mt-2 text-xs text-muted">{state.currentTask.hint}</div> : null}
+                    {visibleHints.length > 0 ? (
+                        <ul className="mt-2 space-y-1 text-xs text-muted">
+                            {visibleHints.map((hint, index) => (
+                                <li key={`${hint}-${index}`}>💡 {hint}</li>
+                            ))}
+                        </ul>
+                    ) : null}
                 </div>
             ) : null}
 
@@ -54,6 +63,12 @@ export default function AiCoachPanel({ cardType }: Props) {
                 <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
                     Antwort prüfen
                 </button>
+                <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={state.status !== "in_task" || !hasHints}>
+                    💡 Tipp
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={skip} disabled={state.status !== "in_task"}>
+                    ⏭ Überspringen
+                </button>
                 <button type="button" className="btn btn-secondary" onClick={() => { setAnswer(""); void nextTask(); }} disabled={state.status !== "showing_result"}>
                     Nächste Aufgabe
                 </button>
@@ -64,8 +79,29 @@ export default function AiCoachPanel({ cardType }: Props) {
 
             {state.lastResult ? (
                 <div className="rounded-2xl border border-soft p-3">
-                    <div className="font-medium">{state.lastResult.correct ? "✅ Richtig" : "❌ Noch nicht"} · Score: {Math.round(state.lastResult.score * 100)}%</div>
+                    <div className="font-medium">
+                        {state.lastResult.correctness === "correct"
+                            ? "✅ Richtig"
+                            : state.lastResult.correctness === "almost"
+                                ? "🟨 Fast richtig"
+                                : "❌ Noch nicht"}
+                    </div>
                     <div className="text-sm text-muted mt-1">{state.lastResult.feedback}</div>
+                    {state.lastResult.correctness !== "correct" ? (
+                        <div className="text-sm mt-2">
+                            Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span>
+                        </div>
+                    ) : null}
+                    {state.lastResult.why ? <div className="text-sm text-muted mt-1">Warum: {state.lastResult.why}</div> : null}
+                    {state.lastResult.mnemonic ? <div className="text-sm text-muted mt-1">Merksatz: {state.lastResult.mnemonic}</div> : null}
+                    {state.lastResult.correctness !== "correct" ? (
+                        <div className="mt-2 h-2 rounded-full bg-surface-elevated">
+                            <div
+                                className={`h-2 rounded-full ${state.lastResult.correctness === "almost" ? "bg-yellow-500" : "bg-red-500"}`}
+                                style={{ width: `${Math.round((state.lastResult.score ?? 0) * 100)}%` }}
+                            />
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 
