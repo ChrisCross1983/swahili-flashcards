@@ -11,6 +11,8 @@ type Body = {
     type?: CardType;
     direction?: Direction;
     streak?: number;
+    excludeCardId?: string;
+    answeredCardIds?: string[];
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
 };
@@ -49,10 +51,32 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
     }
 
+    const excludeCardId = body.excludeCardId;
+    const answeredCardIds = new Set(body.answeredCardIds ?? []);
+
+    const withoutExcluded = excludeCardId ? cards.filter((card) => card.id !== excludeCardId) : cards;
+    const unseenCandidates = withoutExcluded.filter((card) => !answeredCardIds.has(card.id));
+
+    const candidatePool = unseenCandidates.length > 0
+        ? unseenCandidates
+        : (withoutExcluded.length > 0 ? withoutExcluded : cards);
+
     const prioritized = body.wrongCardIds?.length
-        ? cards.find((card) => body.wrongCardIds?.includes(card.id))
+        ? candidatePool.find((card) => body.wrongCardIds?.includes(card.id))
         : null;
-    const picked = prioritized ?? cards[Math.floor(Math.random() * cards.length)];
+    const picked = prioritized ?? candidatePool[Math.floor(Math.random() * candidatePool.length)];
+    const repeated = excludeCardId !== undefined && picked.id === excludeCardId;
+
+    if (process.env.NODE_ENV === "development") {
+        console.info("[ai-coach-api] next", {
+            excludeCardId,
+            answeredCount: answeredCardIds.size,
+            chosenCardId: picked.id,
+            repeated,
+            poolSize: candidatePool.length,
+        });
+    }
+
     const taskType = chooseNextTaskType(streak, body.lastResult);
     const task = buildTaskFromCard(
         { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
@@ -60,5 +84,5 @@ export async function POST(req: Request) {
         direction
     );
 
-    return NextResponse.json({ task });
+    return NextResponse.json({ task: { ...task, meta: { ...task.meta, repeated } }, meta: { repeated } });
 }

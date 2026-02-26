@@ -5,7 +5,7 @@ import type { CardType, Direction } from "@/lib/trainer/types";
 import { postLearnSession } from "@/lib/trainer/api";
 import { evaluateAiCoachAnswer, fetchNextAiCoachTask, startAiCoachSession } from "./api";
 import { createInitialAiCoachState, finish, setError, setEvaluating, setLoading, setResult, setTask, showHint, skipTask } from "./engine";
-import type { AiCoachState } from "./types";
+import type { AiCoachNextInput, AiCoachState } from "./types";
 
 export function useAiCoachSession(cardType: CardType = "vocab", direction: Direction = "DE_TO_SW") {
     const [state, setState] = useState<AiCoachState>(createInitialAiCoachState());
@@ -38,22 +38,44 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
 
     const nextTask = useCallback(async () => {
         if (!state.sessionId) return;
+
+        const payload: AiCoachNextInput = {
+            sessionId: state.sessionId,
+            type: cardType,
+            direction,
+            streak: state.streak,
+            excludeCardId: state.currentTask?.cardId,
+            answeredCardIds: state.answeredCardIds,
+            lastResult: state.lastResult ?? undefined,
+            wrongCardIds: state.wrongCardIds,
+        };
+
+        if (process.env.NODE_ENV === "development") {
+            console.info("[ai-coach] next:request", {
+                currentTaskId: state.currentTask?.taskId,
+                currentCardId: state.currentTask?.cardId,
+                answeredCardIds: state.answeredCardIds,
+            });
+        }
+
         setState((prev) => setLoading(prev));
 
         try {
-            const data = await fetchNextAiCoachTask({
-                sessionId: state.sessionId,
-                type: cardType,
-                direction,
-                streak: state.streak,
-                lastResult: state.lastResult ?? undefined,
-                wrongCardIds: state.wrongCardIds,
-            });
+            const data = await fetchNextAiCoachTask(payload);
+
+            if (process.env.NODE_ENV === "development") {
+                console.info("[ai-coach] next:response", {
+                    taskId: data.task.taskId,
+                    cardId: data.task.cardId,
+                    repeated: data.meta?.repeated ?? false,
+                });
+            }
+
             setState((prev) => setTask(prev, { task: data.task }));
         } catch (error) {
             setState((prev) => setError(prev, error instanceof Error ? error.message : "Nächste Aufgabe fehlgeschlagen."));
         }
-    }, [cardType, direction, state.lastResult, state.sessionId, state.streak]);
+    }, [cardType, direction, state.answeredCardIds, state.currentTask?.cardId, state.currentTask?.taskId, state.lastResult, state.sessionId, state.streak, state.wrongCardIds]);
 
     const endSession = useCallback(async () => {
         try {

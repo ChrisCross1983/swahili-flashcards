@@ -60,16 +60,17 @@ describe("ai coach engine", () => {
         expect(state.status).toBe("finished");
     });
 
-    it("skip increments totalCount and wrongCardIds", () => {
+    it("skip adds card to answered ids and increments totalCount", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c3") });
         const state = skipTask(withTask);
 
         expect(state.totalCount).toBe(1);
         expect(state.wrongCardIds).toContain("c3");
+        expect(state.answeredCardIds).toContain("c3");
         expect(state.lastResult?.correctness).toBe("wrong");
     });
 
-    it("almost does not increment correctCount", () => {
+    it("almost adds card to answered ids and increments totalCount", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c4") });
         const state = setResult(withTask, {
             correctness: "almost",
@@ -79,6 +80,24 @@ describe("ai coach engine", () => {
             suggestedNext: "repeat",
         });
 
+        expect(state.totalCount).toBe(1);
         expect(state.correctCount).toBe(0);
+        expect(state.answeredCardIds).toContain("c4");
+    });
+
+    it("setTask replaces lastResult and updates task id", () => {
+        const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c1") });
+        const withResult = setResult(withTask, {
+            correctness: "wrong",
+            correctAnswer: "nyumba",
+            score: 0.1,
+            feedback: "no",
+            suggestedNext: "repeat",
+        });
+
+        const nextState = setTask(withResult, { task: makeTask("c2") });
+        expect(nextState.currentTask?.taskId).toBe("task-c2");
+        expect(nextState.lastResult).toBeNull();
+        expect(nextState.lastCardId).toBe("c2");
     });
 });

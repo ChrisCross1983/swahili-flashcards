@@ -12,7 +12,7 @@ export type AiCoachTask = {
     acceptedAnswers?: string[];
     hint?: string;
     hints?: string[];
-    meta?: { source?: "vocab" | "sentence" | "template"; difficulty?: "easy" | "medium" };
+    meta?: { source?: "vocab" | "sentence" | "template"; difficulty?: "easy" | "medium"; repeated?: boolean };
 };
 
 export type AiCoachResult = {
@@ -59,12 +59,17 @@ export type AiCoachNextInput = {
     type: CardType;
     direction: Direction;
     streak: number;
+    excludeCardId?: string;
+    answeredCardIds?: string[];
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
 };
 
 export type AiCoachNextResponse = {
     task: AiCoachTask;
+    meta?: {
+        repeated?: boolean;
+    };
 };
 
 export type AiCoachStatus =
@@ -84,6 +89,8 @@ export type AiCoachState = {
     totalCount: number;
     correctCount: number;
     wrongCardIds: string[];
+    answeredCardIds: string[];
+    lastCardId?: string;
     streak: number;
     hintLevel: number;
     error: string | null;

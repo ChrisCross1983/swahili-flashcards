@@ -9,6 +9,7 @@ export function createInitialAiCoachState(): AiCoachState {
         totalCount: 0,
         correctCount: 0,
         wrongCardIds: [],
+        answeredCardIds: [],
         streak: 0,
         hintLevel: 0,
         error: null,
@@ -25,6 +26,7 @@ export function setTask(state: AiCoachState, payload: { sessionId?: string; task
         status: "in_task",
         sessionId: payload.sessionId ?? state.sessionId,
         currentTask: payload.task,
+        lastCardId: payload.task.cardId,
         lastResult: null,
         hintLevel: 0,
         error: null,
@@ -36,7 +38,11 @@ export function setEvaluating(state: AiCoachState): AiCoachState {
 }
 
 export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachState {
-    const isWrong = result.correctness !== "correct" && state.currentTask?.cardId;
+    const currentCardId = state.currentTask?.cardId;
+    const isWrong = result.correctness !== "correct" && currentCardId;
+    const answeredCardIds = currentCardId
+        ? Array.from(new Set([...state.answeredCardIds, currentCardId]))
+        : state.answeredCardIds;
 
     return {
         ...state,
@@ -45,8 +51,9 @@ export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachSt
         totalCount: state.totalCount + 1,
         correctCount: state.correctCount + (result.correctness === "correct" ? 1 : 0),
         streak: result.correctness === "correct" ? state.streak + 1 : 0,
+        answeredCardIds,
         wrongCardIds: isWrong
-            ? Array.from(new Set([...state.wrongCardIds, state.currentTask!.cardId]))
+            ? Array.from(new Set([...state.wrongCardIds, currentCardId]))
             : state.wrongCardIds,
     };
 }
@@ -75,6 +82,7 @@ export function skipTask(state: AiCoachState): AiCoachState {
         totalCount: state.totalCount + 1,
         streak: 0,
         hintLevel: 0,
+        answeredCardIds: Array.from(new Set([...state.answeredCardIds, state.currentTask.cardId])),
         wrongCardIds: Array.from(new Set([...state.wrongCardIds, state.currentTask.cardId])),
     };
 }
