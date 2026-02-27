@@ -27,11 +27,11 @@ export async function POST(req: Request) {
     cardsQuery = type === "sentence" ? cardsQuery.eq("type", "sentence") : cardsQuery.or("type.is.null,type.eq.vocab");
 
     const { data: cards, error } = await cardsQuery;
+
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!cards || cards.length === 0) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
 
     const picked = cards[Math.floor(Math.random() * cards.length)];
