@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { chooseNextTaskType } from "@/lib/aiCoach/curriculum";
-import { buildTaskFromCard } from "@/lib/aiCoach/tasks";
+import { generateTask } from "@/lib/aiCoach/tasks/generate";
 import type { AiCoachResult } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -10,11 +9,13 @@ type Body = {
     sessionId?: string;
     type?: CardType;
     direction?: Direction;
-    streak?: number;
     excludeCardId?: string;
     answeredCardIds?: string[];
+    recentCardIds?: string[];
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
+    hintLevel?: number;
+    shouldOfferMcq?: boolean;
 };
 
 export async function POST(req: Request) {
@@ -28,61 +29,35 @@ export async function POST(req: Request) {
     const { user, response } = await requireUser();
     if (response) return response;
 
-    if (!body.sessionId) {
-        return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
-    }
+    if (!body.sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
 
     const type = body.type === "sentence" ? "sentence" : "vocab";
     const direction = body.direction === "SW_TO_DE" ? "SW_TO_DE" : "DE_TO_SW";
-    const streak = Number(body.streak ?? 0);
 
-    let cardsQuery = supabaseServer
-        .from("cards")
-        .select("id, german_text, swahili_text, type")
-        .eq("owner_key", user.id)
-        .limit(50);
-
+    let cardsQuery = supabaseServer.from("cards").select("id, german_text, swahili_text, type").eq("owner_key", user.id).limit(100);
     cardsQuery = type === "sentence" ? cardsQuery.eq("type", "sentence") : cardsQuery.or("type.is.null,type.eq.vocab");
 
     const { data: cards, error } = await cardsQuery;
-
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!cards || cards.length === 0) {
-        return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
-    }
+    if (!cards || cards.length === 0) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
 
-    const excludeCardId = body.excludeCardId;
-    const answeredCardIds = new Set(body.answeredCardIds ?? []);
+    const recentSet = new Set(body.recentCardIds ?? []);
+    const answeredSet = new Set(body.answeredCardIds ?? []);
+    const filtered = cards.filter((card) => card.id !== body.excludeCardId && !recentSet.has(card.id) && !answeredSet.has(card.id));
+    const pool = filtered.length > 0 ? filtered : cards.filter((card) => card.id !== body.excludeCardId);
+    const fallbackPool = pool.length > 0 ? pool : cards;
+    const picked = fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+    const repeated = Boolean(body.excludeCardId && picked.id === body.excludeCardId);
 
-    const withoutExcluded = excludeCardId ? cards.filter((card) => card.id !== excludeCardId) : cards;
-    const unseenCandidates = withoutExcluded.filter((card) => !answeredCardIds.has(card.id));
+    const shouldOfferMcq = Boolean(body.shouldOfferMcq || body.lastResult?.actionHints.shouldOfferMcq);
 
-    const candidatePool = unseenCandidates.length > 0
-        ? unseenCandidates
-        : (withoutExcluded.length > 0 ? withoutExcluded : cards);
+    const task = generateTask({
+        card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
+        direction,
+        forceMcq: shouldOfferMcq,
+        hintLevel: body.hintLevel ?? 0,
+        pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text })),
+    });
 
-    const prioritized = body.wrongCardIds?.length
-        ? candidatePool.find((card) => body.wrongCardIds?.includes(card.id))
-        : null;
-    const picked = prioritized ?? candidatePool[Math.floor(Math.random() * candidatePool.length)];
-    const repeated = excludeCardId !== undefined && picked.id === excludeCardId;
-
-    if (process.env.NODE_ENV === "development") {
-        console.info("[ai-coach-api] next", {
-            excludeCardId,
-            answeredCount: answeredCardIds.size,
-            chosenCardId: picked.id,
-            repeated,
-            poolSize: candidatePool.length,
-        });
-    }
-
-    const taskType = chooseNextTaskType(streak, body.lastResult);
-    const task = buildTaskFromCard(
-        { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
-        taskType,
-        direction
-    );
-
-    return NextResponse.json({ task: { ...task, meta: { ...task.meta, repeated } }, meta: { repeated } });
+    return NextResponse.json({ task, meta: { repeated } });
 }

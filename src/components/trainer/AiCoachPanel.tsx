@@ -8,43 +8,23 @@ type Props = {
     cardType: CardType;
 };
 
-function stripStatusPrefix(value: string) {
-    return value.replace(/^\s*(✅\s*Richtig|🟨\s*Fast\s+richtig|❌\s*Noch\s+nicht\.?)[\s:\-]*?/i, "").trim();
-}
-
-function formatMnemonic(value: string) {
-    return /^\s*Merksatz\s*:/i.test(value) ? value.trim() : `Merksatz: ${value.trim()}`;
-}
-
 export default function AiCoachPanel({ cardType }: Props) {
-    const { state, accuracy, startSession, submitAnswer, revealHint, skip, nextTask, endSession } = useAiCoachSession(cardType);
+    const { state, accuracy, startSession, submitAnswer, revealHint, skip, retry, showExampleText, nextTask, endSession } = useAiCoachSession(cardType);
     const [answer, setAnswer] = useState("");
 
-    const canSubmit = state.status === "in_task" && answer.trim().length > 0;
-
-    const visibleHints = state.currentTask?.hints?.slice(0, state.hintLevel) ?? (state.hintLevel > 0 && state.currentTask?.hint ? [state.currentTask.hint] : []);
-    const hasHints = Boolean(state.currentTask?.hints?.length || state.currentTask?.hint);
-
-    const statusHeadline = state.lastResult
-        ? state.lastResult.correctness === "correct"
-            ? "✅ Richtig"
-            : state.lastResult.correctness === "almost"
-                ? "🟨 Fast richtig"
-                : "❌ Noch nicht"
-        : null;
-
-    const feedbackLine = (() => {
-        if (!state.lastResult?.feedback) return null;
-        const cleaned = stripStatusPrefix(state.lastResult.feedback);
-        if (!cleaned || cleaned.toLowerCase() === statusHeadline?.toLowerCase()) return null;
-        return cleaned;
-    })();
-
-    const mnemonicLine = state.lastResult?.mnemonic ? formatMnemonic(state.lastResult.mnemonic) : null;
+    const isInTask = state.status === "in_task";
+    const hasResult = state.status === "showing_result" && state.lastResult;
+    const lastResult = state.lastResult;
+    const canSubmit = isInTask && answer.trim().length > 0;
 
     const handleNextTask = async () => {
         setAnswer("");
         await nextTask();
+    };
+
+    const handleRetry = () => {
+        setAnswer("");
+        retry();
     };
 
     return (
@@ -54,7 +34,7 @@ export default function AiCoachPanel({ cardType }: Props) {
                 <div className="text-sm text-muted">Trefferquote: {accuracy}%</div>
             </div>
 
-            {state.status === "idle" || state.status === "finished" ? (
+            {(state.status === "idle" || state.status === "finished") ? (
                 <button type="button" className="btn btn-primary" onClick={startSession}>
                     Start KI Session
                 </button>
@@ -64,13 +44,27 @@ export default function AiCoachPanel({ cardType }: Props) {
                 <div className="rounded-2xl bg-surface-elevated p-4">
                     <div className="text-sm text-muted">Aufgabe ({state.currentTask.type})</div>
                     <div className="mt-1 font-semibold">{state.currentTask.prompt}</div>
-                    {visibleHints.length > 0 ? (
-                        <ul className="mt-2 space-y-1 text-xs text-muted">
-                            {visibleHints.map((hint, index) => (
-                                <li key={`${hint}-${index}`}>💡 {hint}</li>
+
+                    {state.currentTask.type === "mcq" && state.currentTask.choices?.length ? (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {state.currentTask.choices.map((choice) => (
+                                <button
+                                    key={choice}
+                                    type="button"
+                                    className="btn btn-secondary text-left"
+                                    disabled={!isInTask}
+                                    onClick={() => { setAnswer(choice); }}
+                                >
+                                    {choice}
+                                </button>
                             ))}
-                        </ul>
+                        </div>
                     ) : null}
+
+                    {state.showExample && state.currentTask.exampleSentence ? (
+                        <div className="mt-2 text-sm text-muted">Beispiel: {state.currentTask.exampleSentence}</div>
+                    ) : null}
+
                     {state.currentTask.meta?.repeated ? (
                         <div className="mt-2 text-xs text-muted">Nur 1 Karte verfügbar – Wiederholung ist aktuell unvermeidbar.</div>
                     ) : null}
@@ -82,51 +76,54 @@ export default function AiCoachPanel({ cardType }: Props) {
                 rows={3}
                 value={answer}
                 onChange={(event) => setAnswer(event.target.value)}
-                placeholder="Deine Antwort"
+                placeholder={state.currentTask?.type === "mcq" ? "Oder Option anklicken" : "Deine Antwort"}
                 onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey && canSubmit) {
                         event.preventDefault();
                         void submitAnswer(answer);
                     }
                 }}
-                disabled={state.status !== "in_task"}
+                disabled={!isInTask}
             />
 
-            <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
-                    Antwort prüfen
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={state.status !== "in_task" || !hasHints}>
-                    💡 Tipp
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={skip} disabled={state.status !== "in_task"}>
-                    ⏭ Überspringen
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={() => { void handleNextTask(); }} disabled={state.status !== "showing_result"}>
-                    Nächste Aufgabe
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={endSession} disabled={state.status === "idle" || state.status === "loading"}>
-                    Session beenden
-                </button>
-            </div>
+            {!hasResult ? (
+                <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
+                        Antwort prüfen
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={!isInTask}>
+                        💡 Tipp
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={skip} disabled={!isInTask}>
+                        ⏭ Überspringen
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={endSession} disabled={state.status === "idle" || state.status === "loading"}>
+                        Session beenden
+                    </button>
+                </div>
+            ) : (
+                <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-secondary" onClick={handleRetry} disabled={!lastResult?.actionHints.canRetry}>
+                        Nochmal versuchen
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={showExampleText}>
+                        Beispiel sehen
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={() => { void handleNextTask(); }}>
+                        Weiter
+                    </button>
+                </div>
+            )}
 
             {state.lastResult ? (
-                <div className="rounded-2xl border border-soft p-3">
-                    <div className="font-medium">{statusHeadline}</div>
-                    {feedbackLine ? <div className="text-sm text-muted mt-1">{feedbackLine}</div> : null}
-                    {state.lastResult.correctness !== "correct" ? (
-                        <div className="text-sm mt-2">
-                            Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span>
-                        </div>
-                    ) : null}
-                    {state.lastResult.why ? <div className="text-sm text-muted mt-1">Warum: {state.lastResult.why}</div> : null}
-                    {mnemonicLine ? <div className="text-sm text-muted mt-1">{mnemonicLine}</div> : null}
-                    {state.lastResult.correctness !== "correct" ? (
-                        <div className="mt-2 h-2 rounded-full bg-surface-elevated">
-                            <div
-                                className={`h-2 rounded-full ${state.lastResult.correctness === "almost" ? "bg-yellow-500" : "bg-red-500"}`}
-                                style={{ width: `${Math.round((state.lastResult.score ?? 0) * 100)}%` }}
-                            />
+                <div className="rounded-2xl border border-soft p-3 text-sm">
+                    <div className="font-medium">{state.lastResult.feedback.headline}</div>
+                    {state.lastResult.feedback.analysis ? <div className="text-muted mt-1">Fehleranalyse: {state.lastResult.feedback.analysis}</div> : null}
+                    {state.lastResult.feedback.hint ? <div className="text-muted mt-1">Lernhinweis: {state.lastResult.feedback.hint}</div> : null}
+                    {state.lastResult.feedback.example ? <div className="text-muted mt-1">Beispiel: {state.lastResult.feedback.example}</div> : null}
+                    {state.lastResult.feedback.solution ? (
+                        <div className="mt-2">
+                            Richtig wäre: <span className="font-medium">{state.lastResult.feedback.solution}</span>
                         </div>
                     ) : null}
                 </div>

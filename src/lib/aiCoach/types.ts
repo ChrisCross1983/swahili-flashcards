@@ -1,6 +1,7 @@
 import type { CardType, Direction } from "@/lib/trainer/types";
+import type { AnswerIntent } from "./eval/classify";
 
-export type AiTaskType = "translate" | "cloze";
+export type AiTaskType = "translate" | "cloze" | "mcq";
 
 export type AiCoachTask = {
     taskId: string;
@@ -10,27 +11,27 @@ export type AiCoachTask = {
     prompt: string;
     expectedAnswer: string;
     acceptedAnswers?: string[];
-    hint?: string;
-    hints?: string[];
-    meta?: { source?: "vocab" | "sentence" | "template"; difficulty?: "easy" | "medium"; repeated?: boolean };
+    exampleSentence?: string;
+    choices?: string[];
+    meta?: { repeated?: boolean };
 };
 
 export type AiCoachResult = {
-    correctness: "correct" | "almost" | "wrong";
-    correctAnswer: string;
-    acceptedAnswers?: string[];
-    feedback: string;
-    why?: string;
-    mnemonic?: string;
-    score?: number;
-    suggestedNext: "translate" | "cloze" | "repeat";
-};
-
-export type AiCoachSessionStats = {
-    totalCount: number;
-    correctCount: number;
-    wrongCardIds: string[];
-    streak: number;
+    correct: boolean;
+    intent: AnswerIntent;
+    scoreNormalized: number;
+    feedback: {
+        headline: string;
+        analysis?: string;
+        hint?: string;
+        example?: string;
+        solution?: string;
+    };
+    actionHints: {
+        canRetry: boolean;
+        shouldOfferMcq: boolean;
+        nextLabel: "Weiter" | "Nächste Aufgabe";
+    };
 };
 
 export type AiCoachStartInput = {
@@ -48,6 +49,8 @@ export type AiCoachEvaluateInput = {
     sessionId: string;
     task: AiCoachTask;
     answer: string;
+    hintLevel?: number;
+    wrongAttemptsOnCard?: number;
 };
 
 export type AiCoachEvaluateResponse = {
@@ -61,8 +64,11 @@ export type AiCoachNextInput = {
     streak: number;
     excludeCardId?: string;
     answeredCardIds?: string[];
+    recentCardIds?: string[];
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
+    hintLevel?: number;
+    shouldOfferMcq?: boolean;
 };
 
 export type AiCoachNextResponse = {
@@ -89,9 +95,12 @@ export type AiCoachState = {
     totalCount: number;
     correctCount: number;
     wrongCardIds: string[];
-    answeredCardIds: string[];
+    answeredCardIds: string[]
+    recentCardIds: string[];
+    wrongAttemptsOnCard: number;
     lastCardId?: string;
     streak: number;
     hintLevel: number;
+    showExample: boolean;
     error: string | null;
 };

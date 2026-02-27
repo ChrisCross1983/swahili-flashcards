@@ -7,6 +7,8 @@ type Body = {
     sessionId?: string;
     task?: AiCoachTask;
     answer?: string;
+    hintLevel?: number;
+    wrongAttemptsOnCard?: number;
 };
 
 export async function POST(req: Request) {
@@ -24,7 +26,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
     }
 
-    const heuristic = evaluateWithHeuristic(body.task, body.answer);
+    const heuristic = evaluateWithHeuristic(body.task, body.answer, body.hintLevel ?? 0, body.wrongAttemptsOnCard ?? 0);
     const withAi = await evaluateWithAi(body.task, body.answer, heuristic);
 
     return NextResponse.json({ result: withAi });

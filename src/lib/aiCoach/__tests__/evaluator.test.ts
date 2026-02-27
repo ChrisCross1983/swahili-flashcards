@@ -1,36 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { evaluateWithHeuristic } from "../evaluator";
-import type { AiCoachTask } from "../types";
+import { classifyAnswerIntent } from "../eval/classify";
+import { computeSimilarityScore, levenshtein } from "../eval/similarity";
 
-const task: AiCoachTask = {
-    taskId: "t1",
-    cardId: "c1",
-    type: "translate",
-    direction: "DE_TO_SW",
-    prompt: "Übersetze: Haus",
-    expectedAnswer: "nyumba",
-};
-
-const longTask: AiCoachTask = {
-    ...task,
-    taskId: "t2",
-    expectedAnswer: "ninakunywa",
-};
-
-describe("evaluator", () => {
-    it("exact match => correct", () => {
-        const result = evaluateWithHeuristic(task, "nyumba");
-        expect(result.correctness).toBe("correct");
+describe("classifyAnswerIntent", () => {
+    it("detects no_attempt", () => {
+        expect(classifyAnswerIntent("keine ahnung", "sungura").intent).toBe("no_attempt");
     });
 
-    it("one letter off => almost", () => {
-        const result = evaluateWithHeuristic(longTask, "ninakunzwa");
-        expect(result.correctness).toBe("almost");
+    it("detects typo", () => {
+        expect(classifyAnswerIntent("sungur", "sungura").intent).toBe("typo");
     });
 
-    it("far off => wrong", () => {
-        const result = evaluateWithHeuristic(task, "banana");
-        expect(result.correctness).toBe("wrong");
-        expect(result.correctAnswer).toBe("nyumba");
+    it("detects correct", () => {
+        expect(classifyAnswerIntent("Sungura", "sungura").intent).toBe("correct");
+    });
+
+    it("detects nonsense", () => {
+        expect(classifyAnswerIntent("*", "sungura").intent).toBe("nonsense");
+    });
+});
+
+describe("similarity helpers", () => {
+    it("computes levenshtein", () => {
+        expect(levenshtein("kitabu", "kitabu")).toBe(0);
+        expect(levenshtein("kitabu", "kitabo")).toBe(1);
+    });
+
+    it("computes similarity score", () => {
+        expect(computeSimilarityScore("kitabu", "kitabu")).toBe(1);
+        expect(computeSimilarityScore("kitabu", "banana")).toBeLessThan(0.4);
     });
 });
