@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialAiCoachState, retryCurrentTask, setResult, setTask } from "../engine";
+import { createInitialAiCoachState, setTask, showHint, setResult } from "../engine";
 import type { AiCoachTask } from "../types";
 
 function makeTask(id: string): AiCoachTask {
@@ -10,31 +10,36 @@ function makeTask(id: string): AiCoachTask {
         direction: "DE_TO_SW",
         prompt: "Übersetze: Haus",
         expectedAnswer: "nyumba",
+        hint: "Denk an Alltag.",
+        learnTip: "Merktipp: laut sagen.",
+        ui: { inputMode: "text" },
     };
 }
 
 describe("ai coach engine", () => {
-    it("almost counts as answered but not correct", () => {
+    it("clears feedback when next task is set", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c1") });
-        const state = setResult(withTask, {
+        const withResult = setResult(withTask, {
             correct: false,
             intent: "almost",
-            scoreNormalized: 0.8,
-            feedback: { headline: "⚠️ Fast richtig", solution: "nyumba" },
-            actionHints: { canRetry: true, shouldOfferMcq: false, nextLabel: "Weiter" },
+            score: 0.8,
+            feedbackTitle: "Fast richtig",
+            correctAnswer: "nyumba",
+            learnTip: "Merktipp",
+            retryAllowed: true,
         });
 
-        expect(state.totalCount).toBe(1);
-        expect(state.correctCount).toBe(0);
-        expect(state.answeredCardIds).toContain("c1");
+        const next = setTask(withResult, { task: makeTask("c2") });
+        expect(next.lastResult).toBeNull();
+        expect(next.currentTask?.taskId).toBe("task-c2");
     });
 
-    it("retry increments hint level and keeps same task/card", () => {
+    it("tip button levels up from hint to learnTip", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c2") });
-        const retried = retryCurrentTask(withTask);
+        const first = showHint(withTask);
+        const second = showHint(first);
 
-        expect(retried.hintLevel).toBe(1);
-        expect(retried.currentTask?.taskId).toBe("task-c2");
-        expect(retried.currentTask?.cardId).toBe("c2");
+        expect(first.hintLevel).toBe(1);
+        expect(second.hintLevel).toBe(2);
     });
 });

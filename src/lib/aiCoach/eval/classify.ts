@@ -2,7 +2,7 @@ import { computeSimilarityScore, levenshtein, normalizeText } from "./similarity
 
 export type AnswerIntent = "correct" | "typo" | "almost" | "wrong" | "no_attempt" | "nonsense";
 
-const NO_ATTEMPT_RE = /^(keine ahnung|weiss nicht|weiß nicht|idk|skip|ich weiss es nicht|ich weiß es nicht)$/i;
+const NO_ATTEMPT_RE = /^(keine ahnung|weiss nicht|weiß nicht|idk|skip|ich weiss es nicht|ich weiß es nicht|i don't know)$/i;
 
 export function classifyAnswerIntent(input: string, expected: string): { intent: AnswerIntent; scoreNormalized: number } {
     const normalizedInput = normalizeText(input);

@@ -1,8 +1,6 @@
+import { decideNextTaskType } from "./policy";
 import type { AiCoachResult, AiTaskType } from "./types";
 
-export function chooseNextTaskType(streak: number, lastResult?: AiCoachResult): AiTaskType {
-    if (!lastResult) return "translate";
-    if (lastResult.actionHints.shouldOfferMcq) return "mcq";
-    if (lastResult.correct && streak >= 2 && Math.random() < 0.7) return "cloze";
-    return "translate";
+export function chooseNextTaskType(streak: number, lastResult?: AiCoachResult, history: AiTaskType[] = [], lastTaskType?: AiTaskType): AiTaskType {
+    return decideNextTaskType(history, streak, lastTaskType, Boolean(lastResult?.correct));
 }

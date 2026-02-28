@@ -3,9 +3,5 @@ import type { AiCoachTask, AiTaskType } from "./types";
 import { generateTask, type SourceCard } from "./tasks/generate";
 
 export function buildTaskFromCard(card: SourceCard, taskType: AiTaskType, direction: Direction): AiCoachTask {
-    return generateTask({
-        card,
-        direction,
-        forceMcq: taskType === "mcq",
-    });
+    return generateTask({ card, direction, taskType });
 }

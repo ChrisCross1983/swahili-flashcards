@@ -1,21 +1,22 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { decideNextTaskType } from "@/lib/aiCoach/policy";
 import { generateTask } from "@/lib/aiCoach/tasks/generate";
-import type { AiCoachResult } from "@/lib/aiCoach/types";
+import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
 type Body = {
     sessionId?: string;
     type?: CardType;
     direction?: Direction;
+    streak?: number;
     excludeCardId?: string;
     answeredCardIds?: string[];
     recentCardIds?: string[];
+    history?: AiTaskType[];
+    lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
-    wrongCardIds?: string[];
-    hintLevel?: number;
-    shouldOfferMcq?: boolean;
 };
 
 export async function POST(req: Request) {
@@ -49,13 +50,12 @@ export async function POST(req: Request) {
     const picked = fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
     const repeated = Boolean(body.excludeCardId && picked.id === body.excludeCardId);
 
-    const shouldOfferMcq = Boolean(body.shouldOfferMcq || body.lastResult?.actionHints.shouldOfferMcq);
+    const taskType = decideNextTaskType(body.history ?? [], body.streak ?? 0, body.lastTaskType, body.lastResult?.correct ?? true);
 
     const task = generateTask({
         card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
         direction,
-        forceMcq: shouldOfferMcq,
-        hintLevel: body.hintLevel ?? 0,
+        taskType,
         pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text })),
     });
 

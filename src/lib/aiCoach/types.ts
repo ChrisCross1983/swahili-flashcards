@@ -10,28 +10,31 @@ export type AiCoachTask = {
     direction: Direction;
     prompt: string;
     expectedAnswer: string;
-    acceptedAnswers?: string[];
-    exampleSentence?: string;
     choices?: string[];
-    meta?: { repeated?: boolean };
+    hint?: string;
+    learnTip?: string;
+    example?: { sw: string; de: string };
+    ui?: {
+        inputMode: "none" | "text";
+        selectionMode?: "mcq" | "chips";
+    };
+    meta?: {
+        repeated?: boolean;
+        pos?: "noun" | "verb" | "other";
+        nounClass?: string;
+        plural?: string;
+    };
 };
 
 export type AiCoachResult = {
     correct: boolean;
     intent: AnswerIntent;
-    scoreNormalized: number;
-    feedback: {
-        headline: string;
-        analysis?: string;
-        hint?: string;
-        example?: string;
-        solution?: string;
-    };
-    actionHints: {
-        canRetry: boolean;
-        shouldOfferMcq: boolean;
-        nextLabel: "Weiter" | "Nächste Aufgabe";
-    };
+    score: number;
+    feedbackTitle: "Richtig" | "Fast richtig" | "Noch nicht";
+    correctAnswer: string;
+    learnTip: string;
+    example?: { sw: string; de: string };
+    retryAllowed?: boolean;
 };
 
 export type AiCoachStartInput = {
@@ -65,10 +68,11 @@ export type AiCoachNextInput = {
     excludeCardId?: string;
     answeredCardIds?: string[];
     recentCardIds?: string[];
+    history?: AiTaskType[];
+    lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
     hintLevel?: number;
-    shouldOfferMcq?: boolean;
 };
 
 export type AiCoachNextResponse = {
@@ -95,12 +99,13 @@ export type AiCoachState = {
     totalCount: number;
     correctCount: number;
     wrongCardIds: string[];
-    answeredCardIds: string[]
+    answeredCardIds: string[];
     recentCardIds: string[];
     wrongAttemptsOnCard: number;
     lastCardId?: string;
     streak: number;
     hintLevel: number;
     showExample: boolean;
+    taskTypeHistory: AiTaskType[];
     error: string | null;
 };

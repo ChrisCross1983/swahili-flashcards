@@ -17,6 +17,12 @@ export default function AiCoachPanel({ cardType }: Props) {
     const lastResult = state.lastResult;
     const canSubmit = isInTask && answer.trim().length > 0;
 
+    const handleChoice = (choice: string) => {
+        if (!isInTask) return;
+        setAnswer(choice);
+        void submitAnswer(choice);
+    };
+
     const handleNextTask = async () => {
         setAnswer("");
         await nextTask();
@@ -26,6 +32,8 @@ export default function AiCoachPanel({ cardType }: Props) {
         setAnswer("");
         retry();
     };
+
+    const showHintText = state.hintLevel > 0 && state.currentTask;
 
     return (
         <div className="mt-6 rounded-3xl border border-soft bg-surface p-6 shadow-soft space-y-4">
@@ -45,7 +53,13 @@ export default function AiCoachPanel({ cardType }: Props) {
                     <div className="text-sm text-muted">Aufgabe ({state.currentTask.type})</div>
                     <div className="mt-1 font-semibold">{state.currentTask.prompt}</div>
 
-                    {state.currentTask.type === "mcq" && state.currentTask.choices?.length ? (
+                    {showHintText ? (
+                        <div className="mt-2 text-sm text-muted">
+                            💡 {state.hintLevel === 1 ? state.currentTask.hint : state.currentTask.learnTip ?? state.currentTask.hint}
+                        </div>
+                    ) : null}
+
+                    {(state.currentTask.type === "mcq" || state.currentTask.type === "cloze") && state.currentTask.choices?.length ? (
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             {state.currentTask.choices.map((choice) => (
                                 <button
@@ -53,16 +67,12 @@ export default function AiCoachPanel({ cardType }: Props) {
                                     type="button"
                                     className="btn btn-secondary text-left"
                                     disabled={!isInTask}
-                                    onClick={() => { setAnswer(choice); }}
+                                    onClick={() => handleChoice(choice)}
                                 >
                                     {choice}
                                 </button>
                             ))}
                         </div>
-                    ) : null}
-
-                    {state.showExample && state.currentTask.exampleSentence ? (
-                        <div className="mt-2 text-sm text-muted">Beispiel: {state.currentTask.exampleSentence}</div>
                     ) : null}
 
                     {state.currentTask.meta?.repeated ? (
@@ -71,29 +81,38 @@ export default function AiCoachPanel({ cardType }: Props) {
                 </div>
             ) : null}
 
-            <textarea
-                className="w-full rounded-2xl border border-soft bg-transparent p-3"
-                rows={3}
-                value={answer}
-                onChange={(event) => setAnswer(event.target.value)}
-                placeholder={state.currentTask?.type === "mcq" ? "Oder Option anklicken" : "Deine Antwort"}
-                onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey && canSubmit) {
-                        event.preventDefault();
-                        void submitAnswer(answer);
-                    }
-                }}
-                disabled={!isInTask}
-            />
+            {state.currentTask?.ui?.inputMode !== "none" ? (
+                <textarea
+                    className="w-full rounded-2xl border border-soft bg-transparent p-3"
+                    rows={3}
+                    value={answer}
+                    onChange={(event) => setAnswer(event.target.value)}
+                    placeholder="Deine Antwort"
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && canSubmit) {
+                            event.preventDefault();
+                            void submitAnswer(answer);
+                        }
+                    }}
+                    disabled={!isInTask}
+                />
+            ) : null}
 
             {!hasResult ? (
                 <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
-                        Antwort prüfen
-                    </button>
+                    {state.currentTask?.ui?.inputMode !== "none" ? (
+                        <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
+                            Antwort prüfen
+                        </button>
+                    ) : null}
                     <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={!isInTask}>
                         💡 Tipp
                     </button>
+                    {state.currentTask?.type === "translate" ? (
+                        <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don't know")} disabled={!isInTask}>
+                            Ich weiß nicht
+                        </button>
+                    ) : null}
                     <button type="button" className="btn btn-secondary" onClick={skip} disabled={!isInTask}>
                         ⏭ Überspringen
                     </button>
@@ -103,27 +122,27 @@ export default function AiCoachPanel({ cardType }: Props) {
                 </div>
             ) : (
                 <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn btn-secondary" onClick={handleRetry} disabled={!lastResult?.actionHints.canRetry}>
+                    <button type="button" className="btn btn-secondary" onClick={handleRetry} disabled={!lastResult?.retryAllowed}>
                         Nochmal versuchen
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={showExampleText}>
                         Beispiel sehen
                     </button>
                     <button type="button" className="btn btn-primary" onClick={() => { void handleNextTask(); }}>
-                        Weiter
+                        Nächste Aufgabe
                     </button>
                 </div>
             )}
 
             {state.lastResult ? (
-                <div className="rounded-2xl border border-soft p-3 text-sm">
-                    <div className="font-medium">{state.lastResult.feedback.headline}</div>
-                    {state.lastResult.feedback.analysis ? <div className="text-muted mt-1">Fehleranalyse: {state.lastResult.feedback.analysis}</div> : null}
-                    {state.lastResult.feedback.hint ? <div className="text-muted mt-1">Lernhinweis: {state.lastResult.feedback.hint}</div> : null}
-                    {state.lastResult.feedback.example ? <div className="text-muted mt-1">Beispiel: {state.lastResult.feedback.example}</div> : null}
-                    {state.lastResult.feedback.solution ? (
-                        <div className="mt-2">
-                            Richtig wäre: <span className="font-medium">{state.lastResult.feedback.solution}</span>
+                <div className="rounded-2xl border border-soft p-3 text-sm space-y-2">
+                    <div className="font-medium">{state.lastResult.feedbackTitle}</div>
+                    <div>Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
+                    <div className="text-muted">Merktipp: {state.lastResult.learnTip}</div>
+                    {state.showExample && state.lastResult.example ? (
+                        <div className="text-muted">
+                            <div>Swahili: {state.lastResult.example.sw}</div>
+                            <div>Deutsch: {state.lastResult.example.de}</div>
                         </div>
                     ) : null}
                 </div>

@@ -41,6 +41,8 @@ export async function POST(req: Request) {
         task: generateTask({
             card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
             direction,
+            taskType: "translate",
+            pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text })),
         }),
     });
 }

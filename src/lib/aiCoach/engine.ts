@@ -15,6 +15,7 @@ export function createInitialAiCoachState(): AiCoachState {
         streak: 0,
         hintLevel: 0,
         showExample: false,
+        taskTypeHistory: [],
         error: null,
     };
 }
@@ -24,9 +25,7 @@ export function setLoading(state: AiCoachState): AiCoachState {
 }
 
 export function setTask(state: AiCoachState, payload: { sessionId?: string; task: AiCoachTask }): AiCoachState {
-    const recentCardIds = payload.task.cardId
-        ? [...state.recentCardIds, payload.task.cardId].slice(-8)
-        : state.recentCardIds;
+    const recentCardIds = payload.task.cardId ? [...state.recentCardIds, payload.task.cardId].slice(-8) : state.recentCardIds;
 
     return {
         ...state,
@@ -38,6 +37,7 @@ export function setTask(state: AiCoachState, payload: { sessionId?: string; task
         wrongAttemptsOnCard: 0,
         hintLevel: 0,
         showExample: false,
+        taskTypeHistory: [...state.taskTypeHistory, payload.task.type].slice(-12),
         recentCardIds,
         error: null,
     };
@@ -49,12 +49,7 @@ export function setEvaluating(state: AiCoachState): AiCoachState {
 
 export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachState {
     const currentCardId = state.currentTask?.cardId;
-    const answered = result.intent === "correct" || result.intent === "almost" || result.intent === "typo" || result.intent === "wrong" || result.intent === "no_attempt" || result.intent === "nonsense";
-
-    const answeredCardIds = currentCardId && answered
-        ? Array.from(new Set([...state.answeredCardIds, currentCardId]))
-        : state.answeredCardIds;
-
+    const answeredCardIds = currentCardId ? Array.from(new Set([...state.answeredCardIds, currentCardId])) : state.answeredCardIds;
     const isWrong = !result.correct && currentCardId;
 
     return {
@@ -66,9 +61,7 @@ export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachSt
         streak: result.correct ? state.streak + 1 : 0,
         answeredCardIds,
         wrongAttemptsOnCard: result.correct ? 0 : state.wrongAttemptsOnCard + 1,
-        wrongCardIds: isWrong
-            ? Array.from(new Set([...state.wrongCardIds, currentCardId]))
-            : state.wrongCardIds,
+        wrongCardIds: isWrong ? Array.from(new Set([...state.wrongCardIds, currentCardId])) : state.wrongCardIds,
     };
 }
 
@@ -78,13 +71,13 @@ export function retryCurrentTask(state: AiCoachState): AiCoachState {
         ...state,
         status: "in_task",
         lastResult: null,
-        hintLevel: Math.min(state.hintLevel + 1, 3),
+        hintLevel: Math.min(state.hintLevel + 1, 2),
         showExample: false,
     };
 }
 
 export function showHint(state: AiCoachState): AiCoachState {
-    return { ...state, hintLevel: Math.min(state.hintLevel + 1, 3) };
+    return { ...state, hintLevel: Math.min(state.hintLevel + 1, 2) };
 }
 
 export function toggleExample(state: AiCoachState): AiCoachState {
@@ -99,23 +92,16 @@ export function skipTask(state: AiCoachState): AiCoachState {
         lastResult: {
             correct: false,
             intent: "no_attempt",
-            scoreNormalized: 0,
-            feedback: {
-                headline: "🤝 Alles gut — kurz lernen",
-                analysis: "Übersprungen: wir nehmen jetzt die Lösung als Lernanker.",
-                hint: "Nimm zuerst Anfangsbuchstabe + Länge und probiere dann Retry.",
-                example: state.currentTask.exampleSentence,
-                solution: state.currentTask.expectedAnswer,
-            },
-            actionHints: {
-                canRetry: true,
-                shouldOfferMcq: true,
-                nextLabel: "Weiter",
-            },
+            score: 0,
+            feedbackTitle: "Noch nicht",
+            correctAnswer: state.currentTask.expectedAnswer,
+            learnTip: state.currentTask.learnTip ?? "Merktipp: Erst hören, dann laut nachsprechen.",
+            example: state.currentTask.example,
+            retryAllowed: true,
         },
         totalCount: state.totalCount + 1,
         streak: 0,
-        hintLevel: Math.min(state.hintLevel + 1, 3),
+        hintLevel: Math.min(state.hintLevel + 1, 2),
         wrongAttemptsOnCard: state.wrongAttemptsOnCard + 1,
         answeredCardIds: Array.from(new Set([...state.answeredCardIds, state.currentTask.cardId])),
         wrongCardIds: Array.from(new Set([...state.wrongCardIds, state.currentTask.cardId])),

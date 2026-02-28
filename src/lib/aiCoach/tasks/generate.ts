@@ -1,7 +1,8 @@
 import type { Direction } from "@/lib/trainer/types";
-import type { AiCoachTask } from "../types";
-import { buildExampleSentence } from "./exampleSentence";
-import { buildMcqChoices } from "./mcq";
+import { buildExampleSentence } from "../examples";
+import { buildHintForCard, buildLearnTipForCard, inferCardMeta } from "../hints";
+import { buildChoices } from "../policy";
+import type { AiCoachTask, AiTaskType } from "../types";
 
 export type SourceCard = {
     id: string;
@@ -12,55 +13,62 @@ export type SourceCard = {
 type GenerateTaskInput = {
     card: SourceCard;
     direction: Direction;
-    forceMcq?: boolean;
-    hintLevel?: number;
+    taskType?: AiTaskType;
     pool?: SourceCard[];
 };
 
-function parseAcceptedAnswers(value: string): string[] {
-    return value
-        .split(/[\/,]/)
-        .map((part) => part.trim())
-        .filter(Boolean);
+function toExpected(card: SourceCard, direction: Direction): string {
+    return direction === "DE_TO_SW" ? card.swahili_text : card.german_text;
+}
+
+function toPrompt(card: SourceCard, direction: Direction, taskType: AiTaskType, gapWord: string): string {
+    const sourceText = direction === "DE_TO_SW" ? card.german_text : card.swahili_text;
+    if (taskType === "mcq") return `Wähle die richtige Übersetzung: ${sourceText}`;
+    if (taskType === "cloze") return `Wähle das passende Wort für die Lücke: ${gapWord}`;
+    return `Übersetze: ${sourceText}`;
 }
 
 export function generateTask(input: GenerateTaskInput): AiCoachTask {
-    const { card, direction, forceMcq = false, hintLevel = 0, pool = [] } = input;
-    const expectedAnswer = direction === "DE_TO_SW" ? card.swahili_text : card.german_text;
-    const sourceText = direction === "DE_TO_SW" ? card.german_text : card.swahili_text;
-    const acceptedAnswers = parseAcceptedAnswers(expectedAnswer);
-    const exampleSentence = buildExampleSentence({ swahili: card.swahili_text, german: card.german_text });
+    const { card, direction, taskType = "translate", pool = [] } = input;
+    const expectedAnswer = toExpected(card, direction);
+    const example = buildExampleSentence(card, direction);
+    const meta = inferCardMeta(card);
 
-    if (forceMcq || hintLevel >= 3) {
-        const directionAwarePool = pool.map((candidate) => ({
-            id: candidate.id,
-            answer: direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text,
-        }));
-
+    if (taskType === "mcq") {
+        const poolAnswers = pool.map((candidate) => (direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text));
         return {
             taskId: crypto.randomUUID(),
             cardId: card.id,
             type: "mcq",
             direction,
-            prompt: `Wähle die richtige Übersetzung: ${sourceText}`,
+            prompt: toPrompt(card, direction, "mcq", ""),
             expectedAnswer,
-            acceptedAnswers,
-            choices: buildMcqChoices(expectedAnswer, directionAwarePool),
-            exampleSentence,
+            choices: buildChoices(expectedAnswer, poolAnswers),
+            hint: buildHintForCard(card, direction),
+            learnTip: buildLearnTipForCard(card),
+            example,
+            ui: { inputMode: "none", selectionMode: "mcq" },
+            meta,
         };
     }
 
-    if (Math.random() < 0.3 && exampleSentence) {
-        const gap = acceptedAnswers[0] ?? expectedAnswer;
+    if (taskType === "cloze") {
+        const gapWord = expectedAnswer.trim() || "____";
+        const sentence = example.sw.replace(gapWord, "____");
+        const poolAnswers = pool.map((candidate) => (direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text));
         return {
             taskId: crypto.randomUUID(),
             cardId: card.id,
             type: "cloze",
             direction,
-            prompt: `Fülle die Lücke: ${exampleSentence.replace(gap, "____")}`,
+            prompt: toPrompt(card, direction, "cloze", sentence),
             expectedAnswer,
-            acceptedAnswers,
-            exampleSentence,
+            choices: buildChoices(expectedAnswer, poolAnswers),
+            hint: buildHintForCard(card, direction),
+            learnTip: buildLearnTipForCard(card),
+            example,
+            ui: { inputMode: "none", selectionMode: "chips" },
+            meta,
         };
     }
 
@@ -69,9 +77,12 @@ export function generateTask(input: GenerateTaskInput): AiCoachTask {
         cardId: card.id,
         type: "translate",
         direction,
-        prompt: `Übersetze: ${sourceText}`,
+        prompt: toPrompt(card, direction, "translate", ""),
         expectedAnswer,
-        acceptedAnswers,
-        exampleSentence,
+        hint: buildHintForCard(card, direction),
+        learnTip: buildLearnTipForCard(card),
+        example,
+        ui: { inputMode: "text" },
+        meta,
     };
 }

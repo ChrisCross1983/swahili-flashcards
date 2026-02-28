@@ -1,54 +1,36 @@
-import { buildFeedback, actionHintsForIntent, isCorrectIntent } from "./feedback/templates";
 import { classifyAnswerIntent } from "./eval/classify";
-import { computeSimilarityScore, normalizeText } from "./eval/similarity";
+import { computeSimilarityScore } from "./eval/similarity";
 import type { AiCoachResult, AiCoachTask } from "./types";
 
-function parseAcceptedAnswers(raw: string): string[] {
-    return raw
-        .split(/[\/,]/)
-        .map((item) => item.trim())
-        .filter(Boolean);
+function scoreFor(intent: AiCoachResult["intent"], similarity: number): number {
+    if (intent === "correct") return 1;
+    if (intent === "typo" || intent === "almost") return Math.max(0.3, Math.min(0.9, similarity));
+    return 0;
 }
 
-function collectCandidates(task: AiCoachTask): string[] {
-    const fromExpected = parseAcceptedAnswers(task.expectedAnswer);
-    const fromAccepted = (task.acceptedAnswers ?? []).flatMap((item) => parseAcceptedAnswers(item));
-    return Array.from(new Set([...fromExpected, ...fromAccepted]));
-}
-
-function bestCandidate(input: string, candidates: string[]): string {
-    let best = candidates[0] ?? "";
-    let bestScore = -1;
-
-    for (const candidate of candidates) {
-        const score = computeSimilarityScore(input, candidate);
-        if (score > bestScore) {
-            best = candidate;
-            bestScore = score;
-        }
-    }
-    return best;
+function feedbackTitle(intent: AiCoachResult["intent"]): AiCoachResult["feedbackTitle"] {
+    if (intent === "correct") return "Richtig";
+    if (intent === "typo" || intent === "almost") return "Fast richtig";
+    return "Noch nicht";
 }
 
 export function evaluateWithHeuristic(task: AiCoachTask, answer: string, hintLevel = 0, wrongAttemptsOnCard = 0): AiCoachResult {
-    const candidates = collectCandidates(task);
-    const expected = bestCandidate(answer, candidates);
+    const expected = task.expectedAnswer;
     const classification = classifyAnswerIntent(answer, expected);
-    const feedback = buildFeedback({
-        intent: classification.intent,
-        answer: normalizeText(answer),
-        expected,
-        hintLevel,
-        exampleSentence: task.exampleSentence,
-        scoreNormalized: classification.scoreNormalized,
-    });
+    const similarity = computeSimilarityScore(answer, expected);
+    const score = scoreFor(classification.intent, similarity);
+
+    const helpfulTip = task.learnTip ?? (hintLevel > 0 ? `Merktipp: Beginnt mit „${expected.slice(0, 1)}“.` : "Merktipp: Kurz laut sprechen und im Satz nutzen.");
 
     return {
-        correct: isCorrectIntent(classification.intent),
+        correct: classification.intent === "correct",
         intent: classification.intent,
-        scoreNormalized: classification.scoreNormalized,
-        feedback,
-        actionHints: actionHintsForIntent(classification.intent, wrongAttemptsOnCard, hintLevel),
+        score,
+        feedbackTitle: feedbackTitle(classification.intent),
+        correctAnswer: expected,
+        learnTip: helpfulTip,
+        example: task.example,
+        retryAllowed: classification.intent !== "correct" && wrongAttemptsOnCard < 2,
     };
 }
 
