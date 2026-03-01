@@ -52,11 +52,12 @@ export async function POST(req: Request) {
 
     const taskType = decideNextTaskType(body.history ?? [], body.streak ?? 0, body.lastTaskType, body.lastResult?.correct ?? true);
 
-    const task = generateTask({
-        card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text },
+    const task = await generateTask({
+        ownerKey: user.id,
+        card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text, type: picked.type },
         direction,
         taskType,
-        pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text })),
+        pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text, type: card.type })),
     });
 
     return NextResponse.json({ task, meta: { repeated } });

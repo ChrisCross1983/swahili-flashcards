@@ -10,7 +10,7 @@ function makeTask(id: string): AiCoachTask {
         direction: "DE_TO_SW",
         prompt: "Übersetze: Haus",
         expectedAnswer: "nyumba",
-        hint: "Denk an Alltag.",
+        hintLevels: ["Wortart: noun", "Beginnt mit n", "Beispiel"],
         learnTip: "Merktipp: laut sagen.",
         ui: { inputMode: "text" },
     };

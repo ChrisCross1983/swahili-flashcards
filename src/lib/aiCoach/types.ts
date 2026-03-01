@@ -11,16 +11,15 @@ export type AiCoachTask = {
     prompt: string;
     expectedAnswer: string;
     choices?: string[];
-    hint?: string;
     learnTip?: string;
     example?: { sw: string; de: string };
+    hintLevels?: string[];
     ui?: {
-        inputMode: "none" | "text";
-        selectionMode?: "mcq" | "chips";
+        inputMode: "text" | "mcq" | "cloze_click";
     };
     meta?: {
         repeated?: boolean;
-        pos?: "noun" | "verb" | "other";
+        pos?: "noun" | "verb" | "adj" | "phrase" | "unknown";
         nounClass?: string;
         plural?: string;
     };

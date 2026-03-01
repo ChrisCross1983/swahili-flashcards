@@ -71,13 +71,13 @@ export function retryCurrentTask(state: AiCoachState): AiCoachState {
         ...state,
         status: "in_task",
         lastResult: null,
-        hintLevel: Math.min(state.hintLevel + 1, 2),
+        hintLevel: Math.min(state.hintLevel + 1, 3),
         showExample: false,
     };
 }
 
 export function showHint(state: AiCoachState): AiCoachState {
-    return { ...state, hintLevel: Math.min(state.hintLevel + 1, 2) };
+    return { ...state, hintLevel: Math.min(state.hintLevel + 1, 3) };
 }
 
 export function toggleExample(state: AiCoachState): AiCoachState {
@@ -101,7 +101,7 @@ export function skipTask(state: AiCoachState): AiCoachState {
         },
         totalCount: state.totalCount + 1,
         streak: 0,
-        hintLevel: Math.min(state.hintLevel + 1, 2),
+        hintLevel: Math.min(state.hintLevel + 1, 3),
         wrongAttemptsOnCard: state.wrongAttemptsOnCard + 1,
         answeredCardIds: Array.from(new Set([...state.answeredCardIds, state.currentTask.cardId])),
         wrongCardIds: Array.from(new Set([...state.wrongCardIds, state.currentTask.cardId])),

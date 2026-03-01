@@ -9,12 +9,13 @@ type Props = {
 };
 
 export default function AiCoachPanel({ cardType }: Props) {
-    const { state, accuracy, startSession, submitAnswer, revealHint, skip, retry, showExampleText, nextTask, endSession } = useAiCoachSession(cardType);
+    const { state, accuracy, startSession, submitAnswer, revealHint, skip, retry, nextTask, endSession } = useAiCoachSession(cardType);
     const [answer, setAnswer] = useState("");
 
     const isInTask = state.status === "in_task";
     const hasResult = state.status === "showing_result" && state.lastResult;
     const lastResult = state.lastResult;
+    const inputMode = state.currentTask?.ui?.inputMode ?? "text";
     const canSubmit = isInTask && answer.trim().length > 0;
 
     const handleChoice = (choice: string) => {
@@ -33,7 +34,8 @@ export default function AiCoachPanel({ cardType }: Props) {
         retry();
     };
 
-    const showHintText = state.hintLevel > 0 && state.currentTask;
+    const hintLevel = Math.min(state.hintLevel, 3);
+    const currentHint = hintLevel > 0 ? state.currentTask?.hintLevels?.[hintLevel - 1] : null;
 
     return (
         <div className="mt-6 rounded-3xl border border-soft bg-surface p-6 shadow-soft space-y-4">
@@ -51,15 +53,15 @@ export default function AiCoachPanel({ cardType }: Props) {
             {state.currentTask ? (
                 <div className="rounded-2xl bg-surface-elevated p-4">
                     <div className="text-sm text-muted">Aufgabe ({state.currentTask.type})</div>
-                    <div className="mt-1 font-semibold">{state.currentTask.prompt}</div>
+                    <div className="mt-1 font-semibold whitespace-pre-line">{state.currentTask.prompt}</div>
 
-                    {showHintText ? (
+                    {currentHint ? (
                         <div className="mt-2 text-sm text-muted">
-                            💡 {state.hintLevel === 1 ? state.currentTask.hint : state.currentTask.learnTip ?? state.currentTask.hint}
+                            💡 Tipp {hintLevel}/3: {currentHint}
                         </div>
                     ) : null}
 
-                    {(state.currentTask.type === "mcq" || state.currentTask.type === "cloze") && state.currentTask.choices?.length ? (
+                    {(inputMode === "mcq" || inputMode === "cloze_click") && state.currentTask.choices?.length ? (
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             {state.currentTask.choices.map((choice) => (
                                 <button
@@ -81,7 +83,7 @@ export default function AiCoachPanel({ cardType }: Props) {
                 </div>
             ) : null}
 
-            {state.currentTask?.ui?.inputMode !== "none" ? (
+            {inputMode === "text" ? (
                 <textarea
                     className="w-full rounded-2xl border border-soft bg-transparent p-3"
                     rows={3}
@@ -100,7 +102,7 @@ export default function AiCoachPanel({ cardType }: Props) {
 
             {!hasResult ? (
                 <div className="flex flex-wrap gap-2">
-                    {state.currentTask?.ui?.inputMode !== "none" ? (
+                    {inputMode === "text" ? (
                         <button type="button" className="btn btn-primary" onClick={() => submitAnswer(answer)} disabled={!canSubmit}>
                             Antwort prüfen
                         </button>
@@ -125,9 +127,6 @@ export default function AiCoachPanel({ cardType }: Props) {
                     <button type="button" className="btn btn-secondary" onClick={handleRetry} disabled={!lastResult?.retryAllowed}>
                         Nochmal versuchen
                     </button>
-                    <button type="button" className="btn btn-secondary" onClick={showExampleText}>
-                        Beispiel sehen
-                    </button>
                     <button type="button" className="btn btn-primary" onClick={() => { void handleNextTask(); }}>
                         Nächste Aufgabe
                     </button>
@@ -136,10 +135,12 @@ export default function AiCoachPanel({ cardType }: Props) {
 
             {state.lastResult ? (
                 <div className="rounded-2xl border border-soft p-3 text-sm space-y-2">
-                    <div className="font-medium">{state.lastResult.feedbackTitle}</div>
+                    <div className="font-medium">
+                        {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
+                    </div>
                     <div>Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
-                    <div className="text-muted">Merktipp: {state.lastResult.learnTip}</div>
-                    {state.showExample && state.lastResult.example ? (
+                    <div className="text-muted">Mini-Tipp: {state.lastResult.learnTip}</div>
+                    {state.lastResult.example ? (
                         <div className="text-muted">
                             <div>Swahili: {state.lastResult.example.sw}</div>
                             <div>Deutsch: {state.lastResult.example.de}</div>
