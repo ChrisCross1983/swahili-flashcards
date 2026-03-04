@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { computeMasteryLevel, readMastery } from "@/lib/aiCoach/mastery";
+import { decideNextTaskType } from "@/lib/aiCoach/policy";
 import { generateTask } from "@/lib/aiCoach/tasks/generate";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -34,7 +36,13 @@ export async function POST(req: Request) {
 
     if (!cards || cards.length === 0) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
 
-    const picked = cards[Math.floor(Math.random() * cards.length)];
+    const candidates = await Promise.all(cards.map(async (card) => ({ card, mastery: await readMastery(user.id, card.id) })));
+    const pickedEntry = candidates
+        .map(({ card, mastery }) => ({ card, level: computeMasteryLevel(mastery), seen: mastery?.seen_count ?? 0 }))
+        .sort((a, b) => a.level - b.level || a.seen - b.seen)[0];
+
+    const picked = pickedEntry?.card ?? cards[Math.floor(Math.random() * cards.length)];
+    const taskType = decideNextTaskType([], 0, undefined, true, pickedEntry?.level ?? 0);
 
     return NextResponse.json({
         sessionId: crypto.randomUUID(),
@@ -42,7 +50,7 @@ export async function POST(req: Request) {
             ownerKey: user.id,
             card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text, type: picked.type },
             direction,
-            taskType: "translate",
+            taskType,
             pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text, type: card.type })),
         }),
     });

@@ -12,7 +12,7 @@ export default function TrainerCard({ reveal, prompt, answer, imagePath, imageBa
     return (
         <div className="rounded-3xl border border-soft bg-surface p-6 shadow-soft">
             <div className="text-sm text-muted">Übersetze:</div>
-            <div className="mt-2 text-3xl font-semibold text-primary">
+            <div className="mt-2 text-2xl font-semibold text-primary">
                 <CardText>{prompt}</CardText>
             </div>
 

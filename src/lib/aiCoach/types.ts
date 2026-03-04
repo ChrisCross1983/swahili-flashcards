@@ -28,11 +28,14 @@ export type AiCoachTask = {
 export type AiCoachResult = {
     correct: boolean;
     intent: AnswerIntent;
+    verdict?: "correct" | "almost" | "wrong" | "skip" | "nonsense";
     score: number;
     feedbackTitle: "Richtig" | "Fast richtig" | "Noch nicht";
+    feedback?: string;
     correctAnswer: string;
     learnTip: string;
     example?: { sw: string; de: string };
+    suggestedNext?: "repeat" | "next" | "easier" | "harder";
     retryAllowed?: boolean;
 };
 

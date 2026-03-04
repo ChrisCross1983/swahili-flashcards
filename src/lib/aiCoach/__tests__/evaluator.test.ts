@@ -33,9 +33,8 @@ describe("similarity helpers", () => {
     });
 });
 
-
 describe("evaluateWithHeuristic", () => {
-    it("marks keine ahnung as incorrect with supportive feedback", () => {
+    it("returns verdict skip for 'keine ahnung'", () => {
         const result = evaluateWithHeuristic({
             taskId: "t1",
             cardId: "c1",
@@ -50,6 +49,6 @@ describe("evaluateWithHeuristic", () => {
 
         expect(result.correct).toBe(false);
         expect(result.intent).toBe("no_attempt");
-        expect(result.learnTip).toContain("Alles gut");
+        expect(result.verdict).toBe("skip");
     });
 });

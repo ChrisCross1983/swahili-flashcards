@@ -19,7 +19,7 @@ vi.mock("../enrichment/generateEnrichment", () => ({
 }));
 
 describe("generateTask cloze", () => {
-    it("uses enrichment example and avoids Ninaona hardcode", async () => {
+    it("always includes a proper translation line and gap marker", async () => {
         const task = await generateTask({
             ownerKey: "owner-1",
             direction: "DE_TO_SW",
@@ -38,8 +38,9 @@ describe("generateTask cloze", () => {
 
         expect(task.example?.sw).toBe("Ninanunua kitabu kipya.");
         expect(task.example?.de).toBe("Ich kaufe ein neues Buch.");
-        expect(task.prompt).not.toContain("Ninaona");
-        expect(task.prompt).toContain("Gesuchtes Wort");
+        expect(task.prompt).toContain("Gesuchtes Wort (Deutsch)");
+        expect(task.prompt).toMatch(/(Übersetzung|Volle Übersetzung):/);
+        expect(task.prompt).toContain("____");
         expect(task.ui?.inputMode).toBe("cloze_click");
     });
 });

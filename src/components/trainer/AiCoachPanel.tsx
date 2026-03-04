@@ -36,6 +36,9 @@ export default function AiCoachPanel({ cardType }: Props) {
 
     const hintLevel = Math.min(state.hintLevel, 3);
     const currentHint = hintLevel > 0 ? state.currentTask?.hintLevels?.[hintLevel - 1] : null;
+    const hintTotal = state.currentTask?.hintLevels?.length ?? 0;
+    const hintButtonLabel = hintLevel < hintTotal ? `Tipp (${Math.min(hintLevel + 1, hintTotal)}/${hintTotal})` : `Alle Tipps angezeigt (${hintTotal}/${hintTotal})`;
+    const hintDisabled = !isInTask || hintTotal === 0 || hintLevel >= hintTotal;
 
     return (
         <div className="mt-6 rounded-3xl border border-soft bg-surface p-6 shadow-soft space-y-4">
@@ -57,7 +60,7 @@ export default function AiCoachPanel({ cardType }: Props) {
 
                     {currentHint ? (
                         <div className="mt-2 text-sm text-muted">
-                            💡 Tipp {hintLevel}/3: {currentHint}
+                            💡 Tipp {hintLevel}/{Math.max(hintTotal, 1)}: {currentHint}
                         </div>
                     ) : null}
 
@@ -107,8 +110,8 @@ export default function AiCoachPanel({ cardType }: Props) {
                             Antwort prüfen
                         </button>
                     ) : null}
-                    <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={!isInTask}>
-                        💡 Tipp
+                    <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={hintDisabled}>
+                        💡 {hintButtonLabel}
                     </button>
                     {state.currentTask?.type === "translate" ? (
                         <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don't know")} disabled={!isInTask}>
@@ -133,13 +136,14 @@ export default function AiCoachPanel({ cardType }: Props) {
                 </div>
             )}
 
-            {state.lastResult ? (
+            {hasResult && state.lastResult ? (
                 <div className="rounded-2xl border border-soft p-3 text-sm space-y-2">
                     <div className="font-medium">
                         {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
                     <div>Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
-                    <div className="text-muted">Mini-Tipp: {state.lastResult.learnTip}</div>
+                    <div className="text-muted">{state.lastResult.feedback ?? "Gute Arbeit – weiter so."}</div>
+                    <div className="text-muted">Tipp: {state.lastResult.learnTip}</div>
                     {state.lastResult.example ? (
                         <div className="text-muted">
                             <div>Swahili: {state.lastResult.example.sw}</div>

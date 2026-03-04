@@ -45,16 +45,48 @@ function asExample(entry?: { sw: string; de: string }): { sw: string; de: string
     return { sw: entry.sw.trim(), de: entry.de.trim() };
 }
 
+function ensureExampleContainsExpected(
+    example: { sw: string; de: string } | undefined,
+    expected: string,
+    card: SourceCard,
+    direction: Direction,
+): { sw: string; de: string } {
+    const target = expected.trim().toLowerCase();
+    const initial = example ?? {
+        sw: `Leo natumia neno "${card.swahili_text.trim() || "neno"}" kwenye sentensi.`,
+        de: `Heute nutze ich das Wort "${card.german_text.trim() || "Wort"}" in einem Satz.`,
+    };
+
+    const candidateSentence = direction === "DE_TO_SW" ? initial.sw : initial.de;
+    if (target && candidateSentence.toLowerCase().includes(target)) {
+        return initial;
+    }
+
+    if (direction === "DE_TO_SW") {
+        return {
+            sw: `Leo ninatumia ${expected.trim()} darasani.`,
+            de: `Heute benutze ich ${card.german_text.trim() || "das Wort"} im Unterricht.`,
+        };
+    }
+
+    return {
+        sw: `Leo ninatumia ${card.swahili_text.trim() || "neno"} darasani.`,
+        de: `Heute benutze ich ${expected.trim()} im Unterricht.`,
+    };
+}
+
 function clozePrompt(example: { sw: string; de: string }, expected: string, card: SourceCard, direction: Direction): { prompt: string; sentenceWithGap: string } {
     const safeExpected = expected.trim();
     const sourceGloss = direction === "DE_TO_SW" ? card.german_text.trim() : card.swahili_text.trim();
     const baseSentence = direction === "DE_TO_SW" ? example.sw : example.de;
-    const sentenceWithGap = safeExpected ? baseSentence.replace(safeExpected, "____") : baseSentence;
+    const gapSentence = safeExpected && baseSentence.includes(safeExpected)
+        ? baseSentence.replace(safeExpected, "____")
+        : `${baseSentence} ____`;
     const translation = direction === "DE_TO_SW" ? example.de : example.sw;
 
     return {
-        prompt: `Fülle die Lücke. Gesuchtes Wort: ${sourceGloss}\n${sentenceWithGap}\nÜbersetzung: ${translation}`,
-        sentenceWithGap,
+        prompt: `Fülle die Lücke. Gesuchtes Wort (Deutsch): ${sourceGloss}\n${gapSentence}\nVolle Übersetzung: ${translation}`,
+        sentenceWithGap: gapSentence,
     };
 }
 
@@ -89,10 +121,7 @@ export async function generateTask(input: GenerateTaskInput): Promise<AiCoachTas
     }
 
     if (taskType === "cloze") {
-        const clozeExample = example ?? {
-            sw: `Hii ni ${card.swahili_text}.`,
-            de: `Das ist ${card.german_text}.`,
-        };
+        const clozeExample = ensureExampleContainsExpected(example, expectedAnswer, card, direction);
         const { prompt } = clozePrompt(clozeExample, expectedAnswer, card, direction);
         const poolAnswers = pool.map((candidate) => (direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text));
 
@@ -116,12 +145,16 @@ export async function generateTask(input: GenerateTaskInput): Promise<AiCoachTas
         };
     }
 
+    const productionSuffix = (input.taskType === "translate" && enrichment.pos !== "unknown")
+        ? " Nutze das Wort danach in einem kurzen Satz."
+        : "";
+
     return {
         taskId: crypto.randomUUID(),
         cardId: card.id,
         type: "translate",
         direction,
-        prompt: `Übersetze natürlich: ${direction === "DE_TO_SW" ? card.german_text : card.swahili_text}`,
+        prompt: `Übersetze natürlich: ${direction === "DE_TO_SW" ? card.german_text : card.swahili_text}${productionSuffix}`,
         expectedAnswer,
         hintLevels,
         learnTip: enrichment.notes ?? undefined,

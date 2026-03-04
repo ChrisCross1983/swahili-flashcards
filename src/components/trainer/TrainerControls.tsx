@@ -17,7 +17,7 @@ export default function TrainerControls({
 }: Props) {
     if (!reveal) {
         return (
-            <button type="button" className="btn btn-primary w-full py-4 text-base" onClick={onReveal}>
+            <button type="button" className="btn btn-primary mt-6 w-full py-4 text-base" onClick={onReveal}>
                 Aufdecken
             </button>
         );

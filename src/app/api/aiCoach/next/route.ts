@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { computeMasteryLevel, readMastery } from "@/lib/aiCoach/mastery";
 import { decideNextTaskType } from "@/lib/aiCoach/policy";
 import { generateTask } from "@/lib/aiCoach/tasks/generate";
 import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
@@ -47,10 +48,25 @@ export async function POST(req: Request) {
     const filtered = cards.filter((card) => card.id !== body.excludeCardId && !recentSet.has(card.id) && !answeredSet.has(card.id));
     const pool = filtered.length > 0 ? filtered : cards.filter((card) => card.id !== body.excludeCardId);
     const fallbackPool = pool.length > 0 ? pool : cards;
-    const picked = fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+
+    const masteryEntries = await Promise.all(
+        fallbackPool.map(async (card) => ({ card, mastery: await readMastery(user.id, card.id) })),
+    );
+    const prioritized = masteryEntries
+        .map(({ card, mastery }) => ({ card, level: computeMasteryLevel(mastery), seen: mastery?.seen_count ?? 0 }))
+        .sort((a, b) => a.level - b.level || a.seen - b.seen);
+
+    const pickedEntry = prioritized[0] ?? { card: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], level: 0 };
+    const picked = pickedEntry.card;
     const repeated = Boolean(body.excludeCardId && picked.id === body.excludeCardId);
 
-    const taskType = decideNextTaskType(body.history ?? [], body.streak ?? 0, body.lastTaskType, body.lastResult?.correct ?? true);
+    const taskType = decideNextTaskType(
+        body.history ?? [],
+        body.streak ?? 0,
+        body.lastTaskType,
+        body.lastResult?.correct ?? true,
+        pickedEntry.level,
+    );
 
     const task = await generateTask({
         ownerKey: user.id,

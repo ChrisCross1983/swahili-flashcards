@@ -77,22 +77,32 @@ async function run() {
         throw new Error("No auth cookies received from /api/dev/login");
     }
 
-    const endpoints = [
+    const getEndpoints = [
         "/api/stats/overview?type=vocab",
         "/api/learn/today?type=vocab",
         "/api/cards?type=vocab",
     ];
 
-    const checks = [
+    const getChecks = [
         { name: "unauthenticated", endpointSuffix: "", cookie: null, expected: 401 },
         { name: "authenticated", endpointSuffix: "", cookie: authCookieHeader, expected: 200 },
         { name: "ownerKey-ignored", endpointSuffix: "&ownerKey=not-my-id", cookie: authCookieHeader, expected: 200 },
     ];
 
+    const postChecks = [
+        { endpoint: "/api/aiCoach/start", body: { type: "vocab", direction: "DE_TO_SW" }, unauthExpected: 401, authExpected: 200 },
+        {
+            endpoint: "/api/aiCoach/next",
+            body: { sessionId: crypto.randomUUID(), type: "vocab", direction: "DE_TO_SW", streak: 0 },
+            unauthExpected: 401,
+            authExpected: 200,
+        },
+    ];
+
     let failures = 0;
 
-    for (const endpoint of endpoints) {
-        for (const check of checks) {
+    for (const endpoint of getEndpoints) {
+        for (const check of getChecks) {
             const url = `${baseUrl}${endpoint}${check.endpointSuffix}`;
 
             const headers = {};
@@ -108,6 +118,26 @@ async function run() {
                 `[${pass ? "PASS" : "FAIL"}] ${endpoint}${check.endpointSuffix} | ${check.name} | expected ${check.expected}, got ${response.status}`
             );
         }
+    }
+
+    for (const check of postChecks) {
+        const unauth = await fetch(`${baseUrl}${check.endpoint}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(check.body),
+        });
+        const unauthPass = unauth.status === check.unauthExpected;
+        if (!unauthPass) failures += 1;
+        console.log(`[${unauthPass ? "PASS" : "FAIL"}] ${check.endpoint} | unauthenticated | expected ${check.unauthExpected}, got ${unauth.status}`);
+
+        const auth = await fetch(`${baseUrl}${check.endpoint}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", cookie: authCookieHeader },
+            body: JSON.stringify(check.body),
+        });
+        const authPass = auth.status === check.authExpected;
+        if (!authPass) failures += 1;
+        console.log(`[${authPass ? "PASS" : "FAIL"}] ${check.endpoint} | authenticated | expected ${check.authExpected}, got ${auth.status}`);
     }
 
     if (failures === 0) {
