@@ -1,46 +1,50 @@
-import { describe, expect, it, vi } from "vitest";
-import { generateTask } from "../tasks/generate";
+import { describe, expect, it } from "vitest";
+import { buildTask } from "../tasks/generate";
 
-vi.mock("../enrichment/generateEnrichment", () => ({
-    getOrCreateEnrichment: vi.fn(async () => ({
-        owner_key: "owner-1",
-        card_id: "c1",
-        type: "vocab",
-        pos: "noun",
-        noun_class: "ki/vi",
-        singular: "kitabu",
-        plural: "vitabu",
-        examples: [
-            { sw: "Ninanunua kitabu kipya.", de: "Ich kaufe ein neues Buch." },
-        ],
-        mnemonic: null,
-        notes: "Achte auf ki/vi im Singular und Plural.",
-    })),
-}));
-
-describe("generateTask cloze", () => {
-    it("always includes a proper translation line and gap marker", async () => {
-        const task = await generateTask({
-            ownerKey: "owner-1",
+describe("task builder", () => {
+    it("falls back from cloze when expected token is missing in examples", () => {
+        const task = buildTask({
             direction: "DE_TO_SW",
             taskType: "cloze",
-            card: {
-                id: "c1",
-                german_text: "Buch",
-                swahili_text: "kitabu",
+            card: { id: "c1", german_text: "Buch", swahili_text: "kitabu", type: "vocab" },
+            enrichment: {
+                owner_key: "u1",
+                card_id: "c1",
                 type: "vocab",
+                pos: "noun",
+                noun_class: "ki/vi",
+                singular: "kitabu",
+                plural: "vitabu",
+                examples: [{ sw: "Ninaenda sokoni.", de: "Ich gehe zum Markt." }],
+                mnemonic: null,
+                notes: "",
             },
+        });
+
+        expect(task.type).toBe("translate");
+    });
+
+    it("builds a clean translate prompt", () => {
+        const task = buildTask({
+            direction: "DE_TO_SW",
+            taskType: "translate",
+            card: { id: "c1", german_text: "Haus\nBitte antworte", swahili_text: "nyumba", type: "vocab" },
+        });
+        expect(task.prompt).toBe("Übersetze: Haus Bitte antworte");
+    });
+
+    it("mcq distractors are short and non-empty", () => {
+        const task = buildTask({
+            direction: "DE_TO_SW",
+            taskType: "mcq",
+            card: { id: "c1", german_text: "Buch", swahili_text: "kitabu", type: "vocab" },
             pool: [
-                { id: "c2", german_text: "Haus", swahili_text: "nyumba", type: "vocab" },
-                { id: "c3", german_text: "Auto", swahili_text: "gari", type: "vocab" },
+                { id: "c2", german_text: "Haus", swahili_text: "nyumba", pos: "noun", nounClass: "n/n" },
+                { id: "c3", german_text: "", swahili_text: "", pos: "noun", nounClass: "n/n" },
+                { id: "c4", german_text: "Langer Satz mit viel zu vielen Zeichen und Erklärungen", swahili_text: "hii ni sentensi ndefu sana mno mno mno", pos: "phrase", nounClass: null },
             ],
         });
 
-        expect(task.example?.sw).toBe("Ninanunua kitabu kipya.");
-        expect(task.example?.de).toBe("Ich kaufe ein neues Buch.");
-        expect(task.prompt).toContain("Gesuchtes Wort (Deutsch)");
-        expect(task.prompt).toMatch(/(Übersetzung|Volle Übersetzung):/);
-        expect(task.prompt).toContain("____");
-        expect(task.ui?.inputMode).toBe("cloze_click");
+        expect(task.choices?.every((choice) => choice.trim().length >= 2 && choice.length <= 32)).toBe(true);
     });
 });

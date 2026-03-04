@@ -1,20 +1,14 @@
-/**
- * Teacher-like evaluator with two layers:
- * 1) deterministic heuristics fallback (always available)
- * 2) AI JSON-schema evaluator when OPENAI_API_KEY is present.
- */
 import { classifyAnswerIntent } from "./eval/classify";
 import { computeSimilarityScore, normalizeText } from "./eval/similarity";
 import type { AiCoachResult, AiCoachTask } from "./types";
 
 type AiEvalPayload = {
-    verdict: "correct" | "almost" | "wrong" | "skip" | "nonsense";
-    score: number;
-    correction: string;
-    feedback: string;
-    tip: string;
-    example: { sw: string; de: string };
-    suggestedNext: "repeat" | "next" | "easier" | "harder";
+    errorType: "typo" | "wrong_word" | "wrong_form" | "nonsense" | "skip" | "correct";
+    correctedAnswer: string;
+    feedbackShort: string;
+    feedbackWhy: string;
+    nextSuggestion: "repeat" | "next" | "easier" | "harder";
+    minimalExample?: { sw: string; de: string } | null;
 };
 
 function feedbackTitle(intent: AiCoachResult["intent"]): AiCoachResult["feedbackTitle"] {
@@ -23,47 +17,11 @@ function feedbackTitle(intent: AiCoachResult["intent"]): AiCoachResult["feedback
     return "Noch nicht";
 }
 
-function missingHint(answer: string, expected: string): string {
-    const normalizedAnswer = normalizeText(answer);
-    const normalizedExpected = normalizeText(expected);
-
-    if (!normalizedAnswer) {
-        return `Starte mit „${expected.slice(0, 1)}".`;
-    }
-
-    if (normalizedExpected.startsWith(normalizedAnswer)) {
-        const rest = expected.slice(answer.trim().length);
-        return rest ? `Am Ende fehlt noch „${rest}".` : "Achte auf die genaue Schreibweise.";
-    }
-
-    let idx = 0;
-    while (idx < normalizedAnswer.length && idx < normalizedExpected.length && normalizedAnswer[idx] === normalizedExpected[idx]) {
-        idx += 1;
-    }
-
-    if (idx < normalizedExpected.length) {
-        return `Prüfe den Abschnitt ab „${expected.slice(idx)}".`;
-    }
-
-    return "Prüfe Vokale und Endungen noch einmal.";
-}
-
-function normalizeExample(task: AiCoachTask): { sw: string; de: string } {
+function normalizeExample(task: AiCoachTask): { sw: string; de: string } | undefined {
     if (task.example?.sw?.trim() && task.example?.de?.trim()) {
         return { sw: task.example.sw.trim(), de: task.example.de.trim() };
     }
-
-    if (task.direction === "DE_TO_SW") {
-        return {
-            sw: `Leo natumia ${task.expectedAnswer} kwenye sentensi.`,
-            de: "Heute benutze ich das gesuchte Wort in einem Satz.",
-        };
-    }
-
-    return {
-        sw: "Leo natumia neno hili kwenye sentensi.",
-        de: `Heute benutze ich ${task.expectedAnswer} in einem Satz.`,
-    };
+    return undefined;
 }
 
 export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLevel = 0, wrongAttemptsOnCard = 0): AiCoachResult {
@@ -71,16 +29,16 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
     const normalized = normalizeText(answer);
     const example = normalizeExample(task);
 
-    if (!normalized || /^(keine ahnung|weiss nicht|weiß nicht|idk|skip|ich weiss es nicht|ich weiß es nicht|i dont know|i don't know)$/.test(normalized)) {
+    if (!normalized || /^(keine ahnung|weiss nicht|weiß nicht|idk|skip|ich weiss nicht|ich weiß nicht|ich weiss es nicht|ich weiß es nicht|i dont know|i don't know)$/.test(normalized)) {
         return {
             correct: false,
             intent: "no_attempt",
             verdict: "skip",
             score: 0,
             feedbackTitle: "Noch nicht",
-            feedback: "Kein Problem – wir bauen das Schritt für Schritt auf.",
+            feedback: "Alles gut – wir machen als Nächstes eine leichtere Übung.",
             correctAnswer: expected,
-            learnTip: "Nutze zuerst eine einfache Merkhilfe und sprich das Wort laut nach.",
+            learnTip: "Wenn du unsicher bist: antworte mit dem Stammwort zuerst.",
             example,
             suggestedNext: "easier",
             retryAllowed: wrongAttemptsOnCard < 2,
@@ -89,99 +47,91 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
 
     const classification = classifyAnswerIntent(answer, expected);
     const similarity = computeSimilarityScore(answer, expected);
-    const partial = similarity >= 0.7 && similarity < 0.95;
+    const partial = similarity >= 0.75 && similarity < 0.98;
     const isCorrect = classification.intent === "correct";
     const intent = isCorrect ? "correct" : (partial ? "almost" : classification.intent);
-    const score = isCorrect ? 1 : (partial ? similarity : 0);
-    const fallbackTip = task.learnTip ?? "Achte auf Stamm und Endung; bilde direkt einen kurzen Beispielsatz.";
-    const feedback = isCorrect
-        ? "Sehr gut – das passt genau."
-        : partial
-            ? `Fast richtig. ${missingHint(answer, expected)}`
-            : "Noch nicht ganz. Vergleiche Bedeutung und Form noch einmal ruhig.";
 
     return {
         correct: isCorrect,
         intent,
-        verdict: isCorrect ? "correct" : (intent === "almost" || intent === "typo" ? "almost" : intent === "nonsense" ? "nonsense" : "wrong"),
-        score,
+        verdict: isCorrect ? "correct" : intent === "nonsense" ? "nonsense" : partial || intent === "typo" ? "almost" : "wrong",
+        score: isCorrect ? 1 : partial ? similarity : 0,
         feedbackTitle: feedbackTitle(intent),
-        feedback,
+        feedback: isCorrect ? "Sehr gut – korrekt." : partial ? "Fast richtig, überprüfe die genaue Form." : "Noch nicht korrekt. Prüfe Bedeutung und Wortform.",
         correctAnswer: expected,
-        learnTip: isCorrect ? fallbackTip : (partial ? `${missingHint(answer, expected)} ${fallbackTip}` : fallbackTip),
+        learnTip: intent === "typo" ? "Achte auf einzelne Buchstaben und Endungen." : "Vergleiche Stamm + Endung mit der Musterlösung.",
         example,
-        suggestedNext: isCorrect ? "next" : (partial ? "repeat" : "easier"),
+        suggestedNext: isCorrect ? "next" : partial ? "repeat" : "easier",
         retryAllowed: !isCorrect && wrongAttemptsOnCard < 2,
     };
 }
 
-async function evaluateWithOpenAi(task: AiCoachTask, answer: string): Promise<AiEvalPayload | null> {
+async function evaluateWithOpenAi(task: AiCoachTask, answer: string, timeoutMs = 700): Promise<AiEvalPayload | null> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return null;
 
-    const payload = {
-        model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-        input: [
-            {
-                role: "system",
-                content: [{ type: "input_text", text: "Du bist ein freundlicher Swahili-Lehrcoach. Antworte nur als valides JSON laut Schema." }],
+    const controller = new AbortController();
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => {
+        controller.abort();
+        resolve(null);
+    }, timeoutMs));
+
+    try {
+        const fetchPromise = fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
             },
-            {
-                role: "user",
-                content: [{
-                    type: "input_text",
-                    text: `Bewerte die Antwort einer Lernperson.\nTasktyp: ${task.type}\nRichtung: ${task.direction}\nPrompt: ${task.prompt}\nErwartet: ${task.expectedAnswer}\nAntwort: ${answer}\nBeispiel sw: ${task.example?.sw ?? ""}\nBeispiel de: ${task.example?.de ?? ""}\nGib kurze, konkrete Rückmeldung auf Deutsch.`,
-                }],
-            },
-        ],
-        text: {
-            format: {
-                type: "json_schema",
-                name: "ai_coach_eval",
-                strict: true,
-                schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                        verdict: { type: "string", enum: ["correct", "almost", "wrong", "skip", "nonsense"] },
-                        score: { type: "number", minimum: 0, maximum: 1 },
-                        correction: { type: "string" },
-                        feedback: { type: "string" },
-                        tip: { type: "string" },
-                        example: {
+            body: JSON.stringify({
+                model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+                input: [
+                    {
+                        role: "system",
+                        content: [{ type: "input_text", text: "Du bist Swahili-Coach. Korrigiere nur sprachlich sauber. Wenn kein sicheres Beispiel vorhanden ist, gib minimalExample = null." }],
+                    },
+                    {
+                        role: "user",
+                        content: [{ type: "input_text", text: `Task: ${task.type}\nPrompt: ${task.prompt}\nErwartet: ${task.expectedAnswer}\nAntwort: ${answer}` }],
+                    },
+                ],
+                text: {
+                    format: {
+                        type: "json_schema",
+                        name: "ai_eval",
+                        strict: true,
+                        schema: {
                             type: "object",
                             additionalProperties: false,
                             properties: {
-                                sw: { type: "string" },
-                                de: { type: "string" },
+                                errorType: { type: "string", enum: ["typo", "wrong_word", "wrong_form", "nonsense", "skip", "correct"] },
+                                correctedAnswer: { type: "string" },
+                                feedbackShort: { type: "string" },
+                                feedbackWhy: { type: "string" },
+                                nextSuggestion: { type: "string", enum: ["repeat", "next", "easier", "harder"] },
+                                minimalExample: {
+                                    anyOf: [
+                                        { type: "null" },
+                                        {
+                                            type: "object",
+                                            additionalProperties: false,
+                                            properties: { sw: { type: "string" }, de: { type: "string" } },
+                                            required: ["sw", "de"],
+                                        },
+                                    ],
+                                },
                             },
-                            required: ["sw", "de"],
+                            required: ["errorType", "correctedAnswer", "feedbackShort", "feedbackWhy", "nextSuggestion", "minimalExample"],
                         },
-                        suggestedNext: { type: "string", enum: ["repeat", "next", "easier", "harder"] },
                     },
-                    required: ["verdict", "score", "correction", "feedback", "tip", "example", "suggestedNext"],
                 },
-            },
-        },
-    };
-
-    const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as { output_text?: string };
-    const raw = data.output_text?.trim();
-    if (!raw) return null;
-
-    try {
-        return JSON.parse(raw) as AiEvalPayload;
+            }),
+        });
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
+        if (!response || !("ok" in response) || !response.ok) return null;
+        const data = (await response.json()) as { output_text?: string };
+        return data.output_text ? JSON.parse(data.output_text) as AiEvalPayload : null;
     } catch {
         return null;
     }
@@ -191,32 +141,29 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
     const ai = await evaluateWithOpenAi(task, answer);
     if (!ai) return fallback;
 
-    const mappedIntent = ai.verdict === "correct"
-        ? "correct"
-        : ai.verdict === "almost"
-            ? "almost"
-            : ai.verdict === "skip"
-                ? "no_attempt"
-                : ai.verdict === "nonsense"
-                    ? "nonsense"
-                    : "wrong";
+    const intentMap: Record<AiEvalPayload["errorType"], AiCoachResult["intent"]> = {
+        correct: "correct",
+        typo: "typo",
+        wrong_word: "wrong",
+        wrong_form: "almost",
+        nonsense: "nonsense",
+        skip: "no_attempt",
+    };
 
-    const example = ai.example?.sw?.trim() && ai.example?.de?.trim()
-        ? { sw: ai.example.sw.trim(), de: ai.example.de.trim() }
-        : normalizeExample(task);
+    const mappedIntent = intentMap[ai.errorType] ?? fallback.intent;
 
     return {
         ...fallback,
-        correct: ai.verdict === "correct",
+        correct: ai.errorType === "correct",
         intent: mappedIntent,
-        verdict: ai.verdict,
-        score: Math.max(0, Math.min(1, ai.score)),
+        verdict: ai.errorType === "correct" ? "correct" : ai.errorType === "skip" ? "skip" : ai.errorType === "nonsense" ? "nonsense" : "wrong",
         feedbackTitle: feedbackTitle(mappedIntent),
-        feedback: ai.feedback.trim(),
-        correctAnswer: ai.correction.trim() || task.expectedAnswer,
-        learnTip: ai.tip.trim() || fallback.learnTip,
-        example,
-        suggestedNext: ai.suggestedNext,
-        retryAllowed: ai.verdict !== "correct" ? fallback.retryAllowed : false,
+        feedback: `${ai.feedbackShort} ${ai.feedbackWhy}`.trim(),
+        correctAnswer: ai.correctedAnswer?.trim() || task.expectedAnswer,
+        learnTip: ai.feedbackWhy?.trim() || fallback.learnTip,
+        suggestedNext: ai.nextSuggestion,
+        example: ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim()
+            ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
+            : fallback.example,
     };
 }

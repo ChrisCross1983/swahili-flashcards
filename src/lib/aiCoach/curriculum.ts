@@ -1,12 +1,16 @@
-import { decideNextTaskType } from "./policy";
+import { createDefaultLearnerCardState } from "./learnerModel";
+import { planNextTask } from "./planner";
 import type { AiCoachResult, AiTaskType } from "./types";
 
 export function chooseNextTaskType(
-    streak: number,
+    _streak: number,
     lastResult?: AiCoachResult,
-    history: AiTaskType[] = [],
-    lastTaskType?: AiTaskType,
-    masteryLevel: 0 | 1 | 2 | 3 | 4 = 0,
+    _history: AiTaskType[] = [],
+    _lastTaskType?: AiTaskType,
+    masteryLevel = 0,
 ): AiTaskType {
-    return decideNextTaskType(history, streak, lastTaskType, Boolean(lastResult?.correct), masteryLevel);
+    const state = createDefaultLearnerCardState("", "");
+    state.mastery = Math.max(0, Math.min(1, masteryLevel / 4));
+    state.lastErrorType = lastResult?.intent && lastResult.intent !== "correct" ? lastResult.intent : null;
+    return planNextTask({ learnerState: state }).taskType;
 }

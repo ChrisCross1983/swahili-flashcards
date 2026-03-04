@@ -267,3 +267,31 @@ export async function getOrCreateEnrichment(ownerKey: string, card: EnrichmentCa
 
     return enrichment;
 }
+
+export async function getExistingEnrichment(ownerKey: string, cardId: string): Promise<CardEnrichment | null> {
+    const { supabaseServer } = await import("@/lib/supabaseServer");
+    const { data } = await supabaseServer
+        .from("ai_card_enrichment")
+        .select("owner_key, card_id, type, pos, noun_class, singular, plural, examples, mnemonic, notes")
+        .eq("owner_key", ownerKey)
+        .eq("card_id", cardId)
+        .maybeSingle();
+
+    if (!data) return null;
+    return {
+        owner_key: data.owner_key,
+        card_id: data.card_id,
+        type: data.type === "sentence" ? "sentence" : "vocab",
+        pos: ["noun", "verb", "adj", "phrase", "unknown"].includes(data.pos) ? (data.pos as CardEnrichment["pos"]) : "unknown",
+        noun_class: data.noun_class,
+        singular: data.singular,
+        plural: data.plural,
+        examples: normalizeExamples((data.examples as EnrichmentExample[]) ?? []),
+        mnemonic: data.mnemonic,
+        notes: data.notes,
+    };
+}
+
+export function scheduleEnrichment(ownerKey: string, card: EnrichmentCardInput): void {
+    void getOrCreateEnrichment(ownerKey, card).catch(() => undefined);
+}

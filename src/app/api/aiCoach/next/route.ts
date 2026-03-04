@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { computeMasteryLevel, readMastery } from "@/lib/aiCoach/mastery";
-import { decideNextTaskType } from "@/lib/aiCoach/policy";
-import { generateTask } from "@/lib/aiCoach/tasks/generate";
+import { createDefaultLearnerCardState, type LearnerCardState } from "@/lib/aiCoach/learnerModel";
+import { planNextTask } from "@/lib/aiCoach/planner";
+import { buildTask } from "@/lib/aiCoach/tasks/generate";
+import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
 import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -11,7 +12,6 @@ type Body = {
     sessionId?: string;
     type?: CardType;
     direction?: Direction;
-    streak?: number;
     excludeCardId?: string;
     answeredCardIds?: string[];
     recentCardIds?: string[];
@@ -20,61 +20,71 @@ type Body = {
     lastResult?: AiCoachResult;
 };
 
+function fromRow(userId: string, cardId: string, row?: Record<string, unknown>): LearnerCardState {
+    if (!row) return createDefaultLearnerCardState(userId, cardId);
+    return {
+        ownerKey: userId,
+        cardId,
+        mastery: Number(row.mastery ?? 0),
+        lastSeen: (row.last_seen as string | null) ?? null,
+        dueAt: (row.due_at as string | null) ?? null,
+        wrongCount: Number(row.wrong_count ?? 0),
+        lastErrorType: (row.last_error_type as LearnerCardState["lastErrorType"]) ?? null,
+        avgLatencyMs: Number(row.avg_latency_ms ?? 0),
+        hintCount: Number(row.hint_count ?? 0),
+    };
+}
+
 export async function POST(req: Request) {
     let body: Body;
-    try {
-        body = (await req.json()) as Body;
-    } catch {
-        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-    }
+    try { body = (await req.json()) as Body; } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
 
     const { user, response } = await requireUser();
     if (response) return response;
-
     if (!body.sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
 
     const type = body.type === "sentence" ? "sentence" : "vocab";
     const direction = body.direction === "SW_TO_DE" ? "SW_TO_DE" : "DE_TO_SW";
 
-    let cardsQuery = supabaseServer.from("cards").select("id, german_text, swahili_text, type").eq("owner_key", user.id).limit(100);
-    cardsQuery = type === "sentence" ? cardsQuery.eq("type", "sentence") : cardsQuery.or("type.is.null,type.eq.vocab");
-
-    const { data: cards, error } = await cardsQuery;
+    let query = supabaseServer.from("cards").select("id,german_text,swahili_text,type").eq("owner_key", user.id).limit(100);
+    query = type === "sentence" ? query.eq("type", "sentence") : query.or("type.is.null,type.eq.vocab");
+    const { data: cards, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!cards || cards.length === 0) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
+    if (!cards?.length) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
 
     const recentSet = new Set(body.recentCardIds ?? []);
     const answeredSet = new Set(body.answeredCardIds ?? []);
-    const filtered = cards.filter((card) => card.id !== body.excludeCardId && !recentSet.has(card.id) && !answeredSet.has(card.id));
-    const pool = filtered.length > 0 ? filtered : cards.filter((card) => card.id !== body.excludeCardId);
-    const fallbackPool = pool.length > 0 ? pool : cards;
+    const candidatePool = cards.filter((card) => card.id !== body.excludeCardId && !recentSet.has(card.id) && !answeredSet.has(card.id));
+    const fallbackPool = candidatePool.length ? candidatePool : cards;
 
-    const masteryEntries = await Promise.all(
-        fallbackPool.map(async (card) => ({ card, mastery: await readMastery(user.id, card.id) })),
-    );
-    const prioritized = masteryEntries
-        .map(({ card, mastery }) => ({ card, level: computeMasteryLevel(mastery), seen: mastery?.seen_count ?? 0 }))
-        .sort((a, b) => a.level - b.level || a.seen - b.seen);
+    const cardIds = fallbackPool.map((card) => card.id);
+    const { data: states } = await supabaseServer
+        .from("ai_learner_state")
+        .select("card_id,mastery,last_seen,due_at,wrong_count,last_error_type,avg_latency_ms,hint_count")
+        .eq("owner_key", user.id)
+        .in("card_id", cardIds);
 
-    const pickedEntry = prioritized[0] ?? { card: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], level: 0 };
-    const picked = pickedEntry.card;
-    const repeated = Boolean(body.excludeCardId && picked.id === body.excludeCardId);
+    const stateMap = new Map((states ?? []).map((row) => [String(row.card_id), row]));
+    const ranked = fallbackPool
+        .map((card) => ({ card, state: fromRow(user.id, card.id, stateMap.get(card.id)) }))
+        .sort((a, b) => a.state.mastery - b.state.mastery || a.state.wrongCount - b.state.wrongCount);
 
-    const taskType = decideNextTaskType(
-        body.history ?? [],
-        body.streak ?? 0,
-        body.lastTaskType,
-        body.lastResult?.correct ?? true,
-        pickedEntry.level,
-    );
+    const picked = ranked[0];
+    if (!picked) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
+    const recentIntents = body.lastResult?.intent ? [body.lastResult.intent] : [];
+    const plan = planNextTask({ learnerState: picked.state, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
 
-    const task = await generateTask({
-        ownerKey: user.id,
-        card: { id: picked.id, german_text: picked.german_text, swahili_text: picked.swahili_text, type: picked.type },
+    const enrichment = await getExistingEnrichment(user.id, picked.card.id);
+    if (!enrichment) scheduleEnrichment(user.id, picked.card);
+
+    const task = buildTask({
+        card: picked.card,
         direction,
-        taskType,
-        pool: cards.map((card) => ({ id: card.id, german_text: card.german_text, swahili_text: card.swahili_text, type: card.type })),
+        taskType: plan.taskType,
+        pool: cards,
+        enrichment,
+        rationale: plan.rationale,
     });
 
-    return NextResponse.json({ task, meta: { repeated } });
+    return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), rationale: plan.rationale } });
 }
