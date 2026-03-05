@@ -22,49 +22,98 @@ export type LearnerResultUpdate = {
     now?: Date;
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+export type LearnerUpdateMeta = {
+    now: Date;
+    taskType?: "translate" | "cloze" | "mcq";
+    usedHintLevel?: number;
+    wrongAttemptsOnCard?: number;
+    intent?: AnswerIntent;
+};
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+function clampMastery(value: number): number {
+    return Math.max(0, Math.min(4, value));
+}
 
 export function computeMastery(state: LearnerCardState): number {
-    return Math.max(0, Math.min(1, state.mastery));
+    const mastery = clampMastery(state.mastery);
+    return mastery <= 1 ? mastery : mastery / 4;
 }
 
 export function isDue(state: LearnerCardState, now = new Date()): boolean {
     if (!state.dueAt) return true;
-    return new Date(state.dueAt).getTime() <= now.getTime();
+    const dueMs = new Date(state.dueAt).getTime();
+    if (Number.isNaN(dueMs)) return true;
+    return dueMs <= now.getTime();
 }
 
-function nextIntervalDays(mastery: number): number {
-    if (mastery >= 0.9) return 8;
-    if (mastery >= 0.75) return 4;
-    if (mastery >= 0.5) return 2;
-    return 1;
+function intervalForCorrect(mastery: number): number {
+    if (mastery >= 4) return 7 * DAY_MS;
+    if (mastery >= 3) return 2 * DAY_MS;
+    if (mastery >= 2) return 6 * HOUR_MS;
+    if (mastery >= 1) return 30 * MINUTE_MS;
+    return 5 * MINUTE_MS;
 }
 
-export function updateStateFromResult(state: LearnerCardState, result: LearnerResultUpdate): LearnerCardState {
-    const now = result.now ?? new Date();
-    const prevMastery = computeMastery(state);
-    const score = Math.max(0, Math.min(1, result.score));
-    const hintPenalty = result.usedHint ? 0.1 : 0;
-    const latencyPenalty = (result.latencyMs ?? 0) > 7000 ? 0.07 : 0;
-    const delta = result.correct ? (0.16 * score) - hintPenalty - latencyPenalty : -0.18;
-    const mastery = Math.max(0, Math.min(1, prevMastery + delta));
-    const intervalDays = result.correct ? nextIntervalDays(mastery) : 0.25;
-    const dueAt = new Date(now.getTime() + (intervalDays * DAY_MS)).toISOString();
+function intervalForAlmost(mastery: number): number {
+    if (mastery >= 2) return HOUR_MS;
+    return 10 * MINUTE_MS;
+}
+
+function intervalForWrong(wrongAttemptsOnCard: number): number {
+    return (wrongAttemptsOnCard >= 2 ? 10 : 2) * MINUTE_MS;
+}
+
+export function updateStateFromResult(
+    state: LearnerCardState,
+    result: LearnerResultUpdate,
+    meta?: LearnerUpdateMeta,
+): LearnerCardState {
+    const now = meta?.now ?? result.now ?? new Date();
+    const nowIso = now.toISOString();
+    const prevMastery = clampMastery(state.mastery);
+    const usedHintLevel = meta?.usedHintLevel ?? (result.usedHint ? 1 : 0);
+    const intent = meta?.intent ?? result.intent;
+    const wrongAttemptsOnCard = meta?.wrongAttemptsOnCard ?? 0;
+
+    let mastery = prevMastery;
+    let wrongCount = state.wrongCount;
+    let lastErrorType: AnswerIntent | null = state.lastErrorType;
+    let dueAtMs = now.getTime();
+
+    if (result.correct) {
+        mastery = clampMastery(prevMastery + 0.35);
+        wrongCount = Math.max(0, state.wrongCount - 1);
+        lastErrorType = null;
+        dueAtMs = now.getTime() + intervalForCorrect(mastery);
+    } else if (intent === "almost" || intent === "typo") {
+        mastery = clampMastery(prevMastery + 0.15);
+        lastErrorType = intent;
+        dueAtMs = now.getTime() + intervalForAlmost(mastery);
+    } else {
+        mastery = clampMastery(prevMastery - 0.2);
+        wrongCount = state.wrongCount + 1;
+        lastErrorType = intent;
+        dueAtMs = now.getTime() + intervalForWrong(wrongAttemptsOnCard);
+    }
 
     return {
         ...state,
         mastery,
-        lastSeen: now.toISOString(),
-        dueAt,
-        wrongCount: result.correct ? state.wrongCount : state.wrongCount + 1,
-        lastErrorType: result.correct ? null : result.intent,
+        lastSeen: nowIso,
+        dueAt: new Date(dueAtMs).toISOString(),
+        wrongCount,
+        lastErrorType,
         avgLatencyMs: result.latencyMs
             ? state.avgLatencyMs > 0
                 ? Math.round((state.avgLatencyMs * 0.7) + (result.latencyMs * 0.3))
                 : result.latencyMs
             : state.avgLatencyMs,
-        hintCount: result.usedHint ? state.hintCount + 1 : state.hintCount,
-        updatedAt: now.toISOString(),
+        hintCount: usedHintLevel > 0 ? state.hintCount + 1 : state.hintCount,
+        updatedAt: nowIso,
     };
 }
 

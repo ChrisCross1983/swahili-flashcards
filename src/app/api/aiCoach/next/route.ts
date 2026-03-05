@@ -35,7 +35,29 @@ function fromRow(userId: string, cardId: string, row?: Record<string, unknown>):
     };
 }
 
+function parseTime(value: string | null): number | null {
+    if (!value) return null;
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? null : ms;
+}
+
+function compareByPriority(a: LearnerCardState, b: LearnerCardState, nowMs: number): number {
+    const aDueAt = parseTime(a.dueAt);
+    const bDueAt = parseTime(b.dueAt);
+    const aDue = aDueAt !== null && aDueAt <= nowMs;
+    const bDue = bDueAt !== null && bDueAt <= nowMs;
+    if (aDue !== bDue) return aDue ? -1 : 1;
+    if (a.mastery !== b.mastery) return a.mastery - b.mastery;
+    if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
+    const aLastSeen = parseTime(a.lastSeen);
+    const bLastSeen = parseTime(b.lastSeen);
+    if (aLastSeen === null && bLastSeen !== null) return -1;
+    if (aLastSeen !== null && bLastSeen === null) return 1;
+    return (aLastSeen ?? 0) - (bLastSeen ?? 0);
+}
+
 export async function POST(req: Request) {
+    const startedAt = Date.now();
     let body: Body;
     try { body = (await req.json()) as Body; } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
 
@@ -46,9 +68,11 @@ export async function POST(req: Request) {
     const type = body.type === "sentence" ? "sentence" : "vocab";
     const direction = body.direction === "SW_TO_DE" ? "SW_TO_DE" : "DE_TO_SW";
 
+    const cardsQueryStartedAt = Date.now();
     let query = supabaseServer.from("cards").select("id,german_text,swahili_text,type").eq("owner_key", user.id).limit(100);
     query = type === "sentence" ? query.eq("type", "sentence") : query.or("type.is.null,type.eq.vocab");
     const { data: cards, error } = await query;
+    const cardsQueryMs = Date.now() - cardsQueryStartedAt;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!cards?.length) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
 
@@ -58,16 +82,19 @@ export async function POST(req: Request) {
     const fallbackPool = candidatePool.length ? candidatePool : cards;
 
     const cardIds = fallbackPool.map((card) => card.id);
+    const statesQueryStartedAt = Date.now();
     const { data: states } = await supabaseServer
         .from("ai_learner_state")
         .select("card_id,mastery,last_seen,due_at,wrong_count,last_error_type,avg_latency_ms,hint_count")
         .eq("owner_key", user.id)
         .in("card_id", cardIds);
+    const statesQueryMs = Date.now() - statesQueryStartedAt;
 
     const stateMap = new Map((states ?? []).map((row) => [String(row.card_id), row]));
+    const nowMs = Date.now();
     const ranked = fallbackPool
         .map((card) => ({ card, state: fromRow(user.id, card.id, stateMap.get(card.id)) }))
-        .sort((a, b) => a.state.mastery - b.state.mastery || a.state.wrongCount - b.state.wrongCount);
+        .sort((a, b) => compareByPriority(a.state, b.state, nowMs));
 
     const picked = ranked[0];
     if (!picked) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
@@ -84,6 +111,15 @@ export async function POST(req: Request) {
         pool: cards,
         enrichment,
         rationale: plan.rationale,
+    });
+
+    console.info("[aiCoach] next timings", {
+        userId: user.id,
+        dbMs: { cardsQueryMs, statesQueryMs },
+        totalMs: Date.now() - startedAt,
+        taskTypeRequested: plan.taskType,
+        taskTypeChosen: task.type,
+        clozeFallbackReason: plan.taskType === "cloze" && task.type !== "cloze" ? "missing_valid_example" : null,
     });
 
     return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), rationale: plan.rationale } });

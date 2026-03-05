@@ -141,7 +141,7 @@ export default function AiCoachPanel({ cardType }: Props) {
                     <div className="font-medium">
                         {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
-                    <div>Richtig wäre: <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
+                    <div>{state.lastResult.correct ? "Richtig:" : "Richtig ist:"} <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
                     <div className="text-muted">{state.lastResult.feedback ?? "Gute Arbeit – weiter so."}</div>
                     <div className="text-muted">Tipp: {state.lastResult.learnTip}</div>
                     {state.lastResult.example ? (
