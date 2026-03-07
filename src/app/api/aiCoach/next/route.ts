@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { createDefaultLearnerCardState, type LearnerCardState } from "@/lib/aiCoach/learnerModel";
 import { planNextTask } from "@/lib/aiCoach/planner";
+import { interpretCard } from "@/lib/aiCoach/cardInterpreter";
 import { buildTask } from "@/lib/aiCoach/tasks/generate";
 import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
 import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
@@ -99,15 +100,23 @@ export async function POST(req: Request) {
     const picked = ranked[0];
     if (!picked) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
     const recentIntents = body.lastResult?.intent ? [body.lastResult.intent] : [];
-    const plan = planNextTask({ learnerState: picked.state, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
 
     const enrichment = await getExistingEnrichment(user.id, picked.card.id);
+    const cardProfile = interpretCard(picked.card, enrichment);
+    const plan = planNextTask({ learnerState: picked.state, cardProfile, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
+    const remediationObjective = body.lastResult?.correct === false
+        ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "guidedRecall")
+        : body.lastResult?.correct === true && picked.state.mastery >= 0.75
+            ? "contextUsage"
+            : null;
     if (!enrichment) scheduleEnrichment(user.id, picked.card);
 
     const task = buildTask({
         card: picked.card,
         direction,
-        taskType: plan.taskType,
+        taskType: remediationObjective === "recognition" ? "mcq" : remediationObjective === "guidedRecall" ? "cloze" : remediationObjective === "contextUsage" ? "cloze" : plan.taskType,
+        objective: remediationObjective ?? plan.objective,
+        cardProfile,
         pool: cards,
         enrichment,
         rationale: plan.rationale,
@@ -122,5 +131,5 @@ export async function POST(req: Request) {
         clozeFallbackReason: plan.taskType === "cloze" && task.type !== "cloze" ? "missing_valid_example" : null,
     });
 
-    return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), rationale: plan.rationale } });
+    return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), objective: remediationObjective ?? plan.objective, rationale: plan.rationale } });
 }

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { createDefaultLearnerCardState, type LearnerCardState } from "@/lib/aiCoach/learnerModel";
 import { planNextTask } from "@/lib/aiCoach/planner";
+import { interpretCard } from "@/lib/aiCoach/cardInterpreter";
 import { buildTask } from "@/lib/aiCoach/tasks/generate";
 import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
 import type { CardType, Direction } from "@/lib/trainer/types";
@@ -80,14 +81,17 @@ export async function POST(req: Request) {
         .sort((a, b) => compareByPriority(a.state, b.state, nowMs))[0];
 
     if (!picked) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
-    const plan = planNextTask({ learnerState: picked.state });
     const enrichment = await getExistingEnrichment(user.id, picked.card.id);
+    const cardProfile = interpretCard(picked.card, enrichment);
+    const plan = planNextTask({ learnerState: picked.state, cardProfile });
     if (!enrichment) scheduleEnrichment(user.id, picked.card);
 
     const task = buildTask({
         card: picked.card,
         direction,
         taskType: plan.taskType,
+        objective: plan.objective,
+        cardProfile,
         pool: cards,
         enrichment,
         rationale: plan.rationale,
@@ -102,5 +106,5 @@ export async function POST(req: Request) {
         clozeFallbackReason: plan.taskType === "cloze" && task.type !== "cloze" ? "missing_valid_example" : null,
     });
 
-    return NextResponse.json({ sessionId: crypto.randomUUID(), task });
+    return NextResponse.json({ sessionId: crypto.randomUUID(), task, meta: { objective: plan.objective, rationale: plan.rationale } });
 }

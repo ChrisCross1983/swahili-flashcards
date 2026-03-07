@@ -1,5 +1,24 @@
 import type { CardType, Direction } from "@/lib/trainer/types";
 import type { AnswerIntent } from "./eval/classify";
+import type { CardPedagogicalProfile } from "./cardInterpreter";
+
+export type LearningObjective =
+    | "recognition"
+    | "recall"
+    | "guidedRecall"
+    | "contextUsage"
+    | "errorRemediation"
+    | "contrastLearning"
+    | "reinforcement";
+
+export type ErrorCategory =
+    | "typo"
+    | "wrong_form"
+    | "wrong_noun_class"
+    | "wrong_word_order"
+    | "semantic_confusion"
+    | "no_attempt"
+    | "unknown";
 
 export type AiTaskType = "translate" | "cloze" | "mcq";
 
@@ -17,6 +36,9 @@ export type AiCoachTask = {
     ui?: {
         inputMode: "text" | "mcq" | "cloze_click";
     };
+    objective?: LearningObjective;
+    rationale?: string;
+    profile?: CardPedagogicalProfile;
     meta?: {
         repeated?: boolean;
         pos?: "noun" | "verb" | "adj" | "phrase" | "unknown";
@@ -28,6 +50,9 @@ export type AiCoachTask = {
 export type AiCoachResult = {
     correct: boolean;
     intent: AnswerIntent;
+    confidence?: number;
+    errorCategory?: ErrorCategory;
+    explanation?: string;
     verdict?: "correct" | "almost" | "wrong" | "skip" | "nonsense";
     score: number;
     feedbackTitle: "Richtig" | "Fast richtig" | "Noch nicht";
@@ -81,6 +106,8 @@ export type AiCoachNextResponse = {
     task: AiCoachTask;
     meta?: {
         repeated?: boolean;
+        objective?: LearningObjective;
+        rationale?: string;
     };
 };
 

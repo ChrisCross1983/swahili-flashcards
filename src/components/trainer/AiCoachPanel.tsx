@@ -113,13 +113,11 @@ export default function AiCoachPanel({ cardType }: Props) {
                     <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={hintDisabled}>
                         💡 {hintButtonLabel}
                     </button>
-                    {state.currentTask?.type === "translate" ? (
-                        <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don't know")} disabled={!isInTask}>
-                            Ich weiß nicht
-                        </button>
-                    ) : null}
+                    <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don\'t know")} disabled={!isInTask}>
+                        Auflösen & erklären
+                    </button>
                     <button type="button" className="btn btn-secondary" onClick={skip} disabled={!isInTask}>
-                        ⏭ Überspringen
+                        ⏭ Später
                     </button>
                     <button type="button" className="btn btn-ghost" onClick={endSession} disabled={state.status === "idle" || state.status === "loading"}>
                         Session beenden
@@ -141,15 +139,16 @@ export default function AiCoachPanel({ cardType }: Props) {
                     <div className="font-medium">
                         {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
-                    <div>{state.lastResult.correct ? "Richtig:" : "Richtig ist:"} <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
-                    <div className="text-muted">{state.lastResult.feedback ?? "Gute Arbeit – weiter so."}</div>
-                    <div className="text-muted">Tipp: {state.lastResult.learnTip}</div>
+                    <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
+                    {!state.lastResult.correct ? <div className="text-muted">Warum es noch nicht passt: {state.lastResult.explanation ?? state.lastResult.feedback}</div> : null}
+                    <div className="text-muted">Linguistischer Hinweis: {state.currentTask?.profile?.morphologicalFeatures?.nounClass ? `Nominalklasse ${state.currentTask.profile.morphologicalFeatures.nounClass}.` : state.lastResult.learnTip}</div>
                     {state.lastResult.example ? (
                         <div className="text-muted">
-                            <div>Swahili: {state.lastResult.example.sw}</div>
-                            <div>Deutsch: {state.lastResult.example.de}</div>
+                            <div>Beispiel (SW): {state.lastResult.example.sw}</div>
+                            <div>Übersetzung (DE): {state.lastResult.example.de}</div>
                         </div>
                     ) : null}
+                    {state.currentTask?.objective ? <div className="text-xs text-muted">Lernziel: {state.currentTask.objective}</div> : null}
                 </div>
             ) : null}
 

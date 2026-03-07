@@ -1,43 +1,73 @@
-# AI Coach v2 Architecture (Beginner-Friendly)
+# AI Coach v3: Pedagogical Intelligence Layer
 
-## Why the old coach felt mechanical
-The previous flow mixed planning, task generation, and enrichment fetching together. That made decisions feel random and slow.
+## 1) What changed conceptually
+The coach no longer selects an exercise directly from card type. It now runs a teacher-like micro-planning flow:
 
-## New architecture
-1. **Learner Model (`learnerModel.ts`)**
-   - Stores per-user/per-card memory: mastery, due time, error trend, latency, hint use.
-   - Updates mastery after each answer with simple transparent rules.
+1. **Card Interpretation** (`cardInterpreter.ts`)
+   - Builds a deterministic `CardPedagogicalProfile` from card text + enrichment.
+   - Identifies linguistic unit, POS, morphology, complexity, difficulty, and safe exercise capabilities.
 
-2. **Planner (`planner.ts`)**
-   - Reads learner state + recent error history.
-   - Returns deterministic `{ taskType, difficulty, rationale, constraints }`.
-   - Gives a human-readable reason like “we focus spelling due to repeated typos”.
+2. **Pedagogical Planning** (`planner.ts`)
+   - Chooses a **LearningObjective** first (e.g. `recognition`, `guidedRecall`, `contextUsage`).
+   - Maps objective → task type with rationale and constraints.
 
-3. **Task Builder (`tasks/generate.ts` as pure `buildTask`)**
-   - Pure function: no DB, no OpenAI.
-   - Builds safe tasks only from known data.
-   - Cloze is allowed only if an existing sentence actually contains the expected token.
-   - If no safe sentence exists, it falls back to translate.
+3. **Objective-driven Task Generation** (`tasks/generate.ts`)
+   - Generates tasks from `objective + cardProfile`, not from random fallback heuristics.
+   - Preserves deterministic fallback safety (e.g. cloze only with valid examples, otherwise translate).
 
-4. **Evaluator (`evaluator.ts`)**
-   - Fast heuristic grader always works.
-   - Optional OpenAI pass uses strict JSON schema + timeout.
-   - On timeout/error, immediate fallback to heuristic result.
+4. **Evaluation + Error Semantics** (`evaluator.ts`)
+   - Returns richer result payload: `intent`, `confidence`, `errorCategory`, `explanation`.
+   - Detects pedagogically useful categories (noun class issue, form issue, word order, semantic confusion, no attempt).
 
-## Why this fixes “mechanical trainer”
-- Decisions are explainable and stable (not weighted randomness).
-- The hot path (`/start`, `/next`) no longer blocks on enrichment generation.
-- Wrong examples are avoided by design: if a trustworthy example is missing, no fabricated sentence is shown.
-- Ownership is server-derived from `requireUser()`, not client input.
+5. **Hint Intelligence** (`hintEngine.ts`)
+   - Hint levels now depend on profile + inferred error intent.
+   - Strategies: semantic / contrast / form / prefix / nounClass.
 
-## Refactor plan (implemented)
-- Added `src/lib/aiCoach/learnerModel.ts`.
-- Added `src/lib/aiCoach/planner.ts`.
-- Refactored task generation to pure `buildTask` in `src/lib/aiCoach/tasks/generate.ts`.
-- Updated `src/lib/aiCoach/policy.ts` to deterministic planner-backed behavior and safer MCQ choice building.
-- Improved `src/lib/aiCoach/evaluator.ts` with stricter classifications and OpenAI timeout fallback.
-- Updated API routes:
-  - `src/app/api/aiCoach/start/route.ts`
-  - `src/app/api/aiCoach/next/route.ts`
-  to read learner state and asynchronously schedule enrichment when missing.
-- Added regression tests for planner, task builder, evaluator.
+6. **Adaptive sequencing** (`/api/aiCoach/next`)
+   - Wrong answer triggers remediation objective (`recognition` or `guidedRecall`).
+   - Strong correct responses can move into `contextUsage`.
+
+---
+
+## 2) Updated module structure
+- `src/lib/aiCoach/cardInterpreter.ts` (new)
+- `src/lib/aiCoach/hintEngine.ts` (new)
+- `src/lib/aiCoach/planner.ts` (updated for objectives)
+- `src/lib/aiCoach/tasks/generate.ts` (updated to consume objective + profile)
+- `src/lib/aiCoach/enrichment/generateEnrichment.ts` (AI-first examples + validation + safe fallback)
+- `src/lib/aiCoach/evaluator.ts` (expanded diagnostics)
+- `src/lib/aiCoach/types.ts` (new pedagogical and error contracts)
+- `src/app/api/aiCoach/start/route.ts` (profile + objective pipeline)
+- `src/app/api/aiCoach/next/route.ts` (objective planning + remediation loop)
+- `src/components/trainer/AiCoachPanel.tsx` (micro-lesson style result card + UX wording)
+
+---
+
+## 3) Design guarantees (safety)
+- AI is optional and never blocks the learning flow.
+- Heuristic evaluation and deterministic task generation remain primary fallbacks.
+- Example generation is validated; unsafe template-like examples are filtered out.
+- If no safe example exists, coach continues without forcing poor content.
+
+---
+
+## 4) Migration plan (minimal disruption)
+
+### Phase A (done)
+- Introduce new types (`LearningObjective`, `CardPedagogicalProfile`, `ErrorCategory`).
+- Wire interpreter + planner into `start`/`next` routes.
+- Keep API compatibility by preserving existing `task.type` and result core fields.
+
+### Phase B (done)
+- Move hint creation to strategy-based engine.
+- Extend evaluator output with confidence + explanation + error category.
+- Add remediation objective override in `next` route.
+
+### Phase C (next recommended)
+- Persist objective/error analytics in DB for longitudinal pedagogy tuning.
+- Add per-card explanation/example caches with TTL in Supabase.
+- Add objective distribution dashboards (to verify teacher-like pacing).
+
+### Phase D (next recommended)
+- Introduce explicit `contextUsage` task renderer in UI (sentence completion composer).
+- Add objective-aware A/B tests for retention and engagement outcomes.

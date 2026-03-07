@@ -1,7 +1,9 @@
 import type { Direction } from "@/lib/trainer/types";
-import { buildChoices, type ChoiceCandidate } from "../policy";
+import { interpretCard, type CardPedagogicalProfile } from "../cardInterpreter";
 import type { CardEnrichment } from "../enrichment/generateEnrichment";
-import type { AiCoachTask, AiTaskType } from "../types";
+import { buildHintLevels } from "../hintEngine";
+import { buildChoices, type ChoiceCandidate } from "../policy";
+import type { AiCoachTask, AiTaskType, LearningObjective } from "../types";
 
 export type SourceCard = {
     id: string;
@@ -14,6 +16,8 @@ type BuildTaskInput = {
     card: SourceCard;
     direction: Direction;
     taskType?: AiTaskType;
+    objective?: LearningObjective;
+    cardProfile?: CardPedagogicalProfile;
     pool?: Array<SourceCard & { pos?: string | null; nounClass?: string | null }>;
     enrichment?: CardEnrichment | null;
     rationale?: string;
@@ -40,21 +44,25 @@ function buildTranslatePrompt(card: SourceCard, direction: Direction): string {
     return `Übersetze: ${source}`;
 }
 
+function objectiveToTaskType(objective: LearningObjective | undefined, fallback: AiTaskType): AiTaskType {
+    if (!objective) return fallback;
+    if (objective === "recognition" || objective === "errorRemediation") return "mcq";
+    if (objective === "guidedRecall" || objective === "contrastLearning" || objective === "contextUsage") return "cloze";
+    return "translate";
+}
+
 export function buildTask(input: BuildTaskInput): AiCoachTask {
     const { card, direction, enrichment, rationale } = input;
     const expectedAnswer = toExpected(card, direction);
-    const preferredType = input.taskType ?? "translate";
+    const profile = input.cardProfile ?? interpretCard(card, enrichment);
+    const preferredType = input.taskType ?? objectiveToTaskType(input.objective, "translate");
     const example = safeExample(enrichment);
     const hasValidClozeExample = example
         ? includesToken(direction === "DE_TO_SW" ? example.sw : example.de, expectedAnswer)
         : false;
     const type = preferredType === "cloze" && !hasValidClozeExample ? "translate" : preferredType;
 
-    const hintLevels = [
-        enrichment?.pos ? `Wortart: ${enrichment.pos}` : "Achte auf die Kernbedeutung.",
-        expectedAnswer ? `Beginnt mit: ${expectedAnswer.slice(0, 1)}` : "Kurz und präzise antworten.",
-        enrichment?.notes ?? rationale ?? "Sprich die Antwort laut und prüfe die Endung.",
-    ];
+    const hintLevels = buildHintLevels(profile, expectedAnswer);
 
     if (type === "mcq") {
         const poolCandidates: ChoiceCandidate[] = (input.pool ?? []).map((candidate) => ({
@@ -68,6 +76,9 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             cardId: card.id,
             type: "mcq",
             direction,
+            objective: input.objective,
+            rationale,
+            profile,
             prompt: `Wähle die richtige Übersetzung: ${direction === "DE_TO_SW" ? card.german_text : card.swahili_text}`,
             expectedAnswer,
             choices: buildChoices(expectedAnswer, poolCandidates, { targetPos: enrichment?.pos, targetNounClass: enrichment?.noun_class }),
@@ -87,6 +98,9 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             cardId: card.id,
             type: "cloze",
             direction,
+            objective: input.objective,
+            rationale,
+            profile,
             prompt: `Fülle die Lücke: ${sentenceWithGap}`,
             expectedAnswer,
             choices: buildChoices(expectedAnswer, (input.pool ?? []).map((candidate) => direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text)),
@@ -103,6 +117,9 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         cardId: card.id,
         type: "translate",
         direction,
+        objective: input.objective,
+        rationale,
+        profile,
         prompt: buildTranslatePrompt(card, direction),
         expectedAnswer,
         hintLevels,
