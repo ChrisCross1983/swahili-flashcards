@@ -46,9 +46,16 @@ function buildTranslatePrompt(card: SourceCard, direction: Direction): string {
 
 function objectiveToTaskType(objective: LearningObjective | undefined, fallback: AiTaskType): AiTaskType {
     if (!objective) return fallback;
-    if (objective === "recognition" || objective === "errorRemediation") return "mcq";
-    if (objective === "guidedRecall" || objective === "contrastLearning" || objective === "contextUsage") return "cloze";
+    if (objective === "recognition" || objective === "repairMistake" || objective === "contrastConfusion") return "mcq";
+    if (objective === "guidedRecall" || objective === "contextUsage") return "cloze";
     return "translate";
+}
+
+function isTaskTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): boolean {
+    if (profile.forbiddenExerciseTypes.includes(type)) return false;
+    if (type === "cloze") return profile.exerciseSuitability.guidedRecall || profile.exerciseSuitability.contextUsage;
+    if (type === "mcq") return profile.exerciseSuitability.recognition;
+    return profile.exerciseSuitability.recall || profile.exerciseSuitability.production;
 }
 
 export function buildTask(input: BuildTaskInput): AiCoachTask {
@@ -60,9 +67,13 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
     const hasValidClozeExample = example
         ? includesToken(direction === "DE_TO_SW" ? example.sw : example.de, expectedAnswer)
         : false;
-    const type = preferredType === "cloze" && !hasValidClozeExample ? "translate" : preferredType;
+    const suitableType = !isTaskTypeAllowed(preferredType, profile)
+        ? (preferredType === "cloze" ? "translate" : (profile.preferredExerciseTypes[0] ?? "translate"))
+        : preferredType;
+    const type = suitableType === "cloze" && !hasValidClozeExample ? "translate" : suitableType;
 
-    const hintLevels = buildHintLevels(profile, expectedAnswer);
+    const rawHintLevels = buildHintLevels(profile, expectedAnswer);
+    const hintLevels = rawHintLevels.filter((hint) => hint.trim().length >= 4).slice(0, 3);
 
     if (type === "mcq") {
         const poolCandidates: ChoiceCandidate[] = (input.pool ?? []).map((candidate) => ({
@@ -90,7 +101,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         };
     }
 
-    if (type === "cloze" && example) {
+    if (type === "cloze" && example && hasValidClozeExample) {
         const base = direction === "DE_TO_SW" ? example.sw : example.de;
         const sentenceWithGap = base.replace(expectedAnswer, "____");
         return {

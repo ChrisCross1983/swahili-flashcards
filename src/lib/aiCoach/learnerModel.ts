@@ -8,8 +8,13 @@ export type LearnerCardState = {
     dueAt: string | null;
     wrongCount: number;
     lastErrorType: AnswerIntent | null;
+    errorHistory: AnswerIntent[];
+    confusionTargets: string[];
     avgLatencyMs: number;
     hintCount: number;
+    confidenceEstimate: number;
+    lastSuccessfulTaskType?: "translate" | "cloze" | "mcq" | null;
+    lastFailedTaskType?: "translate" | "cloze" | "mcq" | null;
     updatedAt?: string;
 };
 
@@ -36,6 +41,10 @@ const DAY_MS = 24 * HOUR_MS;
 
 function clampMastery(value: number): number {
     return Math.max(0, Math.min(4, value));
+}
+
+function clampConfidence(value: number): number {
+    return Math.max(0, Math.min(1, value));
 }
 
 export function computeMastery(state: LearnerCardState): number {
@@ -83,21 +92,25 @@ export function updateStateFromResult(
     let wrongCount = state.wrongCount;
     let lastErrorType: AnswerIntent | null = state.lastErrorType;
     let dueAtMs = now.getTime();
+    let confidenceEstimate = clampConfidence(state.confidenceEstimate);
 
     if (result.correct) {
         mastery = clampMastery(prevMastery + 0.35);
         wrongCount = Math.max(0, state.wrongCount - 1);
         lastErrorType = null;
         dueAtMs = now.getTime() + intervalForCorrect(mastery);
+        confidenceEstimate = clampConfidence(confidenceEstimate + 0.12);
     } else if (intent === "almost" || intent === "typo") {
         mastery = clampMastery(prevMastery + 0.15);
         lastErrorType = intent;
         dueAtMs = now.getTime() + intervalForAlmost(mastery);
+        confidenceEstimate = clampConfidence(confidenceEstimate + 0.03);
     } else {
         mastery = clampMastery(prevMastery - 0.2);
         wrongCount = state.wrongCount + 1;
         lastErrorType = intent;
         dueAtMs = now.getTime() + intervalForWrong(wrongAttemptsOnCard);
+        confidenceEstimate = clampConfidence(confidenceEstimate - 0.1);
     }
 
     return {
@@ -107,12 +120,19 @@ export function updateStateFromResult(
         dueAt: new Date(dueAtMs).toISOString(),
         wrongCount,
         lastErrorType,
+        errorHistory: [...(state.errorHistory ?? []), intent].slice(-6),
+        confusionTargets: intent === "wrong" || intent === "nonsense"
+            ? Array.from(new Set([...(state.confusionTargets ?? []), state.cardId])).slice(-4)
+            : state.confusionTargets,
         avgLatencyMs: result.latencyMs
             ? state.avgLatencyMs > 0
                 ? Math.round((state.avgLatencyMs * 0.7) + (result.latencyMs * 0.3))
                 : result.latencyMs
             : state.avgLatencyMs,
         hintCount: usedHintLevel > 0 ? state.hintCount + 1 : state.hintCount,
+        confidenceEstimate,
+        lastSuccessfulTaskType: result.correct ? meta?.taskType ?? state.lastSuccessfulTaskType : state.lastSuccessfulTaskType,
+        lastFailedTaskType: result.correct ? state.lastFailedTaskType : meta?.taskType ?? state.lastFailedTaskType,
         updatedAt: nowIso,
     };
 }
@@ -126,7 +146,12 @@ export function createDefaultLearnerCardState(ownerKey: string, cardId: string):
         dueAt: null,
         wrongCount: 0,
         lastErrorType: null,
+        errorHistory: [],
+        confusionTargets: [],
         avgLatencyMs: 0,
         hintCount: 0,
+        confidenceEstimate: 0.35,
+        lastSuccessfulTaskType: null,
+        lastFailedTaskType: null,
     };
 }

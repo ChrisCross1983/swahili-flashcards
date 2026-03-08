@@ -31,8 +31,13 @@ function fromRow(userId: string, cardId: string, row?: Record<string, unknown>):
         dueAt: (row.due_at as string | null) ?? null,
         wrongCount: Number(row.wrong_count ?? 0),
         lastErrorType: (row.last_error_type as LearnerCardState["lastErrorType"]) ?? null,
+        errorHistory: [],
+        confusionTargets: [],
         avgLatencyMs: Number(row.avg_latency_ms ?? 0),
         hintCount: Number(row.hint_count ?? 0),
+        confidenceEstimate: 0.4,
+        lastSuccessfulTaskType: null,
+        lastFailedTaskType: null,
     };
 }
 
@@ -105,7 +110,7 @@ export async function POST(req: Request) {
     const cardProfile = interpretCard(picked.card, enrichment);
     const plan = planNextTask({ learnerState: picked.state, cardProfile, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
     const remediationObjective = body.lastResult?.correct === false
-        ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "guidedRecall")
+        ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "repairMistake")
         : body.lastResult?.correct === true && picked.state.mastery >= 0.75
             ? "contextUsage"
             : null;
@@ -114,7 +119,7 @@ export async function POST(req: Request) {
     const task = buildTask({
         card: picked.card,
         direction,
-        taskType: remediationObjective === "recognition" ? "mcq" : remediationObjective === "guidedRecall" ? "cloze" : remediationObjective === "contextUsage" ? "cloze" : plan.taskType,
+        taskType: remediationObjective === "recognition" ? "mcq" : remediationObjective === "repairMistake" ? "mcq" : remediationObjective === "contextUsage" ? "cloze" : plan.taskType,
         objective: remediationObjective ?? plan.objective,
         cardProfile,
         pool: cards,

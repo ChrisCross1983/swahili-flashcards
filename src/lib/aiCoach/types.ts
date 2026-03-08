@@ -6,9 +6,10 @@ export type LearningObjective =
     | "recognition"
     | "recall"
     | "guidedRecall"
+    | "repairMistake"
+    | "contrastConfusion"
     | "contextUsage"
-    | "errorRemediation"
-    | "contrastLearning"
+    | "production"
     | "reinforcement";
 
 export type ErrorCategory =
@@ -62,6 +63,17 @@ export type AiCoachResult = {
     example?: { sw: string; de: string };
     suggestedNext?: "repeat" | "next" | "easier" | "harder";
     retryAllowed?: boolean;
+    nextRecommendation?: "repeat_same_card" | "lower_complexity" | "switch_to_contrast" | "advance";
+    repeatSameCard?: boolean;
+    lowerComplexity?: boolean;
+    switchToContrast?: boolean;
+    microLesson?: {
+        explanation?: string;
+        morphology?: string;
+        example?: { sw: string; de: string };
+        memoryHook?: string;
+        nextStepCue?: string;
+    };
 };
 
 export type AiCoachStartInput = {

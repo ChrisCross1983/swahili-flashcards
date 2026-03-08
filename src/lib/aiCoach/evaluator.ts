@@ -26,6 +26,18 @@ function normalizeExample(task: AiCoachTask): { sw: string; de: string } | undef
     return undefined;
 }
 
+function buildMicroLesson(task: AiCoachTask, explanation: string, correct: boolean): AiCoachResult["microLesson"] {
+    const morphology = task.profile?.morphologicalInfo?.nounClass
+        ? `Nominalklasse: ${task.profile.morphologicalInfo.nounClass}${task.profile.morphologicalInfo.plural ? `, Plural: ${task.profile.morphologicalInfo.plural}` : ""}`
+        : undefined;
+    return {
+        explanation,
+        morphology,
+        example: normalizeExample(task),
+        nextStepCue: correct ? "Jetzt direkt die nächste Karte im Kontext anwenden." : "Versuche dieselbe Karte noch einmal mit Fokus auf Bedeutung und Form.",
+    };
+}
+
 function classifyErrorCategory(task: AiCoachTask, answer: string): ErrorCategory {
     const normalized = normalizeText(answer);
     const expected = normalizeText(task.expectedAnswer);
@@ -72,6 +84,11 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
             example,
             suggestedNext: "easier",
             retryAllowed: wrongAttemptsOnCard < 2,
+            nextRecommendation: "lower_complexity",
+            repeatSameCard: true,
+            lowerComplexity: true,
+            switchToContrast: false,
+            microLesson: buildMicroLesson(task, "Keine Antwort erkannt; wir wechseln in eine gestützte Übung.", false),
         };
     }
 
@@ -105,6 +122,19 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
         example,
         suggestedNext: isCorrect ? "next" : partial ? "repeat" : "easier",
         retryAllowed: !isCorrect && wrongAttemptsOnCard < 2,
+        nextRecommendation: isCorrect ? "advance" : errorCategory === "semantic_confusion" ? "switch_to_contrast" : partial ? "repeat_same_card" : "lower_complexity",
+        repeatSameCard: !isCorrect,
+        lowerComplexity: !isCorrect && !partial,
+        switchToContrast: errorCategory === "semantic_confusion",
+        microLesson: buildMicroLesson(task, isCorrect
+            ? "Antwort stimmt in Form und Bedeutung überein."
+            : errorCategory === "wrong_noun_class"
+                ? "Bedeutung nah dran, aber die Nominalklasse passt nicht."
+                : errorCategory === "wrong_word_order"
+                    ? "Viele Wörter sind richtig, aber die Reihenfolge ist falsch."
+                    : errorCategory === "wrong_form"
+                        ? "Sehr nah dran, aber Form/Endung muss korrigiert werden."
+                        : "Die Antwort passt semantisch noch nicht zur Zielbedeutung.", isCorrect),
     };
 }
 
@@ -224,8 +254,20 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
         correctAnswer: ai.correctedAnswer?.trim() || task.expectedAnswer,
         learnTip: ai.feedbackWhy?.trim() || fallback.learnTip,
         suggestedNext: ai.nextSuggestion,
+        nextRecommendation: ai.nextSuggestion === "next" ? "advance" : ai.nextSuggestion === "repeat" ? "repeat_same_card" : "lower_complexity",
+        repeatSameCard: ai.nextSuggestion === "repeat",
+        lowerComplexity: ai.nextSuggestion === "easier",
+        switchToContrast: ai.errorType === "semantic_confusion",
         example: ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim()
             ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
             : fallback.example,
+        microLesson: {
+            explanation: ai.explanation,
+            morphology: task.profile?.morphologicalInfo?.nounClass ? `Nominalklasse: ${task.profile.morphologicalInfo.nounClass}` : undefined,
+            example: ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim()
+                ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
+                : undefined,
+            nextStepCue: ai.nextSuggestion === "next" ? "Jetzt im nächsten Kontext anwenden." : "Noch einmal mit Fokus auf den Unterschied probieren.",
+        },
     };
 }

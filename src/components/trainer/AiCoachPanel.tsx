@@ -110,9 +110,11 @@ export default function AiCoachPanel({ cardType }: Props) {
                             Antwort prüfen
                         </button>
                     ) : null}
-                    <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={hintDisabled}>
-                        💡 {hintButtonLabel}
-                    </button>
+                    {hintTotal > 0 ? (
+                        <button type="button" className="btn btn-secondary" onClick={revealHint} disabled={hintDisabled}>
+                            💡 {hintButtonLabel}
+                        </button>
+                    ) : null}
                     <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don\'t know")} disabled={!isInTask}>
                         Auflösen & erklären
                     </button>
@@ -140,20 +142,22 @@ export default function AiCoachPanel({ cardType }: Props) {
                         {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
                     <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
-                    {!state.lastResult.correct ? <div className="text-muted">Warum es noch nicht passt: {state.lastResult.explanation ?? state.lastResult.feedback}</div> : null}
-                    <div className="text-muted">Linguistischer Hinweis: {state.currentTask?.profile?.morphologicalFeatures?.nounClass ? `Nominalklasse ${state.currentTask.profile.morphologicalFeatures.nounClass}.` : state.lastResult.learnTip}</div>
-                    {state.lastResult.example ? (
+                    {state.lastResult.microLesson?.explanation && !state.lastResult.correct
+                        ? <div className="text-muted">Warum es noch nicht passt: {state.lastResult.microLesson.explanation}</div>
+                        : null}
+                    <div className="text-muted">Linguistischer Hinweis: {state.lastResult.microLesson?.morphology ?? state.lastResult.learnTip}</div>
+                    {(state.lastResult.microLesson?.example ?? state.lastResult.example) ? (
                         <div className="text-muted">
-                            <div>Beispiel (SW): {state.lastResult.example.sw}</div>
-                            <div>Übersetzung (DE): {state.lastResult.example.de}</div>
+                            <div>Beispiel (SW): {(state.lastResult.microLesson?.example ?? state.lastResult.example)?.sw}</div>
+                            <div>Übersetzung (DE): {(state.lastResult.microLesson?.example ?? state.lastResult.example)?.de}</div>
                         </div>
                     ) : null}
-                    {state.currentTask?.objective ? <div className="text-xs text-muted">Lernziel: {state.currentTask.objective}</div> : null}
+                    {state.lastResult.microLesson?.nextStepCue ? <div className="text-xs text-muted">Nächster Schritt: {state.lastResult.microLesson.nextStepCue}</div> : null}
                 </div>
             ) : null}
 
             {state.status === "loading" || state.status === "evaluating" ? <div className="text-sm text-muted">Lade…</div> : null}
             {state.error ? <div className="text-sm text-danger">{state.error}</div> : null}
-        </div>
+        </div >
     );
 }

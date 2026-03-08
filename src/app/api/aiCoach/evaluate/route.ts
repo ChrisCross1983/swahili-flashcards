@@ -93,8 +93,13 @@ export async function POST(req: Request) {
             dueAt: (learnerStateRow.due_at as string | null) ?? null,
             wrongCount: Number(learnerStateRow.wrong_count ?? 0),
             lastErrorType: (learnerStateRow.last_error_type ?? null) as AnswerIntent | null,
+            errorHistory: [],
+            confusionTargets: [],
             avgLatencyMs: Number(learnerStateRow.avg_latency_ms ?? 0),
             hintCount: Number(learnerStateRow.hint_count ?? 0),
+            confidenceEstimate: 0.4,
+            lastSuccessfulTaskType: null,
+            lastFailedTaskType: null,
         }
         : createDefaultLearnerCardState(user.id, canonicalTask.cardId);
 

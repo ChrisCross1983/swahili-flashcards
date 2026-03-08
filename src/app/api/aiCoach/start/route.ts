@@ -20,8 +20,13 @@ function fromRow(userId: string, cardId: string, row?: Record<string, unknown>):
         dueAt: (row.due_at as string | null) ?? null,
         wrongCount: Number(row.wrong_count ?? 0),
         lastErrorType: (row.last_error_type as LearnerCardState["lastErrorType"]) ?? null,
+        errorHistory: [],
+        confusionTargets: [],
         avgLatencyMs: Number(row.avg_latency_ms ?? 0),
         hintCount: Number(row.hint_count ?? 0),
+        confidenceEstimate: 0.4,
+        lastSuccessfulTaskType: null,
+        lastFailedTaskType: null,
     };
 }
 
