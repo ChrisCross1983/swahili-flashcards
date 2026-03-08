@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { CardType } from "@/lib/trainer/types";
 import { useAiCoachSession } from "@/lib/aiCoach/hooks";
+import { getVisibleMorphology, pickVisibleExample, shouldShowHint } from "@/lib/aiCoach/contentQuality";
 
 type Props = {
     cardType: CardType;
@@ -17,6 +18,10 @@ export default function AiCoachPanel({ cardType }: Props) {
     const lastResult = state.lastResult;
     const inputMode = state.currentTask?.ui?.inputMode ?? "text";
     const canSubmit = isInTask && answer.trim().length > 0;
+
+    const visibleMorphology = state.currentTask && state.lastResult ? getVisibleMorphology(state.currentTask) : null;
+    const visibleExample = state.currentTask && state.lastResult ? pickVisibleExample(state.lastResult, state.currentTask) : null;
+    const visibleHint = state.lastResult && shouldShowHint(state.lastResult) ? state.lastResult.learnTip : null;
 
     const handleChoice = (choice: string) => {
         if (!isInTask) return;
@@ -55,7 +60,7 @@ export default function AiCoachPanel({ cardType }: Props) {
 
             {state.currentTask ? (
                 <div className="rounded-2xl bg-surface-elevated p-4">
-                    <div className="text-sm text-muted">Aufgabe ({state.currentTask.type})</div>
+                    <div className="text-sm text-muted">Aufgabe</div>
                     <div className="mt-1 font-semibold whitespace-pre-line">{state.currentTask.prompt}</div>
 
                     {currentHint ? (
@@ -115,7 +120,7 @@ export default function AiCoachPanel({ cardType }: Props) {
                             💡 {hintButtonLabel}
                         </button>
                     ) : null}
-                    <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don\'t know")} disabled={!isInTask}>
+                    <button type="button" className="btn btn-secondary" onClick={() => submitAnswer("I don't know")} disabled={!isInTask}>
                         Auflösen & erklären
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={skip} disabled={!isInTask}>
@@ -142,17 +147,23 @@ export default function AiCoachPanel({ cardType }: Props) {
                         {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
                     <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
-                    {state.lastResult.microLesson?.explanation && !state.lastResult.correct
-                        ? <div className="text-muted">Warum es noch nicht passt: {state.lastResult.microLesson.explanation}</div>
-                        : null}
-                    <div className="text-muted">Linguistischer Hinweis: {state.lastResult.microLesson?.morphology ?? state.lastResult.learnTip}</div>
-                    {(state.lastResult.microLesson?.example ?? state.lastResult.example) ? (
+
+                    {visibleMorphology ? (
                         <div className="text-muted">
-                            <div>Beispiel (SW): {(state.lastResult.microLesson?.example ?? state.lastResult.example)?.sw}</div>
-                            <div>Übersetzung (DE): {(state.lastResult.microLesson?.example ?? state.lastResult.example)?.de}</div>
+                            {visibleMorphology.nounClass ? <div>Nomenklasse: {visibleMorphology.nounClass}</div> : null}
+                            {visibleMorphology.singular ? <div>Singular: {visibleMorphology.singular}</div> : null}
+                            {visibleMorphology.plural ? <div>Plural: {visibleMorphology.plural}</div> : null}
                         </div>
                     ) : null}
-                    {state.lastResult.microLesson?.nextStepCue ? <div className="text-xs text-muted">Nächster Schritt: {state.lastResult.microLesson.nextStepCue}</div> : null}
+
+                    {visibleHint ? <div className="text-muted">Hinweis: {visibleHint}</div> : null}
+
+                    {visibleExample ? (
+                        <div className="text-muted">
+                            <div>Beispiel (SW): {visibleExample.sw}</div>
+                            <div>Übersetzung (DE): {visibleExample.de}</div>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 

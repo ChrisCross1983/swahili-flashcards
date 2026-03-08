@@ -1,3 +1,4 @@
+import { isHighQualityExample } from "./contentQuality";
 import { classifyAnswerIntent } from "./eval/classify";
 import { computeSimilarityScore, normalizeText } from "./eval/similarity";
 import type { AiCoachResult, AiCoachTask, ErrorCategory } from "./types";
@@ -20,21 +21,26 @@ function feedbackTitle(intent: AiCoachResult["intent"]): AiCoachResult["feedback
 }
 
 function normalizeExample(task: AiCoachTask): { sw: string; de: string } | undefined {
-    if (task.example?.sw?.trim() && task.example?.de?.trim()) {
-        return { sw: task.example.sw.trim(), de: task.example.de.trim() };
-    }
-    return undefined;
+    if (!isHighQualityExample(task, task.example)) return undefined;
+    return { sw: task.example.sw.trim(), de: task.example.de.trim() };
 }
 
-function buildMicroLesson(task: AiCoachTask, explanation: string, correct: boolean): AiCoachResult["microLesson"] {
-    const morphology = task.profile?.morphologicalInfo?.nounClass
-        ? `Nominalklasse: ${task.profile.morphologicalInfo.nounClass}${task.profile.morphologicalInfo.plural ? `, Plural: ${task.profile.morphologicalInfo.plural}` : ""}`
-        : undefined;
+function buildMicroLesson(task: AiCoachTask): AiCoachResult["microLesson"] {
+    const nounClass = task.profile?.morphologicalInfo?.nounClass;
+    const singular = task.profile?.morphologicalInfo?.singular;
+    const plural = task.profile?.morphologicalInfo?.plural;
+
+    const morphology = [
+        nounClass ? `Nominalklasse: ${nounClass}` : null,
+        singular ? `Singular: ${singular}` : null,
+        plural ? `Plural: ${plural}` : null,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+
     return {
-        explanation,
-        morphology,
-        example: normalizeExample(task),
-        nextStepCue: correct ? "Jetzt direkt die nächste Karte im Kontext anwenden." : "Versuche dieselbe Karte noch einmal mit Fokus auf Bedeutung und Form.",
+        morphology: morphology || undefined,
+        nextStepCue: "Versuche dieselbe Karte noch einmal mit Fokus auf Bedeutung und Form.",
     };
 }
 
@@ -74,13 +80,13 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
             intent: "no_attempt",
             confidence: 1,
             errorCategory: "no_attempt",
-            explanation: "Keine Antwort erkannt; wir wechseln in eine gestützte Übung.",
+            explanation: "Keine Antwort erkannt.",
             verdict: "skip",
             score: 0,
             feedbackTitle: "Noch nicht",
-            feedback: "Alles gut – wir machen als Nächstes eine leichtere Übung.",
+            feedback: "",
             correctAnswer: expected,
-            learnTip: "Wenn du unsicher bist: antworte mit dem Stammwort zuerst.",
+            learnTip: "",
             example,
             suggestedNext: "easier",
             retryAllowed: wrongAttemptsOnCard < 2,
@@ -88,7 +94,7 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
             repeatSameCard: true,
             lowerComplexity: true,
             switchToContrast: false,
-            microLesson: buildMicroLesson(task, "Keine Antwort erkannt; wir wechseln in eine gestützte Übung.", false),
+            microLesson: buildMicroLesson(task),
         };
     }
 
@@ -98,27 +104,24 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
     const isCorrect = classification.intent === "correct";
     const intent = isCorrect ? "correct" : (partial ? "almost" : classification.intent);
     const errorCategory = isCorrect ? "unknown" : (classification.intent === "typo" ? "typo" : classifyErrorCategory(task, answer));
+    const learnTip = intent === "almost" && errorCategory === "wrong_noun_class"
+        ? "Achte auf die Nominalklasse."
+        : intent === "almost" && errorCategory === "wrong_form"
+            ? "Prüfe die Endung."
+            : "";
 
     return {
         correct: isCorrect,
         intent,
         confidence: isCorrect ? 1 : Math.max(0.35, similarity),
         errorCategory,
-        explanation: isCorrect
-            ? "Antwort stimmt in Form und Bedeutung überein."
-            : errorCategory === "wrong_noun_class"
-                ? "Die Bedeutung ist nahe dran, aber die Nominalklasse/Form ist falsch."
-                : errorCategory === "wrong_word_order"
-                    ? "Die Wörter sind teilweise richtig, aber die Reihenfolge passt nicht."
-                    : errorCategory === "wrong_form"
-                        ? "Du bist nah dran; die konkrete Form/Endung passt noch nicht."
-                        : "Die Antwort weicht semantisch von der Zielbedeutung ab.",
+        explanation: isCorrect ? "Antwort stimmt." : "Antwort passt noch nicht.",
         verdict: isCorrect ? "correct" : intent === "nonsense" ? "nonsense" : partial || intent === "typo" ? "almost" : "wrong",
         score: isCorrect ? 1 : partial ? similarity : 0,
         feedbackTitle: feedbackTitle(intent),
-        feedback: isCorrect ? "Sehr gut – korrekt." : partial ? "Fast richtig, überprüfe die genaue Form." : "Noch nicht korrekt. Prüfe Bedeutung und Wortform.",
+        feedback: "",
         correctAnswer: expected,
-        learnTip: intent === "typo" ? "Achte auf einzelne Buchstaben und Endungen." : "Vergleiche Stamm + Endung mit der Musterlösung.",
+        learnTip,
         example,
         suggestedNext: isCorrect ? "next" : partial ? "repeat" : "easier",
         retryAllowed: !isCorrect && wrongAttemptsOnCard < 2,
@@ -126,15 +129,7 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
         repeatSameCard: !isCorrect,
         lowerComplexity: !isCorrect && !partial,
         switchToContrast: errorCategory === "semantic_confusion",
-        microLesson: buildMicroLesson(task, isCorrect
-            ? "Antwort stimmt in Form und Bedeutung überein."
-            : errorCategory === "wrong_noun_class"
-                ? "Bedeutung nah dran, aber die Nominalklasse passt nicht."
-                : errorCategory === "wrong_word_order"
-                    ? "Viele Wörter sind richtig, aber die Reihenfolge ist falsch."
-                    : errorCategory === "wrong_form"
-                        ? "Sehr nah dran, aber Form/Endung muss korrigiert werden."
-                        : "Die Antwort passt semantisch noch nicht zur Zielbedeutung.", isCorrect),
+        microLesson: buildMicroLesson(task),
     };
 }
 
@@ -240,6 +235,9 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
     };
 
     const mappedIntent = intentMap[ai.errorType] ?? fallback.intent;
+    const aiExample = ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim() && isHighQualityExample(task, ai.minimalExample)
+        ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
+        : fallback.example;
 
     return {
         ...fallback,
@@ -250,24 +248,15 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
         explanation: ai.explanation,
         verdict: ai.errorType === "correct" ? "correct" : ai.errorType === "skip" ? "skip" : ai.errorType === "nonsense" ? "nonsense" : "wrong",
         feedbackTitle: feedbackTitle(mappedIntent),
-        feedback: `${ai.feedbackShort} ${ai.feedbackWhy}`.trim(),
+        feedback: "",
         correctAnswer: ai.correctedAnswer?.trim() || task.expectedAnswer,
-        learnTip: ai.feedbackWhy?.trim() || fallback.learnTip,
+        learnTip: mappedIntent === "almost" ? (ai.feedbackWhy?.trim() || fallback.learnTip) : "",
         suggestedNext: ai.nextSuggestion,
         nextRecommendation: ai.nextSuggestion === "next" ? "advance" : ai.nextSuggestion === "repeat" ? "repeat_same_card" : "lower_complexity",
         repeatSameCard: ai.nextSuggestion === "repeat",
         lowerComplexity: ai.nextSuggestion === "easier",
         switchToContrast: ai.errorType === "semantic_confusion",
-        example: ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim()
-            ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
-            : fallback.example,
-        microLesson: {
-            explanation: ai.explanation,
-            morphology: task.profile?.morphologicalInfo?.nounClass ? `Nominalklasse: ${task.profile.morphologicalInfo.nounClass}` : undefined,
-            example: ai.minimalExample?.sw?.trim() && ai.minimalExample?.de?.trim()
-                ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
-                : undefined,
-            nextStepCue: ai.nextSuggestion === "next" ? "Jetzt im nächsten Kontext anwenden." : "Noch einmal mit Fokus auf den Unterschied probieren.",
-        },
+        example: aiExample,
+        microLesson: buildMicroLesson(task),
     };
 }

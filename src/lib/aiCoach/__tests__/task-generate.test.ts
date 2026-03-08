@@ -47,4 +47,26 @@ describe("task builder", () => {
 
         expect(task.choices?.every((choice) => choice.trim().length >= 2 && choice.length <= 32)).toBe(true);
     });
+
+    it("rejects generic template examples for task output", () => {
+        const task = buildTask({
+            direction: "DE_TO_SW",
+            taskType: "translate",
+            card: { id: "c1", german_text: "Avocado", swahili_text: "parachichi", type: "vocab" },
+            enrichment: {
+                owner_key: "u1",
+                card_id: "c1",
+                type: "vocab",
+                pos: "noun",
+                noun_class: null,
+                singular: "parachichi",
+                plural: null,
+                examples: [{ sw: "Im Gespräch sage ich parachichi häufig.", de: "Im Gespräch sage ich Avocado häufig." }],
+                mnemonic: null,
+                notes: "",
+            },
+        });
+
+        expect(task.example).toBeUndefined();
+    });
 });

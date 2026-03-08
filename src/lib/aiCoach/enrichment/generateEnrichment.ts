@@ -1,3 +1,5 @@
+import { isHighQualityExample } from "../contentQuality";
+
 export type EnrichmentCardInput = {
     id: string;
     german_text: string;
@@ -43,15 +45,6 @@ function inferNounForms(sw: string): Pick<CardEnrichment, "noun_class" | "singul
     return { noun_class: null, singular: value, plural: null };
 }
 
-function fallbackExamples(card: EnrichmentCardInput): EnrichmentExample[] {
-    const sw = card.swahili_text.trim() || "neno";
-    const de = card.german_text.trim() || "Wort";
-    return [
-        { sw: `Leo ninasoma neno "${sw}" kwa makini.`, de: `Heute lerne ich das Wort "${de}" bewusst.` },
-        { sw: `Mwalimu anatumia "${sw}" katika sentensi sahihi.`, de: `Die Lehrkraft verwendet "${de}" in einem korrekten Satz.` },
-    ];
-}
-
 function fallbackNotes(pos: CardEnrichment["pos"], nounClass: string | null, singular: string | null, plural: string | null): string {
     if (pos === "noun" && nounClass && singular) {
         return plural
@@ -71,14 +64,12 @@ function looksUnsafeTemplate(text: string): boolean {
     return ["wir sagen oft", "immer", "häufig", "oft"].some((token) => normalized.includes(token)) && !/[.!?]$/.test(text.trim());
 }
 
-function hasWordBoundaryToken(sentence: string, token: string): boolean {
-    const escaped = token.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (!escaped) return false;
-    return new RegExp(`(^|\\W)${escaped}(\\W|$)`, "i").test(sentence);
-}
-
 function normalizeExamples(examples: EnrichmentExample[], card?: EnrichmentCardInput): EnrichmentExample[] {
-    const token = card?.swahili_text.trim() ?? "";
+    const taskLike = {
+        expectedAnswer: card?.swahili_text.trim() ?? "",
+        direction: "DE_TO_SW" as const,
+    };
+
     return examples
         .map((example) => ({
             sw: (example.sw ?? "").trim(),
@@ -87,7 +78,7 @@ function normalizeExamples(examples: EnrichmentExample[], card?: EnrichmentCardI
         }))
         .filter((example) => example.sw.length > 0 && example.de.length > 0)
         .filter((example) => !looksUnsafeTemplate(example.sw) && !looksUnsafeTemplate(example.de))
-        .filter((example) => !token || hasWordBoundaryToken(example.sw, token))
+        .filter((example) => !card || isHighQualityExample(taskLike, { sw: example.sw, de: example.de }))
         .slice(0, 10);
 }
 
@@ -182,7 +173,6 @@ export async function generateEnrichment(ownerKey: string, card: EnrichmentCardI
 
     const aiResult = await generateWithAi(card);
     const aiExamples = normalizeExamples((aiResult?.examples as EnrichmentExample[] | undefined) ?? [], card);
-    const curatedExamples = normalizeExamples(fallbackExamples(card), card);
 
     const enrichment: CardEnrichment = {
         owner_key: ownerKey,
@@ -192,7 +182,7 @@ export async function generateEnrichment(ownerKey: string, card: EnrichmentCardI
         noun_class: (aiResult?.noun_class as string | null | undefined) ?? nounForms.noun_class,
         singular: (aiResult?.singular as string | null | undefined) ?? nounForms.singular,
         plural: (aiResult?.plural as string | null | undefined) ?? nounForms.plural,
-        examples: aiExamples.length > 0 ? aiExamples : curatedExamples,
+        examples: aiExamples,
         mnemonic: (aiResult?.mnemonic as string | null | undefined) ?? null,
         notes: (aiResult?.notes as string | undefined)?.trim() || fallbackNotes(pos, nounForms.noun_class, nounForms.singular, nounForms.plural),
     };

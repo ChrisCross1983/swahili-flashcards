@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { generateEnrichment } from "../enrichment/generateEnrichment";
 
-describe("generateEnrichment fallback", () => {
-    it("returns bilingual examples with sw+de", async () => {
+describe("generateEnrichment", () => {
+    it("does not inject fallback template examples without validated quality", async () => {
         const original = process.env.OPENAI_API_KEY;
         delete process.env.OPENAI_API_KEY;
 
@@ -13,11 +13,7 @@ describe("generateEnrichment fallback", () => {
             type: "vocab",
         });
 
-        expect(enrichment.examples.length).toBeGreaterThan(0);
-        enrichment.examples.forEach((example) => {
-            expect(example.sw.trim().length).toBeGreaterThan(0);
-            expect(example.de.trim().length).toBeGreaterThan(0);
-        });
+        expect(enrichment.examples).toEqual([]);
 
         process.env.OPENAI_API_KEY = original;
     });

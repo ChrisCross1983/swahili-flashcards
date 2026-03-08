@@ -1,5 +1,6 @@
 import type { Direction } from "@/lib/trainer/types";
 import { interpretCard, type CardPedagogicalProfile } from "../cardInterpreter";
+import { isHighQualityExample } from "../contentQuality";
 import type { CardEnrichment } from "../enrichment/generateEnrichment";
 import { buildHintLevels } from "../hintEngine";
 import { buildChoices, type ChoiceCandidate } from "../policy";
@@ -27,8 +28,9 @@ function toExpected(card: SourceCard, direction: Direction): string {
     return (direction === "DE_TO_SW" ? card.swahili_text : card.german_text).trim();
 }
 
-function safeExample(enrichment?: CardEnrichment | null): { sw: string; de: string } | undefined {
-    const entry = enrichment?.examples?.find((example) => example.sw?.trim() && example.de?.trim());
+function safeExample(expectedAnswer: string, direction: Direction, enrichment?: CardEnrichment | null): { sw: string; de: string } | undefined {
+    const taskLike = { expectedAnswer, direction };
+    const entry = enrichment?.examples?.find((example) => isHighQualityExample(taskLike, example));
     if (!entry) return undefined;
     return { sw: entry.sw.trim(), de: entry.de.trim() };
 }
@@ -58,19 +60,33 @@ function isTaskTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): b
     return profile.exerciseSuitability.recall || profile.exerciseSuitability.production;
 }
 
+function fallbackTaskType(preferred: AiTaskType, profile: CardPedagogicalProfile): AiTaskType {
+    if (preferred === "cloze") {
+        if (isTaskTypeAllowed("translate", profile)) return "translate";
+        return isTaskTypeAllowed("mcq", profile) ? "mcq" : "translate";
+    }
+
+    if (preferred === "mcq") {
+        if (isTaskTypeAllowed("translate", profile)) return "translate";
+        return isTaskTypeAllowed("cloze", profile) ? "cloze" : "translate";
+    }
+
+    return isTaskTypeAllowed("mcq", profile) ? "mcq" : "translate";
+}
+
 export function buildTask(input: BuildTaskInput): AiCoachTask {
     const { card, direction, enrichment, rationale } = input;
     const expectedAnswer = toExpected(card, direction);
     const profile = input.cardProfile ?? interpretCard(card, enrichment);
     const preferredType = input.taskType ?? objectiveToTaskType(input.objective, "translate");
-    const example = safeExample(enrichment);
+    const example = safeExample(expectedAnswer, direction, enrichment);
     const hasValidClozeExample = example
         ? includesToken(direction === "DE_TO_SW" ? example.sw : example.de, expectedAnswer)
         : false;
     const suitableType = !isTaskTypeAllowed(preferredType, profile)
-        ? (preferredType === "cloze" ? "translate" : (profile.preferredExerciseTypes[0] ?? "translate"))
+        ? fallbackTaskType(preferredType, profile)
         : preferredType;
-    const type = suitableType === "cloze" && !hasValidClozeExample ? "translate" : suitableType;
+    const type = suitableType === "cloze" && !hasValidClozeExample ? fallbackTaskType("cloze", profile) : suitableType;
 
     const rawHintLevels = buildHintLevels(profile, expectedAnswer);
     const hintLevels = rawHintLevels.filter((hint) => hint.trim().length >= 4).slice(0, 3);
@@ -140,5 +156,6 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined },
     };
 }
+
 
 export const generateTask = buildTask;
