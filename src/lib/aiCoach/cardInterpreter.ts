@@ -111,8 +111,10 @@ export function interpretCard(card: CardLike, enrichment?: CardEnrichment | null
     const plural = enrichment?.plural ?? undefined;
     const qualityConfidence = enrichment?.examples?.length ? 0.92 : unitType === "sentence" ? 0.7 : 0.82;
 
+    const isFormulaLike = unitType === "phrase" || unitType === "greeting" || unitType === "formula" || unitType === "expression";
+
     const exerciseSuitability: CardPedagogicalProfile["exerciseSuitability"] = {
-        recognition: true,
+        recognition: unitType !== "sentence",
         recall: unitType !== "sentence" || card.swahili_text.trim().split(/\s+/).length <= 7,
         guidedRecall: true,
         contextUsage: unitType !== "word" || linguisticType === "verb" || linguisticType === "fixed_phrase",
@@ -122,12 +124,13 @@ export function interpretCard(card: CardLike, enrichment?: CardEnrichment | null
 
     const forbiddenExerciseTypes: CardPedagogicalProfile["forbiddenExerciseTypes"] = [];
     if (!exerciseSuitability.contextUsage && unitType === "word") forbiddenExerciseTypes.push("cloze");
+    if (unitType === "greeting" || unitType === "formula") forbiddenExerciseTypes.push("cloze");
     if (!exerciseSuitability.production && unitType !== "greeting") forbiddenExerciseTypes.push("translate");
 
     const preferredExerciseTypes: CardPedagogicalProfile["preferredExerciseTypes"] = [];
-    if (exerciseSuitability.recognition) preferredExerciseTypes.push("mcq");
-    if (exerciseSuitability.guidedRecall && (enrichment?.examples?.length ?? 0) > 0) preferredExerciseTypes.push("cloze");
     if (exerciseSuitability.recall) preferredExerciseTypes.push("translate");
+    if (!isFormulaLike && exerciseSuitability.recognition) preferredExerciseTypes.push("mcq");
+    if (exerciseSuitability.guidedRecall && (enrichment?.examples?.length ?? 0) > 0 && !forbiddenExerciseTypes.includes("cloze")) preferredExerciseTypes.push("cloze");
 
     return {
         unitType,

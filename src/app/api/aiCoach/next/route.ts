@@ -114,12 +114,19 @@ export async function POST(req: Request) {
         : body.lastResult?.correct === true && picked.state.mastery >= 0.75
             ? "contextUsage"
             : null;
+    const remediationTaskType: AiTaskType | null = remediationObjective === "recognition"
+        ? "mcq"
+        : remediationObjective === "repairMistake"
+            ? "translate"
+            : remediationObjective === "contextUsage"
+                ? (cardProfile.exerciseCapabilities.cloze ? "cloze" : "translate")
+                : null;
     if (!enrichment) scheduleEnrichment(user.id, picked.card);
 
     const task = buildTask({
         card: picked.card,
         direction,
-        taskType: remediationObjective === "recognition" ? "mcq" : remediationObjective === "repairMistake" ? "mcq" : remediationObjective === "contextUsage" ? "cloze" : plan.taskType,
+        taskType: remediationTaskType ?? plan.taskType,
         objective: remediationObjective ?? plan.objective,
         cardProfile,
         pool: cards,

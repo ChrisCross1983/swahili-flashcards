@@ -24,10 +24,67 @@ export type PlannerOutput = {
 };
 
 function objectiveToTaskType(objective: LearningObjective, profile: CardPedagogicalProfile): AiTaskType {
-    if (objective === "recognition" || objective === "repairMistake" || objective === "contrastConfusion") return "mcq";
-    if (objective === "guidedRecall") return profile.exerciseCapabilities.cloze ? "cloze" : "mcq";
+    if (objective === "recognition" || objective === "contrastConfusion") return "mcq";
+    if (objective === "repairMistake") return profile.exerciseCapabilities.translation ? "translate" : "mcq";
+    if (objective === "guidedRecall") return profile.exerciseCapabilities.cloze ? "cloze" : "translate";
     if (objective === "contextUsage") return profile.exerciseCapabilities.cloze ? "cloze" : "translate";
     return "translate";
+}
+
+function isTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): boolean {
+    if (profile.forbiddenExerciseTypes.includes(type)) return false;
+    if (type === "mcq") return profile.exerciseSuitability.recognition;
+    if (type === "cloze") return profile.exerciseCapabilities.cloze && (profile.exerciseSuitability.guidedRecall || profile.exerciseSuitability.contextUsage);
+    return profile.exerciseCapabilities.translation && (profile.exerciseSuitability.recall || profile.exerciseSuitability.production);
+}
+
+function chooseWithVariety(
+    preferred: AiTaskType,
+    profile: CardPedagogicalProfile,
+    recentTaskTypes: AiTaskType[],
+    lastTaskType: AiTaskType | undefined,
+    intent: AnswerIntent | undefined,
+    remediationMode: PlannerOutput["remediationMode"],
+): AiTaskType {
+    const recent = recentTaskTypes.slice(-3);
+    const mcqInRecent = recent.filter((type) => type === "mcq").length;
+    const allRecentSame = recent.length >= 2 && recent.every((type) => type === recent[0]);
+
+    if (isTypeAllowed(preferred, profile)) {
+        if (
+            preferred === "mcq"
+            && remediationMode === "none"
+            && lastTaskType === "mcq"
+            && (intent === "correct" || intent === "almost")
+        ) {
+            if (isTypeAllowed("cloze", profile)) return "cloze";
+            if (isTypeAllowed("translate", profile)) return "translate";
+        }
+
+        if (
+            preferred === "mcq"
+            && remediationMode === "none"
+            && (mcqInRecent >= 2 || allRecentSame)
+            && isTypeAllowed("translate", profile)
+        ) {
+            return "translate";
+        }
+
+        if (
+            preferred === "cloze"
+            && profile.unitType !== "word"
+            && !profile.exerciseSuitability.contextUsage
+            && isTypeAllowed("translate", profile)
+        ) {
+            return "translate";
+        }
+
+        return preferred;
+    }
+
+    if (preferred !== "translate" && isTypeAllowed("translate", profile)) return "translate";
+    if (preferred !== "cloze" && isTypeAllowed("cloze", profile)) return "cloze";
+    return "mcq";
 }
 
 export function planNextTask(input: PlannerInput): PlannerOutput {
@@ -48,6 +105,9 @@ export function planNextTask(input: PlannerInput): PlannerOutput {
     const due = isDue(input.learnerState);
     const lastError = input.learnerState.lastErrorType;
     const recentIntents = input.recentIntents ?? [];
+    const recentTaskTypes = input.recentTaskTypes ?? [];
+    const lastTaskType = input.lastTaskType ?? recentTaskTypes.at(-1);
+    const lastIntent = recentIntents.at(-1);
     const wrongStreak = recentIntents.slice(-2).filter((item) => item === "wrong" || item === "nonsense" || item === "no_attempt").length;
 
     let objective: LearningObjective = "reinforcement";
@@ -59,8 +119,8 @@ export function planNextTask(input: PlannerInput): PlannerOutput {
     if (wrongStreak >= 2 || input.learnerState.wrongCount >= 2) {
         objective = "repairMistake";
         difficulty = "support";
-        rationale = "Nach mehreren Fehlern wählen wir sofort eine reparierende Aufgabe mit klaren Kontrasten.";
-        focus = "recognition";
+        rationale = "Nach mehreren Fehlern wählen wir eine gestützte Reparaturaufgabe mit klaren Leitplanken.";
+        focus = "form";
         remediationMode = "intensive";
     } else if (lastError === "typo" || recentIntents.slice(-3).filter((item) => item === "typo").length >= 2) {
         objective = "recall";
@@ -85,9 +145,18 @@ export function planNextTask(input: PlannerInput): PlannerOutput {
         focus = "form";
     }
 
+    if ((profile.unitType === "phrase" || profile.unitType === "greeting" || profile.unitType === "formula") && objective === "recognition") {
+        objective = "guidedRecall";
+        focus = "form";
+        rationale = "Mehrwort-/Formelkarte: wir üben geführt statt isolierter Erkennung.";
+    }
+
+    const plannedTaskType = objective === "recall" && focus === "spelling" ? "translate" : objectiveToTaskType(objective, profile);
+    const taskType = chooseWithVariety(plannedTaskType, profile, recentTaskTypes, lastTaskType, lastIntent, remediationMode);
+
     return {
         objective,
-        taskType: objective === "recall" && focus === "spelling" ? "translate" : objectiveToTaskType(objective, profile),
+        taskType,
         difficulty,
         rationale,
         constraints: { focus },

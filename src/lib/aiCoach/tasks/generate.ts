@@ -55,9 +55,9 @@ function objectiveToTaskType(objective: LearningObjective | undefined, fallback:
 
 function isTaskTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): boolean {
     if (profile.forbiddenExerciseTypes.includes(type)) return false;
-    if (type === "cloze") return profile.exerciseSuitability.guidedRecall || profile.exerciseSuitability.contextUsage;
-    if (type === "mcq") return profile.exerciseSuitability.recognition;
-    return profile.exerciseSuitability.recall || profile.exerciseSuitability.production;
+    if (type === "cloze") return profile.exerciseCapabilities.cloze && (profile.exerciseSuitability.guidedRecall || profile.exerciseSuitability.contextUsage);
+    if (type === "mcq") return profile.exerciseSuitability.recognition && profile.unitType !== "sentence";
+    return profile.exerciseCapabilities.translation && (profile.exerciseSuitability.recall || profile.exerciseSuitability.production);
 }
 
 function fallbackTaskType(preferred: AiTaskType, profile: CardPedagogicalProfile): AiTaskType {
@@ -68,9 +68,10 @@ function fallbackTaskType(preferred: AiTaskType, profile: CardPedagogicalProfile
 
     if (preferred === "mcq") {
         if (isTaskTypeAllowed("translate", profile)) return "translate";
-        return isTaskTypeAllowed("cloze", profile) ? "cloze" : "translate";
+        return isTaskTypeAllowed("cloze", profile) ? "cloze" : "mcq";
     }
 
+    if (isTaskTypeAllowed("cloze", profile)) return "cloze";
     return isTaskTypeAllowed("mcq", profile) ? "mcq" : "translate";
 }
 
@@ -78,14 +79,17 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
     const { card, direction, enrichment, rationale } = input;
     const expectedAnswer = toExpected(card, direction);
     const profile = input.cardProfile ?? interpretCard(card, enrichment);
-    const preferredType = input.taskType ?? objectiveToTaskType(input.objective, "translate");
+    const objectiveType = objectiveToTaskType(input.objective, "translate");
+    const preferredType = input.taskType ?? objectiveType;
     const example = safeExample(expectedAnswer, direction, enrichment);
     const hasValidClozeExample = example
         ? includesToken(direction === "DE_TO_SW" ? example.sw : example.de, expectedAnswer)
         : false;
-    const suitableType = !isTaskTypeAllowed(preferredType, profile)
-        ? fallbackTaskType(preferredType, profile)
-        : preferredType;
+    const formulaLike = profile.unitType === "phrase" || profile.unitType === "greeting" || profile.unitType === "formula";
+    const adjustedPreferred = formulaLike && preferredType === "mcq" ? "translate" : preferredType;
+    const suitableType = !isTaskTypeAllowed(adjustedPreferred, profile)
+        ? fallbackTaskType(adjustedPreferred, profile)
+        : adjustedPreferred;
     const type = suitableType === "cloze" && !hasValidClozeExample ? fallbackTaskType("cloze", profile) : suitableType;
 
     const rawHintLevels = buildHintLevels(profile, expectedAnswer);
