@@ -110,13 +110,13 @@ export async function POST(req: Request) {
     const cardProfile = interpretCard(picked.card, enrichment);
     const plan = planNextTask({ learnerState: picked.state, cardProfile, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
     const remediationObjective = body.lastResult?.correct === false
-        ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "repairMistake")
+        ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "confusionRepair")
         : body.lastResult?.correct === true && picked.state.mastery >= 0.75
             ? "contextUsage"
             : null;
     const remediationTaskType: AiTaskType | null = remediationObjective === "recognition"
         ? "mcq"
-        : remediationObjective === "repairMistake"
+        : remediationObjective === "confusionRepair"
             ? "translate"
             : remediationObjective === "contextUsage"
                 ? (cardProfile.exerciseCapabilities.cloze ? "cloze" : "translate")

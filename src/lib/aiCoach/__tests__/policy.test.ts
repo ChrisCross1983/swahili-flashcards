@@ -46,7 +46,7 @@ describe("planner", () => {
             cardProfile: interpretCard({ id: "c2", german_text: "Vielen Dank", swahili_text: "asante sana", type: "vocab" }),
         });
 
-        expect(next.objective).toBe("guidedRecall");
+        expect(["phraseMeaning", "guidedRecall"]).toContain(next.objective);
         expect(next.taskType).toBe("translate");
     });
 

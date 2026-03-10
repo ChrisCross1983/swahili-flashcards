@@ -48,16 +48,29 @@ function buildTranslatePrompt(card: SourceCard, direction: Direction): string {
 
 function objectiveToTaskType(objective: LearningObjective | undefined, fallback: AiTaskType): AiTaskType {
     if (!objective) return fallback;
-    if (objective === "recognition" || objective === "repairMistake" || objective === "contrastConfusion") return "mcq";
-    if (objective === "guidedRecall" || objective === "contextUsage") return "cloze";
+    if (objective === "recognition") return "mcq";
+    if (objective === "guidedRecall" || objective === "contextUsage" || objective === "sentenceUnderstanding") return "cloze";
     return "translate";
 }
 
 function isTaskTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): boolean {
     if (profile.forbiddenExerciseTypes.includes(type)) return false;
     if (type === "cloze") return profile.exerciseCapabilities.cloze && (profile.exerciseSuitability.guidedRecall || profile.exerciseSuitability.contextUsage);
-    if (type === "mcq") return profile.exerciseSuitability.recognition && profile.unitType !== "sentence";
+    if (type === "mcq") return profile.exerciseSuitability.recognition && profile.unitType !== "full_sentence";
     return profile.exerciseCapabilities.translation && (profile.exerciseSuitability.recall || profile.exerciseSuitability.production);
+}
+
+
+
+function deriveResultCardPlan(profile: CardPedagogicalProfile, objective?: LearningObjective) {
+    const objectiveType = objective ?? "recall";
+    return {
+        includeCorrectAnswer: true,
+        includeMorphology: profile.morphologyRelevant && (objectiveType === "morphologyFocus" || objectiveType === "guidedRecall" || objectiveType === "confusionRepair"),
+        includeExample: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
+        includeContrastNote: profile.exerciseSuitability.contrastLearning && (objectiveType === "phraseMeaning" || objectiveType === "confusionRepair"),
+        includeUsageContext: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
+    };
 }
 
 function fallbackTaskType(preferred: AiTaskType, profile: CardPedagogicalProfile): AiTaskType {
@@ -85,7 +98,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
     const hasValidClozeExample = example
         ? includesToken(direction === "DE_TO_SW" ? example.sw : example.de, expectedAnswer)
         : false;
-    const formulaLike = profile.unitType === "phrase" || profile.unitType === "greeting" || profile.unitType === "formula";
+    const formulaLike = profile.unitType === "phrase" || profile.unitType === "greeting" || profile.unitType === "formula" || profile.unitType === "expression";
     const adjustedPreferred = formulaLike && preferredType === "mcq" ? "translate" : preferredType;
     const suitableType = !isTaskTypeAllowed(adjustedPreferred, profile)
         ? fallbackTaskType(adjustedPreferred, profile)
@@ -117,7 +130,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             learnTip: rationale,
             example,
             ui: { inputMode: "mcq" },
-            meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined },
+            meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
         };
     }
 
@@ -139,7 +152,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             learnTip: rationale,
             example,
             ui: { inputMode: "cloze_click" },
-            meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined },
+            meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
         };
     }
 
@@ -157,7 +170,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         learnTip: rationale,
         example,
         ui: { inputMode: "text" },
-        meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined },
+        meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
     };
 }
 

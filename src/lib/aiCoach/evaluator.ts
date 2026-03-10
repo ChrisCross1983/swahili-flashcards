@@ -26,21 +26,24 @@ function normalizeExample(task: AiCoachTask): { sw: string; de: string } | undef
 }
 
 function buildMicroLesson(task: AiCoachTask): AiCoachResult["microLesson"] {
+    const plan = task.meta?.resultCardPlan;
     const nounClass = task.profile?.morphologicalInfo?.nounClass;
     const singular = task.profile?.morphologicalInfo?.singular;
     const plural = task.profile?.morphologicalInfo?.plural;
 
     const morphology = [
         nounClass ? `Nominalklasse: ${nounClass}` : null,
-        singular ? `Singular: ${singular}` : null,
+        singular && nounClass ? `Singular: ${singular}` : null,
         plural ? `Plural: ${plural}` : null,
     ]
         .filter(Boolean)
         .join(" · ");
 
     return {
-        morphology: morphology || undefined,
-        nextStepCue: "Versuche dieselbe Karte noch einmal mit Fokus auf Bedeutung und Form.",
+        morphology: plan?.includeMorphology ? (morphology || undefined) : undefined,
+        example: plan?.includeExample ? normalizeExample(task) : undefined,
+        explanation: plan?.includeUsageContext && task.profile?.contextRequired ? "Achte auf die passende Situation, nicht nur auf die Wort-für-Wort-Übersetzung." : undefined,
+        nextStepCue: task.objective === "recognition" ? "Als Nächstes ohne Auswahl erinnern." : undefined,
     };
 }
 

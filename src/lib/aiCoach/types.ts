@@ -6,11 +6,11 @@ export type LearningObjective =
     | "recognition"
     | "recall"
     | "guidedRecall"
-    | "repairMistake"
-    | "contrastConfusion"
+    | "morphologyFocus"
     | "contextUsage"
-    | "production"
-    | "reinforcement";
+    | "confusionRepair"
+    | "phraseMeaning"
+    | "sentenceUnderstanding";
 
 export type ErrorCategory =
     | "typo"
@@ -45,6 +45,13 @@ export type AiCoachTask = {
         pos?: "noun" | "verb" | "adj" | "phrase" | "unknown";
         nounClass?: string;
         plural?: string;
+        resultCardPlan?: {
+            includeCorrectAnswer: boolean;
+            includeMorphology: boolean;
+            includeExample: boolean;
+            includeContrastNote: boolean;
+            includeUsageContext: boolean;
+        };
     };
 };
 
