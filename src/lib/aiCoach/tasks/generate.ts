@@ -4,6 +4,7 @@ import { isHighQualityExample } from "../contentQuality";
 import type { CardEnrichment } from "../enrichment/generateEnrichment";
 import { buildHintLevels } from "../hintEngine";
 import { buildChoices, type ChoiceCandidate } from "../policy";
+import { rotateDeterministic } from "../variation";
 import type { AiCoachTask, AiTaskType, LearningObjective } from "../types";
 
 export type SourceCard = {
@@ -14,6 +15,7 @@ export type SourceCard = {
 };
 
 type BuildTaskInput = {
+    variationSeed?: string;
     card: SourceCard;
     direction: Direction;
     taskType?: AiTaskType;
@@ -116,7 +118,10 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             pos: candidate.pos,
             nounClass: candidate.nounClass,
         }));
-        const mcqChoices = buildChoices(expectedAnswer, poolCandidates, { targetPos: enrichment?.pos, targetNounClass: enrichment?.noun_class, direction });
+        const mcqChoices = rotateDeterministic(
+            buildChoices(expectedAnswer, poolCandidates, { targetPos: enrichment?.pos, targetNounClass: enrichment?.noun_class, direction }),
+            input.variationSeed ?? `${card.id}:${expectedAnswer}`
+        );
 
         if (mcqChoices.length < 4) {
             return {

@@ -2,6 +2,7 @@ import type { CardPedagogicalProfile } from "./cardInterpreter";
 import type { AnswerIntent } from "./eval/classify";
 import { computeMastery, isDue, type LearnerCardState } from "./learnerModel";
 import type { AiTaskType, LearningObjective } from "./types";
+import { hashToUnit } from "./variation";
 
 export type PlannerInput = {
     learnerState: LearnerCardState;
@@ -9,6 +10,7 @@ export type PlannerInput = {
     recentIntents?: AnswerIntent[];
     recentTaskTypes?: AiTaskType[];
     lastTaskType?: AiTaskType;
+    variationSeed?: string;
 };
 
 export type PlannerOutput = {
@@ -47,12 +49,18 @@ function isTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): boole
     return profile.exerciseCapabilities.translation && (profile.exerciseSuitability.recall || profile.exerciseSuitability.production);
 }
 
-function chooseWithVariety(preferred: AiTaskType, profile: CardPedagogicalProfile, recentTaskTypes: AiTaskType[], lastTaskType: AiTaskType | undefined): AiTaskType {
+function chooseWithVariety(preferred: AiTaskType, profile: CardPedagogicalProfile, recentTaskTypes: AiTaskType[], lastTaskType: AiTaskType | undefined, variationSeed?: string): AiTaskType {
     const recent = recentTaskTypes.slice(-3);
     if (preferred === "mcq" && lastTaskType === "mcq" && isTypeAllowed("translate", profile)) return "translate";
     if (recent.length >= 3 && recent.every((t) => t === recent[0])) {
         if (recent[0] !== "translate" && isTypeAllowed("translate", profile)) return "translate";
         if (recent[0] !== "cloze" && isTypeAllowed("cloze", profile)) return "cloze";
+    }
+
+    const randomRoll = variationSeed ? hashToUnit(variationSeed) : 0;
+    if (randomRoll > 0.66) {
+        const alternative = preferred === "translate" ? "mcq" : "translate";
+        if (alternative !== lastTaskType && isTypeAllowed(alternative, profile)) return alternative;
     }
     if (isTypeAllowed(preferred, profile)) return preferred;
     if (preferred !== "translate" && isTypeAllowed("translate", profile)) return "translate";
@@ -136,7 +144,7 @@ export function planNextTask(input: PlannerInput): PlannerOutput {
     }
 
     const plannedTaskType = objectiveToTaskType(objective, profile);
-    const taskType = chooseWithVariety(plannedTaskType, profile, recentTaskTypes, lastTaskType);
+    const taskType = chooseWithVariety(plannedTaskType, profile, recentTaskTypes, lastTaskType, input.variationSeed);
 
     return {
         objective,

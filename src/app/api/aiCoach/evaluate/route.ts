@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
-import { evaluateWithAi, evaluateWithHeuristic } from "@/lib/aiCoach/evaluator";
+import { evaluateWithHeuristic } from "@/lib/aiCoach/evaluator";
+import { buildTeachingResponse } from "@/lib/aiCoach/aiTeachingResponse";
 import { createDefaultLearnerCardState, updateStateFromResult } from "@/lib/aiCoach/learnerModel";
 import { readMastery, upsertMastery } from "@/lib/aiCoach/mastery";
 import { supabaseServer } from "@/lib/supabaseServer";
@@ -52,7 +53,14 @@ export async function POST(req: Request) {
     const hintLevel = body.hintLevel ?? 0;
     const wrongAttemptsOnCard = body.wrongAttemptsOnCard ?? 0;
     const heuristic = evaluateWithHeuristic(canonicalTask, body.answer, hintLevel, wrongAttemptsOnCard);
-    const withAi = await evaluateWithAi(canonicalTask, body.answer, heuristic);
+    const withAi = await buildTeachingResponse({
+        task: canonicalTask,
+        expectedAnswer: canonicalTask.expectedAnswer,
+        learnerAnswer: body.answer,
+        hintLevel,
+        wrongAttemptsOnCard,
+        fallback: heuristic,
+    });
 
     const masteryReadStartedAt = Date.now();
     const previous = await readMastery(user.id, canonicalTask.cardId);

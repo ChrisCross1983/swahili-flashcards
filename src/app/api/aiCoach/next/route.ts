@@ -6,6 +6,8 @@ import { planNextTask } from "@/lib/aiCoach/planner";
 import { interpretCard } from "@/lib/aiCoach/cardInterpreter";
 import { buildTask } from "@/lib/aiCoach/tasks/generate";
 import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
+import { designTaskWithAi } from "@/lib/aiCoach/aiTaskDesigner";
+import { pickBoundedIndex } from "@/lib/aiCoach/variation";
 import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -102,13 +104,20 @@ export async function POST(req: Request) {
         .map((card) => ({ card, state: fromRow(user.id, card.id, stateMap.get(card.id)) }))
         .sort((a, b) => compareByPriority(a.state, b.state, nowMs));
 
-    const picked = ranked[0];
+    const picked = ranked[pickBoundedIndex(ranked.length, `${user.id}:${body.sessionId}:${Date.now()}`, 3)] ?? ranked[0];
     if (!picked) return NextResponse.json({ error: "Keine Karten verfügbar." }, { status: 404 });
     const recentIntents = body.lastResult?.intent ? [body.lastResult.intent] : [];
 
     const enrichment = await getExistingEnrichment(user.id, picked.card.id);
     const cardProfile = interpretCard(picked.card, enrichment);
-    const plan = planNextTask({ learnerState: picked.state, cardProfile, recentIntents, recentTaskTypes: body.history, lastTaskType: body.lastTaskType });
+    const plan = planNextTask({
+        learnerState: picked.state,
+        cardProfile,
+        recentIntents,
+        recentTaskTypes: body.history,
+        lastTaskType: body.lastTaskType,
+        variationSeed: `${user.id}:${body.sessionId}:${picked.card.id}`,
+    });
     const remediationObjective = body.lastResult?.correct === false
         ? (body.lastResult.errorCategory === "no_attempt" || body.lastResult.errorCategory === "semantic_confusion" ? "recognition" : "confusionRepair")
         : body.lastResult?.correct === true && picked.state.mastery >= 0.75
@@ -123,7 +132,7 @@ export async function POST(req: Request) {
                 : null;
     if (!enrichment) scheduleEnrichment(user.id, picked.card);
 
-    const task = buildTask({
+    const deterministicTask = buildTask({
         card: picked.card,
         direction,
         taskType: remediationTaskType ?? plan.taskType,
@@ -132,7 +141,20 @@ export async function POST(req: Request) {
         pool: cards,
         enrichment,
         rationale: plan.rationale,
+        variationSeed: `${user.id}:${body.sessionId}:${picked.card.id}:${Date.now()}`,
     });
+
+    const aiTask = await designTaskWithAi({
+        task: deterministicTask,
+        card: picked.card,
+        cardProfile,
+        learnerState: picked.state,
+        recentTaskHistory: body.history ?? [],
+        recentOutcomes: [body.lastResult?.verdict ?? body.lastResult?.intent ?? ""].filter(Boolean),
+        allowedUiCapabilities: ["text", "mcq", "cloze_click"],
+    });
+
+    const task = aiTask ?? deterministicTask;
 
     console.info("[aiCoach] next timings", {
         userId: user.id,
@@ -140,7 +162,7 @@ export async function POST(req: Request) {
         totalMs: Date.now() - startedAt,
         taskTypeRequested: plan.taskType,
         taskTypeChosen: task.type,
-        clozeFallbackReason: plan.taskType === "cloze" && task.type !== "cloze" ? "missing_valid_example" : null,
+        aiTaskDesigned: Boolean(aiTask),
     });
 
     return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), objective: remediationObjective ?? plan.objective, rationale: plan.rationale } });
