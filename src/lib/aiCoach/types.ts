@@ -51,6 +51,8 @@ export type AiCoachTask = {
             includeExample: boolean;
             includeContrastNote: boolean;
             includeUsageContext: boolean;
+            includeExplanation: boolean;
+            includeNextStep: boolean;
         };
     };
 };

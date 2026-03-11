@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { CardType } from "@/lib/trainer/types";
 import { useAiCoachSession } from "@/lib/aiCoach/hooks";
-import { getVisibleMorphology, pickVisibleExample, shouldShowHint } from "@/lib/aiCoach/contentQuality";
+import { buildResultCardViewModel, shouldShowHint } from "@/lib/aiCoach/contentQuality";
 
 type Props = {
     cardType: CardType;
@@ -19,9 +19,8 @@ export default function AiCoachPanel({ cardType }: Props) {
     const inputMode = state.currentTask?.ui?.inputMode ?? "text";
     const canSubmit = isInTask && answer.trim().length > 0;
 
-    const visibleMorphology = state.currentTask && state.lastResult ? getVisibleMorphology(state.currentTask) : null;
-    const visibleExample = state.currentTask && state.lastResult ? pickVisibleExample(state.lastResult, state.currentTask) : null;
     const visibleHint = state.lastResult && shouldShowHint(state.lastResult) ? state.lastResult.learnTip : null;
+    const resultCard = state.currentTask && state.lastResult ? buildResultCardViewModel(state.lastResult, state.currentTask) : null;
 
     const handleChoice = (choice: string) => {
         if (!isInTask) return;
@@ -144,26 +143,29 @@ export default function AiCoachPanel({ cardType }: Props) {
             {hasResult && state.lastResult ? (
                 <div className="rounded-2xl border border-soft p-3 text-sm space-y-2">
                     <div className="font-medium">
-                        {state.lastResult.correct ? "✅ Richtig" : state.lastResult.feedbackTitle === "Fast richtig" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
+                        {resultCard?.status === "correct" ? "✅ Richtig" : resultCard?.status === "almost" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
                     </div>
-                    <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{state.lastResult.correctAnswer}</span></div>
+                    <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{resultCard?.correctAnswer}</span></div>
 
-                    {visibleMorphology ? (
+                    {resultCard?.morphology ? (
                         <div className="text-muted">
-                            {visibleMorphology.nounClass ? <div>Nomenklasse: {visibleMorphology.nounClass}</div> : null}
-                            {visibleMorphology.singular ? <div>Singular: {visibleMorphology.singular}</div> : null}
-                            {visibleMorphology.plural ? <div>Plural: {visibleMorphology.plural}</div> : null}
+                            {resultCard.morphology.nounClass ? <div>Nomenklasse: {resultCard.morphology.nounClass}</div> : null}
+                            {resultCard.morphology.singular ? <div>Singular: {resultCard.morphology.singular}</div> : null}
+                            {resultCard.morphology.plural ? <div>Plural: {resultCard.morphology.plural}</div> : null}
                         </div>
                     ) : null}
 
                     {visibleHint ? <div className="text-muted">Hinweis: {visibleHint}</div> : null}
 
-                    {visibleExample ? (
+                    {resultCard?.example ? (
                         <div className="text-muted">
-                            <div>Beispiel (SW): {visibleExample.sw}</div>
-                            <div>Übersetzung (DE): {visibleExample.de}</div>
+                            <div>Beispiel (SW): {resultCard.example.sw}</div>
+                            <div>Übersetzung (DE): {resultCard.example.de}</div>
                         </div>
                     ) : null}
+
+                    {resultCard?.explanation ? <div className="text-muted">Erklärung: {resultCard.explanation}</div> : null}
+                    {resultCard?.nextStepCue ? <div className="text-muted">Nächster Schritt: {resultCard.nextStepCue}</div> : null}
                 </div>
             ) : null}
 

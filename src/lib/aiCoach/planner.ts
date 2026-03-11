@@ -27,6 +27,8 @@ export type PlannerOutput = {
         includeExample: boolean;
         includeContrastNote: boolean;
         includeUsageContext: boolean;
+        includeExplanation: boolean;
+        includeNextStep: boolean;
     };
 };
 
@@ -69,6 +71,8 @@ function buildResultCardPlan(profile: CardPedagogicalProfile, objective: Learnin
         includeExample,
         includeContrastNote,
         includeUsageContext,
+        includeExplanation: objective !== "recognition",
+        includeNextStep: objective === "guidedRecall" || objective === "confusionRepair",
     };
 }
 

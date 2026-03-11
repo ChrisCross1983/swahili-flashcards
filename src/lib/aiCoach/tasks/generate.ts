@@ -70,6 +70,8 @@ function deriveResultCardPlan(profile: CardPedagogicalProfile, objective?: Learn
         includeExample: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
         includeContrastNote: profile.exerciseSuitability.contrastLearning && (objectiveType === "phraseMeaning" || objectiveType === "confusionRepair"),
         includeUsageContext: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
+        includeExplanation: objectiveType !== "recognition",
+        includeNextStep: objectiveType === "confusionRepair" || objectiveType === "guidedRecall",
     };
 }
 
@@ -114,6 +116,26 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             pos: candidate.pos,
             nounClass: candidate.nounClass,
         }));
+        const mcqChoices = buildChoices(expectedAnswer, poolCandidates, { targetPos: enrichment?.pos, targetNounClass: enrichment?.noun_class, direction });
+
+        if (mcqChoices.length < 4) {
+            return {
+                taskId: crypto.randomUUID(),
+                cardId: card.id,
+                type: "translate",
+                direction,
+                objective: input.objective,
+                rationale,
+                profile,
+                prompt: buildTranslatePrompt(card, direction),
+                expectedAnswer,
+                hintLevels,
+                learnTip: rationale,
+                example,
+                ui: { inputMode: "text" },
+                meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
+            };
+        }
 
         return {
             taskId: crypto.randomUUID(),
@@ -125,7 +147,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             profile,
             prompt: `Wähle die richtige Übersetzung: ${direction === "DE_TO_SW" ? card.german_text : card.swahili_text}`,
             expectedAnswer,
-            choices: buildChoices(expectedAnswer, poolCandidates, { targetPos: enrichment?.pos, targetNounClass: enrichment?.noun_class }),
+            choices: mcqChoices,
             hintLevels,
             learnTip: rationale,
             example,
@@ -147,7 +169,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             profile,
             prompt: `Fülle die Lücke: ${sentenceWithGap}`,
             expectedAnswer,
-            choices: buildChoices(expectedAnswer, (input.pool ?? []).map((candidate) => direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text)),
+            choices: buildChoices(expectedAnswer, (input.pool ?? []).map((candidate) => direction === "DE_TO_SW" ? candidate.swahili_text : candidate.german_text), { direction }),
             hintLevels,
             learnTip: rationale,
             example,

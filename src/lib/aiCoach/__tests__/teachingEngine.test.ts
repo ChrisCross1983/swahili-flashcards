@@ -72,7 +72,7 @@ describe("evaluator output", () => {
         prompt: "Übersetze: Buch",
         expectedAnswer: "kitabu",
         ui: { inputMode: "text" as const },
-        meta: { resultCardPlan: { includeCorrectAnswer: true, includeMorphology: true, includeExample: false, includeContrastNote: false, includeUsageContext: false } },
+        meta: { resultCardPlan: { includeCorrectAnswer: true, includeMorphology: true, includeExample: false, includeContrastNote: false, includeUsageContext: false, includeExplanation: true, includeNextStep: false } },
         profile: { morphologicalInfo: { nounClass: "ki/vi", singular: "kitabu", plural: "vitabu" }, contextRequired: false },
     };
 

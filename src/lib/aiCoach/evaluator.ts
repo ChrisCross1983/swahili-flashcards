@@ -42,8 +42,10 @@ function buildMicroLesson(task: AiCoachTask): AiCoachResult["microLesson"] {
     return {
         morphology: plan?.includeMorphology ? (morphology || undefined) : undefined,
         example: plan?.includeExample ? normalizeExample(task) : undefined,
-        explanation: plan?.includeUsageContext && task.profile?.contextRequired ? "Achte auf die passende Situation, nicht nur auf die Wort-für-Wort-Übersetzung." : undefined,
-        nextStepCue: task.objective === "recognition" ? "Als Nächstes ohne Auswahl erinnern." : undefined,
+        explanation: plan?.includeUsageContext && task.profile?.contextRequired
+            ? "Nutze die Antwort im passenden Kontext statt als wörtliche 1:1-Übersetzung."
+            : undefined,
+        nextStepCue: plan?.includeNextStep ? "Wiederhole dieselbe Karte jetzt ohne Auswahlhilfe." : undefined,
     };
 }
 

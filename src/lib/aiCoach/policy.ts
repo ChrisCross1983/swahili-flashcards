@@ -1,3 +1,4 @@
+import type { Direction } from "@/lib/trainer/types";
 import { planNextTask } from "./planner";
 import type { LearnerCardState } from "./learnerModel";
 import type { AiTaskType } from "./types";
@@ -28,31 +29,98 @@ function randomize<T>(items: T[]): T[] {
     return copy;
 }
 
+const GERMAN_MARKERS = /\b(der|die|das|ein|eine|ich|du|und|nicht|ist|mit|auf|zu|im|am|vom|zum|den|dem)\b/i;
+const SWAHILI_MARKERS = /\b(ni|ya|wa|la|kwa|na|si|mimi|wewe|yeye|sisi|wao|hii|huyu|hapo|sana|asante)\b/i;
+
+function detectLanguage(text: string): "sw" | "de" | "unknown" {
+    const normalized = text.trim().toLowerCase();
+    if (!normalized) return "unknown";
+
+    const hasGermanUmlaut = /[äöüß]/i.test(normalized);
+    const hasSwahiliDigraphs = /\b(ng|ny|sh|ch|dh|kh)\w*/i.test(normalized);
+    const germanMarkers = GERMAN_MARKERS.test(normalized);
+    const swahiliMarkers = SWAHILI_MARKERS.test(normalized);
+
+    if ((germanMarkers || hasGermanUmlaut) && !swahiliMarkers) return "de";
+    if (swahiliMarkers && !germanMarkers) return "sw";
+
+    if (hasGermanUmlaut) return "de";
+    if (hasSwahiliDigraphs && !/[äöüß]/i.test(normalized)) return "sw";
+
+    return "unknown";
+}
+
+function normalizeForCompare(text: string): string {
+    return text.trim().toLowerCase();
+}
+
+function hasMalformedText(text: string): boolean {
+    return /[{}<>\[\]_]/.test(text) || /\b(null|undefined|n\/a|todo|placeholder)\b/i.test(text);
+}
+
+function tokenCount(text: string): number {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function isSentenceLike(text: string): boolean {
+    return tokenCount(text) >= 6 || /[.!?]$/.test(text.trim());
+}
+
+function isShapeCompatible(target: string, candidate: string): boolean {
+    const targetTokens = tokenCount(target);
+    const candidateTokens = tokenCount(candidate);
+    if (targetTokens <= 3 && isSentenceLike(candidate)) return false;
+    if (Math.abs(targetTokens - candidateTokens) > 4) return false;
+    return Math.abs(candidate.length - target.length) <= 16;
+}
+
+function safeFallbackDistractors(direction: Direction, correct: string): string[] {
+    const fallback = direction === "DE_TO_SW"
+        ? ["mji", "kiti", "dirisha", "barabara", "kalamu", "ndizi"]
+        : ["Stadt", "Stuhl", "Fenster", "Straße", "Stift", "Banane"];
+
+    return randomize(fallback).filter((item) => normalizeForCompare(item) !== normalizeForCompare(correct)).slice(0, 3);
+}
+
 export function buildChoices(
     correct: string,
     pool: Array<string | ChoiceCandidate>,
-    options?: { targetPos?: string | null; targetNounClass?: string | null },
+    options?: { targetPos?: string | null; targetNounClass?: string | null; direction?: Direction },
 ): string[] {
-    const normalizedCorrect = correct.trim().toLowerCase();
-    const correctLength = correct.trim().length;
+    const normalizedCorrect = normalizeForCompare(correct);
+    const cleanCorrect = correct.trim();
+    const correctLength = cleanCorrect.length;
+    const expectedLanguage = options?.direction === "DE_TO_SW" ? "sw" : options?.direction === "SW_TO_DE" ? "de" : detectLanguage(cleanCorrect);
+
     const candidates: ChoiceCandidate[] = pool
         .map((item) => (typeof item === "string" ? { text: item } : item))
         .map((item) => ({ ...item, text: item.text.trim() }))
-        .filter((item) => item.text && item.text.toLowerCase() !== normalizedCorrect)
-        .filter((item) => item.text.length >= 2 && item.text.length <= 32 && !/[.!?]{2,}/.test(item.text))
-        .filter((item) => Math.abs(item.text.length - correctLength) <= 10);
+        .filter((item) => item.text && normalizeForCompare(item.text) !== normalizedCorrect)
+        .filter((item) => item.text.length >= 2 && item.text.length <= 36)
+        .filter((item) => !hasMalformedText(item.text) && !/[.!?]{2,}/.test(item.text))
+        .filter((item) => {
+            if (!expectedLanguage || expectedLanguage === "unknown") return true;
+            const detected = detectLanguage(item.text);
+            return options?.direction ? detected === expectedLanguage : (detected === expectedLanguage || detected === "unknown");
+        })
+        .filter((item) => isShapeCompatible(cleanCorrect, item.text));
 
-    const unique = candidates.filter((item, idx, arr) => arr.findIndex((x) => x.text.toLowerCase() === item.text.toLowerCase()) === idx);
+    const unique = candidates.filter((item, idx, arr) => arr.findIndex((x) => normalizeForCompare(x.text) === normalizeForCompare(item.text)) === idx);
     const ranked = unique
         .map((item) => ({ item, score: scoreDistractor(item, options) }))
         .sort((a, b) => b.score - a.score || Math.abs(a.item.text.length - correctLength) - Math.abs(b.item.text.length - correctLength));
 
-    const topBand = ranked.slice(0, 8).map((entry) => entry.item.text);
-    const distractors = randomize(topBand).slice(0, 3);
+    let distractors = randomize(ranked.slice(0, 10).map((entry) => entry.item.text)).slice(0, 3);
 
-    const choices = randomize([correct.trim(), ...distractors])
+    if (distractors.length < 3 && options?.direction) {
+        const fallback = safeFallbackDistractors(options.direction, cleanCorrect)
+            .filter((item) => isShapeCompatible(cleanCorrect, item));
+        distractors = [...distractors, ...fallback.filter((item) => !distractors.includes(item))].slice(0, 3);
+    }
+
+    const choices = randomize([cleanCorrect, ...distractors])
         .filter(Boolean)
-        .filter((item, idx, arr) => arr.findIndex((x) => x.toLowerCase() === item.toLowerCase()) === idx);
+        .filter((item, idx, arr) => arr.findIndex((x) => normalizeForCompare(x) === normalizeForCompare(item)) === idx);
 
     return choices.slice(0, 4);
 }

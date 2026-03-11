@@ -94,4 +94,42 @@ describe("task builder", () => {
 
         expect(task.example).toBeUndefined();
     });
+
+    it("falls back safely when validated mcq pool is insufficient", () => {
+        const task = buildTask({
+            direction: "DE_TO_SW",
+            taskType: "mcq",
+            card: { id: "c11", german_text: "Baum", swahili_text: "mti", type: "vocab" },
+            pool: [
+                { id: "c2", german_text: "Haus", swahili_text: "Haus" },
+                { id: "c3", german_text: "Fenster", swahili_text: "Fenster" },
+            ],
+        });
+
+        if (task.type === "translate") {
+            expect(task.prompt).toContain("Übersetze:");
+            return;
+        }
+
+        expect(task.type).toBe("mcq");
+        expect(task.choices).toHaveLength(4);
+        expect(task.choices?.every((choice) => !/(haus|fenster)/i.test(choice) || /^[A-ZÄÖÜa-zäöüß]+$/.test(choice))).toBe(true);
+    });
+
+    it("keeps SW_TO_DE mcq choices in German only", () => {
+        const task = buildTask({
+            direction: "SW_TO_DE",
+            taskType: "mcq",
+            card: { id: "c12", german_text: "Buch", swahili_text: "kitabu", type: "vocab" },
+            pool: [
+                { id: "c2", german_text: "Haus", swahili_text: "nyumba" },
+                { id: "c3", german_text: "Freund", swahili_text: "rafiki" },
+                { id: "c4", german_text: "Fenster", swahili_text: "dirisha" },
+                { id: "c5", german_text: "Stuhl", swahili_text: "kiti" },
+            ],
+        });
+
+        expect(task.type).toBe("mcq");
+        expect(task.choices?.every((choice) => !/(kitabu|nyumba|rafiki|dirisha|kiti)/i.test(choice))).toBe(true);
+    });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getVisibleMorphology, isHighQualityExample, pickVisibleExample, shouldShowHint } from "../contentQuality";
+import { buildResultCardViewModel, getVisibleMorphology, isHighQualityExample, pickVisibleExample, shouldShowHint } from "../contentQuality";
 
 const nounTask = {
     taskId: "t1",
@@ -10,9 +10,22 @@ const nounTask = {
     expectedAnswer: "kitabu",
     profile: {
         pos: "noun" as const,
+        morphologyRelevant: true,
         morphologicalInfo: { nounClass: "ki/vi", singular: "kitabu", plural: "vitabu" },
     },
-    meta: { nounClass: "ki/vi", plural: "vitabu" },
+    meta: {
+        nounClass: "ki/vi",
+        plural: "vitabu",
+        resultCardPlan: {
+            includeCorrectAnswer: true,
+            includeMorphology: true,
+            includeExample: true,
+            includeContrastNote: false,
+            includeUsageContext: true,
+            includeExplanation: true,
+            includeNextStep: true,
+        },
+    },
     ui: { inputMode: "text" as const },
 };
 
@@ -43,5 +56,44 @@ describe("contentQuality", () => {
         };
         const picked = pickVisibleExample(result as never, nounTask as never);
         expect(picked?.sw).toContain("Ninapata");
+    });
+
+    it("result card always includes status + correct answer", () => {
+        const vm = buildResultCardViewModel({ correct: false, feedbackTitle: "Noch nicht", correctAnswer: "kitabu" } as never, nounTask as never);
+        expect(vm.status).toBe("wrong");
+        expect(vm.correctAnswer).toBe("kitabu");
+    });
+
+    it("hides explanation and next step when generic", () => {
+        const vm = buildResultCardViewModel({
+            correct: false,
+            feedbackTitle: "Noch nicht",
+            correctAnswer: "kitabu",
+            explanation: "Warum es noch nicht passt",
+            microLesson: { nextStepCue: "Weiter so" },
+        } as never, nounTask as never);
+
+        expect(vm.explanation).toBeUndefined();
+        expect(vm.nextStepCue).toBeUndefined();
+    });
+
+    it("hides example when low quality", () => {
+        const vm = buildResultCardViewModel({
+            correct: false,
+            feedbackTitle: "Noch nicht",
+            correctAnswer: "kitabu",
+            example: { sw: "Wir sagen kitabu oft", de: "Wir sagen Buch oft" },
+        } as never, nounTask as never);
+
+        expect(vm.example).toBeUndefined();
+    });
+
+    it("hides morphology for non-morphology items", () => {
+        const plainTask = {
+            ...nounTask,
+            profile: { ...nounTask.profile, morphologyRelevant: false, pos: "verb" },
+        };
+        const vm = buildResultCardViewModel({ correct: true, feedbackTitle: "Richtig", correctAnswer: "kitabu" } as never, plainTask as never);
+        expect(vm.morphology).toBeUndefined();
     });
 });
