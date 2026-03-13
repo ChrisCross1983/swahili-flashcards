@@ -39,8 +39,8 @@ describe("contentQuality", () => {
     });
 
     it("only exposes hint for almost-correct compact hints", () => {
-        expect(shouldShowHint({ feedbackTitle: "Fast richtig", learnTip: "Prüfe die Endung." } as never)).toBe(true);
-        expect(shouldShowHint({ feedbackTitle: "Noch nicht", learnTip: "Prüfe die Endung." } as never)).toBe(false);
+        expect(shouldShowHint({ feedbackTitle: "Fast richtig", learnTip: "Erster Buchstabe: k." } as never)).toBe(true);
+        expect(shouldShowHint({ feedbackTitle: "Noch nicht", learnTip: "Erster Buchstabe: k." } as never)).toBe(false);
     });
 
     it("returns noun morphology only when available", () => {

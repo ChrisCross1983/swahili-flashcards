@@ -1,5 +1,6 @@
 import { aiTeachingResponseSchema } from "./aiSchemas";
 import { type AiTeachingResponse, validateAiTeachingResponse } from "./aiValidators";
+import { buildDeterministicExplanation, shouldUseExplanation } from "./hintQuality";
 import type { AiCoachResult, AiCoachTask } from "./types";
 
 export type AiTeachingInput = {
@@ -64,11 +65,13 @@ export async function buildTeachingResponse(input: AiTeachingInput): Promise<AiC
 
     const intent = ai.verdict === "correct" ? "correct" : ai.verdict === "almost" ? "almost" : ai.verdict === "skip" ? "no_attempt" : ai.verdict === "nonsense" ? "nonsense" : "wrong";
 
+    const explanation = shouldUseExplanation(ai.shortExplanation) ? ai.shortExplanation.trim() : (buildDeterministicExplanation(input.task, ai.errorType) ?? input.fallback.explanation);
+
     return {
         ...input.fallback,
         intent,
         verdict: ai.verdict,
-        explanation: ai.shortExplanation,
+        explanation,
         errorCategory: ai.errorType,
         feedbackTitle: ai.verdict === "correct" ? "Richtig" : ai.verdict === "almost" ? "Fast richtig" : "Noch nicht",
         nextRecommendation: ai.nextLearningMoveRecommendation,
@@ -78,7 +81,7 @@ export async function buildTeachingResponse(input: AiTeachingInput): Promise<AiC
         example: ai.showExample && ai.exampleSentence ? { sw: ai.exampleSentence.sw.trim(), de: ai.exampleSentence.de.trim() } : undefined,
         microLesson: {
             ...input.fallback.microLesson,
-            explanation: ai.shortExplanation,
+            explanation,
             morphology: ai.showMorphology ? (ai.nounClassInfo ?? input.fallback.microLesson?.morphology) : undefined,
             memoryHook: ai.memoryHook?.trim() || input.fallback.microLesson?.memoryHook,
         },

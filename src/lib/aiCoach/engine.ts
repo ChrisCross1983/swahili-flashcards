@@ -16,6 +16,8 @@ export function createInitialAiCoachState(): AiCoachState {
         hintLevel: 0,
         showExample: false,
         taskTypeHistory: [],
+        directionHistory: [],
+        objectiveHistory: [],
         error: null,
     };
 }
@@ -38,6 +40,8 @@ export function setTask(state: AiCoachState, payload: { sessionId?: string; task
         hintLevel: 0,
         showExample: false,
         taskTypeHistory: [...state.taskTypeHistory, payload.task.type].slice(-12),
+        directionHistory: [...state.directionHistory, payload.task.direction].slice(-12),
+        objectiveHistory: payload.task.objective ? [...state.objectiveHistory, payload.task.objective].slice(-12) : state.objectiveHistory,
         recentCardIds,
         error: null,
     };

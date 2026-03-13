@@ -1,6 +1,7 @@
 import { isHighQualityExample } from "./contentQuality";
 import { classifyAnswerIntent } from "./eval/classify";
 import { computeSimilarityScore, normalizeText } from "./eval/similarity";
+import { buildDeterministicExplanation, shouldUseExplanation } from "./hintQuality";
 import type { AiCoachResult, AiCoachTask, ErrorCategory } from "./types";
 
 type AiEvalPayload = {
@@ -120,7 +121,7 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
         intent,
         confidence: isCorrect ? 1 : Math.max(0.35, similarity),
         errorCategory,
-        explanation: isCorrect ? "Antwort stimmt." : "Antwort passt noch nicht.",
+        explanation: isCorrect ? "Antwort stimmt." : (buildDeterministicExplanation(task, errorCategory) ?? "Antwort passt noch nicht."),
         verdict: isCorrect ? "correct" : intent === "nonsense" ? "nonsense" : partial || intent === "typo" ? "almost" : "wrong",
         score: isCorrect ? 1 : partial ? similarity : 0,
         feedbackTitle: feedbackTitle(intent),
@@ -250,7 +251,7 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
         intent: mappedIntent,
         confidence: ai.confidence,
         errorCategory: errorMap[ai.errorType],
-        explanation: ai.explanation,
+        explanation: shouldUseExplanation(ai.explanation) ? ai.explanation.trim() : (buildDeterministicExplanation(task, errorMap[ai.errorType]) ?? fallback.explanation),
         verdict: ai.errorType === "correct" ? "correct" : ai.errorType === "skip" ? "skip" : ai.errorType === "nonsense" ? "nonsense" : "wrong",
         feedbackTitle: feedbackTitle(mappedIntent),
         feedback: "",

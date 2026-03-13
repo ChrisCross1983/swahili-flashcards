@@ -117,6 +117,8 @@ export type AiCoachNextInput = {
     answeredCardIds?: string[];
     recentCardIds?: string[];
     history?: AiTaskType[];
+    recentDirections?: Direction[];
+    recentObjectives?: LearningObjective[];
     lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
@@ -157,5 +159,7 @@ export type AiCoachState = {
     hintLevel: number;
     showExample: boolean;
     taskTypeHistory: AiTaskType[];
+    directionHistory: Direction[];
+    objectiveHistory: LearningObjective[];
     error: string | null;
 };

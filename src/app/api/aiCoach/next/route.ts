@@ -7,7 +7,9 @@ import { interpretCard } from "@/lib/aiCoach/cardInterpreter";
 import { buildTask } from "@/lib/aiCoach/tasks/generate";
 import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
 import { designTaskWithAi } from "@/lib/aiCoach/aiTaskDesigner";
+import { validateFinalTask } from "@/lib/aiCoach/finalTaskValidator";
 import { pickBoundedIndex } from "@/lib/aiCoach/variation";
+import { chooseRemediationTaskType, shouldAvoidImmediateReverse } from "@/lib/aiCoach/remediationPolicy";
 import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -19,6 +21,8 @@ type Body = {
     answeredCardIds?: string[];
     recentCardIds?: string[];
     history?: AiTaskType[];
+    recentDirections?: Direction[];
+    recentObjectives?: string[];
     lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
 };
@@ -89,6 +93,14 @@ export async function POST(req: Request) {
     const candidatePool = cards.filter((card) => card.id !== body.excludeCardId && !recentSet.has(card.id) && !answeredSet.has(card.id));
     const fallbackPool = candidatePool.length ? candidatePool : cards;
 
+    const avoidReverse = shouldAvoidImmediateReverse({
+        recentCardIds: body.recentCardIds,
+        recentDirections: body.recentDirections,
+        currentCardId: body.excludeCardId,
+        currentDirection: direction,
+        lastResult: body.lastResult,
+    });
+
     const cardIds = fallbackPool.map((card) => card.id);
     const statesQueryStartedAt = Date.now();
     const { data: states } = await supabaseServer
@@ -100,7 +112,8 @@ export async function POST(req: Request) {
 
     const stateMap = new Map((states ?? []).map((row) => [String(row.card_id), row]));
     const nowMs = Date.now();
-    const ranked = fallbackPool
+    const rankingPool = avoidReverse ? fallbackPool.filter((card) => card.id !== body.excludeCardId) : fallbackPool;
+    const ranked = (rankingPool.length ? rankingPool : fallbackPool)
         .map((card) => ({ card, state: fromRow(user.id, card.id, stateMap.get(card.id)) }))
         .sort((a, b) => compareByPriority(a.state, b.state, nowMs));
 
@@ -123,13 +136,9 @@ export async function POST(req: Request) {
         : body.lastResult?.correct === true && picked.state.mastery >= 0.75
             ? "contextUsage"
             : null;
-    const remediationTaskType: AiTaskType | null = remediationObjective === "recognition"
-        ? "mcq"
-        : remediationObjective === "confusionRepair"
-            ? "translate"
-            : remediationObjective === "contextUsage"
-                ? (cardProfile.exerciseCapabilities.cloze ? "cloze" : "translate")
-                : null;
+    const remediationTaskType: AiTaskType | null = remediationObjective === "contextUsage"
+        ? (cardProfile.exerciseCapabilities.cloze ? "cloze" : "translate")
+        : chooseRemediationTaskType(body.lastResult);
     if (!enrichment) scheduleEnrichment(user.id, picked.card);
 
     const deterministicTask = buildTask({
@@ -154,7 +163,7 @@ export async function POST(req: Request) {
         allowedUiCapabilities: ["text", "mcq", "cloze_click"],
     });
 
-    const task = aiTask ?? deterministicTask;
+    const task = validateFinalTask(aiTask ?? deterministicTask, { card: picked.card, pool: cards });
 
     console.info("[aiCoach] next timings", {
         userId: user.id,

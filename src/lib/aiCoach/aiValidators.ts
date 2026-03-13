@@ -1,4 +1,5 @@
 import { isHighQualityExample } from "./contentQuality";
+import { isSpecificHintText, shouldUseExplanation } from "./hintQuality";
 import type { AiCoachTask, ErrorCategory } from "./types";
 
 export type AiTaskDesign = {
@@ -44,6 +45,7 @@ function likelyGerman(text: string): boolean {
 
 export function validateAiTaskDesign(task: AiTaskDesign, direction: AiCoachTask["direction"]): boolean {
     if (!task.prompt.trim() || !task.expectedAnswer.trim() || task.confidence < 0.45) return false;
+    if (task.hint?.trim() && !isSpecificHintText(task.hint.trim())) return false;
     if (FILLER.some((rx) => rx.test(task.teachingObjective.trim()))) return false;
     if (task.taskType === "mcq") {
         if (task.distractors.length < 3) return false;
@@ -76,6 +78,7 @@ export function validateAiTaskDesign(task: AiTaskDesign, direction: AiCoachTask[
 
 export function validateAiTeachingResponse(response: AiTeachingResponse, task: AiCoachTask): boolean {
     if (!response.shortExplanation.trim() || response.confidence < 0.45) return false;
+    if (!shouldUseExplanation(response.shortExplanation)) return false;
     if (FILLER.some((rx) => rx.test(response.shortExplanation.trim()))) return false;
     if (response.showExample && response.exampleSentence) {
         if (!isHighQualityExample(task, response.exampleSentence)) return false;

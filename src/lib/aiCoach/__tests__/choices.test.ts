@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChoices } from "../policy";
+import { buildChoices, rankDistractorsByPedagogicalFit } from "../policy";
 
 describe("buildChoices fairness", () => {
     it("keeps options unique and includes correct answer once", () => {
@@ -45,4 +45,22 @@ describe("buildChoices fairness", () => {
         expect(choices.some((item) => item.includes("sentensi ndefu"))).toBe(false);
         expect(choices.some((item) => item.includes("placeholder"))).toBe(false);
     });
+
+    it("does not force mcq with random fallback garbage", () => {
+        const choices = buildChoices("kitabu", ["Haus", "Fenster", "Auto"], { direction: "DE_TO_SW" });
+        expect(choices.length).toBeLessThan(4);
+    });
+
+    it("prefers form-matched distractors over sentence-like options", () => {
+        const ranked = rankDistractorsByPedagogicalFit("asante sana", [
+            { text: "pole sana" },
+            { text: "habari yako" },
+            { text: "hii ni sentensi ndefu sana kwa majaribio" },
+            { text: "karibu tena" },
+        ], { direction: "DE_TO_SW" });
+
+        expect(ranked.some((entry) => entry.text.includes("sentensi ndefu"))).toBe(false);
+        expect(ranked[0]?.text).toMatch(/(pole sana|habari yako|karibu tena)/i);
+    });
+
 });

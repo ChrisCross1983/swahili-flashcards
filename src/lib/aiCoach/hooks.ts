@@ -53,6 +53,8 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
             wrongCardIds: state.wrongCardIds,
             hintLevel: state.hintLevel,
             history: state.taskTypeHistory,
+            recentDirections: state.directionHistory,
+            recentObjectives: state.objectiveHistory,
             lastTaskType: state.currentTask?.type,
         };
 
@@ -65,7 +67,7 @@ export function useAiCoachSession(cardType: CardType = "vocab", direction: Direc
         } catch (error) {
             setState((prev) => setError(prev, error instanceof Error ? error.message : "Nächste Aufgabe fehlgeschlagen."));
         }
-    }, [cardType, direction, state.answeredCardIds, state.currentTask?.cardId, state.currentTask?.type, state.hintLevel, state.lastResult, state.recentCardIds, state.sessionId, state.streak, state.taskTypeHistory, state.wrongCardIds]);
+    }, [cardType, direction, state.answeredCardIds, state.currentTask?.cardId, state.currentTask?.type, state.directionHistory, state.hintLevel, state.lastResult, state.objectiveHistory, state.recentCardIds, state.sessionId, state.streak, state.taskTypeHistory, state.wrongCardIds]);
 
     const endSession = useCallback(async () => {
         try {

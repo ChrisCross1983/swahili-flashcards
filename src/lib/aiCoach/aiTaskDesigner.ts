@@ -2,6 +2,7 @@ import type { CardPedagogicalProfile } from "./cardInterpreter";
 import type { LearnerCardState } from "./learnerModel";
 import { aiTaskDesignerSchema } from "./aiSchemas";
 import { type AiTaskDesign, validateAiTaskDesign } from "./aiValidators";
+import { filterHintLevels } from "./hintQuality";
 import type { AiCoachTask, AiTaskType } from "./types";
 
 export type AiTaskDesignerInput = {
@@ -71,13 +72,15 @@ export async function designTaskWithAi(input: AiTaskDesignerInput): Promise<AiCo
         ? [ai.expectedAnswer, ...ai.distractors].map((item) => item.trim()).filter(Boolean).slice(0, 6)
         : input.task.choices;
 
+    const hintLevels = filterHintLevels(ai.hint?.trim() ? [ai.hint.trim(), ...(input.task.hintLevels ?? [])] : input.task.hintLevels);
+
     return {
         ...input.task,
         type: ai.taskType,
         prompt: ai.prompt.trim(),
         expectedAnswer: ai.expectedAnswer.trim(),
         choices,
-        hintLevels: ai.hint?.trim() ? [ai.hint.trim(), ...(input.task.hintLevels ?? [])].slice(0, 3) : input.task.hintLevels,
+        hintLevels,
         rationale: ai.teachingObjective.trim(),
         example: ai.exampleSentenceNeeded && ai.exampleSentence ? { sw: ai.exampleSentence.sw.trim(), de: ai.exampleSentence.de.trim() } : input.task.example,
         meta: {

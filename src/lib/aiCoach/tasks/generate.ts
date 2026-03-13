@@ -3,7 +3,9 @@ import { interpretCard, type CardPedagogicalProfile } from "../cardInterpreter";
 import { isHighQualityExample } from "../contentQuality";
 import type { CardEnrichment } from "../enrichment/generateEnrichment";
 import { buildHintLevels } from "../hintEngine";
+import { filterHintLevels } from "../hintQuality";
 import { buildChoices, type ChoiceCandidate } from "../policy";
+import { validateFinalTask } from "../finalTaskValidator";
 import { rotateDeterministic } from "../variation";
 import type { AiCoachTask, AiTaskType, LearningObjective } from "../types";
 
@@ -110,7 +112,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
     const type = suitableType === "cloze" && !hasValidClozeExample ? fallbackTaskType("cloze", profile) : suitableType;
 
     const rawHintLevels = buildHintLevels(profile, expectedAnswer);
-    const hintLevels = rawHintLevels.filter((hint) => hint.trim().length >= 4).slice(0, 3);
+    const hintLevels = filterHintLevels(rawHintLevels) ?? [];
 
     if (type === "mcq") {
         const poolCandidates: ChoiceCandidate[] = (input.pool ?? []).map((candidate) => ({
@@ -124,7 +126,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         );
 
         if (mcqChoices.length < 4) {
-            return {
+            return validateFinalTask({
                 taskId: crypto.randomUUID(),
                 cardId: card.id,
                 type: "translate",
@@ -139,10 +141,10 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
                 example,
                 ui: { inputMode: "text" },
                 meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
-            };
+            }, { card, pool: input.pool });
         }
 
-        return {
+        return validateFinalTask({
             taskId: crypto.randomUUID(),
             cardId: card.id,
             type: "mcq",
@@ -158,13 +160,13 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             example,
             ui: { inputMode: "mcq" },
             meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
-        };
+        }, { card, pool: input.pool });
     }
 
     if (type === "cloze" && example && hasValidClozeExample) {
         const base = direction === "DE_TO_SW" ? example.sw : example.de;
         const sentenceWithGap = base.replace(expectedAnswer, "____");
-        return {
+        return validateFinalTask({
             taskId: crypto.randomUUID(),
             cardId: card.id,
             type: "cloze",
@@ -180,10 +182,10 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             example,
             ui: { inputMode: "cloze_click" },
             meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
-        };
+        }, { card, pool: input.pool });
     }
 
-    return {
+    return validateFinalTask({
         taskId: crypto.randomUUID(),
         cardId: card.id,
         type: "translate",
@@ -198,7 +200,7 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         example,
         ui: { inputMode: "text" },
         meta: { pos: enrichment?.pos, nounClass: enrichment?.noun_class ?? undefined, plural: enrichment?.plural ?? undefined, resultCardPlan: deriveResultCardPlan(profile, input.objective) },
-    };
+    }, { card, pool: input.pool });
 }
 
 

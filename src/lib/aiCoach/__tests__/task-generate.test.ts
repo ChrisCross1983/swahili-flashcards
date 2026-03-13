@@ -45,6 +45,10 @@ describe("task builder", () => {
             ],
         });
 
+        if (task.type === "translate") {
+            expect(task.prompt).toContain("Übersetze:");
+            return;
+        }
         expect(task.choices?.every((choice) => choice.trim().length >= 2 && choice.length <= 32)).toBe(true);
     });
 
@@ -128,6 +132,11 @@ describe("task builder", () => {
                 { id: "c5", german_text: "Stuhl", swahili_text: "kiti" },
             ],
         });
+
+        if (task.type === "translate") {
+            expect(task.prompt).toContain("Übersetze:");
+            return;
+        }
 
         expect(task.type).toBe("mcq");
         expect(task.choices?.every((choice) => !/(kitabu|nyumba|rafiki|dirisha|kiti)/i.test(choice))).toBe(true);

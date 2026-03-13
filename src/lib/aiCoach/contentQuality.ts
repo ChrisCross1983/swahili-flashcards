@@ -1,5 +1,6 @@
 import { normalizeText } from "./eval/similarity";
 import type { AiCoachResult, AiCoachTask } from "./types";
+import { isSpecificHintText, shouldUseExplanation } from "./hintQuality";
 
 const GENERIC_PATTERN = [
     /wir sagen\b.*\boft/i,
@@ -84,7 +85,7 @@ function isMeaningfulNextStep(text?: string): boolean {
 }
 
 export function shouldShowHint(result: AiCoachResult): boolean {
-    return result.feedbackTitle === "Fast richtig" && isCompactUsefulHint(result.learnTip);
+    return result.feedbackTitle === "Fast richtig" && isSpecificHintText(result.learnTip) && isCompactUsefulHint(result.learnTip);
 }
 
 export function getVisibleMorphology(task: AiCoachTask): { nounClass?: string; singular?: string; plural?: string } | null {
@@ -122,7 +123,7 @@ export function buildResultCardViewModel(result: AiCoachResult, task: AiCoachTas
         correctAnswer: (result.correctAnswer || task.expectedAnswer).trim(),
         morphology: plan?.includeMorphology ? (getVisibleMorphology(task) ?? undefined) : undefined,
         example: plan?.includeExample ? (pickVisibleExample(result, task) ?? undefined) : undefined,
-        explanation: isSpecificExplanation(explanation) ? explanation?.trim() : undefined,
+        explanation: (shouldUseExplanation(explanation) && isSpecificExplanation(explanation)) ? explanation?.trim() : undefined,
         nextStepCue: isMeaningfulNextStep(nextStepCue) ? nextStepCue?.trim() : undefined,
     };
 }

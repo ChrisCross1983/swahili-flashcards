@@ -7,6 +7,7 @@ import { interpretCard } from "@/lib/aiCoach/cardInterpreter";
 import { buildTask } from "@/lib/aiCoach/tasks/generate";
 import { getExistingEnrichment, scheduleEnrichment } from "@/lib/aiCoach/enrichment/generateEnrichment";
 import { designTaskWithAi } from "@/lib/aiCoach/aiTaskDesigner";
+import { validateFinalTask } from "@/lib/aiCoach/finalTaskValidator";
 import { pickBoundedIndex } from "@/lib/aiCoach/variation";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
@@ -116,7 +117,7 @@ export async function POST(req: Request) {
         recentOutcomes: [],
         allowedUiCapabilities: ["text", "mcq", "cloze_click"],
     });
-    const task = aiTask ?? deterministicTask;
+    const task = validateFinalTask(aiTask ?? deterministicTask, { card: picked.card, pool: cards });
 
     console.info("[aiCoach] start timings", {
         userId: user.id,
