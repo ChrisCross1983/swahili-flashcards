@@ -30,6 +30,8 @@ function fromRow(userId: string, cardId: string, row?: Record<string, unknown>):
         confidenceEstimate: 0.4,
         lastSuccessfulTaskType: null,
         lastFailedTaskType: null,
+        teachingState: "unknown",
+        lastTeachingMove: undefined,
     };
 }
 
@@ -105,6 +107,8 @@ export async function POST(req: Request) {
         pool: cards,
         enrichment,
         rationale: plan.rationale,
+        teachingMove: plan.teachingMove,
+        teachingState: plan.teachingState,
         variationSeed: `${user.id}:${picked.card.id}:${Date.now()}`,
     });
 
@@ -128,5 +132,5 @@ export async function POST(req: Request) {
         aiTaskDesigned: Boolean(aiTask),
     });
 
-    return NextResponse.json({ sessionId: crypto.randomUUID(), task, meta: { objective: plan.objective, rationale: plan.rationale } });
+    return NextResponse.json({ sessionId: crypto.randomUUID(), task, meta: { objective: plan.objective, teachingMove: plan.teachingMove, teachingState: plan.teachingState, rationale: plan.rationale } });
 }

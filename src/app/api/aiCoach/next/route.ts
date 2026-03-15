@@ -10,7 +10,7 @@ import { designTaskWithAi } from "@/lib/aiCoach/aiTaskDesigner";
 import { validateFinalTask } from "@/lib/aiCoach/finalTaskValidator";
 import { pickBoundedIndex } from "@/lib/aiCoach/variation";
 import { chooseRemediationTaskType, shouldAvoidImmediateReverse } from "@/lib/aiCoach/remediationPolicy";
-import type { AiCoachResult, AiTaskType } from "@/lib/aiCoach/types";
+import type { AiCoachResult, AiTaskType, TeachingMove, TeachingState } from "@/lib/aiCoach/types";
 import type { CardType, Direction } from "@/lib/trainer/types";
 
 type Body = {
@@ -23,6 +23,8 @@ type Body = {
     history?: AiTaskType[];
     recentDirections?: Direction[];
     recentObjectives?: string[];
+    recentTeachingMoves?: TeachingMove[];
+    lastTeachingState?: TeachingState;
     lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
 };
@@ -44,6 +46,8 @@ function fromRow(userId: string, cardId: string, row?: Record<string, unknown>):
         confidenceEstimate: 0.4,
         lastSuccessfulTaskType: null,
         lastFailedTaskType: null,
+        teachingState: "unknown",
+        lastTeachingMove: undefined,
     };
 }
 
@@ -129,6 +133,9 @@ export async function POST(req: Request) {
         recentIntents,
         recentTaskTypes: body.history,
         lastTaskType: body.lastTaskType,
+        lastResult: body.lastResult,
+        recentTeachingMoves: body.recentTeachingMoves,
+        previousTeachingState: body.lastTeachingState ?? picked.state.teachingState,
         variationSeed: `${user.id}:${body.sessionId}:${picked.card.id}`,
     });
     const remediationObjective = body.lastResult?.correct === false
@@ -150,6 +157,8 @@ export async function POST(req: Request) {
         pool: cards,
         enrichment,
         rationale: plan.rationale,
+        teachingMove: plan.teachingMove,
+        teachingState: plan.teachingState,
         variationSeed: `${user.id}:${body.sessionId}:${picked.card.id}:${Date.now()}`,
     });
 
@@ -174,5 +183,5 @@ export async function POST(req: Request) {
         aiTaskDesigned: Boolean(aiTask),
     });
 
-    return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), objective: remediationObjective ?? plan.objective, rationale: plan.rationale } });
+    return NextResponse.json({ task, meta: { repeated: Boolean(body.excludeCardId && picked.card.id === body.excludeCardId), objective: remediationObjective ?? plan.objective, teachingMove: plan.teachingMove, teachingState: plan.teachingState, rationale: plan.rationale } });
 }

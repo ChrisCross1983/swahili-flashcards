@@ -1,4 +1,5 @@
 import type { AnswerIntent } from "./eval/classify";
+import type { TeachingMove, TeachingState } from "./types";
 
 export type LearnerCardState = {
     ownerKey: string;
@@ -15,6 +16,8 @@ export type LearnerCardState = {
     confidenceEstimate: number;
     lastSuccessfulTaskType?: "translate" | "cloze" | "mcq" | null;
     lastFailedTaskType?: "translate" | "cloze" | "mcq" | null;
+    teachingState?: TeachingState;
+    lastTeachingMove?: TeachingMove;
     updatedAt?: string;
 };
 
@@ -33,6 +36,8 @@ export type LearnerUpdateMeta = {
     usedHintLevel?: number;
     wrongAttemptsOnCard?: number;
     intent?: AnswerIntent;
+    teachingMove?: TeachingMove;
+    teachingState?: TeachingState;
 };
 
 const MINUTE_MS = 60 * 1000;
@@ -133,6 +138,8 @@ export function updateStateFromResult(
         confidenceEstimate,
         lastSuccessfulTaskType: result.correct ? meta?.taskType ?? state.lastSuccessfulTaskType : state.lastSuccessfulTaskType,
         lastFailedTaskType: result.correct ? state.lastFailedTaskType : meta?.taskType ?? state.lastFailedTaskType,
+        teachingState: meta?.teachingState ?? state.teachingState,
+        lastTeachingMove: meta?.teachingMove ?? state.lastTeachingMove,
         updatedAt: nowIso,
     };
 }
@@ -153,5 +160,7 @@ export function createDefaultLearnerCardState(ownerKey: string, cardId: string):
         confidenceEstimate: 0.35,
         lastSuccessfulTaskType: null,
         lastFailedTaskType: null,
+        teachingState: "unknown",
+        lastTeachingMove: undefined,
     };
 }

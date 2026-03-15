@@ -23,6 +23,28 @@ export type ErrorCategory =
 
 export type AiTaskType = "translate" | "cloze" | "mcq";
 
+export type TeachingMove =
+    | "reveal_anchor"
+    | "recognition_check"
+    | "guided_recall"
+    | "active_recall"
+    | "morphology_focus"
+    | "context_focus"
+    | "contrast_repair"
+    | "transfer_check"
+    | "production_check"
+    | "revisit_due_item";
+
+export type TeachingState =
+    | "unknown"
+    | "just_revealed"
+    | "recognition_in_progress"
+    | "guided_recall_in_progress"
+    | "active_recall_in_progress"
+    | "transfer_check_in_progress"
+    | "stabilized"
+    | "remediation_needed";
+
 export type ResultCardPlan = {
     showStatus: boolean;
     showCorrectAnswer: boolean;
@@ -46,6 +68,8 @@ export type AiCoachTask = {
         inputMode: "text" | "mcq" | "cloze_click";
     };
     objective?: LearningObjective;
+    teachingMove?: TeachingMove;
+    teachingState?: TeachingState;
     rationale?: string;
     profile?: CardPedagogicalProfile;
     meta?: {
@@ -89,6 +113,8 @@ export type AiCoachResult = {
         memoryHook?: string;
         nextStepCue?: string;
     };
+    nextTeachingMove?: TeachingMove;
+    nextTeachingState?: TeachingState;
 };
 
 export type AiCoachStartInput = {
@@ -125,6 +151,8 @@ export type AiCoachNextInput = {
     history?: AiTaskType[];
     recentDirections?: Direction[];
     recentObjectives?: LearningObjective[];
+    recentTeachingMoves?: TeachingMove[];
+    lastTeachingState?: TeachingState;
     lastTaskType?: AiTaskType;
     lastResult?: AiCoachResult;
     wrongCardIds?: string[];
@@ -136,6 +164,8 @@ export type AiCoachNextResponse = {
     meta?: {
         repeated?: boolean;
         objective?: LearningObjective;
+        teachingMove?: TeachingMove;
+        teachingState?: TeachingState;
         rationale?: string;
     };
 };
@@ -167,5 +197,7 @@ export type AiCoachState = {
     taskTypeHistory: AiTaskType[];
     directionHistory: Direction[];
     objectiveHistory: LearningObjective[];
+    teachingMoveHistory: TeachingMove[];
+    lastTeachingState?: TeachingState;
     error: string | null;
 };

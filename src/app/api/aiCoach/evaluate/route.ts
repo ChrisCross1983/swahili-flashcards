@@ -3,11 +3,12 @@ import { requireUser } from "@/lib/api/auth";
 import { evaluateWithHeuristic } from "@/lib/aiCoach/evaluator";
 import { buildTeachingResponse } from "@/lib/aiCoach/aiTeachingResponse";
 import { createDefaultLearnerCardState, updateStateFromResult } from "@/lib/aiCoach/learnerModel";
+import { transitionTeachingState } from "@/lib/aiCoach/teachingStateMachine";
 import { readMastery, upsertMastery } from "@/lib/aiCoach/mastery";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { resolveCanonicalTask } from "@/lib/aiCoach/taskIntegrity";
 import type { AnswerIntent } from "@/lib/aiCoach/eval/classify";
-import type { AiCoachTask } from "@/lib/aiCoach/types";
+import type { AiCoachTask, TeachingState } from "@/lib/aiCoach/types";
 
 type Body = {
     sessionId?: string;
@@ -108,8 +109,23 @@ export async function POST(req: Request) {
             confidenceEstimate: 0.4,
             lastSuccessfulTaskType: null,
             lastFailedTaskType: null,
+            teachingState: "unknown" as TeachingState,
+            lastTeachingMove: undefined,
         }
         : createDefaultLearnerCardState(user.id, canonicalTask.cardId);
+
+
+    const currentTeachingState: TeachingState = existingState.teachingState ?? "unknown";
+
+    const nextTeachingState = transitionTeachingState({
+        currentState: currentTeachingState,
+        teachingMove: canonicalTask.teachingMove ?? "active_recall",
+        correct: withAi.correct,
+        errorCategory: withAi.errorCategory,
+        intent: withAi.intent,
+        confidence: withAi.confidence,
+        hintLevel,
+    });
 
     const now = new Date();
     const updatedState = updateStateFromResult(
@@ -128,6 +144,8 @@ export async function POST(req: Request) {
             usedHintLevel: hintLevel,
             wrongAttemptsOnCard,
             intent: withAi.intent,
+            teachingMove: canonicalTask.teachingMove,
+            teachingState: nextTeachingState,
         },
     );
 
@@ -154,5 +172,5 @@ export async function POST(req: Request) {
         totalMs: Date.now() - startedAt,
     });
 
-    return NextResponse.json({ result: { ...withAi, correctAnswer: canonicalTask.expectedAnswer } });
+    return NextResponse.json({ result: { ...withAi, correctAnswer: canonicalTask.expectedAnswer, nextTeachingMove: canonicalTask.teachingMove, nextTeachingState } });
 }

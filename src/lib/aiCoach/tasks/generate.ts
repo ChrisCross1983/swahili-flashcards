@@ -7,7 +7,7 @@ import { filterHintLevels } from "../hintQuality";
 import { buildChoices, type ChoiceCandidate } from "../policy";
 import { validateFinalTask } from "../finalTaskValidator";
 import { rotateDeterministic } from "../variation";
-import type { AiCoachTask, AiTaskType, LearningObjective } from "../types";
+import type { AiCoachTask, AiTaskType, LearningObjective, TeachingMove, TeachingState } from "../types";
 
 export type SourceCard = {
     id: string;
@@ -26,6 +26,8 @@ type BuildTaskInput = {
     pool?: Array<SourceCard & { pos?: string | null; nounClass?: string | null }>;
     enrichment?: CardEnrichment | null;
     rationale?: string;
+    teachingMove?: TeachingMove;
+    teachingState?: TeachingState;
 };
 
 function toExpected(card: SourceCard, direction: Direction): string {
@@ -148,6 +150,8 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
                 direction,
                 objective: input.objective,
                 rationale,
+                teachingMove: input.teachingMove,
+                teachingState: input.teachingState,
                 profile,
                 prompt: buildTranslatePrompt(card, direction),
                 expectedAnswer,
@@ -166,6 +170,8 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             direction,
             objective: input.objective,
             rationale,
+            teachingMove: input.teachingMove,
+            teachingState: input.teachingState,
             profile,
             prompt: `Wähle die richtige Übersetzung: ${direction === "DE_TO_SW" ? card.german_text : card.swahili_text}`,
             expectedAnswer,
@@ -188,6 +194,8 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
             direction,
             objective: input.objective,
             rationale,
+            teachingMove: input.teachingMove,
+            teachingState: input.teachingState,
             profile,
             prompt: `Fülle die Lücke: ${sentenceWithGap}`,
             expectedAnswer,
@@ -207,6 +215,8 @@ export function buildTask(input: BuildTaskInput): AiCoachTask {
         direction,
         objective: input.objective,
         rationale,
+        teachingMove: input.teachingMove,
+        teachingState: input.teachingState,
         profile,
         prompt: buildTranslatePrompt(card, direction),
         expectedAnswer,
