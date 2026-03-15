@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { CardType } from "@/lib/trainer/types";
 import { useAiCoachSession } from "@/lib/aiCoach/hooks";
-import { buildResultCardViewModel, shouldShowHint } from "@/lib/aiCoach/contentQuality";
+import { shouldShowHint } from "@/lib/aiCoach/contentQuality";
+import { buildResultCardViewModel } from "@/lib/aiCoach/solutionCardBuilder";
 
 type Props = {
     cardType: CardType;
@@ -38,10 +39,10 @@ export default function AiCoachPanel({ cardType }: Props) {
         retry();
     };
 
-    const hintLevel = Math.min(state.hintLevel, 3);
+    const hintLevel = Math.min(state.hintLevel, 1);
     const currentHint = hintLevel > 0 ? state.currentTask?.hintLevels?.[hintLevel - 1] : null;
     const hintTotal = state.currentTask?.hintLevels?.length ?? 0;
-    const hintButtonLabel = hintLevel < hintTotal ? `Tipp (${Math.min(hintLevel + 1, hintTotal)}/${hintTotal})` : `Alle Tipps angezeigt (${hintTotal}/${hintTotal})`;
+    const hintButtonLabel = hintLevel < hintTotal ? "Tipp anzeigen" : "Tipp bereits angezeigt";
     const hintDisabled = !isInTask || hintTotal === 0 || hintLevel >= hintTotal;
 
     return (
@@ -142,12 +143,16 @@ export default function AiCoachPanel({ cardType }: Props) {
 
             {hasResult && state.lastResult ? (
                 <div className="rounded-2xl border border-soft p-3 text-sm space-y-2">
-                    <div className="font-medium">
-                        {resultCard?.status === "correct" ? "✅ Richtig" : resultCard?.status === "almost" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
-                    </div>
-                    <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{resultCard?.correctAnswer}</span></div>
+                    {resultCard?.showStatus ? (
+                        <div className="font-medium">
+                            {resultCard.status === "correct" ? "✅ Richtig" : resultCard.status === "almost" ? "⚠️ Fast richtig" : "❌ Noch nicht"}
+                        </div>
+                    ) : null}
+                    {resultCard?.showCorrectAnswer ? (
+                        <div><span className="text-muted">Korrekte Antwort:</span> <span className="font-medium">{resultCard.correctAnswer}</span></div>
+                    ) : null}
 
-                    {resultCard?.morphology ? (
+                    {resultCard?.showMorphology && resultCard.morphology ? (
                         <div className="text-muted">
                             {resultCard.morphology.nounClass ? <div>Nomenklasse: {resultCard.morphology.nounClass}</div> : null}
                             {resultCard.morphology.singular ? <div>Singular: {resultCard.morphology.singular}</div> : null}
@@ -157,15 +162,14 @@ export default function AiCoachPanel({ cardType }: Props) {
 
                     {visibleHint ? <div className="text-muted">Hinweis: {visibleHint}</div> : null}
 
-                    {resultCard?.example ? (
+                    {resultCard?.showExample && resultCard.example ? (
                         <div className="text-muted">
                             <div>Beispiel (SW): {resultCard.example.sw}</div>
                             <div>Übersetzung (DE): {resultCard.example.de}</div>
                         </div>
                     ) : null}
 
-                    {resultCard?.explanation ? <div className="text-muted">Erklärung: {resultCard.explanation}</div> : null}
-                    {resultCard?.nextStepCue ? <div className="text-muted">Nächster Schritt: {resultCard.nextStepCue}</div> : null}
+                    {resultCard?.showLearningNote ? <div className="text-muted">Lernhinweis: {resultCard.learningNote}</div> : null}
                 </div>
             ) : null}
 

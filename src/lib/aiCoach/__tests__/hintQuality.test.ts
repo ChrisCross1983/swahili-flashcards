@@ -5,10 +5,11 @@ describe("hintQuality", () => {
     it("rejects generic hints", () => {
         expect(isSpecificHintText("Fokussiere dich auf den Kernbegriff.")).toBe(false);
         expect(isSpecificHintText("Antwort beginnt mit: k.")).toBe(true);
+        expect(isSpecificHintText("Plural: vitabu.")).toBe(false);
     });
 
     it("filters vague hint levels", () => {
-        const filtered = filterHintLevels(["Wenn unsicher: erst Stammwort, dann Endung ergänzen.", "Nominalklasse beachten: ki/vi."]);
+        const filtered = filterHintLevels(["Wenn unsicher: erst Stammwort, dann Endung ergänzen.", "Nominalklasse beachten: ki/vi.", "Erster Buchstabe: k."]);
         expect(filtered).toEqual(["Nominalklasse beachten: ki/vi."]);
     });
 

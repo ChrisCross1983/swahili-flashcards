@@ -86,13 +86,11 @@ export async function designTaskWithAi(input: AiTaskDesignerInput): Promise<AiCo
         meta: {
             ...input.task.meta,
             resultCardPlan: {
-                includeCorrectAnswer: true,
-                includeMorphology: ai.morphologyInfoNeeded,
-                includeExample: ai.exampleSentenceNeeded,
-                includeContrastNote: ai.learningObjectType === "contrast_repair",
-                includeUsageContext: ["contextual_usage", "sentence_meaning", "phrase_interpretation"].includes(ai.learningObjectType),
-                includeExplanation: true,
-                includeNextStep: true,
+                showStatus: true,
+                showCorrectAnswer: true,
+                showMorphology: ai.morphologyInfoNeeded,
+                showExample: ai.exampleSentenceNeeded,
+                showLearningNote: true,
             },
         },
     };

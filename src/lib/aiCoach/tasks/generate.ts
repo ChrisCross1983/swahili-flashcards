@@ -64,16 +64,31 @@ function isTaskTypeAllowed(type: AiTaskType, profile: CardPedagogicalProfile): b
     return profile.exerciseCapabilities.translation && (profile.exerciseSuitability.recall || profile.exerciseSuitability.production);
 }
 
-
-
 function deriveResultCardPlan(profile: CardPedagogicalProfile, objective?: LearningObjective) {
     const objectiveType = objective ?? "recall";
     return {
-        includeCorrectAnswer: true,
-        includeMorphology: profile.morphologyRelevant && (objectiveType === "morphologyFocus" || objectiveType === "guidedRecall" || objectiveType === "confusionRepair"),
-        includeExample: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
-        includeContrastNote: profile.exerciseSuitability.contrastLearning && (objectiveType === "phraseMeaning" || objectiveType === "confusionRepair"),
-        includeUsageContext: profile.contextRequired && (objectiveType === "contextUsage" || objectiveType === "phraseMeaning" || objectiveType === "sentenceUnderstanding"),
+        showStatus: true,
+        showCorrectAnswer: true,
+        showMorphology: profile.morphologyRelevant && (
+            objectiveType === "morphologyFocus" ||
+            objectiveType === "guidedRecall" ||
+            objectiveType === "confusionRepair"
+        ),
+        showExample: profile.contextRequired && (
+            objectiveType === "contextUsage" ||
+            objectiveType === "phraseMeaning" ||
+            objectiveType === "sentenceUnderstanding"
+        ),
+        showLearningNote: objectiveType !== "recognition",
+        includeContrastNote: profile.exerciseSuitability.contrastLearning && (
+            objectiveType === "phraseMeaning" ||
+            objectiveType === "confusionRepair"
+        ),
+        includeUsageContext: profile.contextRequired && (
+            objectiveType === "contextUsage" ||
+            objectiveType === "phraseMeaning" ||
+            objectiveType === "sentenceUnderstanding"
+        ),
         includeExplanation: objectiveType !== "recognition",
         includeNextStep: objectiveType === "confusionRepair" || objectiveType === "guidedRecall",
     };

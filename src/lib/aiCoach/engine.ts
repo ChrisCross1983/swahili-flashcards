@@ -71,7 +71,7 @@ export function setResult(state: AiCoachState, result: AiCoachResult): AiCoachSt
 
 export function retryCurrentTask(state: AiCoachState): AiCoachState {
     if (!state.currentTask) return state;
-    const maxHints = state.currentTask.hintLevels?.length ?? 3;
+    const maxHints = state.currentTask.hintLevels?.length ?? 1;
     return {
         ...state,
         status: "in_task",
@@ -121,7 +121,7 @@ export function skipTask(state: AiCoachState): AiCoachState {
         },
         totalCount: state.totalCount + 1,
         streak: 0,
-        hintLevel: Math.min(state.hintLevel + 1, state.currentTask.hintLevels?.length ?? 3),
+        hintLevel: Math.min(state.hintLevel + 1, state.currentTask.hintLevels?.length ?? 1),
         wrongAttemptsOnCard: state.wrongAttemptsOnCard + 1,
         answeredCardIds: Array.from(new Set([...state.answeredCardIds, state.currentTask.cardId])),
         wrongCardIds: Array.from(new Set([...state.wrongCardIds, state.currentTask.cardId])),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildResultCardViewModel, getVisibleMorphology, isHighQualityExample, pickVisibleExample, shouldShowHint } from "../contentQuality";
+import { isHighQualityExample, shouldShowHint } from "../contentQuality";
+import { buildResultCardViewModel } from "../solutionCardBuilder";
 
 const nounTask = {
     taskId: "t1",
@@ -17,13 +18,11 @@ const nounTask = {
         nounClass: "ki/vi",
         plural: "vitabu",
         resultCardPlan: {
-            includeCorrectAnswer: true,
-            includeMorphology: true,
-            includeExample: true,
-            includeContrastNote: false,
-            includeUsageContext: true,
-            includeExplanation: true,
-            includeNextStep: true,
+            showStatus: true,
+            showCorrectAnswer: true,
+            showMorphology: true,
+            showExample: true,
+            showLearningNote: true,
         },
     },
     ui: { inputMode: "text" as const },
@@ -38,62 +37,37 @@ describe("contentQuality", () => {
         expect(isHighQualityExample(nounTask, { sw: "Ninununua kitabu kipya leo.", de: "Ich kaufe heute ein neues Buch." })).toBe(true);
     });
 
-    it("only exposes hint for almost-correct compact hints", () => {
+    it("shows only compact specific hint for almost-correct", () => {
         expect(shouldShowHint({ feedbackTitle: "Fast richtig", learnTip: "Erster Buchstabe: k." } as never)).toBe(true);
-        expect(shouldShowHint({ feedbackTitle: "Noch nicht", learnTip: "Erster Buchstabe: k." } as never)).toBe(false);
-    });
-
-    it("returns noun morphology only when available", () => {
-        const morphology = getVisibleMorphology(nounTask as never);
-        expect(morphology).toEqual({ nounClass: "ki/vi", singular: "kitabu", plural: "vitabu" });
-    });
-
-    it("prefers high-quality examples only", () => {
-        const result = {
-            feedbackTitle: "Noch nicht",
-            example: { sw: "Wir sagen kitabu oft", de: "Wir sagen Buch oft" },
-            microLesson: { example: { sw: "Ninapata kitabu mezani.", de: "Ich finde ein Buch auf dem Tisch." } },
-        };
-        const picked = pickVisibleExample(result as never, nounTask as never);
-        expect(picked?.sw).toContain("Ninapata");
+        expect(shouldShowHint({ feedbackTitle: "Fast richtig", learnTip: "Plural: vitabu." } as never)).toBe(false);
     });
 
     it("result card always includes status + correct answer", () => {
         const vm = buildResultCardViewModel({ correct: false, feedbackTitle: "Noch nicht", correctAnswer: "kitabu" } as never, nounTask as never);
-        expect(vm.status).toBe("wrong");
+        expect(vm.showStatus).toBe(true);
+        expect(vm.showCorrectAnswer).toBe(true);
         expect(vm.correctAnswer).toBe("kitabu");
     });
 
-    it("hides explanation and next step when generic", () => {
-        const vm = buildResultCardViewModel({
-            correct: false,
-            feedbackTitle: "Noch nicht",
-            correctAnswer: "kitabu",
-            explanation: "Warum es noch nicht passt",
-            microLesson: { nextStepCue: "Weiter so" },
-        } as never, nounTask as never);
+    it("shows morphology only for morphology-relevant nouns", () => {
+        const vm = buildResultCardViewModel({ correct: true, feedbackTitle: "Richtig", correctAnswer: "kitabu" } as never, nounTask as never);
+        expect(vm.morphology).toEqual({ nounClass: "ki/vi", singular: "kitabu", plural: "vitabu" });
 
-        expect(vm.explanation).toBeUndefined();
-        expect(vm.nextStepCue).toBeUndefined();
+        const plainTask = { ...nounTask, profile: { ...nounTask.profile, morphologyRelevant: false, pos: "verb" } };
+        const plainVm = buildResultCardViewModel({ correct: true, feedbackTitle: "Richtig", correctAnswer: "kitabu" } as never, plainTask as never);
+        expect(plainVm.morphology).toBeUndefined();
     });
 
-    it("hides example when low quality", () => {
+    it("omits weak example and generic learning note", () => {
         const vm = buildResultCardViewModel({
             correct: false,
             feedbackTitle: "Noch nicht",
             correctAnswer: "kitabu",
             example: { sw: "Wir sagen kitabu oft", de: "Wir sagen Buch oft" },
+            explanation: "Antwort passt noch nicht.",
         } as never, nounTask as never);
 
         expect(vm.example).toBeUndefined();
-    });
-
-    it("hides morphology for non-morphology items", () => {
-        const plainTask = {
-            ...nounTask,
-            profile: { ...nounTask.profile, morphologyRelevant: false, pos: "verb" },
-        };
-        const vm = buildResultCardViewModel({ correct: true, feedbackTitle: "Richtig", correctAnswer: "kitabu" } as never, plainTask as never);
-        expect(vm.morphology).toBeUndefined();
+        expect(vm.learningNote).toBeUndefined();
     });
 });

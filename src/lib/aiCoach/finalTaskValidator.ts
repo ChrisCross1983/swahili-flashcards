@@ -57,7 +57,8 @@ function hasSpecificHint(task: AiCoachTask): boolean {
         const clean = hint.trim();
         if (clean.length < 8) return false;
         if (GENERIC_HINT.some((rx) => rx.test(clean))) return false;
-        return /[a-zäöüß]\.$/i.test(clean) || /\b(erst|beginnt|nominalklasse|plural|singular|fest|person|objekt|gruß|formel)\b/i.test(clean);
+        if (/\b(plural|singular)\b/i.test(clean)) return false;
+        return /[a-zäöüß]\.$/i.test(clean) || /\b(erst|beginnt|nominalklasse|silbe|fest|gruß|formel|kontext)\b/i.test(clean);
     });
 }
 
@@ -91,7 +92,7 @@ function downgradeToTranslate(task: AiCoachTask, card: SourceCard): AiCoachTask 
         prompt: `Übersetze: ${source}`,
         choices: undefined,
         ui: { inputMode: "text" },
-        hintLevels: qualityHints.slice(0, 3),
+        hintLevels: qualityHints.slice(0, 1),
     };
 }
 

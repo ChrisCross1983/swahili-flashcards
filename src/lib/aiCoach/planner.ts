@@ -24,13 +24,11 @@ export type PlannerOutput = {
     showMorphology: boolean;
     requiresAiGeneration: boolean;
     resultCardPlan: {
-        includeCorrectAnswer: boolean;
-        includeMorphology: boolean;
-        includeExample: boolean;
-        includeContrastNote: boolean;
-        includeUsageContext: boolean;
-        includeExplanation: boolean;
-        includeNextStep: boolean;
+        showStatus: boolean;
+        showCorrectAnswer: boolean;
+        showMorphology: boolean;
+        showExample: boolean;
+        showLearningNote: boolean;
     };
 };
 
@@ -69,20 +67,17 @@ function chooseWithVariety(preferred: AiTaskType, profile: CardPedagogicalProfil
 }
 
 function buildResultCardPlan(profile: CardPedagogicalProfile, objective: LearningObjective) {
-    const includeMorphology = profile.morphologyRelevant && (objective === "morphologyFocus" || objective === "confusionRepair" || objective === "guidedRecall");
-    const includeExample = profile.contextRequired && (objective === "contextUsage" || objective === "phraseMeaning" || objective === "sentenceUnderstanding");
-    const includeContrastNote = profile.exerciseSuitability.contrastLearning && (objective === "confusionRepair" || objective === "phraseMeaning");
-    const includeUsageContext = profile.contextRequired && (objective === "contextUsage" || objective === "phraseMeaning" || objective === "sentenceUnderstanding");
+    const showMorphology = profile.morphologyRelevant && (objective === "morphologyFocus" || objective === "confusionRepair" || objective === "guidedRecall");
+    const showExample = profile.contextRequired && (objective === "contextUsage" || objective === "phraseMeaning" || objective === "sentenceUnderstanding");
     return {
-        includeCorrectAnswer: true,
-        includeMorphology,
-        includeExample,
-        includeContrastNote,
-        includeUsageContext,
-        includeExplanation: objective !== "recognition",
-        includeNextStep: objective === "guidedRecall" || objective === "confusionRepair",
+        showStatus: true,
+        showCorrectAnswer: true,
+        showMorphology,
+        showExample,
+        showLearningNote: objective !== "recognition" || profile.exerciseSuitability.contrastLearning,
     };
 }
+
 
 export function planNextTask(input: PlannerInput): PlannerOutput {
     const profile = input.cardProfile ?? {
@@ -153,8 +148,8 @@ export function planNextTask(input: PlannerInput): PlannerOutput {
         rationale,
         constraints: { focus },
         remediationMode,
-        showExample: buildResultCardPlan(profile, objective).includeExample,
-        showMorphology: buildResultCardPlan(profile, objective).includeMorphology,
+        showExample: buildResultCardPlan(profile, objective).showExample,
+        showMorphology: buildResultCardPlan(profile, objective).showMorphology,
         requiresAiGeneration: objective === "contextUsage" || objective === "sentenceUnderstanding" || profile.exampleStrategy === "ai_required",
         resultCardPlan: buildResultCardPlan(profile, objective),
     };

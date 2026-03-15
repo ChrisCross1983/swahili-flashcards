@@ -12,47 +12,45 @@ function inferHintStrategy(profile: CardPedagogicalProfile, intent: ErrorIntent)
     return "prefix";
 }
 
-export function buildHintLevels(profile: CardPedagogicalProfile, expectedAnswer: string, intent: ErrorIntent = "unknown"): string[] {
+function firstSyllable(word: string): string | null {
+    const cleaned = word.trim().toLowerCase();
+    if (!cleaned) return null;
+    const match = cleaned.match(/^(ng'|[bcdfghjklmnpqrstvwxyz]?[aeiou]+)/i);
+    return match?.[0] ?? cleaned.slice(0, 2);
+}
+
+function buildSingleHint(profile: CardPedagogicalProfile, expectedAnswer: string, intent: ErrorIntent = "unknown"): string | null {
     const strategy = inferHintStrategy(profile, intent);
     const normalized = expectedAnswer.trim();
+    const firstLetter = normalized.slice(0, 1);
+    const syllable = firstSyllable(normalized);
+
+    if (!normalized) return null;
+
+    if (profile.unitType === "greeting" || profile.unitType === "formula" || profile.unitType === "phrase" || profile.unitType === "expression") {
+        return "Feste Wendung: achte auf den passenden Kontext, nicht auf Wort-für-Wort.";
+    }
+
+    if (strategy === "semantic" || strategy === "contrast") {
+        return firstLetter ? `Erster Buchstabe: ${firstLetter}.` : null;
+    }
 
     if (strategy === "nounClass") {
-        const nounClass = profile.morphologicalFeatures.nounClass ?? "(nicht markiert)";
-        const plural = profile.morphologicalFeatures.plural ? `Plural: ${profile.morphologicalFeatures.plural}.` : "";
-        return [
-            `Nominalklasse beachten: ${nounClass}.`,
-            plural || "Achte auf den passenden Singular/Plural-Wechsel.",
-            normalized ? `Antwort beginnt mit: ${normalized.slice(0, 2)}…` : "",
-        ].filter(Boolean);
+        if (profile.morphologicalFeatures.nounClass && profile.morphologicalFeatures.nounClass !== "n/n") {
+            return "Achte auf die passende Nominalklasse (ohne Singular/Plural vorwegzunehmen).";
+        }
+        return syllable ? `Erste Silbe: ${syllable}.` : (firstLetter ? `Erster Buchstabe: ${firstLetter}.` : null);
     }
 
     if (strategy === "form") {
-        return [
-            "Achte auf Stamm + Endung (Verbform).",
-            "Sprich die Antwort laut und prüfe die Form.",
-            normalized ? `Erster Buchstabe: ${normalized.slice(0, 1)}.` : "",
-        ].filter(Boolean);
+        return syllable ? `Erste Silbe: ${syllable}.` : (firstLetter ? `Erster Buchstabe: ${firstLetter}.` : null);
     }
 
-    if (strategy === "contrast") {
-        return [
-            "Behalte die Satzreihenfolge bei (Subjekt → Verb → Objekt).",
-            "Konzentriere dich auf die Schlüsselwörter im Kontext.",
-            normalized ? `Zielausdruck startet mit: ${normalized.slice(0, 1)}.` : "",
-        ].filter(Boolean);
-    }
+    return firstLetter ? `Erster Buchstabe: ${firstLetter}.` : null;
 
-    if (strategy === "semantic") {
-        return [
-            "Denk zuerst an die Bedeutung, dann an die genaue Form.",
-            "Verwechsele das Wort nicht mit einem nahen Synonym.",
-            normalized ? `Gesuchtes Wort startet mit: ${normalized.slice(0, 1)}.` : "",
-        ].filter(Boolean);
-    }
+}
 
-    return [
-        "Fokussiere dich auf den Kernbegriff.",
-        normalized ? `Erster Buchstabe: ${normalized.slice(0, 1)}.` : "Kurz und präzise antworten.",
-        "Wenn unsicher: erst Stammwort, dann Endung ergänzen.",
-    ];
+export function buildHintLevels(profile: CardPedagogicalProfile, expectedAnswer: string, intent: ErrorIntent = "unknown"): string[] {
+    const hint = buildSingleHint(profile, expectedAnswer, intent);
+    return hint ? [hint] : [];
 }

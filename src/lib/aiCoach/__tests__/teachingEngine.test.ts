@@ -49,7 +49,7 @@ describe("exercise suitability + generation safety", () => {
             objective: "phraseMeaning",
             card: { id: "c9", german_text: "Guten Morgen", swahili_text: "habari za asubuhi", type: "vocab" },
         });
-        expect(task.meta?.resultCardPlan?.includeUsageContext).toBe(true);
+        expect(task.meta?.resultCardPlan?.showExample).toBe(true);
     });
 });
 
@@ -72,7 +72,7 @@ describe("evaluator output", () => {
         prompt: "Übersetze: Buch",
         expectedAnswer: "kitabu",
         ui: { inputMode: "text" as const },
-        meta: { resultCardPlan: { includeCorrectAnswer: true, includeMorphology: true, includeExample: false, includeContrastNote: false, includeUsageContext: false, includeExplanation: true, includeNextStep: false } },
+        meta: { resultCardPlan: { showStatus: true, showCorrectAnswer: true, showMorphology: true, showExample: false, showLearningNote: true } },
         profile: { morphologicalInfo: { nounClass: "ki/vi", singular: "kitabu", plural: "vitabu" }, contextRequired: false },
     };
 

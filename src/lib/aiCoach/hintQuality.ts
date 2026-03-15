@@ -18,15 +18,16 @@ const GENERIC_EXPLANATION_PATTERNS = [
 export function isSpecificHintText(text?: string): boolean {
     if (!text?.trim()) return false;
     const hint = text.trim();
-    if (hint.length < 8 || hint.length > 120) return false;
+    if (hint.length < 8 || hint.length > 110) return false;
     if (GENERIC_HINT_PATTERNS.some((rx) => rx.test(hint))) return false;
-    return /\b(erst|beginnt|buchstabe|silbe|nominalklasse|plural|singular|gruß|formel|person|objekt|fixe\s+wendung)\b/i.test(hint);
+    if (/\b(plural|singular)\b/i.test(hint)) return false;
+    return /\b(erst|beginnt|buchstabe|silbe|nominalklasse|kontext|gruß|formel|fixe\s+wendung|feste\s+wendung)\b/i.test(hint);
 }
 
 export function filterHintLevels(hints: string[] | undefined): string[] | undefined {
     if (!hints?.length) return hints;
     const filtered = hints.map((hint) => hint.trim()).filter((hint) => isSpecificHintText(hint));
-    return filtered.length ? filtered.slice(0, 3) : undefined;
+    return filtered.length ? filtered.slice(0, 1) : undefined;
 }
 
 export function buildDeterministicExplanation(task: AiCoachTask, error?: ErrorCategory): string | undefined {

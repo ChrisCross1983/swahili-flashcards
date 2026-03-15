@@ -41,12 +41,12 @@ function buildMicroLesson(task: AiCoachTask): AiCoachResult["microLesson"] {
         .join(" · ");
 
     return {
-        morphology: plan?.includeMorphology ? (morphology || undefined) : undefined,
-        example: plan?.includeExample ? normalizeExample(task) : undefined,
-        explanation: plan?.includeUsageContext && task.profile?.contextRequired
+        morphology: plan?.showMorphology ? (morphology || undefined) : undefined,
+        example: plan?.showExample ? normalizeExample(task) : undefined,
+        explanation: plan?.showLearningNote && task.profile?.contextRequired
             ? "Nutze die Antwort im passenden Kontext statt als wörtliche 1:1-Übersetzung."
             : undefined,
-        nextStepCue: plan?.includeNextStep ? "Wiederhole dieselbe Karte jetzt ohne Auswahlhilfe." : undefined,
+        nextStepCue: undefined,
     };
 }
 

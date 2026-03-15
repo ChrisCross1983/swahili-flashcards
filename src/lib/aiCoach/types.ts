@@ -23,6 +23,14 @@ export type ErrorCategory =
 
 export type AiTaskType = "translate" | "cloze" | "mcq";
 
+export type ResultCardPlan = {
+    showStatus: boolean;
+    showCorrectAnswer: boolean;
+    showMorphology: boolean;
+    showExample: boolean;
+    showLearningNote: boolean;
+};
+
 export type AiCoachTask = {
     taskId: string;
     cardId: string;
@@ -46,13 +54,11 @@ export type AiCoachTask = {
         nounClass?: string;
         plural?: string;
         resultCardPlan?: {
-            includeCorrectAnswer: boolean;
-            includeMorphology: boolean;
-            includeExample: boolean;
-            includeContrastNote: boolean;
-            includeUsageContext: boolean;
-            includeExplanation: boolean;
-            includeNextStep: boolean;
+            showStatus: boolean;
+            showCorrectAnswer: boolean;
+            showMorphology: boolean;
+            showExample: boolean;
+            showLearningNote: boolean;
         };
     };
 };

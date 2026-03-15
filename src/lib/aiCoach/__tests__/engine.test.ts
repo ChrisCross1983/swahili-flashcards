@@ -10,7 +10,7 @@ function makeTask(id: string): AiCoachTask {
         direction: "DE_TO_SW",
         prompt: "Übersetze: Haus",
         expectedAnswer: "nyumba",
-        hintLevels: ["Wortart: noun", "Beginnt mit n", "Beispiel"],
+        hintLevels: ["Erster Buchstabe: n."],
         learnTip: "Merktipp: laut sagen.",
         ui: { inputMode: "text" },
     };
@@ -34,12 +34,12 @@ describe("ai coach engine", () => {
         expect(next.currentTask?.taskId).toBe("task-c2");
     });
 
-    it("tip button levels up from hint to learnTip", () => {
+    it("tip button shows at most one pre-answer hint", () => {
         const withTask = setTask(createInitialAiCoachState(), { sessionId: "s1", task: makeTask("c2") });
         const first = showHint(withTask);
         const second = showHint(first);
 
         expect(first.hintLevel).toBe(1);
-        expect(second.hintLevel).toBe(2);
+        expect(second.hintLevel).toBe(1);
     });
 });
