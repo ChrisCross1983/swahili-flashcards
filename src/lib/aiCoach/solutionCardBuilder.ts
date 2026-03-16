@@ -1,16 +1,18 @@
 import { isHighQualityExample } from "./contentQuality";
 import { shouldUseExplanation } from "./hintQuality";
-import type { AiCoachResult, AiCoachTask, ResultCardPlan } from "./types";
+import type { AiCoachResult, AiCoachTask, GrammarTeachingPayload, ResultCardPlan } from "./types";
 
 export type ResultCardViewModel = {
     status: "correct" | "almost" | "wrong";
     correctAnswer: string;
     morphology?: { nounClass?: string; singular?: string; plural?: string };
+    grammar?: GrammarTeachingPayload;
     example?: { sw: string; de: string };
     learningNote?: string;
     showStatus: boolean;
     showCorrectAnswer: boolean;
     showMorphology: boolean;
+    showGrammar: boolean;
     showExample: boolean;
     showLearningNote: boolean;
 };
@@ -50,11 +52,18 @@ function pickLearningNote(result: AiCoachResult): string | undefined {
     return candidate?.trim();
 }
 
+function pickGrammar(result: AiCoachResult): GrammarTeachingPayload | undefined {
+    const grammar = result.microLesson?.grammar;
+    if (!grammar || grammar.grammarFocusType === "none") return undefined;
+    return grammar;
+}
+
 export function buildResultCardViewModel(result: AiCoachResult, task: AiCoachTask): ResultCardViewModel {
     const plan = normalizePlan(task);
     const status = result.correct ? "correct" : result.feedbackTitle === "Fast richtig" ? "almost" : "wrong";
 
     const morphology = plan.showMorphology ? getMorphology(task) : undefined;
+    const grammar = pickGrammar(result);
     const example = plan.showExample ? pickExample(result, task) : undefined;
     const learningNote = plan.showLearningNote ? pickLearningNote(result) : undefined;
 
@@ -62,11 +71,13 @@ export function buildResultCardViewModel(result: AiCoachResult, task: AiCoachTas
         status,
         correctAnswer: (result.correctAnswer || task.expectedAnswer).trim(),
         morphology,
+        grammar,
         example,
         learningNote,
         showStatus: plan.showStatus,
         showCorrectAnswer: plan.showCorrectAnswer,
         showMorphology: Boolean(morphology),
+        showGrammar: Boolean(grammar),
         showExample: Boolean(example),
         showLearningNote: Boolean(learningNote),
     };

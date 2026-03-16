@@ -162,6 +162,15 @@ export default function AiCoachPanel({ cardType }: Props) {
 
                     {visibleHint ? <div className="text-muted">Hinweis: {visibleHint}</div> : null}
 
+                    {resultCard?.showGrammar && resultCard.grammar ? (
+                        <div className="text-muted">
+                            <div><span className="font-medium">Grammatikfokus:</span> {resultCard.grammar.grammarFocusType}</div>
+                            {resultCard.grammar.keyPattern ? <div>Pattern: {resultCard.grammar.keyPattern}</div> : null}
+                            {resultCard.grammar.fixedExpressionNote ? <div>Hinweis: {resultCard.grammar.fixedExpressionNote}</div> : null}
+                            {resultCard.grammar.suggestedMicroDrill ? <div>Nächster Mini-Schritt: {resultCard.grammar.suggestedMicroDrill}</div> : null}
+                        </div>
+                    ) : null}
+
                     {resultCard?.showExample && resultCard.example ? (
                         <div className="text-muted">
                             <div>Beispiel (SW): {resultCard.example.sw}</div>

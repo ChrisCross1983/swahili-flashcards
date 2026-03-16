@@ -58,6 +58,22 @@ describe("contentQuality", () => {
         expect(plainVm.morphology).toBeUndefined();
     });
 
+    it("shows grammar block when mini-lesson has grammar payload", () => {
+        const vm = buildResultCardViewModel({
+            correct: false,
+            feedbackTitle: "Noch nicht",
+            correctAnswer: "kitabu",
+            microLesson: {
+                grammar: {
+                    grammarFocusType: "noun_class",
+                    keyPattern: "ki- im Singular, vi- im Plural",
+                },
+            },
+        } as never, nounTask as never);
+        expect(vm.showGrammar).toBe(true);
+        expect(vm.grammar?.grammarFocusType).toBe("noun_class");
+    });
+
     it("omits weak example and generic learning note", () => {
         const vm = buildResultCardViewModel({
             correct: false,

@@ -1,6 +1,7 @@
 import { aiTeachingResponseSchema } from "./aiSchemas";
 import { type AiTeachingResponse, validateAiTeachingResponse } from "./aiValidators";
 import { buildDeterministicExplanation, shouldUseExplanation } from "./hintQuality";
+import { buildMiniLesson } from "./miniLessonBuilder";
 import type { AiCoachResult, AiCoachTask } from "./types";
 
 export type AiTeachingInput = {
@@ -67,7 +68,7 @@ export async function buildTeachingResponse(input: AiTeachingInput): Promise<AiC
 
     const explanation = shouldUseExplanation(ai.shortExplanation) ? ai.shortExplanation.trim() : (buildDeterministicExplanation(input.task, ai.errorType) ?? input.fallback.explanation);
 
-    return {
+    const nextResult: AiCoachResult = {
         ...input.fallback,
         intent,
         verdict: ai.verdict,
@@ -79,11 +80,16 @@ export async function buildTeachingResponse(input: AiTeachingInput): Promise<AiC
         lowerComplexity: ai.nextLearningMoveRecommendation === "lower_complexity",
         switchToContrast: ai.nextLearningMoveRecommendation === "switch_to_contrast",
         example: ai.showExample && ai.exampleSentence ? { sw: ai.exampleSentence.sw.trim(), de: ai.exampleSentence.de.trim() } : undefined,
-        microLesson: {
-            ...input.fallback.microLesson,
-            explanation,
-            morphology: ai.showMorphology ? (ai.nounClassInfo ?? input.fallback.microLesson?.morphology) : undefined,
-            memoryHook: ai.memoryHook?.trim() || input.fallback.microLesson?.memoryHook,
-        },
+    };
+
+    return {
+        ...nextResult,
+        microLesson: buildMiniLesson({
+            task: input.task,
+            result: nextResult,
+            learnerAnswer: input.learnerAnswer,
+            aiExplanation: ai.shortExplanation,
+            aiMemoryHook: ai.memoryHook ?? undefined,
+        }),
     };
 }

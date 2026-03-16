@@ -53,6 +53,32 @@ export type ResultCardPlan = {
     showLearningNote: boolean;
 };
 
+export type GrammarFocusType =
+    | "noun_class"
+    | "singular_plural"
+    | "fixed_phrase"
+    | "greeting_usage"
+    | "verb_infinitive"
+    | "word_order"
+    | "morphology_pattern"
+    | "semantic_contrast"
+    | "none";
+
+export type GrammarTeachingPayload = {
+    grammarFocusType: GrammarFocusType;
+    shortExplanation?: string;
+    keyPattern?: string;
+    singularForm?: string;
+    pluralForm?: string;
+    nounClass?: string;
+    verbBase?: string;
+    fixedExpressionNote?: string;
+    contrastPair?: { expected: string; learner?: string };
+    usageContext?: string;
+    memoryHook?: string;
+    suggestedMicroDrill?: string;
+};
+
 export type AiCoachTask = {
     taskId: string;
     cardId: string;
@@ -112,6 +138,7 @@ export type AiCoachResult = {
         example?: { sw: string; de: string };
         memoryHook?: string;
         nextStepCue?: string;
+        grammar?: GrammarTeachingPayload;
     };
     nextTeachingMove?: TeachingMove;
     nextTeachingState?: TeachingState;

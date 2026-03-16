@@ -2,6 +2,7 @@ import { isHighQualityExample } from "./contentQuality";
 import { classifyAnswerIntent } from "./eval/classify";
 import { computeSimilarityScore, normalizeText } from "./eval/similarity";
 import { buildDeterministicExplanation, shouldUseExplanation } from "./hintQuality";
+import { buildMiniLesson } from "./miniLessonBuilder";
 import type { AiCoachResult, AiCoachTask, ErrorCategory } from "./types";
 
 type AiEvalPayload = {
@@ -24,30 +25,6 @@ function feedbackTitle(intent: AiCoachResult["intent"]): AiCoachResult["feedback
 function normalizeExample(task: AiCoachTask): { sw: string; de: string } | undefined {
     if (!isHighQualityExample(task, task.example)) return undefined;
     return { sw: task.example.sw.trim(), de: task.example.de.trim() };
-}
-
-function buildMicroLesson(task: AiCoachTask): AiCoachResult["microLesson"] {
-    const plan = task.meta?.resultCardPlan;
-    const nounClass = task.profile?.morphologicalInfo?.nounClass;
-    const singular = task.profile?.morphologicalInfo?.singular;
-    const plural = task.profile?.morphologicalInfo?.plural;
-
-    const morphology = [
-        nounClass ? `Nominalklasse: ${nounClass}` : null,
-        singular && nounClass ? `Singular: ${singular}` : null,
-        plural ? `Plural: ${plural}` : null,
-    ]
-        .filter(Boolean)
-        .join(" · ");
-
-    return {
-        morphology: plan?.showMorphology ? (morphology || undefined) : undefined,
-        example: plan?.showExample ? normalizeExample(task) : undefined,
-        explanation: plan?.showLearningNote && task.profile?.contextRequired
-            ? "Nutze die Antwort im passenden Kontext statt als wörtliche 1:1-Übersetzung."
-            : undefined,
-        nextStepCue: undefined,
-    };
 }
 
 function classifyErrorCategory(task: AiCoachTask, answer: string): ErrorCategory {
@@ -81,7 +58,7 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
     const example = normalizeExample(task);
 
     if (!normalized || /^(keine ahnung|weiss nicht|weiß nicht|idk|skip|ich weiss nicht|ich weiß nicht|ich weiss es nicht|ich weiß es nicht|i dont know|i don't know)$/.test(normalized)) {
-        return {
+        const result: AiCoachResult = {
             correct: false,
             intent: "no_attempt",
             confidence: 1,
@@ -100,8 +77,8 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
             repeatSameCard: true,
             lowerComplexity: true,
             switchToContrast: false,
-            microLesson: buildMicroLesson(task),
         };
+        return { ...result, microLesson: buildMiniLesson({ task, result, learnerAnswer: answer }) };
     }
 
     const classification = classifyAnswerIntent(answer, expected);
@@ -116,7 +93,7 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
             ? "Prüfe die Endung."
             : "";
 
-    return {
+    const result: AiCoachResult = {
         correct: isCorrect,
         intent,
         confidence: isCorrect ? 1 : Math.max(0.35, similarity),
@@ -135,8 +112,9 @@ export function evaluateWithHeuristic(task: AiCoachTask, answer: string, _hintLe
         repeatSameCard: !isCorrect,
         lowerComplexity: !isCorrect && !partial,
         switchToContrast: errorCategory === "semantic_confusion",
-        microLesson: buildMicroLesson(task),
     };
+
+    return { ...result, microLesson: buildMiniLesson({ task, result, learnerAnswer: answer }) };
 }
 
 async function evaluateWithOpenAi(task: AiCoachTask, answer: string, timeoutMs = 700): Promise<AiEvalPayload | null> {
@@ -245,7 +223,7 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
         ? { sw: ai.minimalExample.sw.trim(), de: ai.minimalExample.de.trim() }
         : fallback.example;
 
-    return {
+    const result: AiCoachResult = {
         ...fallback,
         correct: ai.errorType === "correct",
         intent: mappedIntent,
@@ -263,6 +241,10 @@ export async function evaluateWithAi(task: AiCoachTask, answer: string, fallback
         lowerComplexity: ai.nextSuggestion === "easier",
         switchToContrast: ai.errorType === "semantic_confusion",
         example: aiExample,
-        microLesson: buildMicroLesson(task),
+    };
+
+    return {
+        ...result,
+        microLesson: buildMiniLesson({ task, result, learnerAnswer: answer, aiExplanation: ai.explanation }),
     };
 }
