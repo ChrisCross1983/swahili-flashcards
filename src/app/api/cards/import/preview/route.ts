@@ -9,7 +9,7 @@ type PreviewRequest = {
 };
 
 function isMappingMode(value: unknown): value is MappingMode {
-    return value === "DE_LEFT_SW_RIGHT" || value === "SW_LEFT_DE_RIGHT";
+    return value === "AUTO" || value === "DE_LEFT_SW_RIGHT" || value === "SW_LEFT_DE_RIGHT";
 }
 
 export async function POST(req: Request) {
@@ -24,13 +24,13 @@ export async function POST(req: Request) {
     }
 
     const rawText = typeof body.rawText === "string" ? body.rawText : "";
-    const mappingMode = body.mappingMode;
+    const mappingMode = isMappingMode(body.mappingMode) ? body.mappingMode : "AUTO";
 
-    if (!rawText.trim() || !isMappingMode(mappingMode)) {
-        return NextResponse.json({ error: "rawText und mappingMode sind erforderlich." }, { status: 400 });
+    if (!rawText.trim()) {
+        return NextResponse.json({ error: "rawText ist erforderlich." }, { status: 400 });
     }
 
-    const parsed = parseImportText(rawText, mappingMode);
+    const parsed = parseImportText(rawText);
 
     const { data: cards, error } = await supabaseServer
         .from("cards")
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     }
 
     const existingVocabCards = (cards ?? []).filter((card) => card.type == null || card.type === "vocab");
-    const classification = classifyImportRows(parsed.validRows, existingVocabCards, parsed.invalidRows, parsed.totalLines);
+    const classification = classifyImportRows(parsed.validRows, existingVocabCards, mappingMode, parsed.invalidRows, parsed.totalLines);
 
     return NextResponse.json(classification);
 }

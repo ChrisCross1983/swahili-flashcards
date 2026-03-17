@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { classifyImportRows, normalizeImportValue, type MappingMode, type ParsedImportRow } from "@/lib/cards/import";
+import { classifyImportRows, normalizeImportValue, type ParsedImportRow } from "@/lib/cards/import";
 
 type CommitRequest = {
-    mappingMode?: MappingMode;
     rows?: ParsedImportRow[];
 };
-
-function isMappingMode(value: unknown): value is MappingMode {
-    return value === "DE_LEFT_SW_RIGHT" || value === "SW_LEFT_DE_RIGHT";
-}
 
 function isValidRow(value: unknown): value is ParsedImportRow {
     if (!value || typeof value !== "object") return false;
@@ -29,23 +24,23 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    if (!isMappingMode(body.mappingMode)) {
-        return NextResponse.json({ error: "Ungültiger mappingMode." }, { status: 400 });
-    }
-
     const rows = Array.isArray(body.rows) ? body.rows.filter(isValidRow) : [];
     if (!rows.length) {
-        return NextResponse.json({ insertedCount: 0, skippedDuplicates: 0, skippedConflicts: 0, invalidCount: 0 });
+        return NextResponse.json({ insertedCount: 0, skippedDuplicates: 0, skippedConflicts: 0, skippedAmbiguous: 0, invalidCount: 0 });
     }
 
-    const normalizedRows: ParsedImportRow[] = rows.map((row, index) => ({
-        lineNumber: Number.isFinite(row.lineNumber) ? row.lineNumber : index + 1,
-        rawLine: typeof row.rawLine === "string" ? row.rawLine : `${row.german} - ${row.swahili}`,
-        german: row.german.trim(),
-        swahili: row.swahili.trim(),
-        germanNormalized: normalizeImportValue(row.german),
-        swahiliNormalized: normalizeImportValue(row.swahili),
-    }));
+    const normalizedRows = rows.map((row, index) => {
+        const german = row.german.trim();
+        const swahili = row.swahili.trim();
+        return {
+            lineNumber: Number.isFinite(row.lineNumber) ? row.lineNumber : index + 1,
+            rawLine: typeof row.rawLine === "string" ? row.rawLine : `${german} - ${swahili}`,
+            leftValue: german,
+            rightValue: swahili,
+            leftNormalized: normalizeImportValue(german),
+            rightNormalized: normalizeImportValue(swahili),
+        };
+    });
 
     const { data: cards, error } = await supabaseServer
         .from("cards")
@@ -58,13 +53,14 @@ export async function POST(req: Request) {
     }
 
     const existingVocabCards = (cards ?? []).filter((card) => card.type == null || card.type === "vocab");
-    const classification = classifyImportRows(normalizedRows, existingVocabCards);
+    const classification = classifyImportRows(normalizedRows, existingVocabCards, "DE_LEFT_SW_RIGHT");
 
     if (!classification.newRows.length) {
         return NextResponse.json({
             insertedCount: 0,
             skippedDuplicates: classification.counts.duplicates,
             skippedConflicts: classification.counts.conflicts,
+            skippedAmbiguous: classification.counts.ambiguous,
             invalidCount: classification.counts.invalid,
         });
     }
@@ -104,6 +100,7 @@ export async function POST(req: Request) {
         insertedCount: insertPayload.length,
         skippedDuplicates: classification.counts.duplicates,
         skippedConflicts: classification.counts.conflicts,
+        skippedAmbiguous: classification.counts.ambiguous,
         invalidCount: classification.counts.invalid,
     });
 }
