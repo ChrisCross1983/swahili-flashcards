@@ -41,15 +41,54 @@ describe("import helpers", () => {
         expect(result.invalidRows).toHaveLength(1);
     });
 
-    it("supports mixed direction lists in auto mode", () => {
-        const parsed = parseImportText(["Hund = mbwa", "paka = Katze", "Wasser = maji"].join("\n"));
+    it("resolves clean forward pairs confidently in auto mode", () => {
+        const parsed = parseImportText([
+            "Hund; mbwa",
+            "Katze; paka",
+            "Haus; nyumba",
+            "Wasser; maji",
+            "Buch; kitabu",
+            "Auto; gari",
+            "Banane; ndizi",
+            "Freund; rafiki",
+            "Tomate; nyanya",
+            "Lehrer; mwalimu",
+        ].join("\n"));
         const result = classifyImportRows(parsed.validRows, [], "AUTO");
 
-        expect(result.newRows).toHaveLength(2);
-        expect(result.ambiguousRows).toHaveLength(1);
+        expect(result.ambiguousRows).toHaveLength(0);
+        expect(result.newRows).toHaveLength(10);
+        expect(result.newRows.every((row) => row.resolvedDirection === "DE_LEFT_SW_RIGHT")).toBe(true);
+        expect(result.newRows.every((row) => row.directionExplanation?.includes("DE→SW total="))).toBe(true);
+    });
+
+    it("resolves clean reversed pairs in auto mode", () => {
+        const parsed = parseImportText([
+            "mbwa - Hund",
+            "paka - Katze",
+            "nyumba - Haus",
+            "maji - Wasser",
+            "kitabu - Buch",
+            "gari - Auto",
+        ].join("\n"));
+        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+
+        expect(result.ambiguousRows).toHaveLength(0);
+        expect(result.newRows).toHaveLength(6);
+        expect(result.newRows.every((row) => row.resolvedDirection === "SW_LEFT_DE_RIGHT")).toBe(true);
+    });
+
+    it("supports mixed direction lists in auto mode", () => {
+        const parsed = parseImportText(["Hund = mbwa", "paka = Katze", "Wasser = maji", "gari = Auto"].join("\n"));
+        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+
+        expect(result.newRows).toHaveLength(4);
+        expect(result.ambiguousRows).toHaveLength(0);
         expect(result.newRows.map((row) => `${row.german}:${row.swahili}`)).toEqual([
             "Hund:mbwa",
             "Katze:paka",
+            "Wasser:maji",
+            "Auto:gari",
         ]);
     });
 
@@ -58,6 +97,15 @@ describe("import helpers", () => {
         const result = classifyImportRows(parsed.validRows, [], "AUTO");
 
         expect(result.ambiguousRows).toHaveLength(1);
+        expect(result.newRows).toHaveLength(0);
+        expect(result.ambiguousRows[0].directionExplanation).toContain("DE→SW total=");
+    });
+
+    it("keeps truly weak rows ambiguous when confidence margin is small", () => {
+        const parsed = parseImportText(["lala = lili", "mama = mamaa"].join("\n"));
+        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+
+        expect(result.ambiguousRows).toHaveLength(2);
         expect(result.newRows).toHaveLength(0);
     });
 
@@ -73,13 +121,14 @@ describe("import helpers", () => {
         const result = classifyImportRows(parsed.validRows, [
             { id: "1", german_text: "Hund", swahili_text: "mbwa", type: "vocab" },
             { id: "2", german_text: "Katze", swahili_text: "kitten", type: "vocab" },
+            { id: "3", german_text: "Vogel", swahili_text: "ndege", type: "vocab" },
         ], "AUTO");
 
-        expect(result.exactDuplicates).toHaveLength(1);
+        expect(result.exactDuplicates).toHaveLength(2);
         expect(result.conflicts).toHaveLength(2);
         expect(result.newRows).toHaveLength(0);
         expect(result.counts.new).toBe(0);
-        expect(result.counts.duplicates).toBe(1);
+        expect(result.counts.duplicates).toBe(2);
         expect(result.counts.conflicts).toBe(2);
     });
 

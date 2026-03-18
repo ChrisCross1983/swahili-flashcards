@@ -21,6 +21,7 @@ export type ParsedImportRow = {
     swahiliNormalized: string;
     resolvedDirection: ResolvedDirection;
     directionConfidence: "high" | "low";
+    directionExplanation?: string;
 };
 
 export type InvalidImportRow = {
@@ -35,6 +36,7 @@ export type AmbiguousImportRow = {
     leftValue: string;
     rightValue: string;
     reason: string;
+    directionExplanation?: string;
 };
 
 export type ImportClassification = {
@@ -57,6 +59,12 @@ export type ImportClassification = {
 const MAX_SIDE_LENGTH = 120;
 const MAX_LINE_LENGTH = 400;
 const OUTER_QUOTES = /['"“”‘’„‟‚‛«»‹›]+/g;
+const COMMON_GERMAN_WORDS = new Set([
+    "hund", "katze", "haus", "wasser", "buch", "auto", "banane", "freund", "tomate", "lehrer", "vogel",
+]);
+const COMMON_SWAHILI_WORDS = new Set([
+    "mbwa", "paka", "nyumba", "maji", "kitabu", "gari", "ndizi", "rafiki", "nyanya", "mwalimu", "ndege",
+]);
 
 export function normalizeImportValue(value: string): string {
     const trimmed = stripOuterQuotes(value.trim());
@@ -126,23 +134,47 @@ function isHeaderRow(left: string, right: string): boolean {
 function scoreGermanLike(value: string): number {
     const v = normalizeImportValue(value);
     let score = 0;
+    if (!v) return score;
+
     if (/[äöüß]/u.test(v)) score += 3;
-    if (/\b(der|die|das|ein|eine|nicht|und|mit|ich|du)\b/u.test(v)) score += 2;
-    if (/(sch|ei|ie|ck|ung|chen)/u.test(v)) score += 1;
-    if (/\b\w+en\b/u.test(v)) score += 0.5;
+    if (/\b(der|die|das|ein|eine|einer|einem|nicht|und|mit|ich|du|wir|ihr|sie|ist|sind|sein)\b/u.test(v)) score += 2.5;
+    if (/(sch|ei|ie|au|eu|äu|ck|tz|pf|sp|st|ung|chen|keit|heit|lich|ig)/u.test(v)) score += 1.2;
+    if (/(tt|ll|nn|mm|ss)/u.test(v)) score += 0.4;
+    if (/\b\w+(en|er|e|n)\b/u.test(v)) score += 0.4;
+    if (/[^aeiouäöü\s]{3,}/u.test(v)) score += 0.5;
+    if (COMMON_GERMAN_WORDS.has(v)) score += 2.5;
+
+    if (/\b(ya|wa|kwa|katika|mimi|wewe|yeye|sisi|nyinyi|asante|karibu|sana)\b/u.test(v)) score -= 1.8;
     return score;
 }
 
 function scoreSwahiliLike(value: string): number {
     const v = normalizeImportValue(value);
     let score = 0;
-    if (/^(ki|vi|wa|ma|m|u|ku|pa|mw)/u.test(v)) score += 1;
-    if (/(ng|ny|sh|ch|mw|dh|th)/u.test(v)) score += 1;
-    if (/\b(ya|wa|kwa|katika|mimi|wewe|asante|karibu)\b/u.test(v)) score += 2;
+    if (!v) return score;
+
+    if (/^(ki|vi|wa|ma|mwa|mwi|m|u|ku|pa|tu|ny|nd|ng|ch|sh)/u.test(v)) score += 1.5;
+    if (/(ng|ny|sh|ch|mw|dh|th|nd|mb|ngw)/u.test(v)) score += 1.2;
+    if (/\b(ya|wa|kwa|katika|mimi|wewe|yeye|sisi|nyinyi|asante|karibu|sana|hii|hiyo)\b/u.test(v)) score += 2.5;
+    if (/^[a-z]+$/u.test(v) && /[aeiou]$/u.test(v)) score += 0.5;
+    if (/\b(ni|si|la|na|wa|za)\b/u.test(v)) score += 0.5;
+    if (COMMON_SWAHILI_WORDS.has(v)) score += 2.5;
+
+    if (/[äöüß]/u.test(v)) score -= 2;
+    if (/\b(der|die|das|ein|eine|nicht|und|mit|ich|du|wir|ihr|sie)\b/u.test(v)) score -= 1.8;
     return score;
 }
 
-function buildDirectionRow(base: Omit<ParsedImportRow, "german" | "swahili" | "germanNormalized" | "swahiliNormalized" | "resolvedDirection" | "directionConfidence">, direction: ResolvedDirection, confidence: "high" | "low"): ParsedImportRow {
+function isSimpleSingleWord(value: string): boolean {
+    return /^[\p{L}]+$/u.test(normalizeImportValue(value));
+}
+
+function buildDirectionRow(
+    base: Omit<ParsedImportRow, "german" | "swahili" | "germanNormalized" | "swahiliNormalized" | "resolvedDirection" | "directionConfidence">,
+    direction: ResolvedDirection,
+    confidence: "high" | "low",
+    directionExplanation?: string
+): ParsedImportRow {
     const german = direction === "DE_LEFT_SW_RIGHT" ? base.leftValue : base.rightValue;
     const swahili = direction === "DE_LEFT_SW_RIGHT" ? base.rightValue : base.leftValue;
 
@@ -154,8 +186,18 @@ function buildDirectionRow(base: Omit<ParsedImportRow, "german" | "swahili" | "g
         swahiliNormalized: normalizeImportValue(swahili),
         resolvedDirection: direction,
         directionConfidence: confidence,
+        directionExplanation,
     };
 }
+
+type DirectionCandidateScore = {
+    total: number;
+    dbScore: number;
+    lexicalScore: number;
+    germanSideScore: number;
+    swahiliSideScore: number;
+    oppositePenalty: number;
+};
 
 function scoreDirectionCandidate(
     row: Omit<ParsedImportRow, "german" | "swahili" | "germanNormalized" | "swahiliNormalized" | "resolvedDirection" | "directionConfidence">,
@@ -163,25 +205,47 @@ function scoreDirectionCandidate(
     exactPairs: Set<string>,
     germanToSw: Map<string, Set<string>>,
     swToGerman: Map<string, Set<string>>
-): number {
+): DirectionCandidateScore {
     const resolved = buildDirectionRow(row, direction, "low");
     const key = `${resolved.germanNormalized}::${resolved.swahiliNormalized}`;
-    let score = 0;
+    let dbScore = 0;
 
-    if (exactPairs.has(key)) score += 6;
-    if (germanToSw.has(resolved.germanNormalized)) score += 3;
-    if (swToGerman.has(resolved.swahiliNormalized)) score += 3;
+    if (exactPairs.has(key)) dbScore += 8;
+    if (germanToSw.has(resolved.germanNormalized)) dbScore += 2.5;
+    if (swToGerman.has(resolved.swahiliNormalized)) dbScore += 2.5;
 
     const germanMatches = germanToSw.get(resolved.germanNormalized);
-    if (germanMatches && !germanMatches.has(resolved.swahiliNormalized)) score += 2;
+    if (germanMatches && !germanMatches.has(resolved.swahiliNormalized)) dbScore += 1.5;
 
     const swMatches = swToGerman.get(resolved.swahiliNormalized);
-    if (swMatches && !swMatches.has(resolved.germanNormalized)) score += 2;
+    if (swMatches && !swMatches.has(resolved.germanNormalized)) dbScore += 1.5;
 
-    score += (scoreGermanLike(resolved.german) - scoreSwahiliLike(resolved.german)) * 1.5;
-    score += (scoreSwahiliLike(resolved.swahili) - scoreGermanLike(resolved.swahili)) * 1.5;
+    const germanSideScore = scoreGermanLike(resolved.german);
+    const swahiliSideScore = scoreSwahiliLike(resolved.swahili);
+    const oppositePenalty = (scoreSwahiliLike(resolved.german) + scoreGermanLike(resolved.swahili)) * 0.7;
 
-    return score;
+    let lexicalScore = germanSideScore + swahiliSideScore - oppositePenalty;
+
+    const leftSimple = isSimpleSingleWord(row.leftValue);
+    const rightSimple = isSimpleSingleWord(row.rightValue);
+    if (leftSimple && rightSimple) {
+        const germanSideDelta = germanSideScore - scoreSwahiliLike(resolved.german);
+        const swahiliSideDelta = swahiliSideScore - scoreGermanLike(resolved.swahili);
+        if (germanSideDelta >= 1 && swahiliSideDelta >= 1) lexicalScore += 1.5;
+    }
+
+    return {
+        total: dbScore + lexicalScore,
+        dbScore,
+        lexicalScore,
+        germanSideScore,
+        swahiliSideScore,
+        oppositePenalty,
+    };
+}
+
+function explainDirectionDecision(leftToRight: DirectionCandidateScore, rightToLeft: DirectionCandidateScore): string {
+    return `DE→SW total=${leftToRight.total.toFixed(2)} (db=${leftToRight.dbScore.toFixed(2)}, lex=${leftToRight.lexicalScore.toFixed(2)}), SW→DE total=${rightToLeft.total.toFixed(2)} (db=${rightToLeft.dbScore.toFixed(2)}, lex=${rightToLeft.lexicalScore.toFixed(2)})`;
 }
 
 function resolveDirection(
@@ -196,19 +260,27 @@ function resolveDirection(
 
     const leftAsGerman = scoreDirectionCandidate(row, "DE_LEFT_SW_RIGHT", exactPairs, germanToSw, swToGerman);
     const rightAsGerman = scoreDirectionCandidate(row, "SW_LEFT_DE_RIGHT", exactPairs, germanToSw, swToGerman);
+    const explanation = explainDirectionDecision(leftAsGerman, rightAsGerman);
+    const scoreMargin = Math.abs(leftAsGerman.total - rightAsGerman.total);
+    const winner = leftAsGerman.total > rightAsGerman.total ? leftAsGerman : rightAsGerman;
 
-    if (Math.abs(leftAsGerman - rightAsGerman) < 2) {
+    const marginTooSmall = scoreMargin < 1.2;
+    const confidenceTooLow = winner.total < 1.2;
+
+    if (marginTooSmall || confidenceTooLow) {
         return {
             lineNumber: row.lineNumber,
             rawLine: row.rawLine,
             leftValue: row.leftValue,
             rightValue: row.rightValue,
             reason: "Konnte die Sprachrichtung nicht sicher erkennen.",
+            directionExplanation: explanation,
         };
     }
 
-    const direction: ResolvedDirection = leftAsGerman > rightAsGerman ? "DE_LEFT_SW_RIGHT" : "SW_LEFT_DE_RIGHT";
-    return buildDirectionRow(row, direction, "high");
+    const direction: ResolvedDirection = leftAsGerman.total > rightAsGerman.total ? "DE_LEFT_SW_RIGHT" : "SW_LEFT_DE_RIGHT";
+    const confidence: "high" | "low" = scoreMargin >= 2.8 && winner.total >= 3 ? "high" : "low";
+    return buildDirectionRow(row, direction, confidence, explanation);
 }
 
 export function parseImportText(rawText: string): { validRows: Array<Omit<ParsedImportRow, "german" | "swahili" | "germanNormalized" | "swahiliNormalized" | "resolvedDirection" | "directionConfidence">>; invalidRows: InvalidImportRow[]; totalLines: number } {
