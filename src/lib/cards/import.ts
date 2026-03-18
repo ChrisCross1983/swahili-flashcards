@@ -91,7 +91,11 @@ function sanitizeInputLine(value: string): string {
             .trim();
     }
 
-    return cleaned.replace(/\s+/g, " ").trim();
+    // Preserve tab separators so TAB-delimited rows still parse as valid pairs.
+    return cleaned
+        .replace(/[^\S\t]+/g, " ")
+        .replace(/[^\S\t]*\t[^\S\t]*/g, "\t")
+        .trim();
 }
 
 function isSeparatorOnlyLine(value: string): boolean {
@@ -169,6 +173,16 @@ function isSimpleSingleWord(value: string): boolean {
     return /^[\p{L}]+$/u.test(normalizeImportValue(value));
 }
 
+function startsUppercaseLetter(value: string): boolean {
+    const trimmed = value.trim();
+    return /^[A-ZÄÖÜ]/u.test(trimmed);
+}
+
+function startsLowercaseLetter(value: string): boolean {
+    const trimmed = value.trim();
+    return /^[a-zäöü]/u.test(trimmed);
+}
+
 function buildDirectionRow(
     base: Omit<ParsedImportRow, "german" | "swahili" | "germanNormalized" | "swahiliNormalized" | "resolvedDirection" | "directionConfidence">,
     direction: ResolvedDirection,
@@ -232,6 +246,10 @@ function scoreDirectionCandidate(
         const germanSideDelta = germanSideScore - scoreSwahiliLike(resolved.german);
         const swahiliSideDelta = swahiliSideScore - scoreGermanLike(resolved.swahili);
         if (germanSideDelta >= 1 && swahiliSideDelta >= 1) lexicalScore += 1.5;
+
+        if (startsUppercaseLetter(resolved.german) && startsLowercaseLetter(resolved.swahili)) {
+            lexicalScore += 1.5;
+        }
     }
 
     return {
@@ -261,13 +279,29 @@ function resolveDirection(
     const leftAsGerman = scoreDirectionCandidate(row, "DE_LEFT_SW_RIGHT", exactPairs, germanToSw, swToGerman);
     const rightAsGerman = scoreDirectionCandidate(row, "SW_LEFT_DE_RIGHT", exactPairs, germanToSw, swToGerman);
     const explanation = explainDirectionDecision(leftAsGerman, rightAsGerman);
-    const scoreMargin = Math.abs(leftAsGerman.total - rightAsGerman.total);
-    const winner = leftAsGerman.total > rightAsGerman.total ? leftAsGerman : rightAsGerman;
+    const STABLE_FORWARD_TOTAL = 1.2;
+    const REVERSE_CLEAR_WIN_MARGIN = 3;
+    const FORWARD_ORDER_BIAS = 1.4;
+    const leftTotalWithBias = leftAsGerman.total + FORWARD_ORDER_BIAS;
+    const rightTotalWithBias = rightAsGerman.total;
+    const scoreMargin = Math.abs(leftTotalWithBias - rightTotalWithBias);
+    const winner = leftTotalWithBias > rightTotalWithBias ? leftAsGerman : rightAsGerman;
+    const looksLikeStableForwardPair =
+        isSimpleSingleWord(row.leftValue) &&
+        isSimpleSingleWord(row.rightValue) &&
+        startsUppercaseLetter(row.leftValue) &&
+        startsLowercaseLetter(row.rightValue);
+    const canSafelyKeepForward =
+        (leftAsGerman.total >= STABLE_FORWARD_TOTAL || looksLikeStableForwardPair) &&
+        (rightTotalWithBias - leftTotalWithBias) < REVERSE_CLEAR_WIN_MARGIN;
 
     const marginTooSmall = scoreMargin < 1.2;
     const confidenceTooLow = winner.total < 1.2;
 
     if (marginTooSmall || confidenceTooLow) {
+        if (canSafelyKeepForward) {
+            return buildDirectionRow(row, "DE_LEFT_SW_RIGHT", "low", explanation);
+        }
         return {
             lineNumber: row.lineNumber,
             rawLine: row.rawLine,
@@ -278,7 +312,16 @@ function resolveDirection(
         };
     }
 
-    const direction: ResolvedDirection = leftAsGerman.total > rightAsGerman.total ? "DE_LEFT_SW_RIGHT" : "SW_LEFT_DE_RIGHT";
+    const shouldKeepForwardDirection =
+        canSafelyKeepForward &&
+        rightTotalWithBias > leftTotalWithBias &&
+        (rightTotalWithBias - leftTotalWithBias) < REVERSE_CLEAR_WIN_MARGIN;
+
+    const direction: ResolvedDirection = shouldKeepForwardDirection
+        ? "DE_LEFT_SW_RIGHT"
+        : leftTotalWithBias > rightTotalWithBias
+            ? "DE_LEFT_SW_RIGHT"
+            : "SW_LEFT_DE_RIGHT";
     const confidence: "high" | "low" = scoreMargin >= 2.8 && winner.total >= 3 ? "high" : "low";
     return buildDirectionRow(row, direction, confidence, explanation);
 }
@@ -381,6 +424,7 @@ export function classifyImportRows(
     const ambiguousRows: AmbiguousImportRow[] = [];
     const conflicts: Array<ParsedImportRow & { conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH" }> = [];
     const invalidRows = [...initialInvalidRows];
+    const seenCanonicalPairs = new Set<string>();
 
     for (const row of rows) {
         const resolved = resolveDirection(row, mappingMode, exactPairs, germanToSw, swToGerman);
@@ -395,11 +439,21 @@ export function classifyImportRows(
             invalidRows.push({
                 lineNumber: resolved.lineNumber,
                 rawLine: resolved.rawLine,
-                reason: "Doppelte Zeile innerhalb des Imports.",
+                reason: "Dieses Wortpaar ist in deiner Importliste bereits enthalten.",
             });
             continue;
         }
         seenInImport.add(key);
+        const canonicalKey = [resolved.germanNormalized, resolved.swahiliNormalized].sort().join("::");
+        if (seenCanonicalPairs.has(canonicalKey)) {
+            invalidRows.push({
+                lineNumber: resolved.lineNumber,
+                rawLine: resolved.rawLine,
+                reason: "Dieses Wortpaar ist in deiner Importliste bereits enthalten (nur umgekehrte Richtung).",
+            });
+            continue;
+        }
+        seenCanonicalPairs.add(canonicalKey);
 
         if (exactPairs.has(key)) {
             exactDuplicates.push(resolved);

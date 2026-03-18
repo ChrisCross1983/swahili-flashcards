@@ -24,6 +24,15 @@ describe("import helpers", () => {
         expect(parsed.validRows[2].leftValue).toBe("Buch");
     });
 
+    it("parses tab-separated rows as valid pairs", () => {
+        const parsed = parseImportText("Banane\tndizi");
+
+        expect(parsed.invalidRows).toHaveLength(0);
+        expect(parsed.validRows).toHaveLength(1);
+        expect(parsed.validRows[0].leftValue).toBe("Banane");
+        expect(parsed.validRows[0].rightValue).toBe("ndizi");
+    });
+
     it("rejects separator-only rows and keeps real pairs", () => {
         const parsed = parseImportText("---\n;\nHaus = nyumba");
 
@@ -39,6 +48,7 @@ describe("import helpers", () => {
         expect(result.newRows[0].german).toBe("Hund");
         expect(result.newRows[0].swahili).toBe("mbwa");
         expect(result.invalidRows).toHaveLength(1);
+        expect(result.invalidRows[0].reason).toBe("Dieses Wortpaar ist in deiner Importliste bereits enthalten.");
     });
 
     it("resolves clean forward pairs confidently in auto mode", () => {
@@ -60,6 +70,22 @@ describe("import helpers", () => {
         expect(result.newRows).toHaveLength(10);
         expect(result.newRows.every((row) => row.resolvedDirection === "DE_LEFT_SW_RIGHT")).toBe(true);
         expect(result.newRows.every((row) => row.directionExplanation?.includes("DE→SW total="))).toBe(true);
+    });
+
+    it("keeps clean DE→SW rows in forward direction in auto mode", () => {
+        const parsed = parseImportText([
+            "Mango; embe",
+            "Banane; ndizi",
+            "Freund; rafiki",
+        ].join("\n"));
+        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+
+        expect(result.ambiguousRows).toHaveLength(0);
+        expect(result.newRows.map((row) => `${row.german}:${row.swahili}`)).toEqual([
+            "Mango:embe",
+            "Banane:ndizi",
+            "Freund:rafiki",
+        ]);
     });
 
     it("resolves clean reversed pairs in auto mode", () => {
@@ -130,6 +156,15 @@ describe("import helpers", () => {
         expect(result.counts.new).toBe(0);
         expect(result.counts.duplicates).toBe(2);
         expect(result.counts.conflicts).toBe(2);
+    });
+
+    it("uses clearer messaging for same-import reverse duplicates when direction is fixed", () => {
+        const parsed = parseImportText("Hund = mbwa\nmbwa = Hund");
+        const result = classifyImportRows(parsed.validRows, [], "DE_LEFT_SW_RIGHT");
+
+        expect(result.newRows).toHaveLength(1);
+        expect(result.invalidRows).toHaveLength(1);
+        expect(result.invalidRows[0].reason).toContain("umgekehrte Richtung");
     });
 
     it("preview-like counts include invalid and ambiguous rows", () => {
