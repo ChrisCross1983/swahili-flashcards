@@ -4,7 +4,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { classifyImportRows, normalizeImportValue, type ParsedImportRow } from "@/lib/cards/import";
 
 type CommitRequest = {
-    rows?: ParsedImportRow[];
+    rows?: Array<ParsedImportRow & { selectedAction?: "keep" | "skip" }>;
 };
 
 function isValidRow(value: unknown): value is ParsedImportRow {
@@ -24,7 +24,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const rows = Array.isArray(body.rows) ? body.rows.filter(isValidRow) : [];
+    const rows = Array.isArray(body.rows)
+        ? body.rows.filter((row) => isValidRow(row) && row.selectedAction !== "skip")
+        : [];
     if (!rows.length) {
         return NextResponse.json({ insertedCount: 0, skippedDuplicates: 0, skippedConflicts: 0, skippedAmbiguous: 0, invalidCount: 0 });
     }

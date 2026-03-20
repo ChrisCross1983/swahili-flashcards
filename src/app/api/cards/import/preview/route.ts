@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { classifyImportRows, type MappingMode, parseImportText } from "@/lib/cards/import";
+import { buildEditablePreviewState, classifyImportRows, type MappingMode, parseImportText } from "@/lib/cards/import";
 
 type PreviewRequest = {
     rawText?: string;
@@ -45,5 +45,8 @@ export async function POST(req: Request) {
     const existingVocabCards = (cards ?? []).filter((card) => card.type == null || card.type === "vocab");
     const classification = classifyImportRows(parsed.validRows, existingVocabCards, mappingMode, parsed.invalidRows, parsed.totalLines);
 
-    return NextResponse.json(classification);
+    return NextResponse.json({
+        ...classification,
+        editableRows: buildEditablePreviewState(classification),
+    });
 }

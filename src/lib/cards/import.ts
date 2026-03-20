@@ -39,10 +39,25 @@ export type AmbiguousImportRow = {
     directionExplanation?: string;
 };
 
+export type ConflictReasonType = "GERMAN_SIDE_EXISTS" | "SWAHILI_SIDE_EXISTS" | "ALTERNATIVE_GLOSS" | "AMBIGUOUS_MAPPING";
+
+export type ExistingMatchInfo = {
+    id: string;
+    german: string;
+    swahili: string;
+};
+
+export type ConflictImportRow = ParsedImportRow & {
+    conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH";
+    reasonType: ConflictReasonType;
+    reason: string;
+    existingMatches: ExistingMatchInfo[];
+};
+
 export type ImportClassification = {
     newRows: ParsedImportRow[];
     exactDuplicates: ParsedImportRow[];
-    conflicts: Array<ParsedImportRow & { conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH" }>;
+    conflicts: ConflictImportRow[];
     ambiguousRows: AmbiguousImportRow[];
     invalidRows: InvalidImportRow[];
     counts: {
@@ -54,6 +69,27 @@ export type ImportClassification = {
         ambiguous: number;
         invalid: number;
     };
+};
+
+
+export type EditablePreviewStatus = "importable" | "duplicate" | "conflict" | "ambiguous" | "invalid" | "skipped";
+
+export type EditablePreviewRow = {
+    rowKey: string;
+    lineNumber: number;
+    rawLine: string;
+    originalGerman: string;
+    originalSwahili: string;
+    originalDirection: ResolvedDirection;
+    german: string;
+    swahili: string;
+    direction: ResolvedDirection;
+    status: EditablePreviewStatus;
+    reason: string;
+    directionExplanation?: string;
+    reasonType?: ConflictReasonType;
+    existingMatches?: ExistingMatchInfo[];
+    selectedAction: "keep" | "skip";
 };
 
 const MAX_SIDE_LENGTH = 120;
@@ -422,7 +458,7 @@ export function classifyImportRows(
     const newRows: ParsedImportRow[] = [];
     const exactDuplicates: ParsedImportRow[] = [];
     const ambiguousRows: AmbiguousImportRow[] = [];
-    const conflicts: Array<ParsedImportRow & { conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH" }> = [];
+    const conflicts: ConflictImportRow[] = [];
     const invalidRows = [...initialInvalidRows];
     const seenCanonicalPairs = new Set<string>();
 
@@ -467,9 +503,15 @@ export function classifyImportRows(
         const swahiliConflict = Boolean(swMatches && !swMatches.has(resolved.germanNormalized));
 
         if (germanConflict || swahiliConflict) {
+            const conflictType = germanConflict && swahiliConflict ? "BOTH" : germanConflict ? "GERMAN_EXISTS" : "SWAHILI_EXISTS";
+            const existingMatches = findExistingMatches(existingCards, resolved, conflictType);
+            const { reasonType, reason } = explainConflict(resolved, conflictType, existingMatches);
             conflicts.push({
                 ...resolved,
-                conflictType: germanConflict && swahiliConflict ? "BOTH" : germanConflict ? "GERMAN_EXISTS" : "SWAHILI_EXISTS",
+                conflictType,
+                reasonType,
+                reason,
+                existingMatches,
             });
             continue;
         }
@@ -494,3 +536,223 @@ export function classifyImportRows(
         },
     };
 }
+
+
+function glossTokens(value: string): string[] {
+    return normalizeImportValue(value)
+        .replace(/[()]/g, " ")
+        .split(/[\s/,+]+/u)
+        .map((token) => token.trim())
+        .filter((token) => token.length > 1);
+}
+
+function tokenOverlap(a: string, b: string): number {
+    const left = new Set(glossTokens(a));
+    const right = new Set(glossTokens(b));
+    if (!left.size || !right.size) return 0;
+    const shared = Array.from(left).filter((token) => right.has(token)).length;
+    return shared / Math.max(left.size, right.size);
+}
+
+function findExistingMatches(existingCards: ExistingCard[], row: ParsedImportRow, conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH"): ExistingMatchInfo[] {
+    const german = row.germanNormalized;
+    const swahili = row.swahiliNormalized;
+    return existingCards
+        .filter((card) => {
+            const cardGerman = normalizeImportValue(card.german_text ?? "");
+            const cardSwahili = normalizeImportValue(card.swahili_text ?? "");
+            if (!cardGerman || !cardSwahili) return false;
+            if (conflictType === "GERMAN_EXISTS") return cardGerman === german;
+            if (conflictType === "SWAHILI_EXISTS") return cardSwahili === swahili;
+            return cardGerman === german || cardSwahili === swahili;
+        })
+        .slice(0, 3)
+        .map((card) => ({
+            id: card.id,
+            german: (card.german_text ?? "").trim(),
+            swahili: (card.swahili_text ?? "").trim(),
+        }));
+}
+
+function explainConflict(
+    row: ParsedImportRow,
+    conflictType: "GERMAN_EXISTS" | "SWAHILI_EXISTS" | "BOTH",
+    existingMatches: ExistingMatchInfo[]
+): { reasonType: ConflictReasonType; reason: string } {
+    const hasAlternativeGloss = existingMatches.some((match) =>
+        conflictType === "GERMAN_EXISTS"
+            ? tokenOverlap(match.swahili, row.swahili) >= 0.45
+            : tokenOverlap(match.german, row.german) >= 0.45
+    );
+
+    if (hasAlternativeGloss) {
+        return {
+            reasonType: "ALTERNATIVE_GLOSS",
+            reason: "Ähnliche Bedeutung erkannt (alternative Glossierung/Wortwahl). Bitte prüfen, ob als eigene Karte sinnvoll.",
+        };
+    }
+
+    if (conflictType === "GERMAN_EXISTS") {
+        return {
+            reasonType: "GERMAN_SIDE_EXISTS",
+            reason: "Gleiche deutsche Seite, aber bestehende Karte hat eine andere Swahili-Übersetzung.",
+        };
+    }
+
+    if (conflictType === "SWAHILI_EXISTS") {
+        return {
+            reasonType: "SWAHILI_SIDE_EXISTS",
+            reason: "Gleiche Swahili-Seite, aber bestehende Karte hat eine andere deutsche Übersetzung.",
+        };
+    }
+
+    return {
+        reasonType: "AMBIGUOUS_MAPPING",
+        reason: "Mehrdeutige Zuordnung: Beide Seiten existieren bereits in anderen Paarungen.",
+    };
+}
+
+function buildRowKey(lineNumber: number, german: string, swahili: string): string {
+    return `${lineNumber}:${normalizeImportValue(german)}:${normalizeImportValue(swahili)}`;
+}
+
+export function buildEditablePreviewState(classification: ImportClassification): EditablePreviewRow[] {
+    const fromConflicts = classification.conflicts.map((row) => ({
+        rowKey: buildRowKey(row.lineNumber, row.german, row.swahili),
+        lineNumber: row.lineNumber,
+        rawLine: row.rawLine,
+        originalGerman: row.german,
+        originalSwahili: row.swahili,
+        originalDirection: row.resolvedDirection,
+        german: row.german,
+        swahili: row.swahili,
+        direction: row.resolvedDirection,
+        status: "conflict" as const,
+        reason: row.reason,
+        reasonType: row.reasonType,
+        existingMatches: row.existingMatches,
+        directionExplanation: row.directionExplanation,
+        selectedAction: "keep" as const,
+    }));
+
+    const fromAmbiguous = classification.ambiguousRows.map((row) => ({
+        rowKey: buildRowKey(row.lineNumber, row.leftValue, row.rightValue),
+        lineNumber: row.lineNumber,
+        rawLine: row.rawLine,
+        originalGerman: row.leftValue,
+        originalSwahili: row.rightValue,
+        originalDirection: "DE_LEFT_SW_RIGHT" as const,
+        german: row.leftValue,
+        swahili: row.rightValue,
+        direction: "DE_LEFT_SW_RIGHT" as const,
+        status: "ambiguous" as const,
+        reason: row.reason,
+        directionExplanation: row.directionExplanation,
+        selectedAction: "keep" as const,
+    }));
+
+    const fromInvalid = classification.invalidRows.map((row) => ({
+        rowKey: `${row.lineNumber}:invalid`,
+        lineNumber: row.lineNumber,
+        rawLine: row.rawLine,
+        originalGerman: "",
+        originalSwahili: "",
+        originalDirection: "DE_LEFT_SW_RIGHT" as const,
+        german: "",
+        swahili: "",
+        direction: "DE_LEFT_SW_RIGHT" as const,
+        status: "invalid" as const,
+        reason: row.reason,
+        selectedAction: "skip" as const,
+    }));
+
+    return [...fromConflicts, ...fromAmbiguous, ...fromInvalid];
+}
+
+export function revalidatePreviewRow(
+    row: Pick<EditablePreviewRow, "lineNumber" | "rawLine" | "german" | "swahili" | "direction" | "selectedAction">,
+    existingCards: ExistingCard[]
+): EditablePreviewRow {
+    const german = cleanForStorage(row.german);
+    const swahili = cleanForStorage(row.swahili);
+
+    if (!german || !swahili) {
+        return {
+            rowKey: buildRowKey(row.lineNumber, german, swahili),
+            lineNumber: row.lineNumber,
+            rawLine: row.rawLine,
+            originalGerman: german,
+            originalSwahili: swahili,
+            originalDirection: row.direction,
+            german,
+            swahili,
+            direction: row.direction,
+            status: row.selectedAction === "skip" ? "skipped" : "invalid",
+            reason: "Beide Felder müssen ausgefüllt sein.",
+            selectedAction: row.selectedAction,
+        };
+    }
+
+    const leftValue = row.direction === "DE_LEFT_SW_RIGHT" ? german : swahili;
+    const rightValue = row.direction === "DE_LEFT_SW_RIGHT" ? swahili : german;
+
+    const classification = classifyImportRows([
+        {
+            lineNumber: row.lineNumber,
+            rawLine: row.rawLine || `${leftValue} = ${rightValue}`,
+            leftValue,
+            rightValue,
+            leftNormalized: normalizeImportValue(leftValue),
+            rightNormalized: normalizeImportValue(rightValue),
+        },
+    ], existingCards, row.direction);
+
+    let status: EditablePreviewStatus = "invalid";
+    let reason = "Zeile ist ungültig.";
+    let reasonType: ConflictReasonType | undefined;
+    let existingMatches: ExistingMatchInfo[] | undefined;
+    let directionExplanation: string | undefined;
+
+    if (classification.newRows.length > 0) {
+        status = "importable";
+        reason = "Kann importiert werden.";
+        directionExplanation = classification.newRows[0].directionExplanation;
+    } else if (classification.exactDuplicates.length > 0) {
+        status = "duplicate";
+        reason = "Dieses Paar existiert bereits.";
+    } else if (classification.conflicts.length > 0) {
+        status = "conflict";
+        reason = classification.conflicts[0].reason;
+        reasonType = classification.conflicts[0].reasonType;
+        existingMatches = classification.conflicts[0].existingMatches;
+        directionExplanation = classification.conflicts[0].directionExplanation;
+    } else if (classification.ambiguousRows.length > 0) {
+        status = "ambiguous";
+        reason = classification.ambiguousRows[0].reason;
+        directionExplanation = classification.ambiguousRows[0].directionExplanation;
+    } else if (classification.invalidRows.length > 0) {
+        status = "invalid";
+        reason = classification.invalidRows[0].reason;
+    }
+
+    if (row.selectedAction === "skip") status = "skipped";
+
+    return {
+        rowKey: buildRowKey(row.lineNumber, german, swahili),
+        lineNumber: row.lineNumber,
+        rawLine: row.rawLine,
+        originalGerman: german,
+        originalSwahili: swahili,
+        originalDirection: row.direction,
+        german,
+        swahili,
+        direction: row.direction,
+        status,
+        reason,
+        reasonType,
+        existingMatches,
+        directionExplanation,
+        selectedAction: row.selectedAction,
+    };
+}
+

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyImportRows, normalizeImportValue, parseImportText } from "./import";
+import { buildEditablePreviewState, classifyImportRows, normalizeImportValue, parseImportText, revalidatePreviewRow } from "./import";
 
 describe("import helpers", () => {
     it("normalizes values with typographic quotes and whitespace", () => {
@@ -78,7 +78,7 @@ describe("import helpers", () => {
             "Banane; ndizi",
             "Freund; rafiki",
         ].join("\n"));
-        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+        const result = classifyImportRows(parsed.validRows, [], "DE_LEFT_SW_RIGHT");
 
         expect(result.ambiguousRows).toHaveLength(0);
         expect(result.newRows.map((row) => `${row.german}:${row.swahili}`)).toEqual([
@@ -187,5 +187,72 @@ describe("import helpers", () => {
         expect(result.counts.new).toBe(0);
         expect(result.counts.duplicates).toBe(1);
         expect(result.counts.conflicts).toBe(1);
+    });
+
+    it("builds editable preview rows for conflicts, ambiguous and invalid rows", () => {
+        const parsed = parseImportText("Katze = kitteh\nradio = banana\n???");
+        const result = classifyImportRows(parsed.validRows, [{ id: "1", german_text: "Katze", swahili_text: "paka" }], "AUTO", parsed.invalidRows, parsed.totalLines);
+        const editable = buildEditablePreviewState(result);
+
+        expect(editable.some((row) => row.status === "conflict")).toBe(true);
+        expect(editable.some((row) => row.status === "ambiguous")).toBe(true);
+        expect(editable.some((row) => row.status === "invalid")).toBe(true);
+    });
+
+    it("revalidation can resolve ambiguous rows via direction swap", () => {
+        const existing = [{ id: "1", german_text: "Hund", swahili_text: "mbwa" }];
+        const updated = revalidatePreviewRow({
+            lineNumber: 1,
+            rawLine: "mbwa = Hund",
+            german: "Hund",
+            swahili: "mbwa",
+            direction: "DE_LEFT_SW_RIGHT",
+            selectedAction: "keep",
+        }, existing);
+
+        expect(updated.status).toBe("duplicate");
+    });
+
+    it("editing values can turn conflict-like rows into importable", () => {
+        const existing = [{ id: "1", german_text: "Katze", swahili_text: "paka" }];
+        const updated = revalidatePreviewRow({
+            lineNumber: 2,
+            rawLine: "Katze = kitteh",
+            german: "Kätzchen",
+            swahili: "kitteh",
+            direction: "DE_LEFT_SW_RIGHT",
+            selectedAction: "keep",
+        }, existing);
+
+        expect(updated.status).toBe("importable");
+    });
+
+    it("revalidation marks skipped rows as skipped", () => {
+        const updated = revalidatePreviewRow({
+            lineNumber: 3,
+            rawLine: "radio = banana",
+            german: "radio",
+            swahili: "banana",
+            direction: "DE_LEFT_SW_RIGHT",
+            selectedAction: "skip",
+        }, []);
+
+        expect(updated.status).toBe("skipped");
+    });
+
+    it("conflict explanations detect likely alternative glosses", () => {
+        const parsed = parseImportText("okay = sawa / sawa kabisa");
+        const result = classifyImportRows(parsed.validRows, [{ id: "1", german_text: "okay", swahili_text: "sawa" }], "DE_LEFT_SW_RIGHT");
+
+        expect(result.conflicts).toHaveLength(1);
+        expect(result.conflicts[0].reasonType).toBe("ALTERNATIVE_GLOSS");
+    });
+
+    it("keeps slash and parenthetical gloss entries supported (not hard-invalid)", () => {
+        const parsed = parseImportText("jener/jene (dort) = yule");
+        const result = classifyImportRows(parsed.validRows, [], "AUTO");
+
+        expect(result.invalidRows).toHaveLength(0);
+        expect(result.newRows.length + result.ambiguousRows.length).toBe(1);
     });
 });
