@@ -32,6 +32,14 @@ import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
+import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
+import {
+    getLearningUnitType,
+    getOrCreateAnalysisMeta,
+    resolveAnalysisTargetFromCard,
+    type AnalysisTarget,
+    type LearningAnalysis,
+} from "@/lib/trainer/learningHelp";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -132,6 +140,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
+    const [learningHelpOpen, setLearningHelpOpen] = useState(false);
+    const [learningHelpSelectionOpen, setLearningHelpSelectionOpen] = useState(false);
+    const [learningHelpLoading, setLearningHelpLoading] = useState(false);
+    const [learningHelpAnalysis, setLearningHelpAnalysis] = useState<LearningAnalysis | null>(null);
+    const [learningHelpTargetOptions, setLearningHelpTargetOptions] = useState<AnalysisTarget[]>([]);
+    const analysisCacheRef = useRef<Map<string, LearningAnalysis>>(new Map());
 
     const router = useRouter();
     const pathname = usePathname();
@@ -289,6 +303,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             document.removeEventListener("mousedown", handleClick);
         };
     }, [drillMenuOpen]);
+
+    useEffect(() => {
+        setLearningHelpOpen(false);
+        setLearningHelpSelectionOpen(false);
+        setLearningHelpAnalysis(null);
+        setLearningHelpLoading(false);
+        setLearningHelpTargetOptions([]);
+    }, [currentIndex, reveal]);
 
     async function uploadImage(): Promise<string | null> {
         if (!imageFile) return null;
@@ -1148,6 +1170,37 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         playCardAudioIfExists(card);
     }
 
+    function openLearningHelp() {
+        const item = todayItems[currentIndex];
+        if (!item) return;
+
+        const resolved = resolveAnalysisTargetFromCard(item);
+        setLearningHelpOpen(true);
+        setLearningHelpTargetOptions(resolved.options);
+
+        if (resolved.needsSelection) {
+            setLearningHelpSelectionOpen(true);
+            setLearningHelpAnalysis(null);
+            return;
+        }
+
+        setLearningHelpSelectionOpen(false);
+        void selectLearningHelpTarget(resolved.defaultTarget);
+    }
+
+    async function selectLearningHelpTarget(target: AnalysisTarget) {
+        const item = todayItems[currentIndex];
+        if (!item) return;
+
+        setLearningHelpSelectionOpen(false);
+        setLearningHelpLoading(true);
+
+        await Promise.resolve();
+        const analysis = getOrCreateAnalysisMeta(analysisCacheRef.current, item, target);
+        setLearningHelpAnalysis(analysis);
+        setLearningHelpLoading(false);
+    }
+
     async function gradeCurrent(correct: boolean) {
         if (isRecording) {
             stopRecording();
@@ -1472,6 +1525,18 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentGerman = readGerman(currentItem);
 
     const currentSwahili = readSwahili(currentItem);
+    const learningType = getLearningUnitType(currentItem, currentSwahili);
+    const learningTypeLabel = learningType === "noun"
+        ? "Nomen"
+        : learningType === "verb"
+            ? "Verb"
+            : learningType === "phrase"
+                ? "Phrase"
+                : learningType === "greeting"
+                    ? "Grußformel"
+                    : learningType === "sentence"
+                        ? "Satz"
+                        : null;
 
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
@@ -2521,6 +2586,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
+                                                            learningTypeLabel={reveal ? learningTypeLabel : null}
+                                                            onOpenLearningHelp={reveal ? openLearningHelp : undefined}
                                                         />
                                                     </div>
 
@@ -2591,6 +2658,22 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         </div>
                                                     ) : null}
                                                 </div>
+
+                                                <LearningHelpPanel
+                                                    open={learningHelpOpen}
+                                                    loading={learningHelpLoading}
+                                                    analysis={learningHelpAnalysis}
+                                                    options={learningHelpTargetOptions}
+                                                    showSelection={learningHelpSelectionOpen}
+                                                    onClose={() => {
+                                                        setLearningHelpOpen(false);
+                                                        setLearningHelpSelectionOpen(false);
+                                                        setLearningHelpLoading(false);
+                                                    }}
+                                                    onSelectTarget={(target) => {
+                                                        void selectLearningHelpTarget(target);
+                                                    }}
+                                                />
                                             </>
                                         );
                                     })()

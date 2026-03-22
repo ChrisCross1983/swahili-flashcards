@@ -6,9 +6,19 @@ type Props = {
     answer: string;
     imagePath: string | null;
     imageBaseUrl: string;
+    learningTypeLabel?: string | null;
+    onOpenLearningHelp?: () => void;
 };
 
-export default function TrainerCard({ reveal, prompt, answer, imagePath, imageBaseUrl }: Props) {
+export default function TrainerCard({
+    reveal,
+    prompt,
+    answer,
+    imagePath,
+    imageBaseUrl,
+    learningTypeLabel,
+    onOpenLearningHelp,
+}: Props) {
     return (
         <div className="rounded-3xl border border-soft bg-surface p-6 shadow-soft">
             <div className="text-sm text-muted">Übersetze:</div>
@@ -28,6 +38,24 @@ export default function TrainerCard({ reveal, prompt, answer, imagePath, imageBa
                     <div className="mt-1 text-xl font-semibold text-primary">
                         <CardText>{answer}</CardText>
                     </div>
+
+                    {onOpenLearningHelp ? (
+                        <div className="mt-4 flex items-center justify-between gap-3">
+                            {learningTypeLabel ? (
+                                <span className="inline-flex rounded-full border border-soft bg-surface px-2 py-1 text-xs font-semibold text-muted">
+                                    {learningTypeLabel}
+                                </span>
+                            ) : <span />}
+
+                            <button
+                                type="button"
+                                className="rounded-full border border-soft bg-surface px-3 py-1.5 text-sm font-medium text-primary hover:bg-surface"
+                                onClick={onOpenLearningHelp}
+                            >
+                                Mehr Lernhilfe
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
         </div>
