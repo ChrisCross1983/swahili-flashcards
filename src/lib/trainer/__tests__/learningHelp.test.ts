@@ -35,6 +35,16 @@ describe("learning help type detection", () => {
         expect(getLearningUnitType(item({ swahili_text: "habari za asubuhi", german_text: "Guten Morgen" }))).toBe("greeting");
     });
 
+    it("detects numbers, particle words and adverbs", () => {
+        expect(getLearningUnitType(item({ swahili_text: "saba", german_text: "sieben" }))).toBe("number");
+        expect(getLearningUnitType(item({ swahili_text: "ndiyo", german_text: "ja" }))).toBe("particle");
+        expect(getLearningUnitType(item({ swahili_text: "mbali", german_text: "weit" }))).toBe("adverb");
+    });
+
+    it("detects plural nouns from common noun morphology", () => {
+        expect(getLearningUnitType(item({ swahili_text: "matunda", german_text: "Früchte" }))).toBe("plural_noun");
+    });
+
     it("detects phrases", () => {
         expect(getLearningUnitType(item({ swahili_text: "chakula cha mchana", german_text: "Mittagessen" }))).toBe("phrase");
     });
@@ -74,6 +84,8 @@ describe("analysis data shapes", () => {
         expect(analysis.singular).toBe("kitabu");
         expect(analysis.plural).toBe("vitabu");
         expect(analysis.nounClass).toBe("ki/vi");
+        expect((analysis.concordanceHints ?? []).length).toBeGreaterThan(0);
+        expect(analysis.patternHint).toContain("Singular");
     });
 
     it("builds verb analysis shape", () => {
@@ -82,6 +94,9 @@ describe("analysis data shapes", () => {
         expect(analysis.type).toBe("verb");
         expect(analysis.baseForm).toBe("kusoma");
         expect((analysis.forms ?? []).length).toBeGreaterThan(1);
+        expect((analysis.prefixNotes ?? []).some((note) => note.includes("ni-"))).toBe(true);
+        expect(analysis.example?.naturalDe).toBe("Ich lese jeden Tag.");
+        expect(analysis.example?.literalDe).toBe("Ich lesen jeden Tag.");
     });
 
     it("builds phrase/greeting analysis shape", () => {
@@ -89,6 +104,8 @@ describe("analysis data shapes", () => {
 
         expect(["phrase", "greeting"]).toContain(analysis.type);
         expect(analysis.contextNote).toBeTruthy();
+        expect(analysis.translation?.natural).toBeTruthy();
+        expect(analysis.translation?.literal).toBeTruthy();
     });
 
     it("builds sentence analysis shape", () => {
@@ -97,6 +114,7 @@ describe("analysis data shapes", () => {
         expect(analysis.type).toBe("sentence");
         expect(analysis.structuralExplanation).toBeTruthy();
         expect((analysis.highlightParts ?? []).length).toBeGreaterThan(0);
+        expect(analysis.translation?.natural).toBe("Ich lese ein Buch.");
     });
 });
 
@@ -114,9 +132,16 @@ describe("lazy analysis retrieval and fallbacks", () => {
     });
 
     it("returns a safe fallback for unknown words", () => {
-        const analysis = buildLearningAnalysis(item({ swahili_text: "xyz" }), { kind: "whole", value: "xyz", label: "Wort analysieren" });
+        const analysis = buildLearningAnalysis(item({ swahili_text: "xyz", german_text: "unbekannt" }), { kind: "whole", value: "xyz", label: "Wort analysieren" });
         expect(analysis.type).toBe("unknown");
         expect(analysis.fallback).toBe(true);
+        expect(analysis.contextNote).toContain("Basisdaten");
+    });
+
+    it("keeps selection flow intact for greeting cards", () => {
+        const resolved = resolveAnalysisTargetFromCard(item({ swahili_text: "habari za asubuhi", german_text: "Guten Morgen" }));
+        expect(resolved.needsSelection).toBe(true);
+        expect(resolved.options.length).toBeGreaterThan(2);
     });
 });
 
