@@ -1,7 +1,13 @@
 import type { CardType, LeitnerStats, SessionSummary, SetupCounts, TodayItem } from "./types";
 
-function withTypeParam(url: string, cardType: CardType): string {
-    const query = `type=${encodeURIComponent(cardType)}`;
+function withFilterParams(url: string, cardType: CardType, groupIds?: string[]): string {
+    const params = new URLSearchParams();
+    params.set("type", cardType);
+    if (groupIds && groupIds.length > 0) {
+        params.set("groupIds", groupIds.join(","));
+    }
+
+    const query = params.toString();
     return url.includes("?") ? `${url}&${query}` : `${url}?${query}`;
 }
 
@@ -13,8 +19,8 @@ async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
     return json as T;
 }
 
-export async function fetchSetupCounts(cardType: CardType): Promise<SetupCounts> {
-    const res = await fetch(withTypeParam("/api/learn/setup-counts", cardType));
+export async function fetchSetupCounts(cardType: CardType, groupIds?: string[]): Promise<SetupCounts> {
+    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds));
     const json = await parseOrThrow<Partial<SetupCounts>>(res, "Setup counts failed");
     return {
         todayDue: json.todayDue ?? 0,
@@ -23,14 +29,14 @@ export async function fetchSetupCounts(cardType: CardType): Promise<SetupCounts>
     };
 }
 
-export async function fetchTodayItems(cardType: CardType): Promise<TodayItem[]> {
-    const res = await fetch(withTypeParam("/api/learn/today", cardType), { cache: "no-store" });
+export async function fetchTodayItems(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
+    const res = await fetch(withFilterParams("/api/learn/today", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<{ items?: TodayItem[] }>(res, "Aktion fehlgeschlagen.");
     return Array.isArray(json.items) ? json.items : [];
 }
 
-export async function fetchAllCardsForDrill(cardType: CardType): Promise<TodayItem[]> {
-    const res = await fetch(withTypeParam("/api/cards/all", cardType), { cache: "no-store" });
+export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
+    const res = await fetch(withFilterParams("/api/cards/all", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<{ items?: any[]; cards?: any[] }>(res, "Aktion fehlgeschlagen.");
     const source = json.items ?? json.cards ?? [];
     return source.map((c) => ({
@@ -41,11 +47,12 @@ export async function fetchAllCardsForDrill(cardType: CardType): Promise<TodayIt
         swahili: c.swahili_text,
         imagePath: c.image_path ?? null,
         audio_path: c.audio_path ?? null,
+        groups: c.groups ?? [],
     }));
 }
 
-export async function fetchLastMissedItems(cardType: CardType): Promise<TodayItem[]> {
-    const res = await fetch(withTypeParam("/api/learn/last-missed", cardType), { cache: "no-store" });
+export async function fetchLastMissedItems(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
+    const res = await fetch(withFilterParams("/api/learn/last-missed", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<{ items?: any[]; cards?: any[] }>(res, "Aktion fehlgeschlagen.");
     const source = json.items ?? json.cards ?? [];
     return source.map((c) => ({
@@ -56,11 +63,12 @@ export async function fetchLastMissedItems(cardType: CardType): Promise<TodayIte
         swahili: c.swahili_text,
         imagePath: c.image_path ?? null,
         audio_path: c.audio_path ?? null,
+        groups: c.groups ?? [],
     }));
 }
 
 export async function fetchLeitnerStats(cardType: CardType): Promise<LeitnerStats> {
-    const res = await fetch(withTypeParam("/api/learn/stats", cardType), { cache: "no-store" });
+    const res = await fetch(withFilterParams("/api/learn/stats", cardType), { cache: "no-store" });
     return parseOrThrow<LeitnerStats>(res, "Leitner Stats konnten nicht geladen werden.");
 }
 

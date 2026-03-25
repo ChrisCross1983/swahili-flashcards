@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 export async function GET(req: Request) {
   const { user, response } = await requireUser();
@@ -8,11 +9,15 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const ownerKey = user.id;
-  const typeParam = searchParams.get("type");
-  const resolvedType =
-    typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
+  const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
+  const groupIds = parseGroupIds(searchParams);
+  const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
 
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  if (allowedCardIds && allowedCardIds.length === 0) {
+    return NextResponse.json({ items: [] });
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
 
   let query = supabaseServer
     .from("card_progress")
@@ -28,12 +33,10 @@ export async function GET(req: Request) {
     .lte("due_date", today)
     .order("due_date", { ascending: true });
 
-  if (resolvedType === "sentence") {
-    query = query.eq("cards.type", "sentence");
-  }
+  query = applyCardTypeFilter(query, resolvedType, { foreignTable: "cards" });
 
-  if (resolvedType === "vocab") {
-    query = query.or("type.is.null,type.eq.vocab", { foreignTable: "cards" });
+  if (allowedCardIds) {
+    query = query.in("card_id", allowedCardIds);
   }
 
   const { data, error } = await query;
@@ -42,7 +45,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const items = (data ?? []).map((row: any) => ({
+  const rows = data ?? [];
+  const groupsByCard = await getCardGroups(ownerKey, rows.map((row: any) => String(row.card_id)));
+
+  const items = rows.map((row: any) => ({
     cardId: row.card_id,
     level: row.level,
     dueDate: row.due_date,
@@ -51,6 +57,7 @@ export async function GET(req: Request) {
     imagePath: row.cards.image_path ?? null,
     audio_path: row.cards.audio_path ?? null,
     type: row.cards.type ?? null,
+    groups: groupsByCard.get(String(row.card_id)) ?? [],
   }));
 
   return NextResponse.json({ items });

@@ -24,6 +24,7 @@ export type TodayItem = {
     image_path?: string | null;
     image?: string | null;
     audio_path?: string | null;
+    groups?: Array<{ id: string; name: string; color?: string | null }>;
 };
 
 export type LeitnerStats = {

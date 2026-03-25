@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { applyCardTypeFilter, getAllowedCardIdsByGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 const MISSING_TABLE_CODES = new Set(["42P01"]);
 
@@ -10,24 +11,15 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
     return error.message?.toLowerCase().includes("does not exist") ?? false;
 }
 
-async function safeCount(
-    table: string,
-    applyFilters?: (q: any) => any,
-    select = "*"
-) {
-    let q = supabaseServer
-        .from(table)
-        .select(select, { count: "exact", head: true });
-
+async function safeCount(table: string, applyFilters?: (q: any) => any, select = "*") {
+    let q = supabaseServer.from(table).select(select, { count: "exact", head: true });
     if (applyFilters) q = applyFilters(q);
 
     const { count, error } = await q;
-
     if (error) {
         if (isMissingTableError(error)) return 0;
         throw new Error(error.message);
     }
-
     return count ?? 0;
 }
 
@@ -37,11 +29,14 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const ownerKey = user.id;
-    const typeParam = searchParams.get("type");
-    const resolvedType =
-        typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
-
+    const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
+    const groupIds = parseGroupIds(searchParams);
+    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
     const today = new Date().toISOString().slice(0, 10);
+
+    if (allowedCardIds && allowedCardIds.length === 0) {
+        return NextResponse.json({ todayDue: 0, totalCards: 0, lastMissedCount: 0 });
+    }
 
     try {
         const [todayDue, totalCards, lastMissedCount] = await Promise.all([
@@ -49,37 +44,24 @@ export async function GET(req: Request) {
                 "card_progress",
                 (q) => {
                     let query = q.eq("owner_key", ownerKey).lte("due_date", today);
-                    if (resolvedType === "sentence") {
-                        query = query.eq("cards.type", "sentence");
-                    } else if (resolvedType === "vocab") {
-                        query = query.or("type.is.null,type.eq.vocab", {
-                            foreignTable: "cards",
-                        });
-                    }
+                    query = applyCardTypeFilter(query, resolvedType, { foreignTable: "cards" });
+                    if (allowedCardIds) query = query.in("card_id", allowedCardIds);
                     return query;
                 },
                 "card_id, cards!inner(type)"
             ),
             safeCount("cards", (q) => {
                 let query = q.eq("owner_key", ownerKey);
-                if (resolvedType === "sentence") {
-                    query = query.eq("type", "sentence");
-                } else if (resolvedType === "vocab") {
-                    query = query.or("type.is.null,type.eq.vocab");
-                }
+                query = applyCardTypeFilter(query, resolvedType);
+                if (allowedCardIds) query = query.in("id", allowedCardIds);
                 return query;
             }),
             safeCount(
                 "learn_last_missed",
                 (q) => {
                     let query = q.eq("owner_key", ownerKey);
-                    if (resolvedType === "sentence") {
-                        query = query.eq("cards.type", "sentence");
-                    } else if (resolvedType === "vocab") {
-                        query = query.or("type.is.null,type.eq.vocab", {
-                            foreignTable: "cards",
-                        });
-                    }
+                    query = applyCardTypeFilter(query, resolvedType, { foreignTable: "cards" });
+                    if (allowedCardIds) query = query.in("card_id", allowedCardIds);
                     return query;
                 },
                 "card_id, cards!inner(type)"

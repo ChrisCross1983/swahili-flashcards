@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
     EditablePreviewRow,
     InvalidImportRow,
@@ -11,6 +11,8 @@ import type {
     AmbiguousImportRow,
 } from "@/lib/cards/import";
 import { useRouter } from "next/navigation";
+import { fetchGroups } from "@/lib/groups/api";
+import type { Group } from "@/lib/groups/types";
 
 type PreviewResponse = {
     newRows: ParsedImportRow[];
@@ -38,6 +40,14 @@ export default function ImportClient() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [busyRowKey, setBusyRowKey] = useState<string | null>(null);
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [groupMode, setGroupMode] = useState<"none" | "existing" | "new">("none");
+    const [selectedGroupId, setSelectedGroupId] = useState("");
+    const [newGroupName, setNewGroupName] = useState("");
+
+    useEffect(() => {
+        fetchGroups().then(setGroups).catch(() => setGroups([]));
+    }, []);
 
     const resolvedImportableRows = useMemo(
         () => editableRows.filter((row) => row.selectedAction === "keep" && row.status === "importable"),
@@ -149,11 +159,19 @@ export default function ImportClient() {
             directionConfidence: "high",
         }));
 
+        const payload: Record<string, unknown> = { rows: [...preview.newRows, ...manualRows] };
+        if (groupMode === "existing" && selectedGroupId) {
+            payload.groupId = selectedGroupId;
+        }
+        if (groupMode === "new" && newGroupName.trim()) {
+            payload.createGroup = { name: newGroupName.trim() };
+        }
+
         try {
             const res = await fetch("/api/cards/import/commit", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rows: [...preview.newRows, ...manualRows] }),
+                body: JSON.stringify(payload),
             });
             const json = await res.json();
 
@@ -162,10 +180,13 @@ export default function ImportClient() {
                 return;
             }
 
-            setStatus(`Import abgeschlossen: ${json.insertedCount} neue Wortpaare gespeichert.`);
+            const groupSuffix = json.groupAssigned ? " und einer Gruppe zugeordnet" : "";
+            setStatus(`Import abgeschlossen: ${json.insertedCount} neue Wortpaare gespeichert${groupSuffix}.`);
             setPreview(null);
             setEditableRows([]);
             setRawText("");
+            const nextGroups = await fetchGroups().catch(() => groups);
+            setGroups(nextGroups);
         } catch {
             setStatus("Import fehlgeschlagen.");
         } finally {
@@ -190,6 +211,24 @@ export default function ImportClient() {
                         <option value="DE_LEFT_SW_RIGHT">Deutsch links / Swahili rechts</option>
                         <option value="SW_LEFT_DE_RIGHT">Swahili links / Deutsch rechts</option>
                     </select>
+
+                    <div className="mt-4 rounded-xl border p-3">
+                        <label className="text-sm font-medium">Import-Zielgruppe (optional)</label>
+                        <select className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" value={groupMode} onChange={(e) => setGroupMode(e.target.value as any)}>
+                            <option value="none">Keine Gruppe</option>
+                            <option value="existing">Bestehende Gruppe</option>
+                            <option value="new">Neue Gruppe erstellen</option>
+                        </select>
+                        {groupMode === "existing" ? (
+                            <select className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}>
+                                <option value="">Bitte wählen</option>
+                                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                            </select>
+                        ) : null}
+                        {groupMode === "new" ? (
+                            <input className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" placeholder="Neue Gruppe" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} />
+                        ) : null}
+                    </div>
 
                     <label className="mt-4 block text-sm font-medium">Text einfügen</label>
                     <textarea className="mt-2 h-64 w-full rounded-xl border p-3 bg-transparent" placeholder="1. Hund = mbwa\n• Katze - paka\nmbwa = Hund" value={rawText} onChange={(e) => setRawText(e.target.value)} />

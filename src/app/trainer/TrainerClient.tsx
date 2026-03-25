@@ -33,6 +33,11 @@ import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
+import GroupSelector from "@/components/groups/GroupSelector";
+import GroupBadge from "@/components/groups/GroupBadge";
+import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
+import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
+import type { Group } from "@/lib/groups/types";
 import {
     getLearningUnitType,
     getOrCreateAnalysisMeta,
@@ -139,6 +144,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+    const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+    const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
+    const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
     const [learningHelpOpen, setLearningHelpOpen] = useState(false);
     const [learningHelpSelectionOpen, setLearningHelpSelectionOpen] = useState(false);
@@ -264,6 +274,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     useEffect(() => {
         loadCards(undefined, { silent: true });
+        fetchGroups().then(setGroups).catch(() => setGroups([]));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -271,7 +282,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setSetupCountsLoading(true);
 
         try {
-            const counts = await fetchSetupCounts(cardType);
+            const counts = await fetchSetupCounts(cardType, selectedGroupIds);
             setSetupCounts(counts);
         } catch {
             setSetupCounts({
@@ -282,7 +293,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         } finally {
             setSetupCountsLoading(false);
         }
-    }, [cardType]);
+    }, [cardType, selectedGroupIds]);
 
     useEffect(() => {
         if (!openLearn) return;
@@ -768,6 +779,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (q && q.trim().length > 0) {
             searchParams.set("q", q);
         }
+        if (selectedGroupIds.length > 0) {
+            searchParams.set("groupIds", selectedGroupIds.join(","));
+        }
         const url = `/api/cards?${searchParams.toString()}`;
 
         const res = await fetch(url);
@@ -984,7 +998,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setStatus("Lade fällige Karten...");
 
         try {
-            const items = await fetchTodayItems(cardType);
+            const items = await fetchTodayItems(cardType, selectedGroupIds)
 
             if (DEBUG_LEITNER) {
                 console.log("[LEITNER] session init", {
@@ -1015,7 +1029,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         try {
-            const items = await fetchAllCardsForDrill(cardType);
+            const items = await fetchAllCardsForDrill(cardType, selectedGroupIds)
 
             setSessionTotal(items.length);
             setTodayItems(shuffleArray(items));
@@ -1036,7 +1050,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         try {
-            const items = await fetchLastMissedItems(cardType);
+            const items = await fetchLastMissedItems(cardType, selectedGroupIds)
 
             setSessionTotal(items.length);
             setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
@@ -1513,11 +1527,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const filteredCards = cards.filter((c) => {
         const q = search.trim().toLowerCase();
-        if (!q) return true;
-        return (
+        const matchesText = !q ||
             (c.german_text ?? "").toLowerCase().includes(q) ||
-            (c.swahili_text ?? "").toLowerCase().includes(q)
-        );
+            (c.swahili_text ?? "").toLowerCase().includes(q);
+        if (!matchesText) return false;
+
+        if (selectedGroupIds.length === 0) return true;
+        const cardGroupIds = new Set((c.groups ?? []).map((group: any) => String(group.id)));
+        return selectedGroupIds.some((id) => cardGroupIds.has(String(id)));
     });
 
     const currentItem = todayItems[currentIndex] ?? null;
@@ -1686,6 +1703,39 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const learnModeHighlight = missingLearnMode && startDisabled;
     const drillSourceHighlight = missingDrillSource && startDisabled;
     const directionHighlight = missingDirection && startDisabled;
+    function openCurrentCardGroupsEditor() {
+        const item: any = todayItems[currentIndex];
+        if (!item) return;
+        const current = Array.isArray(item.groups) ? item.groups.map((group: any) => String(group.id)) : [];
+        setCardGroupsDraft(current);
+        setCardGroupsEditorOpen(true);
+    }
+
+    async function saveCurrentCardGroups() {
+        const item: any = todayItems[currentIndex];
+        const cardId = String(item?.cardId ?? item?.id ?? "").trim();
+        if (!cardId) return;
+
+        const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
+        const next = new Set<string>(cardGroupsDraft.map(String));
+
+        for (const groupId of next) {
+            if (!existing.has(groupId)) {
+                await assignCardsToGroup(groupId, [cardId]);
+            }
+        }
+        for (const groupId of existing) {
+            if (!next.has(groupId)) {
+                await removeCardFromGroup(groupId, cardId);
+            }
+        }
+
+        const nextGroups = groups.filter((group) => next.has(group.id));
+        setTodayItems((prev) => prev.map((entry: any, index) => index === currentIndex ? { ...entry, groups: nextGroups } : entry));
+        setCards((prev) => prev.map((entry: any) => String(entry.id) === cardId ? { ...entry, groups: nextGroups } : entry));
+        setCardGroupsEditorOpen(false);
+    }
+
     const startHint = missingLearnMode
         ? "Lernmethode wählen"
         : missingDrillSource
@@ -1866,6 +1916,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         {/* Hint card for setup guidance */}
                                         <div className="mt-2 hint-card border border-soft">
                                             Wähle Lernmethode, Abfragerichtung – dann starten wir.
+                                        </div>
+
+                                        <div className="mt-4 rounded-xl border p-3 space-y-3">
+                                            <GroupSelector
+                                                groups={groups}
+                                                selectedIds={selectedGroupIds}
+                                                onChange={setSelectedGroupIds}
+                                                label="Gruppenfilter (optional, ANY-OF)"
+                                                emptyText="Noch keine Gruppen – lege welche über Verwalten an."
+                                            />
+                                            <div className="flex gap-2">
+                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setSelectedGroupIds([])}>Alle Karten</button>
+                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                            </div>
                                         </div>
 
                                         <div
@@ -2568,6 +2632,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         )}
 
                                                         <div className="ml-auto flex items-center gap-4">
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-ghost text-sm whitespace-nowrap"
+                                                                onClick={openCurrentCardGroupsEditor}
+                                                            >
+                                                                ➕ Gruppe
+                                                            </button>
+
                                                             {/* Rechts: Bearbeiten */}
                                                             <button
                                                                 type="button"
@@ -3088,6 +3160,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         {cards.length} {cardsCountLabel}.
                                     </div>
 
+                                    <div className="mt-3 rounded-xl border p-3 space-y-3">
+                                        <GroupSelector groups={groups} selectedIds={selectedGroupIds} onChange={setSelectedGroupIds} label="Nach Gruppen filtern" />
+                                        <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                    </div>
+
                                     {/* Liste */}
                                     <div className="mt-4 space-y-3">
                                         {filteredCards.map((c) => (
@@ -3102,6 +3179,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         <CardText>{c.german_text} — {c.swahili_text}</CardText>
                                                     </div>
                                                 )}
+
+                                                {(c.groups ?? []).length > 0 ? (
+                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                        {(c.groups ?? []).map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                    </div>
+                                                ) : null}
 
                                                 <div className="mt-2 flex items-center gap-2">
                                                     {c.image_path ? (
@@ -3155,6 +3238,27 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     </div>
                                 </div>
                             </FullScreenSheet >
+
+                            <ManageGroupsSheet
+                                open={manageGroupsOpen}
+                                groups={groups}
+                                onClose={() => setManageGroupsOpen(false)}
+                                onUpdated={setGroups}
+                            />
+
+                            <FullScreenSheet
+                                open={cardGroupsEditorOpen}
+                                title="Karte in Gruppen"
+                                onClose={() => setCardGroupsEditorOpen(false)}
+                            >
+                                <div className="space-y-4">
+                                    <GroupSelector groups={groups} selectedIds={cardGroupsDraft} onChange={setCardGroupsDraft} label="Gruppen auswählen" />
+                                    <div className="flex gap-2">
+                                        <button type="button" className="btn btn-primary" onClick={saveCurrentCardGroups}>Speichern</button>
+                                        <button type="button" className="btn btn-ghost" onClick={() => setCardGroupsEditorOpen(false)}>Abbrechen</button>
+                                    </div>
+                                </div>
+                            </FullScreenSheet>
 
                             {/* Search Modal */}
                             < FullScreenSheet

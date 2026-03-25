@@ -5,6 +5,11 @@ import { classifyImportRows, normalizeImportValue, type ParsedImportRow } from "
 
 type CommitRequest = {
     rows?: Array<ParsedImportRow & { selectedAction?: "keep" | "skip" }>;
+    groupId?: string | null;
+    createGroup?: {
+        name?: string;
+        color?: string | null;
+    } | null;
 };
 
 function isValidRow(value: unknown): value is ParsedImportRow {
@@ -98,11 +103,61 @@ export async function POST(req: Request) {
         }
     }
 
+    let resolvedGroupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+    const createGroupName = String(body.createGroup?.name ?? "").trim();
+
+    if (!resolvedGroupId && createGroupName) {
+        const { data: group, error: groupCreateError } = await supabaseServer
+            .from("groups")
+            .insert({ owner_key: user.id, name: createGroupName, color: body.createGroup?.color ?? null })
+            .select("id")
+            .single();
+
+        if (groupCreateError) {
+            return NextResponse.json({ error: `Importiert, aber Gruppe konnte nicht erstellt werden: ${groupCreateError.message}` }, { status: 500 });
+        }
+
+        resolvedGroupId = String(group.id);
+    }
+
+    if (resolvedGroupId && (insertedCards?.length ?? 0) > 0) {
+        const { data: group, error: groupError } = await supabaseServer
+            .from("groups")
+            .select("id")
+            .eq("id", resolvedGroupId)
+            .eq("owner_key", user.id)
+            .maybeSingle();
+
+        if (groupError) {
+            return NextResponse.json({ error: `Importiert, aber Gruppe konnte nicht geladen werden: ${groupError.message}` }, { status: 500 });
+        }
+
+        if (!group) {
+            return NextResponse.json({ error: "Importiert, aber ausgewählte Gruppe existiert nicht." }, { status: 404 });
+        }
+
+        const joinRows = (insertedCards ?? []).map((card) => ({
+            owner_key: user.id,
+            group_id: resolvedGroupId,
+            card_id: card.id,
+        }));
+
+        const { error: groupAssignError } = await supabaseServer
+            .from("card_groups")
+            .upsert(joinRows, { onConflict: "owner_key,card_id,group_id", ignoreDuplicates: true });
+
+        if (groupAssignError) {
+            return NextResponse.json({ error: `Importiert, aber Gruppen-Zuordnung fehlgeschlagen: ${groupAssignError.message}` }, { status: 500 });
+        }
+    }
+
     return NextResponse.json({
         insertedCount: insertPayload.length,
         skippedDuplicates: classification.counts.duplicates,
         skippedConflicts: classification.counts.conflicts,
         skippedAmbiguous: classification.counts.ambiguous,
         invalidCount: classification.counts.invalid,
+        groupAssigned: Boolean(resolvedGroupId),
+        groupId: resolvedGroupId || null,
     });
 }

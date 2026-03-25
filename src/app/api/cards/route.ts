@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 type CreateCardBody = {
     german: string;
@@ -81,26 +82,25 @@ export async function GET(req: Request) {
     const ownerKey = user.id;
     const q = searchParams.get("q");
     const id = searchParams.get("id");
-    const typeParam = searchParams.get("type");
-    const resolvedType =
-        typeParam === "sentence" ? "sentence" : typeParam === "vocab" ? "vocab" : null;
+    const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
+    const groupIds = parseGroupIds(searchParams);
+    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
+
+    if (allowedCardIds && allowedCardIds.length === 0) {
+        if (id) return NextResponse.json({ card: null });
+        return NextResponse.json({ cards: [] });
+    }
 
     let query = supabaseServer
         .from("cards")
         .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
         .eq("owner_key", ownerKey);
 
-    if (id) {
-        query = query.eq("id", id);
-    }
+    if (id) query = query.eq("id", id);
 
-    if (resolvedType === "sentence") {
-        query = query.eq("type", "sentence");
-    }
+    query = applyCardTypeFilter(query, resolvedType);
 
-    if (resolvedType === "vocab") {
-        query = query.or("type.is.null,type.eq.vocab");
-    }
+    if (allowedCardIds) query = query.in("id", allowedCardIds);
 
     if (q && q.trim().length > 0) {
         query = query.or(`german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`);
@@ -120,11 +120,17 @@ export async function GET(req: Request) {
         );
     }
 
+    const cards = data ?? [];
+    const groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)));
+
     if (id) {
-        return NextResponse.json({ card: data?.[0] ?? null });
+        const card = cards[0] ? { ...cards[0], groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;
+        return NextResponse.json({ card });
     }
 
-    return NextResponse.json({ cards: data ?? [] });
+    return NextResponse.json({
+        cards: cards.map((card) => ({ ...card, groups: groupsByCard.get(String(card.id)) ?? [] })),
+    });
 }
 
 export async function DELETE(req: Request) {
