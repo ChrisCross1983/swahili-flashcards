@@ -149,6 +149,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
+    const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
+    const [savingCardGroups, setSavingCardGroups] = useState(false);
     const [drillMenuOpen, setDrillMenuOpen] = useState(false);
     const [learningHelpOpen, setLearningHelpOpen] = useState(false);
     const [learningHelpSelectionOpen, setLearningHelpSelectionOpen] = useState(false);
@@ -196,7 +198,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const sessionSavedRef = useRef(false);
-    const seenRef = useRef<Set<string>>(new Set());
+    const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const learnModeRef = useRef<HTMLDivElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const drillSourceRef = useRef<HTMLDivElement | null>(null);
@@ -1105,9 +1107,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEndedEarly(false);
         setExitConfirmOpen(false);
         sessionSavedRef.current = false;
-        if (DEBUG_LEITNER) {
-            seenRef.current = new Set();
-        }
+        loopGuardRef.current = { cardId: null, streak: 0 };
     }
 
     async function persistLearnSession(params: {
@@ -1536,8 +1536,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const cardGroupIds = new Set((c.groups ?? []).map((group: any) => String(group.id)));
         return selectedGroupIds.some((id) => cardGroupIds.has(String(id)));
     });
+    const groupCardCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        for (const card of cards) {
+            for (const group of card.groups ?? []) {
+                const id = String(group.id);
+                counts[id] = (counts[id] ?? 0) + 1;
+            }
+        }
+        return counts;
+    }, [cards]);
 
     const currentItem = todayItems[currentIndex] ?? null;
+    const currentItemGroups = Array.isArray((currentItem as any)?.groups) ? (currentItem as any).groups : [];
+    const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
 
@@ -1618,23 +1630,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     })();
 
     useEffect(() => {
-        if (!DEBUG_LEITNER) return;
         const cardId = currentItem ? resolveCardId(currentItem) : null;
-        console.log("[LEITNER] current card", {
-            id: cardId,
-            index: currentIndex,
-            queueLen: todayItems.length,
-        });
-
-        if (!cardId) return;
-        if (seenRef.current.has(cardId)) {
-            console.error("[LEITNER] LOOP DETECTED - card seen twice in same session", {
-                id: cardId,
-                seen: Array.from(seenRef.current).slice(0, 50),
-            });
+        if (!cardId) {
+            loopGuardRef.current = { cardId: null, streak: 0 };
             return;
         }
-        seenRef.current.add(cardId);
+
+        if (DEBUG_LEITNER) {
+            console.log("[LEITNER] current card", {
+                id: cardId,
+                index: currentIndex,
+                queueLen: todayItems.length,
+            });
+        }
+
+        const previous = loopGuardRef.current;
+        const streak = previous.cardId === cardId ? previous.streak + 1 : 1;
+        loopGuardRef.current = { cardId, streak };
+
+        if (DEBUG_LEITNER && streak >= 3) {
+            console.warn("[LEITNER] POSSIBLE LOOP - same card shown repeatedly", {
+                id: cardId,
+                streak,
+                index: currentIndex,
+                queueLen: todayItems.length,
+            });
+        }
     }, [currentIndex, currentItem, todayItems.length]);
 
     useEffect(() => {
@@ -1708,6 +1729,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!item) return;
         const current = Array.isArray(item.groups) ? item.groups.map((group: any) => String(group.id)) : [];
         setCardGroupsDraft(current);
+        setCardGroupsStatus(null);
         setCardGroupsEditorOpen(true);
     }
 
@@ -1719,21 +1741,37 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
         const next = new Set<string>(cardGroupsDraft.map(String));
 
-        for (const groupId of next) {
-            if (!existing.has(groupId)) {
-                await assignCardsToGroup(groupId, [cardId]);
-            }
-        }
-        for (const groupId of existing) {
-            if (!next.has(groupId)) {
-                await removeCardFromGroup(groupId, cardId);
-            }
+        if (existing.size === next.size && Array.from(existing).every((id) => next.has(id))) {
+            setCardGroupsStatus("Keine Änderungen an Gruppen.");
+            return;
         }
 
-        const nextGroups = groups.filter((group) => next.has(group.id));
-        setTodayItems((prev) => prev.map((entry: any, index) => index === currentIndex ? { ...entry, groups: nextGroups } : entry));
-        setCards((prev) => prev.map((entry: any) => String(entry.id) === cardId ? { ...entry, groups: nextGroups } : entry));
-        setCardGroupsEditorOpen(false);
+        setSavingCardGroups(true);
+        setCardGroupsStatus(null);
+
+        try {
+            for (const groupId of next) {
+                if (!existing.has(groupId)) {
+                    await assignCardsToGroup(groupId, [cardId]);
+                }
+            }
+            for (const groupId of existing) {
+                if (!next.has(groupId)) {
+                    await removeCardFromGroup(groupId, cardId);
+                }
+            }
+
+            const nextGroups = groups.filter((group) => next.has(group.id));
+            setTodayItems((prev) => prev.map((entry: any, index) => index === currentIndex ? { ...entry, groups: nextGroups } : entry));
+            setCards((prev) => prev.map((entry: any) => String(entry.id) === cardId ? { ...entry, groups: nextGroups } : entry));
+            setCardGroupsStatus("Gruppen gespeichert.");
+            setCardGroupsEditorOpen(false);
+            setStatus("Gruppenzuordnung gespeichert.");
+        } catch (error) {
+            setCardGroupsStatus(error instanceof Error ? error.message : "Gruppen konnten nicht gespeichert werden.");
+        } finally {
+            setSavingCardGroups(false);
+        }
     }
 
     const startHint = missingLearnMode
@@ -1743,6 +1781,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             : missingDirection
                 ? "Abfragerichtung wählen"
                 : null;
+    const cardGroupsUnchanged = (() => {
+        const item: any = todayItems[currentIndex];
+        const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
+        const next = new Set<string>(cardGroupsDraft.map(String));
+        return existing.size === next.size && Array.from(existing).every((id) => next.has(id));
+    })();
 
     return (
         <main className="min-h-screen p-6 flex justify-center">
@@ -1925,9 +1969,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 onChange={setSelectedGroupIds}
                                                 label="Gruppenfilter (optional, ANY-OF)"
                                                 emptyText="Noch keine Gruppen – lege welche über Verwalten an."
+                                                showAllOption
+                                                allActive={!hasActiveGroupFilter}
+                                                onSelectAll={() => setSelectedGroupIds([])}
                                             />
                                             <div className="flex gap-2">
-                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setSelectedGroupIds([])}>Alle Karten</button>
                                                 <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
                                             </div>
                                         </div>
@@ -2632,12 +2678,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         )}
 
                                                         <div className="ml-auto flex items-center gap-4">
+                                                            <div className="hidden sm:flex flex-wrap items-center justify-end gap-1 max-w-[240px]">
+                                                                {currentItemGroups.length > 0 ? (
+                                                                    <>
+                                                                        {currentItemGroups.slice(0, 2).map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                                        {currentItemGroups.length > 2 ? (
+                                                                            <span className="text-xs text-muted">+{currentItemGroups.length - 2} weitere</span>
+                                                                        ) : null}
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-xs text-muted">Noch keiner Gruppe zugeordnet</span>
+                                                                )}
+                                                            </div>
                                                             <button
                                                                 type="button"
                                                                 className="btn btn-ghost text-sm whitespace-nowrap"
                                                                 onClick={openCurrentCardGroupsEditor}
                                                             >
-                                                                ➕ Gruppe
+                                                                {currentItemGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
                                                             </button>
 
                                                             {/* Rechts: Bearbeiten */}
@@ -3157,12 +3215,27 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     ) : null}
 
                                     <div className="mt-3 text-sm text-muted">
-                                        {cards.length} {cardsCountLabel}.
+                                        {filteredCards.length} von {cards.length} {cardsCountLabel}.
                                     </div>
 
                                     <div className="mt-3 rounded-xl border p-3 space-y-3">
-                                        <GroupSelector groups={groups} selectedIds={selectedGroupIds} onChange={setSelectedGroupIds} label="Nach Gruppen filtern" />
-                                        <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                        <GroupSelector
+                                            groups={groups}
+                                            selectedIds={selectedGroupIds}
+                                            onChange={setSelectedGroupIds}
+                                            label="Nach Gruppen filtern"
+                                            showAllOption
+                                            allActive={!hasActiveGroupFilter}
+                                            onSelectAll={() => setSelectedGroupIds([])}
+                                        />
+                                        <div className="flex items-center justify-between gap-2">
+                                            {hasActiveGroupFilter ? (
+                                                <p className="text-xs text-muted">Filter aktiv: {selectedGroupIds.length} Gruppe(n).</p>
+                                            ) : (
+                                                <p className="text-xs text-muted">Alle Karten werden angezeigt.</p>
+                                            )}
+                                            <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                        </div>
                                     </div>
 
                                     {/* Liste */}
@@ -3233,7 +3306,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         ))}
 
                                         {filteredCards.length === 0 ? (
-                                            <p className="text-sm text-muted">Keine Treffer.</p>
+                                            <p className="text-sm text-muted">
+                                                {hasActiveGroupFilter ? "Keine Karten in den gewählten Gruppen. Wähle „Alle Karten“ oder passe den Filter an." : "Keine Treffer."}
+                                            </p>
                                         ) : null}
                                     </div>
                                 </div>
@@ -3242,8 +3317,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <ManageGroupsSheet
                                 open={manageGroupsOpen}
                                 groups={groups}
+                                groupCardCounts={groupCardCounts}
                                 onClose={() => setManageGroupsOpen(false)}
                                 onUpdated={setGroups}
+                                onOpenGroup={(groupId) => {
+                                    setSelectedGroupIds([groupId]);
+                                    setManageGroupsOpen(false);
+                                    setOpenCards(true);
+                                }}
                             />
 
                             <FullScreenSheet
@@ -3252,9 +3333,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onClose={() => setCardGroupsEditorOpen(false)}
                             >
                                 <div className="space-y-4">
-                                    <GroupSelector groups={groups} selectedIds={cardGroupsDraft} onChange={setCardGroupsDraft} label="Gruppen auswählen" />
+                                    <GroupSelector
+                                        groups={groups}
+                                        selectedIds={cardGroupsDraft}
+                                        onChange={setCardGroupsDraft}
+                                        label="Gruppen auswählen"
+                                        assignedIds={((todayItems[currentIndex] as any)?.groups ?? []).map((group: any) => String(group.id))}
+                                        allowCreate
+                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                    />
+                                    {cardGroupsStatus ? <p className="text-sm text-muted">{cardGroupsStatus}</p> : null}
                                     <div className="flex gap-2">
-                                        <button type="button" className="btn btn-primary" onClick={saveCurrentCardGroups}>Speichern</button>
+                                        <button type="button" className="btn btn-primary" onClick={saveCurrentCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>
+                                            {savingCardGroups ? "Speichert…" : "Speichern"}
+                                        </button>
                                         <button type="button" className="btn btn-ghost" onClick={() => setCardGroupsEditorOpen(false)}>Abbrechen</button>
                                     </div>
                                 </div>
