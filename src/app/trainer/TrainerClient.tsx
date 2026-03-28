@@ -36,6 +36,7 @@ import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
 import GroupSelector from "@/components/groups/GroupSelector";
 import GroupBadge from "@/components/groups/GroupBadge";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
+import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
 import {
@@ -147,6 +148,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [groups, setGroups] = useState<Group[]>([]);
     const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+    const [duplicateReviewOpen, setDuplicateReviewOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
@@ -3234,7 +3236,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             ) : (
                                                 <p className="text-xs text-muted">Alle Karten werden angezeigt.</p>
                                             )}
-                                            <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                            <div className="flex items-center gap-2">
+                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setDuplicateReviewOpen(true)}>Dubletten prüfen</button>
+                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -3324,6 +3329,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     setSelectedGroupIds([groupId]);
                                     setManageGroupsOpen(false);
                                     setOpenCards(true);
+                                }}
+                            />
+                            <DuplicateReviewSheet
+                                open={duplicateReviewOpen}
+                                cardType={cardType}
+                                onClose={() => setDuplicateReviewOpen(false)}
+                                onDeleted={async () => {
+                                    await loadCards(undefined, { silent: true });
+                                    await refreshSetupCounts();
                                 }}
                             />
 
