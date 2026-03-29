@@ -31,6 +31,8 @@ function badgeLabel(kind: DuplicateCluster["kind"]): string {
             return "Normalisiert";
         case "direction_swapped":
             return "Richtung vertauscht";
+        case "qualified_duplicate":
+            return "Didaktische Variante";
         default:
             return "Verdächtig ähnlich";
     }
@@ -157,7 +159,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                 <div className="space-y-4">
                     <div className="rounded-xl border bg-surface p-3 text-sm">
                         <p>
-                            Strikte Dubletten: <strong>{strictClusters.length}</strong> · Verdächtige Kandidaten: <strong>{reviewClusters.length}</strong>
+                            Strikte Dubletten (inkl. didaktischer Varianten): <strong>{strictClusters.length}</strong> · Verdächtige Kandidaten: <strong>{reviewClusters.length}</strong>
                         </p>
                         <p className="mt-1 text-xs text-muted">
                             Verdächtige Treffer sind nur Review-Kandidaten und werden nie automatisch gelöscht.

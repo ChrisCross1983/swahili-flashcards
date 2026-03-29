@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { detectDuplicateClusters, recommendKeepCard, validateClusterDeletionSelection, type DuplicateCard } from "./duplicates";
+import {
+    detectDuplicateClusters,
+    normalizeForDuplicateComparison,
+    recommendKeepCard,
+    validateClusterDeletionSelection,
+    type DuplicateCard,
+} from "./duplicates";
 
 function card(overrides: Partial<DuplicateCard>): DuplicateCard {
     return {
@@ -47,7 +53,21 @@ describe("duplicate detection", () => {
         expect(clusters[0].kind).toBe("direction_swapped");
     });
 
-    it("detects suspicious phrase extension candidates", () => {
+    it("classifies annotation-only variants as qualified duplicates", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "essen", swahili_text: "kula" }),
+            card({ id: "2", german_text: "essen (Verb)", swahili_text: "kula" }),
+            card({ id: "3", german_text: "Essen", swahili_text: "chakula" }),
+        ], "all");
+
+        const qualified = clusters.find((cluster) => cluster.kind === "qualified_duplicate");
+        expect(qualified).toBeDefined();
+        expect(qualified?.mode).toBe("strict");
+        expect(qualified?.cards.map((c) => c.id).sort()).toEqual(["1", "2"]);
+        expect(clusters.some((cluster) => cluster.cards.some((c) => c.id === "3") && cluster.cards.length > 1)).toBe(false);
+    });
+
+    it("keeps suspicious phrase extension in review mode", () => {
         const clusters = detectDuplicateClusters([
             card({ id: "1", german_text: "together", swahili_text: "pamoja" }),
             card({ id: "2", german_text: "together", swahili_text: "pamoja na" }),
@@ -65,6 +85,18 @@ describe("duplicate detection", () => {
         ], "all");
 
         expect(clusters).toHaveLength(0);
+    });
+
+    it("normalizes qualifier variants conservatively", () => {
+        expect(normalizeForDuplicateComparison("essen (Verb)")).toBe("essen (verb");
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "Haus", swahili_text: "nyumba" }),
+            card({ id: "2", german_text: "Haus (Nomen)", swahili_text: "nyumba" }),
+            card({ id: "3", german_text: "groß", swahili_text: "kubwa" }),
+            card({ id: "4", german_text: "groß (Adjektiv)", swahili_text: "kubwa" }),
+        ], "strict");
+
+        expect(clusters.every((cluster) => cluster.kind === "qualified_duplicate")).toBe(true);
     });
 });
 

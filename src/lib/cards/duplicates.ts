@@ -1,5 +1,5 @@
 export type DuplicateMode = "strict" | "review" | "all";
-export type DuplicateKind = "exact" | "normalized" | "direction_swapped" | "suspicious";
+export type DuplicateKind = "exact" | "normalized" | "direction_swapped" | "qualified_duplicate" | "suspicious";
 
 export type DuplicateCard = {
     id: string;
@@ -40,6 +40,24 @@ function stripCosmeticPunctuation(value: string): string {
 export function normalizeForDuplicateComparison(value: string): string {
     const collapsed = normalizeWhitespace(value ?? "");
     return stripCosmeticPunctuation(collapsed).toLocaleLowerCase("de-DE");
+}
+
+const DIDACTIC_QUALIFIER_PATTERN = /\s*[\(\[]?(?:verb|verben|nomen|substantiv|adjektiv|adverb|präposition|praeposition|pronomen|artikel|konjunktion|interjektion|phrase|ausdruck|noun|verb\.|adj\.|adjective|adverb|preposition|pronoun|article|conjunction|interjection)[\)\]]?\s*$/iu;
+
+function normalizeForDedupeBase(value: string): string {
+    let normalized = normalizeWhitespace(value ?? "").toLocaleLowerCase("de-DE");
+    let previous = "";
+
+    while (normalized && normalized !== previous) {
+        previous = normalized;
+        normalized = normalizeWhitespace(normalized.replace(DIDACTIC_QUALIFIER_PATTERN, ""));
+    }
+
+    return stripCosmeticPunctuation(normalized);
+}
+
+function hasDidacticQualifier(value: string): boolean {
+    return DIDACTIC_QUALIFIER_PATTERN.test(normalizeWhitespace(value));
 }
 
 function tokenize(value: string): string[] {
@@ -106,6 +124,37 @@ function classifyPair(a: DuplicateCard, b: DuplicateCard): PairMatch | null {
         };
     }
 
+    const germanDedupeBaseA = normalizeForDedupeBase(a.german_text);
+    const germanDedupeBaseB = normalizeForDedupeBase(b.german_text);
+    const swahiliDedupeBaseA = normalizeForDedupeBase(a.swahili_text);
+    const swahiliDedupeBaseB = normalizeForDedupeBase(b.swahili_text);
+
+    if (
+        aSwNormalized === bSwNormalized
+        && germanDedupeBaseA === germanDedupeBaseB
+        && aGermanNormalized !== bGermanNormalized
+        && (hasDidacticQualifier(a.german_text) || hasDidacticQualifier(b.german_text))
+    ) {
+        return {
+            mode: "strict",
+            kind: "qualified_duplicate",
+            reason: "Didaktische Variante desselben Eintrags (z. B. Zusatz wie '(Verb)').",
+        };
+    }
+
+    if (
+        aGermanNormalized === bGermanNormalized
+        && swahiliDedupeBaseA === swahiliDedupeBaseB
+        && aSwNormalized !== bSwNormalized
+        && (hasDidacticQualifier(a.swahili_text) || hasDidacticQualifier(b.swahili_text))
+    ) {
+        return {
+            mode: "strict",
+            kind: "qualified_duplicate",
+            reason: "Didaktische Variante desselben Eintrags (Zusatz/Annotation auf der Gegenseite).",
+        };
+    }
+
     const germanPrefix = isStrictPrefixPair(aGermanNormalized, bGermanNormalized);
     const swPrefix = isStrictPrefixPair(aSwNormalized, bSwNormalized);
 
@@ -154,6 +203,8 @@ function clusterKindPriority(kind: DuplicateKind): number {
         case "normalized":
             return 3;
         case "direction_swapped":
+            return 3;
+        case "qualified_duplicate":
             return 2;
         case "suspicious":
         default:
