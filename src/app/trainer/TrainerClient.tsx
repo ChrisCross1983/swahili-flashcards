@@ -33,6 +33,7 @@ import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
+import { canStartTraining, materialLabel, resolveTrainingGroupIds, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import GroupSelector from "@/components/groups/GroupSelector";
 import GroupBadge from "@/components/groups/GroupBadge";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
@@ -107,8 +108,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
-    const [drillSource, setDrillSource] = useState<"ALL" | "LAST_MISSED" | null>(null);
-    const [cardSelection, setCardSelection] = useState<"ALL_CARDS" | "LAST_MISSED" | null>(null);
+    const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnStarted, setLearnStarted] = useState(false);
     const [returnToLearn, setReturnToLearn] = useState(false);
@@ -153,8 +153,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
     const [savingCardGroups, setSavingCardGroups] = useState(false);
-    const [drillMenuOpen, setDrillMenuOpen] = useState(false);
-    const [learningHelpOpen, setLearningHelpOpen] = useState(false);
+    const [learningHelpFlipped, setLearningHelpFlipped] = useState(false);
     const [learningHelpSelectionOpen, setLearningHelpSelectionOpen] = useState(false);
     const [learningHelpLoading, setLearningHelpLoading] = useState(false);
     const [learningHelpAnalysis, setLearningHelpAnalysis] = useState<LearningAnalysis | null>(null);
@@ -203,8 +202,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const learnModeRef = useRef<HTMLDivElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
-    const drillSourceRef = useRef<HTMLDivElement | null>(null);
-    const drillMenuRef = useRef<HTMLDivElement | null>(null);
+    const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
 
     function getAudioPublicUrl(path: string) {
@@ -226,13 +224,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         audioElRef.current.play().catch(() => { });
     }
 
-    function triggerSetupHighlight(target: "LEARNMODE" | "DIRECTION" | "DRILLSOURCE") {
+    function triggerSetupHighlight(target: "LEARNMODE" | "DIRECTION" | "MATERIAL") {
         const targetRef =
             target === "LEARNMODE"
                 ? learnModeRef
                 : target === "DIRECTION"
                     ? directionRef
-                    : drillSourceRef;
+                    : materialRef;
 
         targetRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -282,11 +280,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    const trainerGroupIds = useMemo(() => resolveTrainingGroupIds(trainingMaterial), [trainingMaterial]);
+    const activeTrainerGroupName = useMemo(
+        () => trainingMaterial.kind === "GROUP"
+            ? groups.find((group) => group.id === trainingMaterial.groupId)?.name ?? null
+            : null,
+        [groups, trainingMaterial]
+    );
+
     const refreshSetupCounts = useCallback(async () => {
         setSetupCountsLoading(true);
 
         try {
-            const counts = await fetchSetupCounts(cardType, selectedGroupIds);
+            const counts = await fetchSetupCounts(cardType, trainerGroupIds);
             setSetupCounts(counts);
         } catch {
             setSetupCounts({
@@ -297,7 +303,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         } finally {
             setSetupCountsLoading(false);
         }
-    }, [cardType, selectedGroupIds]);
+    }, [cardType, trainerGroupIds]);
 
     useEffect(() => {
         if (!openLearn) return;
@@ -305,22 +311,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }, [openLearn, refreshSetupCounts]);
 
     useEffect(() => {
-        if (!drillMenuOpen) return;
-
-        function handleClick(event: MouseEvent) {
-            if (drillMenuRef.current && !drillMenuRef.current.contains(event.target as Node)) {
-                setDrillMenuOpen(false);
-            }
-        }
-
-        document.addEventListener("mousedown", handleClick);
-        return () => {
-            document.removeEventListener("mousedown", handleClick);
-        };
-    }, [drillMenuOpen]);
-
-    useEffect(() => {
-        setLearningHelpOpen(false);
+        setLearningHelpFlipped(false);
         setLearningHelpSelectionOpen(false);
         setLearningHelpAnalysis(null);
         setLearningHelpLoading(false);
@@ -1002,7 +993,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setStatus("Lade fällige Karten...");
 
         try {
-            const items = await fetchTodayItems(cardType, selectedGroupIds)
+            const items = await fetchTodayItems(cardType, trainerGroupIds)
 
             if (DEBUG_LEITNER) {
                 console.log("[LEITNER] session init", {
@@ -1033,7 +1024,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         try {
-            const items = await fetchAllCardsForDrill(cardType, selectedGroupIds)
+            const items = await fetchAllCardsForDrill(cardType, trainerGroupIds)
 
             setSessionTotal(items.length);
             setTodayItems(shuffleArray(items));
@@ -1054,7 +1045,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLastMissedEmpty(false);
 
         try {
-            const items = await fetchLastMissedItems(cardType, selectedGroupIds)
+            const items = await fetchLastMissedItems(cardType, trainerGroupIds)
 
             setSessionTotal(items.length);
             setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
@@ -1191,7 +1182,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!item) return;
 
         const resolved = resolveAnalysisTargetFromCard(item);
-        setLearningHelpOpen(true);
+        setLearningHelpFlipped(true);
         setLearningHelpTargetOptions(resolved.options);
 
         if (resolved.needsSelection) {
@@ -1215,6 +1206,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const analysis = getOrCreateAnalysisMeta(analysisCacheRef.current, item, target);
         setLearningHelpAnalysis(analysis);
         setLearningHelpLoading(false);
+    }
+
+    function flipBackToPrompt() {
+        setLearningHelpFlipped(false);
+        setLearningHelpSelectionOpen(false);
     }
 
     async function gradeCurrent(correct: boolean) {
@@ -1314,7 +1310,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
         if (learnMode === "DRILL") {
             // Wenn Drill auf "LAST_MISSED" läuft und Karte richtig war: last-missed in DB löschen
-            if (drillSource === "LAST_MISSED" && correct) {
+            if (trainingMaterial.kind === "LAST_MISSED" && correct) {
                 const cardId = resolveCardId(item);
                 if (cardId) {
                     const removed = await updateLastMissed("remove", cardId);
@@ -1551,6 +1547,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const currentItem = todayItems[currentIndex] ?? null;
     const currentItemGroups = Array.isArray((currentItem as any)?.groups) ? (currentItem as any).groups : [];
+    const badgeSummary = visibleBadgeSummary(currentItemGroups, 2);
     const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
@@ -1721,10 +1718,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const missingLearnMode = learnMode === null;
     const missingDirection = directionMode === null;
-    const missingDrillSource = learnMode === "DRILL" && drillSource === null;
-    const startDisabled = missingLearnMode || missingDirection || missingDrillSource;
+    const startDisabled = !canStartTraining(learnMode, trainingMaterial, directionMode);
     const learnModeHighlight = missingLearnMode && startDisabled;
-    const drillSourceHighlight = missingDrillSource && startDisabled;
+    const materialHighlight = startDisabled && (trainingMaterial.kind === "GROUP" && !trainingMaterial.groupId);
     const directionHighlight = missingDirection && startDisabled;
     function openCurrentCardGroupsEditor() {
         const item: any = todayItems[currentIndex];
@@ -1778,11 +1774,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const startHint = missingLearnMode
         ? "Lernmethode wählen"
-        : missingDrillSource
-            ? "Quelle wählen (Alle Karten / Zuletzt nicht gewusst)"
-            : missingDirection
-                ? "Abfragerichtung wählen"
-                : null;
+        : trainingMaterial.kind === "GROUP" && !trainingMaterial.groupId
+            ? "Gruppe auswählen"
+            : learnMode === "LEITNER_TODAY" && trainingMaterial.kind === "LAST_MISSED"
+                ? "„Zuletzt nicht gewusst“ ist nur in Freies Üben verfügbar"
+                : missingDirection
+                    ? "Abfragerichtung wählen"
+                    : null;
     const cardGroupsUnchanged = (() => {
         const item: any = todayItems[currentIndex];
         const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
@@ -1852,8 +1850,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         // NICHTS vorauswählen (UX!)
                                         setLearnMode(null);
                                         setDirectionMode(null);
-                                        setDrillSource(null);
-                                        setDrillMenuOpen(false);
+                                        setTrainingMaterial({ kind: "ALL" });
 
                                         // Session reset
                                         setTodayItems([]);
@@ -1944,15 +1941,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                         setLearnMode(null);
                                         setDirectionMode(null);
-                                        setDrillSource(null);
-                                        setDrillMenuOpen(false);
+                                        setTrainingMaterial({ kind: "ALL" });
                                         resetSessionTracking();
 
                                         return;
                                     }
 
                                     setOpenLearn(false);
-                                    setDrillMenuOpen(false);
                                 }}
                             >
                                 {/* === SETUP === */}
@@ -1962,22 +1957,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         {/* Hint card for setup guidance */}
                                         <div className="mt-2 hint-card border border-soft">
                                             Wähle Lernmethode, Abfragerichtung – dann starten wir.
-                                        </div>
-
-                                        <div className="mt-4 rounded-xl border p-3 space-y-3">
-                                            <GroupSelector
-                                                groups={groups}
-                                                selectedIds={selectedGroupIds}
-                                                onChange={setSelectedGroupIds}
-                                                label="Gruppenfilter (optional, ANY-OF)"
-                                                emptyText="Noch keine Gruppen – lege welche über Verwalten an."
-                                                showAllOption
-                                                allActive={!hasActiveGroupFilter}
-                                                onSelectAll={() => setSelectedGroupIds([])}
-                                            />
-                                            <div className="flex gap-2">
-                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                            </div>
                                         </div>
 
                                         <div
@@ -1998,7 +1977,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             type="button"
                                                             onClick={() => {
                                                                 setLearnMode("LEITNER_TODAY");
-                                                                setDrillMenuOpen(false);
                                                             }}
                                                             className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
                                                                 ? "border-accent bg-surface shadow-soft"
@@ -2029,15 +2007,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             type="button"
                                                             onClick={() => {
                                                                 setLearnMode("DRILL");
-                                                                setDrillMenuOpen(false);
-                                                                if (!drillSource) {
-                                                                    setTimeout(() => {
-                                                                        drillSourceRef.current?.scrollIntoView({
-                                                                            behavior: "smooth",
-                                                                            block: "center",
-                                                                        });
-                                                                    }, 0);
-                                                                }
                                                             }}
                                                             className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
                                                                 ? "border-accent bg-surface shadow-soft"
@@ -2068,90 +2037,58 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </div>
                                         </div>
 
-                                        {learnMode === "DRILL" ? (
+                                        <div ref={materialRef} className="mt-4">
                                             <div
-                                                ref={drillSourceRef}
-                                                className="mt-4"
+                                                className={
+                                                    materialHighlight
+                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                        : ""
+                                                }
                                             >
-                                                <div
-                                                    className={
-                                                        drillSourceHighlight
-                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                            : ""
-                                                    }
-                                                >
-                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                        <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
-                                                        <div className="mt-2" ref={drillMenuRef}>
-                                                            <button
-                                                                type="button"
-                                                                className="flex w-full items-center justify-between rounded-xl border bg-surface p-3 text-left shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
-                                                                onClick={() => setDrillMenuOpen((prev) => !prev)}
-                                                            >
-                                                                <span className={drillSource ? "text-primary" : "text-muted"}>
-                                                                    {drillSource === "ALL"
-                                                                        ? "Alle Karten"
-                                                                        : drillSource === "LAST_MISSED"
-                                                                            ? "Zuletzt nicht gewusst"
-                                                                            : "Bitte auswählen…"}
-                                                                </span>
-                                                                <span className="text-xs text-muted">▾</span>
-                                                            </button>
+                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
+                                                    <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
+                                                        <select
+                                                            className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                            value={trainingMaterial.kind}
+                                                            onChange={(event) => {
+                                                                const next = event.target.value;
+                                                                if (next === "GROUP") {
+                                                                    setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
+                                                                    return;
+                                                                }
+                                                                setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
+                                                            }}
+                                                        >
+                                                            <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
+                                                            <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
+                                                            <option value="GROUP">Bestimmte Gruppe…</option>
+                                                        </select>
 
-                                                            {drillMenuOpen ? (
-                                                                <div className="mt-2 space-y-2 rounded-xl border bg-surface p-2 shadow-soft">
-                                                                    <button
-                                                                        type="button"
-                                                                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "ALL"
-                                                                            ? "bg-surface-elevated"
-                                                                            : "hover:bg-surface-elevated"
-                                                                            }`}
-                                                                        onClick={() => {
-                                                                            setDrillSource("ALL");
-                                                                            setDrillMenuOpen(false);
-                                                                        }}
-                                                                    >
-                                                                        <span>Alle Karten</span>
-                                                                        {/* Count badge */}
-                                                                        <span className="count-badge">
-                                                                            {setupCountsLoading ? "…" : setupCounts.totalCards}
-                                                                        </span>
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${drillSource === "LAST_MISSED"
-                                                                            ? "bg-surface-elevated"
-                                                                            : "hover:bg-surface-elevated"
-                                                                            }`}
-                                                                        onClick={() => {
-                                                                            setDrillSource("LAST_MISSED");
-                                                                            setDrillMenuOpen(false);
-                                                                        }}
-                                                                    >
-                                                                        <span>Zuletzt nicht gewusst</span>
-                                                                        {/* Count badge */}
-                                                                        <span className="count-badge">
-                                                                            {setupCountsLoading ? "…" : setupCounts.lastMissedCount}
-                                                                        </span>
-                                                                    </button>
+                                                        {trainingMaterial.kind === "GROUP" ? (
+                                                            <div className="mt-2 space-y-2">
+                                                                <select
+                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                    value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
+                                                                    onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
+                                                                >
+                                                                    <option value="">Gruppe auswählen…</option>
+                                                                    {groups.map((group) => (
+                                                                        <option key={group.id} value={group.id}>{group.name}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <div className="flex items-center justify-between text-xs text-muted">
+                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
                                                                 </div>
-                                                            ) : null}
-                                                        </div>
-                                                        {drillSource === null ? (
-                                                            <div className="mt-2 hint-card border border-soft">
-                                                                {/* Drill hint */}
-                                                                <div>Bitte Quelle auswählen.</div>
-                                                                {!setupCountsLoading && setupCounts.lastMissedCount > 0 ? (
-                                                                    <div className="mt-1">
-                                                                        Es warten {setupCounts.lastMissedCount} Karten im &quot;Zuletzt nicht gewusst&quot; Topf.
-                                                                    </div>
-                                                                ) : null}
                                                             </div>
-                                                        ) : null}
+                                                        ) : (
+                                                            <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
-                                        ) : null}
+                                        </div>
 
                                         <div
                                             ref={directionRef}
@@ -2242,8 +2179,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     return;
                                                 }
 
-                                                if (learnMode === "DRILL" && !drillSource) {
-                                                    triggerSetupHighlight("DRILLSOURCE");
+                                                if (!canStartTraining(learnMode, trainingMaterial, directionMode)) {
+                                                    triggerSetupHighlight("MATERIAL");
                                                     return;
                                                 }
 
@@ -2272,7 +2209,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         });
                                                     }
                                                 } else {
-                                                    if (drillSource === "ALL") {
+                                                    if (trainingMaterial.kind === "ALL" || trainingMaterial.kind === "GROUP") {
                                                         await loadAllForDrill();
                                                     } else {
                                                         await loadLastMissed();
@@ -2351,7 +2288,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                             setLearnMode(null);
                                                             setDirectionMode(null);
-                                                            setDrillSource(null);
+                                                            setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
                                                     >
@@ -2400,7 +2337,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                 }
 
                                                                 setLearnMode("DRILL");
-                                                                setDrillSource("LAST_MISSED");
+                                                                setTrainingMaterial({ kind: "LAST_MISSED" });
                                                                 setLearnStarted(true);
                                                                 setStatus("");
 
@@ -2498,14 +2435,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                             setLearnMode(null);
                                                             setDirectionMode(null);
-                                                            setDrillSource(null);
+                                                            setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
                                                     >
                                                         Fertig
                                                     </button>
                                                 </div>
-                                            ) : learnMode === "DRILL" && drillSource === "LAST_MISSED" && lastMissedEmpty ? (
+                                            ) : learnMode === "DRILL" && trainingMaterial.kind === "LAST_MISSED" && lastMissedEmpty ? (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
                                                     <div className="text-lg font-semibold">
                                                         Keine zuletzt nicht gewussten Karten 🎉
@@ -2529,7 +2466,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                             setLearnMode(null);
                                                             setDirectionMode(null);
-                                                            setDrillSource(null);
+                                                            setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
                                                     >
@@ -2570,7 +2507,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                                             setLearnMode(null);
                                                                             setDirectionMode(null);
-                                                                            setDrillSource(null);
+                                                                            setTrainingMaterial({ kind: "ALL" });
                                                                             resetSessionTracking();
                                                                         }}
                                                                     >
@@ -2665,8 +2602,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 {/* ===== Card ===== */}
                                                 <div className="mt-3 rounded-2xl border p-6 shadow-soft bg-surface">
                                                     {/* Top Actions Row */}
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        {/* Links: Audio aufnehmen – nur wenn KEIN Audio existiert */}
+                                                    <div className="flex flex-wrap items-center justify-between gap-3">
                                                         {!todayItems[currentIndex]?.audio_path ? (
                                                             <button
                                                                 type="button"
@@ -2679,13 +2615,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             <div />
                                                         )}
 
-                                                        <div className="ml-auto flex items-center gap-4">
-                                                            <div className="hidden sm:flex flex-wrap items-center justify-end gap-1 max-w-[240px]">
+                                                        <div className="ml-auto flex items-center gap-2">
+                                                            <div className="hidden sm:flex flex-wrap items-center justify-end gap-1.5 max-w-[240px]">
                                                                 {currentItemGroups.length > 0 ? (
                                                                     <>
-                                                                        {currentItemGroups.slice(0, 2).map((group: any) => <GroupBadge key={group.id} group={group} />)}
-                                                                        {currentItemGroups.length > 2 ? (
-                                                                            <span className="text-xs text-muted">+{currentItemGroups.length - 2} weitere</span>
+                                                                        {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                                        {badgeSummary.overflow > 0 ? (
+                                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface-elevated px-2 text-[11px] text-muted">+{badgeSummary.overflow}</span>
                                                                         ) : null}
                                                                     </>
                                                                 ) : (
@@ -2719,7 +2655,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             learningTypeLabel={reveal ? learningTypeLabel : null}
+                                                            isFlipped={learningHelpFlipped}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
+                                                            onFlipBack={flipBackToPrompt}
+                                                            backContent={
+                                                                <LearningHelpPanel
+                                                                    loading={learningHelpLoading}
+                                                                    analysis={learningHelpAnalysis}
+                                                                    options={learningHelpTargetOptions}
+                                                                    showSelection={learningHelpSelectionOpen}
+                                                                    onSelectTarget={(target) => {
+                                                                        void selectLearningHelpTarget(target);
+                                                                    }}
+                                                                    onFlipBack={flipBackToPrompt}
+                                                                />
+                                                            }
                                                         />
                                                     </div>
 
@@ -2790,22 +2740,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         </div>
                                                     ) : null}
                                                 </div>
-
-                                                <LearningHelpPanel
-                                                    open={learningHelpOpen}
-                                                    loading={learningHelpLoading}
-                                                    analysis={learningHelpAnalysis}
-                                                    options={learningHelpTargetOptions}
-                                                    showSelection={learningHelpSelectionOpen}
-                                                    onClose={() => {
-                                                        setLearningHelpOpen(false);
-                                                        setLearningHelpSelectionOpen(false);
-                                                        setLearningHelpLoading(false);
-                                                    }}
-                                                    onSelectTarget={(target) => {
-                                                        void selectLearningHelpTarget(target);
-                                                    }}
-                                                />
                                             </>
                                         );
                                     })()
