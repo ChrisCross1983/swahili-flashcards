@@ -35,22 +35,15 @@ export default function LearningHelpPanel({
     onFlipBack,
 }: Props) {
     return (
-        <div className="rounded-3xl border border-soft bg-surface p-5 shadow-soft">
-            <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-primary">Lernhilfe · Kartenrückseite</div>
-                <button type="button" className="rounded-full border border-soft px-3 py-1.5 text-xs text-muted hover:bg-surface-elevated" onClick={onFlipBack}>
-                    Zur Vorderseite
-                </button>
-            </div>
-
+        <div className="space-y-4" data-testid="learning-help-panel">
             {showSelection ? (
-                <div className="mt-4 space-y-2">
-                    <p className="text-sm text-muted">Was möchtest du genauer ansehen?</p>
+                <div className="space-y-2">
+                    <p className="text-sm text-muted">Welche Ebene hilft dir gerade am meisten?</p>
                     {options.map((option) => (
                         <button
                             key={`${option.kind}-${option.value}`}
                             type="button"
-                            className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-left text-sm hover:bg-surface"
+                            className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-left text-sm text-primary hover:bg-surface"
                             onClick={() => onSelectTarget(option)}
                         >
                             {option.label}
@@ -59,23 +52,28 @@ export default function LearningHelpPanel({
                 </div>
             ) : null}
 
-            {!showSelection && loading ? <div className="mt-4 text-sm text-muted">Lernhilfe wird vorbereitet…</div> : null}
+            {!showSelection && loading ? <div className="text-sm text-muted">Lerntipps werden vorbereitet…</div> : null}
 
             {!showSelection && !loading && analysis ? (
-                <div className="mt-4 space-y-3">
-                    <div className="inline-flex rounded-full border border-soft bg-surface-elevated px-2.5 py-1 text-xs font-semibold text-muted">
-                        {typeLabel(analysis.type)} · {analysis.target.value}
-                    </div>
-                    {analysis.sections.map((section) => (
-                        <div key={section.title} className="rounded-2xl border border-soft bg-surface-elevated p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-muted">{section.title}</div>
-                            <div className="mt-1 space-y-1 text-sm text-primary">
-                                {section.lines.map((line) => (
-                                    <div key={line}>{line}</div>
-                                ))}
-                            </div>
-
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="inline-flex rounded-full border border-soft bg-surface-elevated px-2.5 py-1 text-xs font-semibold text-muted">
+                            {typeLabel(analysis.type)} · {analysis.target.value}
                         </div>
+                        <button type="button" className="rounded-full border border-soft px-3 py-1 text-xs text-muted hover:bg-surface-elevated" onClick={onFlipBack}>
+                            Zur Aufgabe
+                        </button>
+                    </div>
+
+                    {analysis.sections.map((section) => (
+                        <section key={section.title} className="rounded-2xl border border-soft bg-surface-elevated p-3">
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{section.title}</h3>
+                            <ul className="mt-1 space-y-1 text-sm text-primary">
+                                {section.lines.map((line) => (
+                                    <li key={line}>{line}</li>
+                                ))}
+                            </ul>
+                        </section>
                     ))}
                 </div>
             ) : null}

@@ -2601,31 +2601,42 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                 {/* ===== Card ===== */}
                                                 <div className="mt-3 rounded-2xl border p-6 shadow-soft bg-surface">
-                                                    {/* Top Actions Row */}
-                                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                                        {!todayItems[currentIndex]?.audio_path ? (
+                                                    <div className="space-y-3">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            {!todayItems[currentIndex]?.audio_path ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn btn-ghost text-sm"
+                                                                    onClick={toggleLearnRecording}
+                                                                >
+                                                                    {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                                                </button>
+                                                            ) : (
+                                                                <span className="rounded-full border border-soft bg-surface-elevated px-3 py-1.5 text-xs text-muted">
+                                                                    Audio vorhanden
+                                                                </span>
+                                                            )}
+
                                                             <button
                                                                 type="button"
-                                                                className="btn btn-ghost text-sm"
-                                                                onClick={toggleLearnRecording}
+                                                                className="btn btn-ghost text-sm whitespace-nowrap"
+                                                                onClick={startEditFromLearn}
                                                             >
-                                                                {isRecording ? "⏹️ Stop & Speichern" : "🎙️ Audio aufnehmen"}
+                                                                ✏️ Bearbeiten
                                                             </button>
-                                                        ) : (
-                                                            <div />
-                                                        )}
+                                                        </div>
 
-                                                        <div className="ml-auto flex items-center gap-2">
-                                                            <div className="hidden sm:flex flex-wrap items-center justify-end gap-1.5 max-w-[240px]">
+                                                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-soft bg-surface-elevated px-3 py-2">
+                                                            <div className="flex min-h-7 flex-wrap items-center gap-1.5">
                                                                 {currentItemGroups.length > 0 ? (
                                                                     <>
                                                                         {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
                                                                         {badgeSummary.overflow > 0 ? (
-                                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface-elevated px-2 text-[11px] text-muted">+{badgeSummary.overflow}</span>
+                                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{badgeSummary.overflow}</span>
                                                                         ) : null}
                                                                     </>
                                                                 ) : (
-                                                                    <span className="text-xs text-muted">Noch keiner Gruppe zugeordnet</span>
+                                                                    <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
                                                                 )}
                                                             </div>
                                                             <button
@@ -2634,15 +2645,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                 onClick={openCurrentCardGroupsEditor}
                                                             >
                                                                 {currentItemGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
-                                                            </button>
-
-                                                            {/* Rechts: Bearbeiten */}
-                                                            <button
-                                                                type="button"
-                                                                className="btn btn-ghost text-sm whitespace-nowrap"
-                                                                onClick={startEditFromLearn}
-                                                            >
-                                                                ✏️ Bearbeiten
                                                             </button>
                                                         </div>
                                                     </div>

@@ -38,13 +38,26 @@ const ADVERB_WORDS = new Set(["hapa", "pale", "kule", "mbali", "karibu", "tena",
 const ADJECTIVE_WORDS = new Set(["nzuri", "kubwa", "ndogo", "mpya", "bora", "rahisi", "ngumu", "haraka", "safi"]);
 const PLURAL_PREFIXES = ["ma", "vi", "wa"];
 const NOUN_PREFIXES = ["m", "mw", "ki", "ch", "ji", "u", "n"];
+const TIME_ADVERBS = new Set(["jana", "leo", "kesho", "sasa"]);
+const PLACE_ADVERBS = new Set(["hapa", "pale", "kule", "mbali", "karibu"]);
+
+const PRONOUN_PATTERNS: Record<string, { role: string; pairing: string[]; strategy: string }> = {
+    mimi: { role: "1. Person Singular", pairing: ["mimi nina-…", "mimi si-…"], strategy: "Lerne zusammen mit ni-/si- Formen." },
+    wewe: { role: "2. Person Singular", pairing: ["wewe una-…", "wewe hu-…"], strategy: "Mit u- Formen üben statt isoliert." },
+    yeye: { role: "3. Person Singular", pairing: ["yeye ana-…", "yeye ha-…"], strategy: "Mit a- Formen verankern." },
+    sisi: { role: "1. Person Plural", pairing: ["sisi tuna-…", "sisi hatu-…"], strategy: "Als Team-Form mit tu-/hatu- lernen." },
+    ninyi: { role: "2. Person Plural", pairing: ["ninyi mna-…", "ninyi ham-…"], strategy: "Mit m-/ham- Verbmustern koppeln." },
+    wao: { role: "3. Person Plural", pairing: ["wao wana-…", "wao hawa-…"], strategy: "Mit wa-/hawa- Muster lernen." },
+};
 
 function normalize(text: string | null | undefined): string {
     return (text ?? "").trim();
 }
+
 function words(text: string): string[] {
     return normalize(text).toLowerCase().split(/\s+/).map((w) => w.replace(/^[^\p{L}]+|[^\p{L}.!?]+$/gu, "")).filter(Boolean);
 }
+
 function looksLikeGermanNoun(german: string): boolean {
     const first = normalize(german).split(/\s+/)[0] ?? "";
     return /^[A-ZÄÖÜ]/.test(first);
@@ -56,9 +69,47 @@ function likelyPluralNoun(sw: string, meta: CardMeta): boolean {
     if (normalize(meta.nounClass).toLowerCase() === "ki/vi" && sw.startsWith("vi")) return true;
     return PLURAL_PREFIXES.some((prefix) => sw.startsWith(prefix) && sw.length > prefix.length + 1);
 }
+
 function likelyNoun(sw: string, german: string): boolean {
     if (looksLikeGermanNoun(german)) return true;
     return NOUN_PREFIXES.some((prefix) => sw.startsWith(prefix) && sw.length > prefix.length + 1);
+}
+
+function inferNounClassHint(nounClass: string): string {
+    if (nounClass.toLowerCase() === "ki/vi") return "ki- im Singular, vi- im Plural";
+    if (nounClass.toLowerCase() === "m/wa") return "m-/mw- im Singular, wa- im Plural";
+    return `Merke dir das Klassenpaar ${nounClass}`;
+}
+
+function verbStem(base: string): string {
+    return base.replace(/^ku/, "");
+}
+
+function presentForms(base: string): string[] {
+    const stem = verbStem(base);
+    return [`nina${stem}`, `una${stem}`, `ana${stem}`, `tuna${stem}`];
+}
+
+function adverbRole(target: string): { role: string; strategy: string; context: string } {
+    if (TIME_ADVERBS.has(target)) {
+        return {
+            role: "Zeitwort (antwortet auf „wann?“)",
+            strategy: "Mit einem typischen Verb lernen: jana/leo/kesho + Verb.",
+            context: `Beispielrahmen: ${target} + nina/ana/tu-...`,
+        };
+    }
+    if (PLACE_ADVERBS.has(target)) {
+        return {
+            role: "Ortswort (antwortet auf „wo?“)",
+            strategy: "Mit Ortsverbinder lernen: hapa/pale/kule + nyumbani/kazini.",
+            context: `Beispielrahmen: niko ${target === "mbali" ? "mbali" : target}`,
+        };
+    }
+    return {
+        role: "Adverb (präzisiert Umstand)",
+        strategy: "Im Mini-Satz mit passendem Verb festigen.",
+        context: `Beispielrahmen: ${target} + Verb`,
+    };
 }
 
 export function getLearningUnitType(item: TodayItem | null | undefined, targetText?: string): LearningUnitType {
@@ -102,35 +153,33 @@ export function resolveAnalysisTargetFromCard(item: TodayItem | null | undefined
     return { unitType, needsSelection: phraseOrSentence && tokenOptions.length > 1, defaultTarget: options[0], options };
 }
 
-const inferNounClassHint = (nounClass: string) => nounClass.toLowerCase() === "ki/vi"
-    ? "ki- im Singular, vi- im Plural"
-    : nounClass.toLowerCase() === "m/wa"
-        ? "m-/mw- im Singular, wa- im Plural"
-        : `Merke dir das Klassenpaar ${nounClass}`;
-
-const verbForms = (base: string) => ["nina", "una", "ana", "tuna"].map((p) => `${p}${base.replace(/^ku/, "")}`);
-
 function buildNoun(item: TodayItem, target: AnalysisTarget, type: "noun" | "plural_noun"): LearningAnalysis {
     const meta = item as TodayItem & CardMeta;
     const nounClass = normalize(meta.nounClass);
     const singular = normalize(meta.singular || target.value || readSwahili(item));
     const plural = normalize(meta.plural);
-    const formLines = [`Singular: ${singular}`];
-    if (plural) formLines.push(`Plural: ${plural}`);
-    if (nounClass) formLines.push(`Nomenklasse: ${nounClass} (${inferNounClassHint(nounClass)})`);
+
+    const structure = [`Singular: ${singular}`];
+    if (plural) {
+        structure.push(`Plural: ${plural}`);
+    } else if (type === "plural_noun") {
+        structure.push("Dies ist bereits eine Pluralform.");
+    } else {
+        structure.push("Plural nicht hinterlegt – später mit Klassenmuster ergänzen.");
+    }
+    if (nounClass) structure.push(`Klassenmuster: ${nounClass} (${inferNounClassHint(nounClass)})`);
 
     return {
         type,
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Typ & Bedeutung", lines: ["Nomen", readGerman(item)] },
-            { title: "Form & Struktur", lines: formLines },
+            { title: "Was ist das?", lines: ["Nomen", `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: structure },
             {
-                title: "Lernstrategie",
-                lines: [nounClass ? "Lerne das Wort mit Nomenklasse und Plural als Paket." : "Lerne das Wort als Mini-Chunk mit Begleitwort (z. B. na, ya, cha)."],
+                title: "Wie lernst du es am besten?",
+                lines: [nounClass ? "Lerne Singular + Plural + Klasse als ein Paket." : "Kombiniere das Nomen mit einem typischen Begleiter (z. B. na/ya/cha)."],
             },
-            { title: "Typische Verbindungen", lines: [`${singular} nzuri`, plural ? `${plural} nzuri` : `${singular} yangu`] },
         ],
         fallback: !plural && !nounClass,
     };
@@ -138,31 +187,35 @@ function buildNoun(item: TodayItem, target: AnalysisTarget, type: "noun" | "plur
 
 function buildVerb(item: TodayItem, target: AnalysisTarget): LearningAnalysis {
     const baseForm = target.value.startsWith("ku") ? target.value : `ku${target.value}`;
+    const stem = verbStem(baseForm);
     return {
         type: "verb",
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Grundform", lines: [baseForm, `Bedeutung: ${readGerman(item)}`] },
-            { title: "Muster", lines: ["Subjektpräfix + Zeitmarker + Stamm", "ni-/u-/a-/tu- + -na- + Stamm"] },
-            { title: "Nützliche Formen", lines: verbForms(baseForm).slice(0, 4) },
-            { title: "Mini-Chunks", lines: [`nina${baseForm.replace(/^ku/, "")} maji`, `ana${baseForm.replace(/^ku/, "")} chai`] },
-            { title: "Lernstrategie", lines: ["Lerne Verben als Muster statt isoliert.", "ku- markiert den Infinitiv, der Stamm bleibt stabil."] },
+            { title: "Was ist das?", lines: [`Infinitiv: ${baseForm}`, `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: [`Stamm: -${stem}`, "Muster: Subjektpräfix + -na- + Stamm", ...presentForms(baseForm)] },
+            { title: "Wie lernst du es am besten?", lines: ["Übe als Verbgerüst (nina-/una-/ana-) statt nur als Übersetzung.", `Nützlicher Rahmen: nina${stem} ...`] },
         ],
         fallback: false,
     };
 }
 
 function buildPronoun(item: TodayItem, target: AnalysisTarget): LearningAnalysis {
+    const entry = PRONOUN_PATTERNS[target.value] ?? {
+        role: "Pronomen/Funktionswort",
+        pairing: [`${target.value} + passendes Verbmuster`],
+        strategy: "Nicht isoliert lernen, sondern mit Verbform koppeln.",
+    };
+
     return {
         type: "pronoun",
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Typ", lines: ["Personalpronomen / Funktionswort"] },
-            { title: "Funktion", lines: [`${target.value} = ${readGerman(item)}`] },
-            { title: "Typische Paarung", lines: ["sisi tuna-...", "wao wana-..."] },
-            { title: "Lernstrategie", lines: ["Mit passender Verbstruktur lernen, nicht isoliert."] },
+            { title: "Was ist das?", lines: [entry.role, `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: entry.pairing },
+            { title: "Wie lernst du es am besten?", lines: [entry.strategy] },
         ],
         fallback: false,
     };
@@ -174,32 +227,66 @@ function buildGreeting(item: TodayItem, target: AnalysisTarget): LearningAnalysi
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Kommunikative Funktion", lines: ["Soziale Formel / Gruß", readGerman(item)] },
-            { title: "Wann verwenden?", lines: ["Im Alltag zur Begrüßung oder empathischen Reaktion."] },
-            { title: "Lernen", lines: ["Als feste Ausdruckseinheit lernen, nicht wortwörtlich."] },
-            { title: "Typische Antwort", lines: ["Asante / Asante sana", "Nzuri, asante"] },
+            { title: "Was ist das?", lines: ["Soziale Formel / feste Wendung", `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: ["Nicht wortwörtlich zerlegen, sondern als Kommunikationssignal verstehen.", "Kontext entscheidet (Begrüßung, Mitgefühl, Höflichkeit)."] },
+            { title: "Wie lernst du es am besten?", lines: ["Lerne direkt mit natürlicher Antwort.", "Typische Antwort: asante / asante sana"] },
         ],
         fallback: false,
     };
 }
 
 function buildSmallWord(item: TodayItem, target: AnalysisTarget, type: "number" | "particle" | "adverb" | "adjective"): LearningAnalysis {
-    const config = {
-        number: { role: "Zahlwort", combos: ["watu wawili", "saa saba"] },
-        particle: { role: "Antwort- oder Diskurswort", combos: ["ndiyo, sawa", "hapana, siwezi"] },
-        adverb: { role: "Adverb/Ortswort", combos: ["mbali kidogo", "hapa nyumbani"] },
-        adjective: { role: "Eigenschaftswort", combos: ["kitabu kizuri", "mtu mzuri"] },
-    }[type];
+    if (type === "number") {
+        return {
+            type,
+            target,
+            germanMeaning: readGerman(item),
+            sections: [
+                { title: "Was ist das?", lines: ["Zahlwort", `Bedeutung: ${readGerman(item)}`] },
+                { title: "Was ist wichtig?", lines: ["Zahlwörter wirken meist als Begleiter zu Nomen.", "Achte auf natürliche Zahl + Nomen-Kombinationen (nicht isoliert)."] },
+                { title: "Wie lernst du es am besten?", lines: ["Mit alltagsnahen Mengen lernen: watu wawili, saa saba."] },
+            ],
+            fallback: false,
+        };
+    }
+
+    if (type === "adverb") {
+        const role = adverbRole(target.value);
+        return {
+            type,
+            target,
+            germanMeaning: readGerman(item),
+            sections: [
+                { title: "Was ist das?", lines: [role.role, `Bedeutung: ${readGerman(item)}`] },
+                { title: "Was ist wichtig?", lines: [role.context] },
+                { title: "Wie lernst du es am besten?", lines: [role.strategy] },
+            ],
+            fallback: false,
+        };
+    }
+
+    if (type === "particle") {
+        return {
+            type,
+            target,
+            germanMeaning: readGerman(item),
+            sections: [
+                { title: "Was ist das?", lines: ["Partikel/Antwortwort", `Bedeutung: ${readGerman(item)}`] },
+                { title: "Was ist wichtig?", lines: ["Steuert Gesprächston und Reaktion, nicht nur den Lexik-Sinn."] },
+                { title: "Wie lernst du es am besten?", lines: ["In kurzen Dialogpaaren üben: Frage + Partikelantwort."] },
+            ],
+            fallback: false,
+        };
+    }
 
     return {
         type,
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Rolle im Satz", lines: [config.role] },
-            { title: "Bedeutung im Kontext", lines: [readGerman(item)] },
-            { title: "Typische Chunks", lines: config.combos },
-            { title: "Lernstrategie", lines: ["Am besten in kurzen Kontext-Chunks lernen."] },
+            { title: "Was ist das?", lines: ["Adjektiv", `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: ["Beschreibt Eigenschaften und passt sich oft an die Nomenstruktur an."] },
+            { title: "Wie lernst du es am besten?", lines: ["Mit einem typischen Nomenpaar lernen (z. B. mtu mzuri)."] },
         ],
         fallback: false,
     };
@@ -211,9 +298,9 @@ function buildPhrase(item: TodayItem, target: AnalysisTarget): LearningAnalysis 
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Typ", lines: ["Feste Wendung / Phrase"] },
-            { title: "Verwendung", lines: ["Als Gesamtchunk lernen, nicht Wort-für-Wort."] },
-            { title: "Mini-Chunk", lines: [target.value] },
+            { title: "Was ist das?", lines: ["Feste Wendung / Phrase", `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: ["Als gesamte Einheit merken, nicht Wort-für-Wort rekonstruieren."] },
+            { title: "Wie lernst du es am besten?", lines: [target.value] },
         ],
         fallback: false,
     };
@@ -226,8 +313,9 @@ function buildSentence(item: TodayItem, target: AnalysisTarget): LearningAnalysi
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Satzstruktur", lines: ["Subjekt + Verb + Ergänzung", ...sentenceWords.slice(0, 3)] },
-            { title: "Lernstrategie", lines: ["Satz in 2-3 Sprech-Chunks teilen und laut üben."] },
+            { title: "Was ist das?", lines: ["Satz", `Bedeutung: ${readGerman(item)}`] },
+            { title: "Was ist wichtig?", lines: ["Grundrahmen: Subjekt + Verb + Ergänzung", ...sentenceWords.slice(0, 2)] },
+            { title: "Wie lernst du es am besten?", lines: ["In 2-3 Sprechblöcke teilen und laut sprechen."] },
         ],
         fallback: sentenceWords.length < 2,
     };
@@ -250,8 +338,8 @@ export function buildLearningAnalysis(item: TodayItem, target: AnalysisTarget): 
         target,
         germanMeaning: readGerman(item),
         sections: [
-            { title: "Bedeutung", lines: [readGerman(item)] },
-            { title: "Lernstrategie", lines: ["Nutze die Karte als Mini-Chunk mit einem passenden Verb oder Kontextwort."] },
+            { title: "Was ist das?", lines: [`Bedeutung: ${readGerman(item)}`] },
+            { title: "Wie lernst du es am besten?", lines: ["Lerne dieses Wort in einem kurzen, echten Gebrauchssatz statt isoliert."] },
         ],
         fallback: true,
     };

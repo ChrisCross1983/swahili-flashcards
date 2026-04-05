@@ -61,31 +61,40 @@ describe("didactic templates", () => {
         const nounCard: TodayItemWithMeta = item({ swahili_text: "kitabu", nounClass: "ki/vi", plural: "vitabu", singular: "kitabu" } as TodayItemWithMeta);
         const analysis = buildLearningAnalysis(nounCard, { kind: "whole", value: "kitabu", label: "Wort analysieren" });
         expect(analysis.type).toBe("noun");
-        expect(analysis.sections.some((s) => s.title === "Form & Struktur")).toBe(true);
+        expect(analysis.sections.some((s) => s.title === "Was ist wichtig?")).toBe(true);
+        expect(analysis.sections).toHaveLength(3);
     });
 
     it("builds verb template", () => {
         const analysis = buildLearningAnalysis(item({ swahili_text: "kunywa", german_text: "trinken" }), { kind: "whole", value: "kunywa", label: "Wort analysieren" });
         expect(analysis.type).toBe("verb");
-        expect(analysis.sections.some((s) => s.title === "Nützliche Formen")).toBe(true);
+        const structure = analysis.sections.find((s) => s.title === "Was ist wichtig?");
+        expect(structure?.lines.join(" ")).toContain("Subjektpräfix + -na- + Stamm");
     });
 
     it("builds pronoun template", () => {
         const analysis = buildLearningAnalysis(item({ swahili_text: "sisi", german_text: "wir" }), { kind: "whole", value: "sisi", label: "Wort analysieren" });
         expect(analysis.type).toBe("pronoun");
-        expect(analysis.sections.some((s) => s.title === "Funktion")).toBe(true);
+        expect(analysis.sections.some((s) => s.lines.some((line) => line.includes("tuna-")))).toBe(true);
     });
 
     it("builds greeting template", () => {
         const analysis = buildLearningAnalysis(item({ swahili_text: "pole", german_text: "Oh, das tut mir leid" }), { kind: "whole", value: "pole", label: "Wort analysieren" });
         expect(analysis.type).toBe("greeting");
-        expect(analysis.sections.some((s) => s.title === "Kommunikative Funktion")).toBe(true);
+        expect(analysis.sections.some((s) => s.title === "Was ist wichtig?")).toBe(true);
     });
 
     it("builds adverb/small-word template", () => {
         const analysis = buildLearningAnalysis(item({ swahili_text: "mbali", german_text: "weit" }), { kind: "whole", value: "mbali", label: "Wort analysieren" });
         expect(analysis.type).toBe("adverb");
-        expect(analysis.sections.some((s) => s.title === "Typische Chunks")).toBe(true);
+        expect(analysis.sections[0]?.lines.join(" ")).toContain("Ortswort");
+    });
+
+    it("builds number template without generic chunk section", () => {
+        const analysis = buildLearningAnalysis(item({ swahili_text: "moja", german_text: "eins" }), { kind: "whole", value: "moja", label: "Wort analysieren" });
+        expect(analysis.type).toBe("number");
+        expect(analysis.sections.some((s) => s.title === "Typische Chunks")).toBe(false);
+        expect(analysis.sections.some((s) => s.lines.some((line) => line.includes("watu wawili")))).toBe(true);
     });
 });
 
