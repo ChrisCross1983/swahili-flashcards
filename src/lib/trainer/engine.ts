@@ -51,6 +51,72 @@ export function next(state: TrainerState, answered: Set<string>): TrainerState {
     };
 }
 
+export type SessionAfterDeletion = {
+    items: TodayItem[];
+    index: number;
+    reveal: boolean;
+    deletedCurrent: boolean;
+    ended: boolean;
+};
+
+export function removeDeletedCardsFromSession(
+    items: TodayItem[],
+    index: number,
+    reveal: boolean,
+    deletedCardIds: Set<string>,
+): SessionAfterDeletion {
+    if (deletedCardIds.size === 0) {
+        return {
+            items,
+            index: Math.max(0, Math.min(index, Math.max(0, items.length - 1))),
+            reveal,
+            deletedCurrent: false,
+            ended: items.length === 0,
+        };
+    }
+
+    const deletedIndexes = new Set<number>();
+    const remaining: TodayItem[] = [];
+    items.forEach((item, itemIndex) => {
+        const cardId = resolveCardId(item);
+        if (cardId && deletedCardIds.has(cardId)) {
+            deletedIndexes.add(itemIndex);
+            return;
+        }
+        remaining.push(item);
+    });
+
+    if (remaining.length === 0) {
+        return {
+            items: [],
+            index: 0,
+            reveal: false,
+            deletedCurrent: deletedIndexes.has(index),
+            ended: true,
+        };
+    }
+
+    const deletedCurrent = deletedIndexes.has(index);
+    if (deletedCurrent) {
+        return {
+            items: remaining,
+            index: Math.min(index, remaining.length - 1),
+            reveal: false,
+            deletedCurrent: true,
+            ended: false,
+        };
+    }
+
+    const removedBeforeCurrent = Array.from(deletedIndexes).filter((itemIndex) => itemIndex < index).length;
+    return {
+        items: remaining,
+        index: Math.max(0, index - removedBeforeCurrent),
+        reveal,
+        deletedCurrent: false,
+        ended: false,
+    };
+}
+
 function grade(state: TrainerState, correct: boolean): TrainerState {
     const current = state.items[state.index];
     const cardId = resolveCardId(current);

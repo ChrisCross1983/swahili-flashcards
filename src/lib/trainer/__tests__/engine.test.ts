@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gradeFail, gradeSuccess, initSession, next, reveal } from "../engine";
+import { gradeFail, gradeSuccess, initSession, next, removeDeletedCardsFromSession, reveal } from "../engine";
 import type { TodayItem } from "../types";
 
 function makeItem(id: string): TodayItem {
@@ -78,5 +78,44 @@ describe("trainer engine", () => {
         expect(state.index).toBe(0);
         expect(state.reveal).toBe(false);
         expect(state.items).toEqual([]);
+    });
+
+    it("removes current deleted card and advances without reveal", () => {
+        const result = removeDeletedCardsFromSession(
+            [makeItem("1"), makeItem("2"), makeItem("3")],
+            1,
+            true,
+            new Set(["2"]),
+        );
+
+        expect(result.items.map((item) => item.id)).toEqual(["1", "3"]);
+        expect(result.index).toBe(1);
+        expect(result.reveal).toBe(false);
+        expect(result.deletedCurrent).toBe(true);
+        expect(result.ended).toBe(false);
+    });
+
+    it("keeps current card when deleting a later card", () => {
+        const result = removeDeletedCardsFromSession(
+            [makeItem("1"), makeItem("2"), makeItem("3")],
+            0,
+            true,
+            new Set(["3"]),
+        );
+
+        expect(result.items.map((item) => item.id)).toEqual(["1", "2"]);
+        expect(result.index).toBe(0);
+        expect(result.reveal).toBe(true);
+        expect(result.deletedCurrent).toBe(false);
+    });
+
+    it("ends session when the last remaining card gets deleted", () => {
+        const result = removeDeletedCardsFromSession([makeItem("1")], 0, true, new Set(["1"]));
+
+        expect(result.items).toEqual([]);
+        expect(result.index).toBe(0);
+        expect(result.reveal).toBe(false);
+        expect(result.ended).toBe(true);
+        expect(result.deletedCurrent).toBe(true);
     });
 });

@@ -36,7 +36,7 @@ describe("trainer card two-mode layout", () => {
         expect(expanded).toContain("Antwort");
     });
 
-    it("uses value-focused tips label in the second mode", () => {
+    it("uses personal notes label in the second mode", () => {
         const tips = renderToStaticMarkup(
             <TrainerCard
                 reveal
@@ -50,8 +50,10 @@ describe("trainer card two-mode layout", () => {
             />,
         );
 
-        expect(tips).toContain('data-mode="tips"');
-        expect(tips).toContain("Lerntipps");
+        expect(tips).toContain('data-mode="notes"');
+        expect(tips).toContain("Eigene Notizen");
+        expect(tips).toContain("Zur Vorderseite");
+        expect(tips.match(/Zur Vorderseite/g)?.length ?? 0).toBe(1);
         expect(tips).not.toContain("Karte umdrehen");
     });
 });

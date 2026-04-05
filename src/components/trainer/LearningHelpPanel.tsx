@@ -1,82 +1,83 @@
 "use client";
 
-import type { AnalysisTarget, LearningAnalysis } from "@/lib/trainer/learningHelp";
+type CardNoteDraft = {
+    mainNotes: string;
+    memoryHint: string;
+    exampleSentence: string;
+    confusionNote: string;
+};
 
 type Props = {
     loading: boolean;
-    analysis: LearningAnalysis | null;
-    options: AnalysisTarget[];
-    showSelection: boolean;
-    onSelectTarget: (target: AnalysisTarget) => void;
-    onFlipBack: () => void;
+    draft: CardNoteDraft;
+    saveStateText: string | null;
+    saving: boolean;
+    onChange: (field: keyof CardNoteDraft, value: string) => void;
+    onSave: () => void;
 };
-
-function typeLabel(type: LearningAnalysis["type"]): string {
-    if (type === "noun") return "Nomen";
-    if (type === "plural_noun") return "Plural-Nomen";
-    if (type === "verb") return "Verb";
-    if (type === "pronoun") return "Pronomen";
-    if (type === "phrase") return "Phrase";
-    if (type === "greeting") return "Grußformel";
-    if (type === "sentence") return "Satz";
-    if (type === "number") return "Zahlwort";
-    if (type === "particle") return "Partikel";
-    if (type === "adverb") return "Adverb";
-    if (type === "adjective") return "Adjektiv";
-    return "Lernhilfe";
-}
 
 export default function LearningHelpPanel({
     loading,
-    analysis,
-    options,
-    showSelection,
-    onSelectTarget,
-    onFlipBack,
+    draft,
+    saveStateText,
+    saving,
+    onChange,
+    onSave,
 }: Props) {
+    if (loading) {
+        return <div className="text-sm text-muted">Notizen werden geladen…</div>;
+    }
     return (
-        <div className="space-y-4" data-testid="learning-help-panel">
-            {showSelection ? (
-                <div className="space-y-2">
-                    <p className="text-sm text-muted">Welche Ebene hilft dir gerade am meisten?</p>
-                    {options.map((option) => (
-                        <button
-                            key={`${option.kind}-${option.value}`}
-                            type="button"
-                            className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-left text-sm text-primary hover:bg-surface"
-                            onClick={() => onSelectTarget(option)}
-                        >
-                            {option.label}
-                        </button>
-                    ))}
+        <div className="space-y-4" data-testid="learning-notes-panel">
+            <p className="text-sm text-muted">Dein persönlicher Lernbereich für diese Karte.</p>
+
+            <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Eigene Notizen</label>
+                <textarea
+                    className="min-h-28 w-full rounded-xl border border-soft bg-surface-elevated p-3 text-sm text-primary"
+                    placeholder="Merkhilfe, Grammatik, Mini-Übersetzung oder was dir beim Merken hilft…"
+                    value={draft.mainNotes}
+                    onChange={(event) => onChange("mainNotes", event.target.value)}
+                />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Merkhilfe</label>
+                    <input
+                        className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-sm"
+                        placeholder="Kurzer Gedächtnisanker"
+                        value={draft.memoryHint}
+                        onChange={(event) => onChange("memoryHint", event.target.value)}
+                    />
                 </div>
-            ) : null}
-
-            {!showSelection && loading ? <div className="text-sm text-muted">Lerntipps werden vorbereitet…</div> : null}
-
-            {!showSelection && !loading && analysis ? (
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="inline-flex rounded-full border border-soft bg-surface-elevated px-2.5 py-1 text-xs font-semibold text-muted">
-                            {typeLabel(analysis.type)} · {analysis.target.value}
-                        </div>
-                        <button type="button" className="rounded-full border border-soft px-3 py-1 text-xs text-muted hover:bg-surface-elevated" onClick={onFlipBack}>
-                            Zur Aufgabe
-                        </button>
-                    </div>
-
-                    {analysis.sections.map((section) => (
-                        <section key={section.title} className="rounded-2xl border border-soft bg-surface-elevated p-3">
-                            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{section.title}</h3>
-                            <ul className="mt-1 space-y-1 text-sm text-primary">
-                                {section.lines.map((line) => (
-                                    <li key={line}>{line}</li>
-                                ))}
-                            </ul>
-                        </section>
-                    ))}
+                <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Beispielsatz</label>
+                    <input
+                        className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-sm"
+                        placeholder="z.B. Ninapenda kitabu hiki."
+                        value={draft.exampleSentence}
+                        onChange={(event) => onChange("exampleSentence", event.target.value)}
+                    />
                 </div>
-            ) : null}
+            </div>
+
+            <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Verwechslungswort</label>
+                <input
+                    className="w-full rounded-xl border border-soft bg-surface-elevated p-3 text-sm"
+                    placeholder="Womit verwechselst du diese Karte oft?"
+                    value={draft.confusionNote}
+                    onChange={(event) => onChange("confusionNote", event.target.value)}
+                />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+                <button type="button" className="rounded-xl border border-soft px-4 py-2 text-sm font-medium" onClick={onSave} disabled={saving}>
+                    {saving ? "Speichert…" : "Notizen speichern"}
+                </button>
+                {saveStateText ? <span className="text-xs text-muted">{saveStateText}</span> : null}
+            </div>
         </div>
     );
 }

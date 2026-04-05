@@ -27,13 +27,13 @@ export default function TrainerCard({
     backContent,
 }: Props) {
     return (
-        <div className="rounded-3xl border border-soft bg-surface p-6 shadow-soft" data-testid="trainer-card-shell" data-mode={isFlipped ? "tips" : "front"}>
+        <div className="rounded-3xl border border-soft bg-surface p-6 shadow-soft" data-testid="trainer-card-shell" data-mode={isFlipped ? "notes" : "front"}>
             {isFlipped ? (
                 <div className="space-y-4" data-testid="trainer-card-back">
                     <div className="flex items-center justify-between gap-3">
                         <div>
-                            <div className="text-sm font-semibold text-primary">Lerntipps</div>
-                            <div className="text-xs text-muted">Gezielte Hilfe zu genau dieser Karte.</div>
+                            <div className="text-sm font-semibold text-primary">Eigene Notizen</div>
+                            <div className="text-xs text-muted">Dein persönlicher Lernbereich für diese Karte.</div>
                         </div>
                         {onFlipBack ? (
                             <button
@@ -41,7 +41,7 @@ export default function TrainerCard({
                                 className="rounded-full border border-soft px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface-elevated"
                                 onClick={onFlipBack}
                             >
-                                Zurück zur Aufgabe
+                                Zur Vorderseite
                             </button>
                         ) : null}
                     </div>
@@ -80,7 +80,7 @@ export default function TrainerCard({
                                         className="rounded-full border border-soft bg-surface px-3 py-1.5 text-sm font-medium text-primary hover:bg-surface-elevated"
                                         onClick={onOpenLearningHelp}
                                     >
-                                        Lerntipps öffnen
+                                        Eigene Notizen
                                     </button>
                                 </div>
                             ) : null}

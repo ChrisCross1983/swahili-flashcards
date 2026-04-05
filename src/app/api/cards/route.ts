@@ -140,23 +140,45 @@ export async function DELETE(req: Request) {
     const { searchParams } = new URL(req.url);
     const ownerKey = user.id;
     const id = searchParams.get("id");
+    if (id) {
+        const { error } = await supabaseServer
+            .from("cards")
+            .delete()
+            .eq("id", id)
+            .eq("owner_key", ownerKey);
 
-    if (!id) {
-        return NextResponse.json({ error: "id is required" }, { status: 400 });
+        if (error) {
+            console.error(error);
+            return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
+        }
+
+        return NextResponse.json({ ok: true, deletedIds: [id] });
     }
 
-    const { error } = await supabaseServer
+    const body = (await req.json().catch(() => ({}))) as { ids?: string[] };
+    const ids = Array.isArray(body.ids)
+        ? body.ids.map((value) => String(value).trim()).filter(Boolean)
+        : [];
+    if (ids.length === 0) {
+        return NextResponse.json({ error: "id or ids are required" }, { status: 400 });
+    }
+
+    const { data, error } = await supabaseServer
         .from("cards")
         .delete()
-        .eq("id", id)
-        .eq("owner_key", ownerKey);
-
+        .eq("owner_key", ownerKey)
+        .in("id", ids)
+        .select("id");
     if (error) {
         console.error(error);
         return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+        ok: true,
+        deletedCount: (data ?? []).length,
+        deletedIds: (data ?? []).map((row) => String(row.id)),
+    });
 }
 
 type UpdateCardBody = {

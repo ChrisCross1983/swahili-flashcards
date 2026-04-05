@@ -24,7 +24,7 @@ import {
     postLastMissed,
     postLearnSession,
 } from "@/lib/trainer/api";
-import { findNextUnansweredIndex } from "@/lib/trainer/engine";
+import { findNextUnansweredIndex, removeDeletedCardsFromSession } from "@/lib/trainer/engine";
 import type { CardType, Direction, LeitnerStats, TodayItem } from "@/lib/trainer/types";
 import { readGerman, readSwahili, resolveCardId, shuffleArray } from "@/lib/trainer/utils";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
@@ -40,13 +40,7 @@ import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
 import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
-import {
-    getLearningUnitType,
-    getOrCreateAnalysisMeta,
-    resolveAnalysisTargetFromCard,
-    type AnalysisTarget,
-    type LearningAnalysis,
-} from "@/lib/trainer/learningHelp";
+import { clearSelection, removeDeletedFromSelection, selectAllVisible, toggleSelection } from "@/lib/cards/selection";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -154,11 +148,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
     const [savingCardGroups, setSavingCardGroups] = useState(false);
     const [learningHelpFlipped, setLearningHelpFlipped] = useState(false);
-    const [learningHelpSelectionOpen, setLearningHelpSelectionOpen] = useState(false);
-    const [learningHelpLoading, setLearningHelpLoading] = useState(false);
-    const [learningHelpAnalysis, setLearningHelpAnalysis] = useState<LearningAnalysis | null>(null);
-    const [learningHelpTargetOptions, setLearningHelpTargetOptions] = useState<AnalysisTarget[]>([]);
-    const analysisCacheRef = useRef<Map<string, LearningAnalysis>>(new Map());
+    const [cardNoteDraft, setCardNoteDraft] = useState({ mainNotes: "", memoryHint: "", exampleSentence: "", confusionNote: "" });
+    const [cardNoteLoading, setCardNoteLoading] = useState(false);
+    const [cardNoteSaving, setCardNoteSaving] = useState(false);
+    const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
+    const [cardSelectionMode, setCardSelectionMode] = useState(false);
+    const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
 
     const router = useRouter();
     const pathname = usePathname();
@@ -312,10 +307,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     useEffect(() => {
         setLearningHelpFlipped(false);
-        setLearningHelpSelectionOpen(false);
-        setLearningHelpAnalysis(null);
-        setLearningHelpLoading(false);
-        setLearningHelpTargetOptions([]);
     }, [currentIndex, reveal]);
 
     async function uploadImage(): Promise<string | null> {
@@ -940,8 +931,37 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return false;
     }
 
-    async function deleteCard(id: string): Promise<boolean> {
-        const yes = confirm("Karte wirklich löschen?");
+    function applyDeletedCards(deletedIds: string[]) {
+        if (deletedIds.length === 0) return;
+        const deletedSet = new Set(deletedIds.map(String));
+        setCards((prev) => prev.filter((card) => !deletedSet.has(String(card.id))));
+        setSessionWrongItems((prev) => {
+            const next: Record<string, TodayItem> = {};
+            Object.entries(prev).forEach(([cardId, item]) => {
+                if (!deletedSet.has(String(cardId))) next[cardId] = item;
+            });
+            return next;
+        });
+        setAnsweredCardIds((prev) => removeDeletedFromSelection(prev, deletedSet));
+        setSessionWrongIds((prev) => removeDeletedFromSelection(prev, deletedSet));
+        setSelectedCardIds((prev) => removeDeletedFromSelection(prev, deletedSet));
+
+        setTodayItems((prev) => {
+            const adjusted = removeDeletedCardsFromSession(prev, currentIndex, reveal, deletedSet);
+            setCurrentIndex(adjusted.index);
+            setReveal(adjusted.reveal);
+            if (adjusted.deletedCurrent) {
+                setLearningHelpFlipped(false);
+            }
+            if (adjusted.ended) {
+                setLearnDone(true);
+            }
+            return adjusted.items;
+        });
+    }
+
+    async function deleteCard(id: string, options?: { skipConfirm?: boolean }): Promise<boolean> {
+        const yes = options?.skipConfirm ? true : confirm("Karte wirklich löschen?");
         if (!yes) return false;
 
         const res = await fetch(
@@ -955,9 +975,34 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             return false;
         }
 
+        applyDeletedCards([id]);
         await loadCards(undefined, { silent: true });
         showToast("Karte gelöscht ✅");
         return true;
+    }
+
+    async function deleteSelectedCards() {
+        const selectedIds = Array.from(selectedCardIds);
+        if (selectedIds.length === 0) return;
+        const yes = confirm(`${selectedIds.length} Karte(n) wirklich löschen?`);
+        if (!yes) return;
+
+        const res = await fetch("/api/cards", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+            setStatus(json?.error ?? "Bulk-Löschen fehlgeschlagen.");
+            return;
+        }
+        const deletedIds = Array.isArray(json?.deletedIds) ? json.deletedIds.map(String) : selectedIds;
+        applyDeletedCards(deletedIds);
+        setSelectedCardIds(clearSelection());
+        setCardSelectionMode(false);
+        await loadCards(undefined, { silent: true });
+        showToast(`${deletedIds.length} Karte(n) gelöscht ✅`);
     }
 
     function startEditFromLearn() {
@@ -1177,40 +1222,60 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         playCardAudioIfExists(card);
     }
 
-    function openLearningHelp() {
+    async function openLearningHelp() {
         const item = todayItems[currentIndex];
-        if (!item) return;
-
-        const resolved = resolveAnalysisTargetFromCard(item);
+        const cardId = resolveCardId(item);
+        if (!item || !cardId) return;
         setLearningHelpFlipped(true);
-        setLearningHelpTargetOptions(resolved.options);
-
-        if (resolved.needsSelection) {
-            setLearningHelpSelectionOpen(true);
-            setLearningHelpAnalysis(null);
-            return;
+        setCardNoteLoading(true);
+        setCardNoteSaveState(null);
+        try {
+            const res = await fetch(`/api/cards/notes?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store" });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht geladen werden.");
+            setCardNoteDraft({
+                mainNotes: json.note?.main_notes ?? "",
+                memoryHint: json.note?.memory_hint ?? "",
+                exampleSentence: json.note?.example_sentence ?? "",
+                confusionNote: json.note?.confusion_note ?? "",
+            });
+        } catch (error) {
+            setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
+        } finally {
+            setCardNoteLoading(false);
         }
-
-        setLearningHelpSelectionOpen(false);
-        void selectLearningHelpTarget(resolved.defaultTarget);
     }
 
-    async function selectLearningHelpTarget(target: AnalysisTarget) {
+    async function saveCardNotes() {
         const item = todayItems[currentIndex];
-        if (!item) return;
-
-        setLearningHelpSelectionOpen(false);
-        setLearningHelpLoading(true);
-
-        await Promise.resolve();
-        const analysis = getOrCreateAnalysisMeta(analysisCacheRef.current, item, target);
-        setLearningHelpAnalysis(analysis);
-        setLearningHelpLoading(false);
+        const cardId = resolveCardId(item);
+        if (!cardId) return;
+        setCardNoteSaving(true);
+        setCardNoteSaveState(null);
+        try {
+            const res = await fetch("/api/cards/notes", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    cardId,
+                    mainNotes: cardNoteDraft.mainNotes,
+                    memoryHint: cardNoteDraft.memoryHint,
+                    exampleSentence: cardNoteDraft.exampleSentence,
+                    confusionNote: cardNoteDraft.confusionNote,
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
+            setCardNoteSaveState("Gespeichert");
+        } catch (error) {
+            setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
+        } finally {
+            setCardNoteSaving(false);
+        }
     }
 
     function flipBackToPrompt() {
         setLearningHelpFlipped(false);
-        setLearningHelpSelectionOpen(false);
     }
 
     async function gradeCurrent(correct: boolean) {
@@ -1553,19 +1618,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentGerman = readGerman(currentItem);
 
     const currentSwahili = readSwahili(currentItem);
-    const learningType = getLearningUnitType(currentItem, currentSwahili);
-    const learningTypeLabel = learningType === "noun"
-        ? "Nomen"
-        : learningType === "verb"
-            ? "Verb"
-            : learningType === "phrase"
-                ? "Phrase"
-                : learningType === "greeting"
-                    ? "Grußformel"
-                    : learningType === "sentence"
-                        ? "Satz"
-                        : null;
-
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
@@ -2656,20 +2708,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
-                                                            learningTypeLabel={reveal ? learningTypeLabel : null}
+                                                            learningTypeLabel={null}
                                                             isFlipped={learningHelpFlipped}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
                                                             onFlipBack={flipBackToPrompt}
                                                             backContent={
                                                                 <LearningHelpPanel
-                                                                    loading={learningHelpLoading}
-                                                                    analysis={learningHelpAnalysis}
-                                                                    options={learningHelpTargetOptions}
-                                                                    showSelection={learningHelpSelectionOpen}
-                                                                    onSelectTarget={(target) => {
-                                                                        void selectLearningHelpTarget(target);
+                                                                    loading={cardNoteLoading}
+                                                                    draft={cardNoteDraft}
+                                                                    saveStateText={cardNoteSaveState}
+                                                                    saving={cardNoteSaving}
+                                                                    onChange={(field, value) => setCardNoteDraft((prev) => ({ ...prev, [field]: value }))}
+                                                                    onSave={() => {
+                                                                        void saveCardNotes();
                                                                     }}
-                                                                    onFlipBack={flipBackToPrompt}
                                                                 />
                                                             }
                                                         />
@@ -3142,8 +3194,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             < FullScreenSheet
                                 open={openCards}
                                 title={cardsLabel}
-                                onClose={() => setOpenCards(false)
-                                }
+                                onClose={() => {
+                                    setOpenCards(false);
+                                    setCardSelectionMode(false);
+                                    setSelectedCardIds(clearSelection());
+                                }}
                             >
                                 <div className="rounded-2xl border p-4 bg-surface">
                                     {status ? (
@@ -3154,6 +3209,57 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                     <div className="mt-3 text-sm text-muted">
                                         {filteredCards.length} von {cards.length} {cardsCountLabel}.
+                                    </div>
+
+                                    <div className="mt-3 rounded-xl border p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="text-sm font-medium text-primary">
+                                                {cardSelectionMode
+                                                    ? `${selectedCardIds.size} Karte(n) ausgewählt`
+                                                    : "Mehrfachauswahl"}
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                {!cardSelectionMode ? (
+                                                    <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setCardSelectionMode(true)}>
+                                                        Auswählen
+                                                    </button>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={() => setSelectedCardIds(selectAllVisible(filteredCards.map((card) => String(card.id))))}
+                                                            disabled={filteredCards.length === 0}
+                                                        >
+                                                            Sichtbare auswählen
+                                                        </button>
+                                                        <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setSelectedCardIds(clearSelection())}>
+                                                            Auswahl leeren
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700"
+                                                            disabled={selectedCardIds.size === 0}
+                                                            onClick={() => {
+                                                                void deleteSelectedCards();
+                                                            }}
+                                                        >
+                                                            Ausgewählte löschen
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border px-3 py-2 text-sm"
+                                                            onClick={() => {
+                                                                setCardSelectionMode(false);
+                                                                setSelectedCardIds(clearSelection());
+                                                            }}
+                                                        >
+                                                            Fertig
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div className="mt-3 rounded-xl border p-3 space-y-3">
@@ -3183,16 +3289,29 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     <div className="mt-4 space-y-3">
                                         {filteredCards.map((c) => (
                                             <div key={c.id} className="rounded-xl border p-3">
-                                                {isSentenceTrainer ? (
-                                                    <div className="space-y-1 text-sm font-medium min-w-0">
-                                                        <CardText>{c.german_text}</CardText>
-                                                        <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                <div className="flex items-start gap-3">
+                                                    {cardSelectionMode ? (
+                                                        <input
+                                                            type="checkbox"
+                                                            className="mt-1 h-4 w-4"
+                                                            checked={selectedCardIds.has(String(c.id))}
+                                                            onChange={() => setSelectedCardIds((prev) => toggleSelection(prev, String(c.id)))}
+                                                            aria-label="Karte auswählen"
+                                                        />
+                                                    ) : null}
+                                                    <div className="flex-1 min-w-0">
+                                                        {isSentenceTrainer ? (
+                                                            <div className="space-y-1 text-sm font-medium min-w-0">
+                                                                <CardText>{c.german_text}</CardText>
+                                                                <CardText className="text-muted">{c.swahili_text}</CardText>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-sm font-medium min-w-0">
+                                                                <CardText>{c.german_text} — {c.swahili_text}</CardText>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                ) : (
-                                                    <div className="text-sm font-medium min-w-0">
-                                                        <CardText>{c.german_text} — {c.swahili_text}</CardText>
-                                                    </div>
-                                                )}
+                                                </div>
 
                                                 {(c.groups ?? []).length > 0 ? (
                                                     <div className="mt-2 flex flex-wrap gap-1">
@@ -3239,6 +3358,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     <button
                                                         className="rounded-xl border px-3 py-2 text-sm"
                                                         onClick={() => deleteCard(c.id)}
+                                                        disabled={cardSelectionMode}
                                                     >
                                                         Löschen
                                                     </button>
