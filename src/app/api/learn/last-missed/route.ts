@@ -26,7 +26,7 @@ export async function GET(req: Request) {
         const cardIds = (lastMissedRows ?? []).map((row) => String(row.card_id ?? "")).filter(Boolean);
         if (cardIds.length === 0) return NextResponse.json({ items: [], cards: [] });
 
-        const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
+        const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
         if (allowedCardIds && allowedCardIds.length === 0) return NextResponse.json({ items: [], cards: [] });
 
         let cardsQuery = supabaseServer
@@ -44,7 +44,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ items: [], cards: [], error: cardsError.message });
         }
 
-        const groupsByCard = await getCardGroups(ownerKey, (cards ?? []).map((card) => String(card.id)));
+        const groupsByCard = await getCardGroups(ownerKey, (cards ?? []).map((card) => String(card.id)), resolvedType);
         const cardMap = new Map((cards ?? []).map((card) => [String(card.id), { ...card, groups: groupsByCard.get(String(card.id)) ?? [] }]));
         const orderedCards = cardIds.map((id) => cardMap.get(String(id))).filter(Boolean);
 

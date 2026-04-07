@@ -215,12 +215,12 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
     );
 
     const checkDuplicate = useCallback(
-        async (sw: string, de: string) => {
+        async (sw: string, de: string, type: "vocab" | "sentence") => {
             try {
                 const res = await fetch("/api/cards/exists", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sw, de }),
+                    body: JSON.stringify({ sw, de, type }),
                 });
 
                 const json = await res.json().catch(() => ({}));
@@ -260,7 +260,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
                         source_label: item.source,
                     };
                     let status: ProposalStatus = { state: "idle" };
-                    const existsResult = await checkDuplicate(canonical.sw, canonical.de);
+                    const existsResult = await checkDuplicate(canonical.sw, canonical.de, item.type);
                     if (existsResult?.exists) {
                         status = {
                             state: "exists",

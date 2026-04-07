@@ -10,6 +10,7 @@ export async function POST(req: Request, { params }: Params) {
 
     const { id: groupId } = await params;
     const body = await req.json().catch(() => ({}));
+    const resolvedType = body?.type === "sentence" ? "sentence" : "vocab";
     const cardIds: string[] = Array.isArray(body?.cardIds)
         ? Array.from(new Set(body.cardIds.map((value: unknown) => String(value ?? "").trim()).filter(Boolean)))
         : [];
@@ -18,25 +19,36 @@ export async function POST(req: Request, { params }: Params) {
         return NextResponse.json({ error: "cardIds is required" }, { status: 400 });
     }
 
-    const { data: group, error: groupError } = await supabaseServer
+    let groupQuery = supabaseServer
         .from("groups")
-        .select("id")
+        .select("id, type_scope")
         .eq("id", groupId)
-        .eq("owner_key", user.id)
-        .maybeSingle();
+        .eq("owner_key", user.id);
+
+    if (resolvedType === "sentence") {
+        groupQuery = groupQuery.eq("type_scope", "sentence");
+    } else {
+        groupQuery = groupQuery.or("type_scope.is.null,type_scope.eq.vocab");
+    }
+
+    const { data: group, error: groupError } = await groupQuery.maybeSingle();
 
     if (groupError) return NextResponse.json({ error: groupError.message }, { status: 500 });
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const { data: cards, error: cardsError } = await supabaseServer
         .from("cards")
-        .select("id")
+        .select("id, type")
         .eq("owner_key", user.id)
         .in("id", cardIds);
 
     if (cardsError) return NextResponse.json({ error: cardsError.message }, { status: 500 });
 
-    const existingCardIds = new Set((cards ?? []).map((card) => String(card.id)));
+    const existingCardIds = new Set(
+        (cards ?? [])
+            .filter((card) => resolvedType === "sentence" ? card.type === "sentence" : card.type == null || card.type === "vocab")
+            .map((card) => String(card.id))
+    );
     const validCardIds = cardIds.filter((cardId) => existingCardIds.has(cardId));
 
     if (validCardIds.length === 0) {

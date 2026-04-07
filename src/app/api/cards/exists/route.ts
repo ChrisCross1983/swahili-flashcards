@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { normalizeText } from "@/lib/cards/saveFlow";
 import { requireUser } from "@/lib/api/auth";
+import { findExistingMatch } from "@/lib/cards/existence";
 
 type ExistsRequestBody = {
     sw?: string;
     de?: string;
+    type?: "vocab" | "sentence";
 };
 
 export async function POST(req: Request) {
@@ -23,17 +24,15 @@ export async function POST(req: Request) {
     const ownerKey = user.id;
     const sw = typeof body.sw === "string" ? body.sw.trim() : "";
     const de = typeof body.de === "string" ? body.de.trim() : "";
+    const type = body.type === "sentence" ? "sentence" : "vocab";
 
     if (!sw || !de) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const normalizedSw = normalizeText(sw);
-    const normalizedDe = normalizeText(de);
-
     const { data: existingCards, error } = await supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text")
+        .select("id, german_text, swahili_text, type")
         .eq("owner_key", ownerKey)
         .order("created_at", { ascending: true });
 
@@ -42,47 +41,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
     }
 
-    let swMatch: typeof existingCards[number] | null = null;
-    let deMatch: typeof existingCards[number] | null = null;
-
-    for (const card of existingCards ?? []) {
-        const existingSw = normalizeText(card.swahili_text ?? "");
-        const existingDe = normalizeText(card.german_text ?? "");
-        const isPair = existingSw === normalizedSw && existingDe === normalizedDe;
-        const isSwap = existingSw === normalizedDe && existingDe === normalizedSw;
-
-        if (isPair) {
-            return NextResponse.json({
-                exists: true,
-                existing_id: card.id,
-                match: "pair",
-            });
-        }
-        if (isSwap) {
-            return NextResponse.json({
-                exists: true,
-                existing_id: card.id,
-                match: "swap",
-            });
-        }
-
-        if (!swMatch && existingSw === normalizedSw) swMatch = card;
-        if (!deMatch && existingDe === normalizedDe) deMatch = card;
-    }
-
-    if (swMatch) {
+    const result = findExistingMatch(existingCards ?? [], { sw, de, type });
+    if (result.existingId && result.match) {
         return NextResponse.json({
             exists: true,
-            existing_id: swMatch.id,
-            match: "sw",
-        });
-    }
-
-    if (deMatch) {
-        return NextResponse.json({
-            exists: true,
-            existing_id: deMatch.id,
-            match: "de",
+            existing_id: result.existingId,
+            match: result.match,
         });
     }
 

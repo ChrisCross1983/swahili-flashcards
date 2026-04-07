@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     const ownerKey = user.id;
     const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
     const groupIds = parseGroupIds(searchParams);
-    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
+    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
     const today = new Date().toISOString().slice(0, 10);
 
     if (allowedCardIds && allowedCardIds.length === 0) {

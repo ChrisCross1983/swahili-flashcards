@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const ownerKey = user.id;
   const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
   const groupIds = parseGroupIds(searchParams);
-  const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
+  const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
 
   if (allowedCardIds && allowedCardIds.length === 0) {
     return NextResponse.json({ items: [] });
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
   }
 
   const rows = data ?? [];
-  const groupsByCard = await getCardGroups(ownerKey, rows.map((row: any) => String(row.card_id)));
+  const groupsByCard = await getCardGroups(ownerKey, rows.map((row: any) => String(row.card_id)), resolvedType);
 
   const items = rows.map((row: any) => ({
     cardId: row.card_id,

@@ -84,6 +84,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
     const [status, setStatus] = useState("");
+    const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+    const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [cards, setCards] = useState<any[]>([]);
     const [search, setSearch] = useState("");
@@ -271,7 +273,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     useEffect(() => {
         loadCards(undefined, { silent: true });
-        fetchGroups().then(setGroups).catch(() => setGroups([]));
+        fetchGroups(cardType).then(setGroups).catch(() => setGroups([]));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -758,29 +760,44 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const silent = opts?.silent ?? false;
 
         if (!silent) setStatus("Lade Karten...");
+        setCardsLoadState("loading");
+        setCardsLoadError(null);
 
-        const searchParams = new URLSearchParams({
-            type: cardType,
-        });
-        if (q && q.trim().length > 0) {
-            searchParams.set("q", q);
+        try {
+            const searchParams = new URLSearchParams({
+                type: cardType,
+            });
+            if (q && q.trim().length > 0) {
+                searchParams.set("q", q);
+            }
+            if (selectedGroupIds.length > 0) {
+                searchParams.set("groupIds", selectedGroupIds.join(","));
+            }
+            const url = `/api/cards?${searchParams.toString()}`;
+
+            const res = await fetch(url);
+            const json = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                const message = (json as { error?: string }).error ?? "Karten konnten nicht geladen werden.";
+                setCardsLoadState("error");
+                setCardsLoadError(message);
+                if (!silent) setStatus(message);
+                return;
+            }
+
+            const nextCards = Array.isArray((json as { cards?: unknown[] }).cards)
+                ? (json as { cards: any[] }).cards
+                : [];
+            setCards(nextCards);
+            setCardsLoadState("loaded");
+            if (!silent) setStatus("");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Karten konnten nicht geladen werden.";
+            setCardsLoadState("error");
+            setCardsLoadError(message);
+            if (!silent) setStatus(message);
         }
-        if (selectedGroupIds.length > 0) {
-            searchParams.set("groupIds", selectedGroupIds.join(","));
-        }
-        const url = `/api/cards?${searchParams.toString()}`;
-
-        const res = await fetch(url);
-        const json = await res.json();
-
-        if (!res.ok) {
-            if (!silent) setStatus(json.error ?? "Aktion fehlgeschlagen.");
-            return;
-        }
-
-        setCards(json.cards);
-
-        if (!silent) setStatus("");
     }
 
     function startEdit(card: any, source: "cards" | "create" = "cards") {
@@ -1057,10 +1074,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             await refreshSetupCounts();
 
             setStatus(`Fällig heute: ${items.length}`);
-            return items;
+            return { ok: true as const, items };
         } catch (error) {
             setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
-            return null;
+            return { ok: false as const, items: [] as TodayItem[] };
         }
     }
 
@@ -1080,8 +1097,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             await refreshSetupCounts();
 
             setStatus(`Alle Karten: ${items.length}`);
+            return { ok: true as const, items };
         } catch (error) {
             setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+            return { ok: false as const, items: [] as TodayItem[] };
         }
     }
 
@@ -1102,7 +1121,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 setReveal(false);
                 setLastMissedEmpty(true);
                 setStatus("Keine zuletzt nicht gewussten Karten.");
-                return;
+                return { ok: true as const, items };
             }
 
             setTodayItems(shuffleArray(items));
@@ -1110,8 +1129,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setReveal(false);
 
             setStatus(`Zuletzt nicht gewusst: ${items.length}`);
+            return { ok: true as const, items };
         } catch (error) {
             setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+            return { ok: false as const, items: [] as TodayItem[] };
         }
     }
 
@@ -1802,7 +1823,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         try {
             for (const groupId of next) {
                 if (!existing.has(groupId)) {
-                    await assignCardsToGroup(groupId, [cardId]);
+                    await assignCardsToGroup(cardType, groupId, [cardId]);
                 }
             }
             for (const groupId of existing) {
@@ -2237,6 +2258,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 }
 
                                                 resetSessionTracking();
+                                                setTodayItems([]);
 
                                                 const chosen =
                                                     directionMode === "RANDOM"
@@ -2249,10 +2271,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 setReveal(false);
                                                 setCurrentIndex(0);
 
+                                                let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
+
                                                 if (learnMode === "LEITNER_TODAY") {
-                                                    const items = await loadToday();          // ✅ FIX: items existiert jetzt
-                                                    await loadLeitnerStats();                 // ✅ Lernstand aktualisieren
-                                                    if (items && items.length === 0) {
+                                                    loadResult = await loadToday();
+                                                    await loadLeitnerStats();
+                                                    if (loadResult.ok && loadResult.items.length === 0) {
                                                         await persistLearnSession({
                                                             mode: "LEITNER",
                                                             totalCount: 0,
@@ -2262,10 +2286,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     }
                                                 } else {
                                                     if (trainingMaterial.kind === "ALL" || trainingMaterial.kind === "GROUP") {
-                                                        await loadAllForDrill();
+                                                        loadResult = await loadAllForDrill();
                                                     } else {
-                                                        await loadLastMissed();
+                                                        loadResult = await loadLastMissed();
                                                     }
+                                                }
+
+                                                if (!loadResult.ok) {
+                                                    setLearnStarted(false);
+                                                    return;
                                                 }
 
                                                 setLearnStarted(true);
@@ -3201,6 +3230,23 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                             >
                                 <div className="rounded-2xl border p-4 bg-surface">
+                                    {cardsLoadState === "loading" ? (
+                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">Lade Karten…</div>
+                                    ) : null}
+
+                                    {cardsLoadState === "error" && cardsLoadError ? (
+                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
+                                            <div>{cardsLoadError}</div>
+                                            <button
+                                                type="button"
+                                                className="mt-2 rounded-lg border px-3 py-1.5 text-xs"
+                                                onClick={() => void loadCards(undefined, { silent: true })}
+                                            >
+                                                Erneut laden
+                                            </button>
+                                        </div>
+                                    ) : null}
+
                                     {status ? (
                                         <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
                                             {status}
@@ -3208,7 +3254,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     ) : null}
 
                                     <div className="mt-3 text-sm text-muted">
-                                        {filteredCards.length} von {cards.length} {cardsCountLabel}.
+                                        {cardsLoadState === "loaded" ? (
+                                            `${filteredCards.length} von ${cards.length} ${cardsCountLabel}.`
+                                        ) : cardsLoadState === "error" ? (
+                                            "Laden fehlgeschlagen."
+                                        ) : (
+                                            "Lade…"
+                                        )}
                                     </div>
 
                                     <div className="mt-3 rounded-xl border p-3">
@@ -3267,6 +3319,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             groups={groups}
                                             selectedIds={selectedGroupIds}
                                             onChange={setSelectedGroupIds}
+                                            cardType={cardType}
                                             label="Nach Gruppen filtern"
                                             showAllOption
                                             allActive={!hasActiveGroupFilter}
@@ -3378,6 +3431,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <ManageGroupsSheet
                                 open={manageGroupsOpen}
                                 groups={groups}
+                                cardType={cardType}
                                 groupCardCounts={groupCardCounts}
                                 onClose={() => setManageGroupsOpen(false)}
                                 onUpdated={setGroups}
@@ -3407,6 +3461,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         groups={groups}
                                         selectedIds={cardGroupsDraft}
                                         onChange={setCardGroupsDraft}
+                                        cardType={cardType}
                                         label="Gruppen auswählen"
                                         assignedIds={((todayItems[currentIndex] as any)?.groups ?? []).map((group: any) => String(group.id))}
                                         allowCreate

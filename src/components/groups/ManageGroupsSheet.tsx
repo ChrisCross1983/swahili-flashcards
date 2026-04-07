@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import type { Group } from "@/lib/groups/types";
 import { createGroup, deleteGroup, updateGroup } from "@/lib/groups/api";
+import type { CardType } from "@/lib/trainer/types";
 
 type Props = {
     open: boolean;
@@ -12,6 +13,7 @@ type Props = {
     onClose: () => void;
     onUpdated: (groups: Group[]) => void;
     onOpenGroup?: (groupId: string) => void;
+    cardType: CardType;
 };
 
 export default function ManageGroupsSheet({
@@ -21,6 +23,7 @@ export default function ManageGroupsSheet({
     onClose,
     onUpdated,
     onOpenGroup,
+    cardType,
 }: Props) {
     const [name, setName] = useState("");
     const [status, setStatus] = useState("");
@@ -44,7 +47,7 @@ export default function ManageGroupsSheet({
         setStatus("");
 
         try {
-            const group = await createGroup({ name: trimmed });
+            const group = await createGroup(cardType, { name: trimmed });
             onUpdated([...groups, group]);
             setName("");
             setStatus(`Gruppe „${group.name}“ erstellt.`);
@@ -77,7 +80,7 @@ export default function ManageGroupsSheet({
         setBusyId(group.id);
         setStatus("");
         try {
-            const updated = await updateGroup(group.id, { name: trimmed });
+            const updated = await updateGroup(cardType, group.id, { name: trimmed });
             onUpdated(groups.map((entry) => (entry.id === updated.id ? updated : entry)));
             setEditingId(null);
             setStatus(`Gruppe umbenannt: ${updated.name}.`);

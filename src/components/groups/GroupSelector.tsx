@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Group } from "@/lib/groups/types";
 import GroupBadge from "@/components/groups/GroupBadge";
 import { createGroup } from "@/lib/groups/api";
+import type { CardType } from "@/lib/trainer/types";
 
 type Props = {
     groups: Group[];
@@ -19,6 +20,7 @@ type Props = {
     allowCreate?: boolean;
     onGroupCreated?: (group: Group) => void;
     autoSelectCreated?: boolean;
+    cardType: CardType;
 };
 
 export default function GroupSelector({
@@ -35,6 +37,7 @@ export default function GroupSelector({
     allowCreate = false,
     onGroupCreated,
     autoSelectCreated = true,
+    cardType,
 }: Props) {
     const [newGroupName, setNewGroupName] = useState("");
     const [createStatus, setCreateStatus] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export default function GroupSelector({
         setCreateStatus(null);
 
         try {
-            const created = await createGroup({ name: trimmed });
+            const created = await createGroup(cardType, { name: trimmed });
             onGroupCreated?.(created);
             setNewGroupName("");
 

@@ -43,14 +43,35 @@ export function applyCardTypeFilter<T extends { eq: Function; or: Function }>(
     return query;
 }
 
-export async function getAllowedCardIdsByGroups(ownerKey: string, groupIds: string[]): Promise<string[] | null> {
+export function applyGroupTypeScopeFilter<T extends { eq: Function; or: Function }>(
+    query: T,
+    resolvedType: ResolvedCardType,
+    options?: { foreignTable?: string }
+): T {
+    const column = options?.foreignTable ? `${options.foreignTable}.type_scope` : "type_scope";
+    if (resolvedType === "sentence") {
+        return query.eq(column, "sentence") as T;
+    }
+
+    if (resolvedType === "vocab") {
+        return query.or("type_scope.is.null,type_scope.eq.vocab", options?.foreignTable ? { foreignTable: options.foreignTable } : undefined) as T;
+    }
+
+    return query;
+}
+
+export async function getAllowedCardIdsByGroups(ownerKey: string, groupIds: string[], resolvedType: ResolvedCardType): Promise<string[] | null> {
     if (groupIds.length === 0) return null;
 
-    const { data, error } = await supabaseServer
+    let query = supabaseServer
         .from("card_groups")
-        .select("card_id")
+        .select("card_id, groups!inner(type_scope)")
         .eq("owner_key", ownerKey)
         .in("group_id", groupIds);
+
+    query = applyGroupTypeScopeFilter(query, resolvedType, { foreignTable: "groups" });
+
+    const { data, error } = await query;
 
     if (error) {
         throw new Error(error.message);
@@ -59,14 +80,18 @@ export async function getAllowedCardIdsByGroups(ownerKey: string, groupIds: stri
     return Array.from(new Set((data ?? []).map((row) => String(row.card_id ?? "")).filter(Boolean)));
 }
 
-export async function getCardGroups(ownerKey: string, cardIds: string[]) {
+export async function getCardGroups(ownerKey: string, cardIds: string[], resolvedType: ResolvedCardType) {
     if (cardIds.length === 0) return new Map<string, Array<{ id: string; name: string; color: string | null }>>();
 
-    const { data, error } = await supabaseServer
+    let query = supabaseServer
         .from("card_groups")
-        .select("card_id, groups!inner(id, name, color)")
+        .select("card_id, groups!inner(id, name, color, type_scope)")
         .eq("owner_key", ownerKey)
         .in("card_id", cardIds);
+
+    query = applyGroupTypeScopeFilter(query, resolvedType, { foreignTable: "groups" });
+
+    const { data, error } = await query;
 
     if (error) throw new Error(error.message);
 

@@ -46,7 +46,7 @@ export default function ImportClient() {
     const [newGroupName, setNewGroupName] = useState("");
 
     useEffect(() => {
-        fetchGroups().then(setGroups).catch(() => setGroups([]));
+        fetchGroups("vocab").then(setGroups).catch(() => setGroups([]));
     }, []);
 
     const resolvedImportableRows = useMemo(
@@ -185,7 +185,7 @@ export default function ImportClient() {
             setPreview(null);
             setEditableRows([]);
             setRawText("");
-            const nextGroups = await fetchGroups().catch(() => groups);
+            const nextGroups = await fetchGroups("vocab").catch(() => groups);
             setGroups(nextGroups);
         } catch {
             setStatus("Import fehlgeschlagen.");

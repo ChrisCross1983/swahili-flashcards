@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
-import { canonicalizeToSwDe, normalizeText } from "@/lib/cards/saveFlow";
+import { canonicalizeToSwDe } from "@/lib/cards/saveFlow";
 import { requireUser } from "@/lib/api/auth";
+import { findExistingMatch } from "@/lib/cards/existence";
 
 type CreateCardBody = {
     type?: "vocab" | "sentence";
@@ -80,13 +81,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
 
-    const normalizedFront = normalizeText(canonical.sw);
-    const normalizedBack = normalizeText(canonical.de);
-
     // No auto-save; always confirm.
     const { data: existingCards, error: selectError } = await supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text")
+        .select("id, german_text, swahili_text, type")
         .eq("owner_key", ownerKey);
 
     if (selectError) {
@@ -94,27 +92,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Speichern fehlgeschlagen." }, { status: 500 });
     }
 
-    let legacySwappedDetected = false;
-    const existingMatch = (existingCards ?? []).find((card) => {
-        const existingFront = normalizeText(card.swahili_text ?? "");
-        const existingBack = normalizeText(card.german_text ?? "");
-        const exactMatch =
-            existingFront === normalizedFront && existingBack === normalizedBack;
-        const partialMatch =
-            existingFront === normalizedFront || existingBack === normalizedBack;
-        const legacySwapped =
-            existingFront === normalizedBack && existingBack === normalizedFront;
-        if (legacySwapped) legacySwappedDetected = true;
-        return exactMatch || partialMatch || legacySwapped;
+    const existingMatch = findExistingMatch(existingCards ?? [], {
+        sw: canonical.sw,
+        de: canonical.de,
+        type,
     });
 
-    if (existingMatch) {
-        if (legacySwappedDetected) {
+    if (existingMatch.existingId) {
+        if (existingMatch.match === "swap") {
             console.warn("legacy_swapped_detected", { ownerKey });
         }
         return NextResponse.json({
             status: "exists",
-            existing_id: existingMatch.id,
+            existing_id: existingMatch.existingId,
         });
     }
 

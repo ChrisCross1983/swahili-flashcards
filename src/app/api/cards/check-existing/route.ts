@@ -6,7 +6,7 @@ export async function POST(req: Request) {
   const { user, response } = await requireUser();
   if (response) return response;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
   const { german, swahili, type } = body;
   const ownerKey = user.id;
 

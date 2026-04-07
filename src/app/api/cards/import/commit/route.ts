@@ -109,7 +109,7 @@ export async function POST(req: Request) {
     if (!resolvedGroupId && createGroupName) {
         const { data: group, error: groupCreateError } = await supabaseServer
             .from("groups")
-            .insert({ owner_key: user.id, name: createGroupName, color: body.createGroup?.color ?? null })
+            .insert({ owner_key: user.id, name: createGroupName, color: body.createGroup?.color ?? null, type_scope: "vocab" })
             .select("id")
             .single();
 
@@ -126,6 +126,7 @@ export async function POST(req: Request) {
             .select("id")
             .eq("id", resolvedGroupId)
             .eq("owner_key", user.id)
+            .or("type_scope.is.null,type_scope.eq.vocab")
             .maybeSingle();
 
         if (groupError) {

@@ -84,7 +84,7 @@ export async function GET(req: Request) {
     const id = searchParams.get("id");
     const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
     const groupIds = parseGroupIds(searchParams);
-    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds);
+    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
 
     if (allowedCardIds && allowedCardIds.length === 0) {
         if (id) return NextResponse.json({ card: null });
@@ -121,7 +121,7 @@ export async function GET(req: Request) {
     }
 
     const cards = data ?? [];
-    const groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)));
+    const groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType);
 
     if (id) {
         const card = cards[0] ? { ...cards[0], groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;
