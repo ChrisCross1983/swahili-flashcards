@@ -97,6 +97,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
+    const [formGroupSelectorOpen, setFormGroupSelectorOpen] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
@@ -1565,6 +1566,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }
 
     function handleCancelEdit() {
+        setFormGroupSelectorOpen(false);
         if (returnToLearn) {
             setReturnToLearn(false);
             setOpenCreate(false);
@@ -1656,6 +1658,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentItem = todayItems[currentIndex] ?? null;
     const currentItemGroups = Array.isArray((currentItem as any)?.groups) ? (currentItem as any).groups : [];
     const badgeSummary = visibleBadgeSummary(currentItemGroups, 2);
+    const formSelectedGroups = useMemo(
+        () => groups.filter((group) => formGroupIds.includes(group.id)),
+        [groups, formGroupIds]
+    );
+    const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
     const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
@@ -2905,15 +2912,42 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     />
 
                                     <div className="mt-4 rounded-xl border p-3">
-                                        <GroupSelector
-                                            groups={groups}
-                                            selectedIds={formGroupIds}
-                                            onChange={setFormGroupIds}
-                                            cardType={cardType}
-                                            label="Gruppen"
-                                            allowCreate
-                                            onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
-                                        />
+                                        {isSentenceTrainer ? (
+                                            <GroupSelector
+                                                groups={groups}
+                                                selectedIds={formGroupIds}
+                                                onChange={setFormGroupIds}
+                                                cardType={cardType}
+                                                label="Gruppen"
+                                                allowCreate
+                                                onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                            />
+                                        ) : (
+                                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                                <div className="space-y-2">
+                                                    <div className="text-sm font-medium">Gruppen</div>
+                                                    <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+                                                        {formGroupSummary.visible.length > 0 ? (
+                                                            <>
+                                                                {formGroupSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                                {formGroupSummary.overflow > 0 ? (
+                                                                    <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{formGroupSummary.overflow}</span>
+                                                                ) : null}
+                                                            </>
+                                                        ) : (
+                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-ghost text-sm whitespace-nowrap"
+                                                    onClick={() => setFormGroupSelectorOpen(true)}
+                                                >
+                                                    {formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="mt-6 text-sm font-medium">Medien</div>
@@ -3234,6 +3268,29 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     ) : null
                                 }
                             </FullScreenSheet >
+
+                            <FullScreenSheet
+                                open={!isSentenceTrainer && formGroupSelectorOpen}
+                                title="Gruppen auswählen"
+                                onClose={() => setFormGroupSelectorOpen(false)}
+                            >
+                                <div className="space-y-4">
+                                    <GroupSelector
+                                        groups={groups}
+                                        selectedIds={formGroupIds}
+                                        onChange={setFormGroupIds}
+                                        cardType={cardType}
+                                        label="Gruppen"
+                                        allowCreate
+                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                    />
+                                    <div className="flex gap-2">
+                                        <button type="button" className="btn btn-primary" onClick={() => setFormGroupSelectorOpen(false)}>
+                                            Fertig
+                                        </button>
+                                    </div>
+                                </div>
+                            </FullScreenSheet>
 
                             {/* Suggestion Modal */}
                             < FullScreenSheet

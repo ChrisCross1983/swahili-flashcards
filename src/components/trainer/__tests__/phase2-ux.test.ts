@@ -14,9 +14,19 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("visibleBadgeSummary(c.groups ?? [], 2)");
     });
 
-    it("supports group assignment inside the create/edit form", () => {
-        expect(trainerSource).toContain("label=\"Gruppen\"");
-        expect(trainerSource).toContain("setFormGroupIds");
+    it("uses compact group selection in vocab create/edit flows", () => {
+        expect(trainerSource).toContain("const [formGroupSelectorOpen, setFormGroupSelectorOpen] = useState(false);");
+        expect(trainerSource).toContain("open={!isSentenceTrainer && formGroupSelectorOpen}");
+        expect(trainerSource).toContain("title=\"Gruppen auswählen\"");
+        expect(trainerSource).toContain("formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);");
+        expect(trainerSource).toContain("{isSentenceTrainer ? (");
+        expect(trainerSource).toContain("{formSelectedGroups.length > 0 ? \"Gruppen bearbeiten\" : \"➕ Gruppe\"}");
+    });
+
+    it("keeps memberships editable with vocab scope and inline group creation", () => {
+        expect(trainerSource).toContain("assignedIds={(cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))?.groups ?? []).map((group: any) => String(group.id))}");
+        expect(trainerSource).toContain("allowCreate");
+        expect(trainerSource).toContain("fetchGroups(cardType)");
         expect(trainerSource).toContain("assignCardsToGroup(cardType, groupId");
     });
 
