@@ -73,10 +73,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         : "Neue Karte anlegen (Deutsch ↔ Swahili).";
     const cardsLabel = isSentenceTrainer ? "Meine Sätze" : "Meine Karten";
     const cardsCountLabel = isSentenceTrainer ? "Sätze insgesamt" : "Karten insgesamt";
-    const searchLabel = isSentenceTrainer ? "Satz suchen" : "Karte suchen";
-    const searchHint = isSentenceTrainer
-        ? "Tippe einen deutschen oder swahilischen Satz."
-        : "Tippe ein deutsches oder swahilisches Wort.";
     const editTitle = isSentenceTrainer ? "Satz bearbeiten" : "Karte bearbeiten";
     const createTitle = isSentenceTrainer ? "Neue Sätze" : "Neue Wörter";
     const saveCardLabel = isSentenceTrainer ? "Satz speichern" : "Karte speichern";
@@ -88,8 +84,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [cards, setCards] = useState<any[]>([]);
-    const [search, setSearch] = useState("");
-    const [openSearch, setOpenSearch] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [todayItems, setTodayItems] = useState<TodayItem[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -147,8 +141,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [duplicateReviewOpen, setDuplicateReviewOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
+    const [cardGroupsCardId, setCardGroupsCardId] = useState<string | null>(null);
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
     const [savingCardGroups, setSavingCardGroups] = useState(false);
+    const [formGroupIds, setFormGroupIds] = useState<string[]>([]);
     const [learningHelpFlipped, setLearningHelpFlipped] = useState(false);
     const [cardNoteDraft, setCardNoteDraft] = useState({ mainNotes: "", memoryHint: "", exampleSentence: "", confusionNote: "" });
     const [cardNoteLoading, setCardNoteLoading] = useState(false);
@@ -563,6 +559,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             const created = json.card;
 
+            if (created?.id) {
+                const createdCardId = String(created.id);
+                for (const groupId of formGroupIds) {
+                    await assignCardsToGroup(cardType, groupId, [createdCardId]);
+                }
+            }
+
             if (created?.id && pendingAudioBlob) {
                 const fd = new FormData();
                 fd.append(
@@ -602,6 +605,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             setEditAudioPath(null);
             setEditingId(null);
+            setFormGroupIds([]);
 
             setDuplicateHint(null);
             setDuplicatePreview(null);
@@ -666,11 +670,28 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             }
 
             const updated = json.card; // { id, german_text, swahili_text, image_path, ... }
+            const updatedCardId = String(updated.id);
+            const existingGroupIds = new Set<string>(
+                (cards.find((entry) => String(entry.id) === updatedCardId)?.groups ?? []).map((group: any) => String(group.id))
+            );
+            const nextGroupIds = new Set<string>(formGroupIds.map(String));
+
+            for (const groupId of nextGroupIds) {
+                if (!existingGroupIds.has(groupId)) {
+                    await assignCardsToGroup(cardType, groupId, [updatedCardId]);
+                }
+            }
+            for (const groupId of existingGroupIds) {
+                if (!nextGroupIds.has(groupId)) {
+                    await removeCardFromGroup(groupId, updatedCardId);
+                }
+            }
 
             showToast("Karte aktualisiert ✅");
 
+            const nextGroups = groups.filter((group) => nextGroupIds.has(group.id));
             setCards((prev) =>
-                prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+                prev.map((c) => (c.id === updated.id ? { ...c, ...updated, groups: nextGroups } : c))
             );
 
             setTodayItems((prev) =>
@@ -686,6 +707,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                         image_path: updated.image_path ?? null,
                         german_text: updated.german_text,
                         swahili_text: updated.swahili_text,
+                        groups: nextGroups,
                     };
                 })
             );
@@ -725,6 +747,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 // zurück in "Neue Karte"-Modus
                 setEditingId(null);
                 setEditAudioPath(null);
+                setFormGroupIds([]);
 
                 setGerman("");
                 setSwahili("");
@@ -743,6 +766,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             // Standard-Fall: Edit aus "Meine Karten"
             setOpenCreate(false);
             setOpenCards(true);
+            setFormGroupIds([]);
 
         } catch (e: any) {
             setStatus(e?.message ?? "Aktualisieren fehlgeschlagen.");
@@ -809,6 +833,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setDuplicateHint(null);
         setImageFile(null);
         setEditAudioPath(card.audio_path ?? null);
+        setFormGroupIds(Array.isArray(card.groups) ? card.groups.map((group: any) => String(group.id)) : []);
         setStatus("");
 
         const existingPath = card.image_path ?? null;
@@ -906,6 +931,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditingId(null);
         setGerman("");
         setSwahili("");
+        setFormGroupIds([]);
         setImageFile(null);
         setDuplicateHint(null);
         setEditAudioPath(null);
@@ -1561,6 +1587,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahili(createDraft.swahili);
 
             setCreateDraft(null);
+            setFormGroupIds([]);
 
             resetImageInputs();
             setDuplicateHint(null);
@@ -1578,6 +1605,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             setGerman("");
             setSwahili("");
+            setFormGroupIds([]);
             resetImageInputs();
 
             setDuplicateHint(null);
@@ -1610,12 +1638,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }
 
     const filteredCards = cards.filter((c) => {
-        const q = search.trim().toLowerCase();
-        const matchesText = !q ||
-            (c.german_text ?? "").toLowerCase().includes(q) ||
-            (c.swahili_text ?? "").toLowerCase().includes(q);
-        if (!matchesText) return false;
-
         if (selectedGroupIds.length === 0) return true;
         const cardGroupIds = new Set((c.groups ?? []).map((group: any) => String(group.id)));
         return selectedGroupIds.some((id) => cardGroupIds.has(String(id)));
@@ -1798,18 +1820,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     function openCurrentCardGroupsEditor() {
         const item: any = todayItems[currentIndex];
         if (!item) return;
+        const cardId = String(item?.cardId ?? item?.id ?? "").trim();
+        if (!cardId) return;
         const current = Array.isArray(item.groups) ? item.groups.map((group: any) => String(group.id)) : [];
+        setCardGroupsCardId(cardId);
         setCardGroupsDraft(current);
         setCardGroupsStatus(null);
         setCardGroupsEditorOpen(true);
     }
 
-    async function saveCurrentCardGroups() {
-        const item: any = todayItems[currentIndex];
-        const cardId = String(item?.cardId ?? item?.id ?? "").trim();
+    function openCardGroupsEditorForCard(card: any) {
+        const cardId = String(card?.id ?? card?.cardId ?? "").trim();
+        if (!cardId) return;
+        const current = Array.isArray(card.groups) ? card.groups.map((group: any) => String(group.id)) : [];
+        setCardGroupsCardId(cardId);
+        setCardGroupsDraft(current);
+        setCardGroupsStatus(null);
+        setCardGroupsEditorOpen(true);
+    }
+
+    async function saveCardGroups() {
+        const cardId = String(cardGroupsCardId ?? "").trim();
         if (!cardId) return;
 
-        const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
+        const existingCard = cards.find((entry: any) => String(entry.id) === cardId)
+            ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === cardId);
+        const existing = new Set<string>((existingCard?.groups ?? []).map((group: any) => String(group.id)));
         const next = new Set<string>(cardGroupsDraft.map(String));
 
         if (existing.size === next.size && Array.from(existing).every((id) => next.has(id))) {
@@ -1833,10 +1869,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             }
 
             const nextGroups = groups.filter((group) => next.has(group.id));
-            setTodayItems((prev) => prev.map((entry: any, index) => index === currentIndex ? { ...entry, groups: nextGroups } : entry));
+            setTodayItems((prev) => prev.map((entry: any) => String(entry.cardId ?? entry.id) === cardId ? { ...entry, groups: nextGroups } : entry));
             setCards((prev) => prev.map((entry: any) => String(entry.id) === cardId ? { ...entry, groups: nextGroups } : entry));
             setCardGroupsStatus("Gruppen gespeichert.");
             setCardGroupsEditorOpen(false);
+            setCardGroupsCardId(null);
             setStatus("Gruppenzuordnung gespeichert.");
         } catch (error) {
             setCardGroupsStatus(error instanceof Error ? error.message : "Gruppen konnten nicht gespeichert werden.");
@@ -1855,8 +1892,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     ? "Abfragerichtung wählen"
                     : null;
     const cardGroupsUnchanged = (() => {
-        const item: any = todayItems[currentIndex];
-        const existing = new Set<string>((item?.groups ?? []).map((group: any) => String(group.id)));
+        const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
+            ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
+        const existing = new Set<string>((existingCard?.groups ?? []).map((group: any) => String(group.id)));
         const next = new Set<string>(cardGroupsDraft.map(String));
         return existing.size === next.size && Array.from(existing).every((id) => next.has(id));
     })();
@@ -1953,6 +1991,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                         setPendingAudioBlob(null);
                                         setPendingAudioType(null);
+                                        setFormGroupIds([]);
 
                                         setOpenCreate(true);
                                     }}
@@ -1978,18 +2017,17 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         Durchsuchen, bearbeiten und aufräumen.
                                     </div>
                                 </button>
-                                <button
-                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-                                    onClick={() => {
-                                        setOpenSearch(true);
-                                        loadCards(undefined, { silent: true });
-                                    }}
-                                >
-                                    <div className="text-xl font-semibold">{searchLabel}</div>
-                                    <div className="mt-2 text-sm text-muted">
-                                        Deutsch oder Swahili.
-                                    </div>
-                                </button>
+                                {!isSentenceTrainer ? (
+                                    <button
+                                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                        onClick={() => router.push("/import")}
+                                    >
+                                        <div className="text-xl font-semibold">📥 Bulk Import</div>
+                                        <div className="mt-2 text-sm text-muted">
+                                            Vokabelliste einfügen, prüfen und importieren.
+                                        </div>
+                                    </button>
+                                ) : null}
                             </div>
 
                             {/* Learn Modal */}
@@ -2866,6 +2904,18 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         rows={3}
                                     />
 
+                                    <div className="mt-4 rounded-xl border p-3">
+                                        <GroupSelector
+                                            groups={groups}
+                                            selectedIds={formGroupIds}
+                                            onChange={setFormGroupIds}
+                                            cardType={cardType}
+                                            label="Gruppen"
+                                            allowCreate
+                                            onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                        />
+                                    </div>
+
                                     <div className="mt-6 text-sm font-medium">Medien</div>
                                     {!editingId && (
                                         <div className="mt-2 rounded-xl border p-3">
@@ -3315,19 +3365,26 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     </div>
 
                                     <div className="mt-3 rounded-xl border p-3 space-y-3">
-                                        <GroupSelector
-                                            groups={groups}
-                                            selectedIds={selectedGroupIds}
-                                            onChange={setSelectedGroupIds}
-                                            cardType={cardType}
-                                            label="Nach Gruppen filtern"
-                                            showAllOption
-                                            allActive={!hasActiveGroupFilter}
-                                            onSelectAll={() => setSelectedGroupIds([])}
-                                        />
+                                        <div>
+                                            <label className="text-sm font-medium">Nach Gruppen filtern</label>
+                                            <select
+                                                className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent text-sm"
+                                                value={selectedGroupIds[0] ?? ""}
+                                                onChange={(event) => setSelectedGroupIds(event.target.value ? [event.target.value] : [])}
+                                            >
+                                                <option value="">Alle Karten</option>
+                                                {groups.map((group) => (
+                                                    <option key={group.id} value={group.id}>
+                                                        {group.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
                                         <div className="flex items-center justify-between gap-2">
                                             {hasActiveGroupFilter ? (
-                                                <p className="text-xs text-muted">Filter aktiv: {selectedGroupIds.length} Gruppe(n).</p>
+                                                <p className="text-xs text-muted">
+                                                    Filter: {groups.find((group) => group.id === selectedGroupIds[0])?.name ?? "1 Gruppe"}
+                                                </p>
                                             ) : (
                                                 <p className="text-xs text-muted">Alle Karten werden angezeigt.</p>
                                             )}
@@ -3367,10 +3424,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 </div>
 
                                                 {(c.groups ?? []).length > 0 ? (
-                                                    <div className="mt-2 flex flex-wrap gap-1">
-                                                        {(c.groups ?? []).map((group: any) => <GroupBadge key={group.id} group={group} />)}
-                                                    </div>
-                                                ) : null}
+                                                    (() => {
+                                                        const badgeSummary = visibleBadgeSummary(c.groups ?? [], 2);
+                                                        return (
+                                                            <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                                {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                                {badgeSummary.overflow > 0 ? (
+                                                                    <span className="rounded-full border border-soft px-2 py-1 text-[11px] text-muted">
+                                                                        +{badgeSummary.overflow}
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                        );
+                                                    })()
+                                                ) : <p className="mt-2 text-xs text-muted">Keine Gruppe</p>}
 
                                                 <div className="mt-2 flex items-center gap-2">
                                                     {c.image_path ? (
@@ -3415,6 +3482,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     >
                                                         Löschen
                                                     </button>
+                                                    <button
+                                                        className="rounded-xl border px-3 py-2 text-sm"
+                                                        onClick={() => openCardGroupsEditorForCard(c)}
+                                                        disabled={cardSelectionMode}
+                                                    >
+                                                        Gruppen bearbeiten
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
@@ -3453,8 +3527,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                             <FullScreenSheet
                                 open={cardGroupsEditorOpen}
-                                title="Karte in Gruppen"
-                                onClose={() => setCardGroupsEditorOpen(false)}
+                                title="Gruppen bearbeiten"
+                                onClose={() => {
+                                    setCardGroupsEditorOpen(false);
+                                    setCardGroupsCardId(null);
+                                }}
                             >
                                 <div className="space-y-4">
                                     <GroupSelector
@@ -3463,90 +3540,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         onChange={setCardGroupsDraft}
                                         cardType={cardType}
                                         label="Gruppen auswählen"
-                                        assignedIds={((todayItems[currentIndex] as any)?.groups ?? []).map((group: any) => String(group.id))}
+                                        assignedIds={(cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))?.groups ?? []).map((group: any) => String(group.id))}
                                         allowCreate
                                         onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
                                     />
                                     {cardGroupsStatus ? <p className="text-sm text-muted">{cardGroupsStatus}</p> : null}
                                     <div className="flex gap-2">
-                                        <button type="button" className="btn btn-primary" onClick={saveCurrentCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>
+                                        <button type="button" className="btn btn-primary" onClick={saveCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>
                                             {savingCardGroups ? "Speichert…" : "Speichern"}
                                         </button>
                                         <button type="button" className="btn btn-ghost" onClick={() => setCardGroupsEditorOpen(false)}>Abbrechen</button>
                                     </div>
                                 </div>
                             </FullScreenSheet>
-
-                            {/* Search Modal */}
-                            < FullScreenSheet
-                                open={openSearch}
-                                title={searchLabel}
-                                onClose={() => {
-                                    setOpenSearch(false);
-                                    setSearch("");
-                                }}
-                            >
-                                <input
-                                    className="w-full rounded-xl border p-3"
-                                    placeholder="Deutsch oder Swahili eingeben…"
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                />
-
-                                <div className="mt-4 space-y-2">
-                                    {search.trim().length === 0 ? (
-                                        <p className="text-sm text-muted">
-                                            {searchHint}
-                                        </p>
-                                    ) : filteredCards.length === 0 ? (
-                                        <p className="text-sm text-muted">
-                                            Keine Karte gefunden.
-                                        </p>
-                                    ) : (
-                                        <div className="mt-4 space-y-2">
-                                            {filteredCards.map((c) => (
-                                                <div key={c.id} className="flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        className="flex-1 text-left rounded-xl border p-3 hover:bg-surface"
-                                                        onClick={() => {
-                                                            setOpenSearch(false);
-                                                            setSearch("");
-                                                            startEdit(c, "cards");
-                                                            setOpenCreate(true);
-                                                        }}
-                                                    >
-                                                        {isSentenceTrainer ? (
-                                                            <div className="space-y-1 font-medium min-w-0">
-                                                                <CardText>{c.german_text}</CardText>
-                                                                <CardText className="text-muted">{c.swahili_text}</CardText>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="font-medium min-w-0">
-                                                                <CardText>{c.german_text} — {c.swahili_text}</CardText>
-                                                            </div>
-                                                        )}
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-xl border p-3"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            deleteCard(c.id);
-                                                        }}
-                                                        aria-label="Karte löschen"
-                                                        title="Löschen"
-                                                    >
-                                                        🗑️
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </FullScreenSheet >
                         </>
                     )}
             </div >

@@ -49,14 +49,11 @@ export default function ImportClient() {
         fetchGroups("vocab").then(setGroups).catch(() => setGroups([]));
     }, []);
 
-    const resolvedImportableRows = useMemo(
-        () => editableRows.filter((row) => row.selectedAction === "keep" && row.status === "importable"),
-        [editableRows]
-    );
+    const resolvedImportableRows = useMemo(() => editableRows.filter((row) => row.status === "importable"), [editableRows]);
 
     const importableCount = (preview?.newRows.length ?? 0) + resolvedImportableRows.length;
-    const manualSkippedCount = editableRows.filter((row) => row.selectedAction === "skip").length;
-    const needsReviewCount = editableRows.filter((row) => row.selectedAction === "keep" && ["conflict", "ambiguous", "invalid"].includes(row.status)).length;
+    const skippedCount = editableRows.filter((row) => row.status === "skipped" || row.status === "duplicate").length;
+    const needsReviewCount = editableRows.filter((row) => ["conflict", "ambiguous", "invalid"].includes(row.status)).length;
 
     const canCommit = useMemo(() => importableCount > 0 && !isCommitting, [importableCount, isCommitting]);
 
@@ -144,7 +141,7 @@ export default function ImportClient() {
         setIsCommitting(true);
         setStatus("");
 
-        const manualRows: ParsedImportRow[] = resolvedImportableRows.map((row) => ({
+        const manualRows: ParsedImportRow[] = editableRows.filter((row) => row.status === "importable").map((row) => ({
             lineNumber: row.lineNumber,
             rawLine: row.rawLine,
             leftValue: row.german,
@@ -247,7 +244,7 @@ export default function ImportClient() {
                             <div>{importableCount} Zeilen sind aktuell importierbar.</div>
                             <div>{preview.counts.duplicates} bereits vorhanden.</div>
                             <div>{needsReviewCount} brauchen noch Review.</div>
-                            <div>{manualSkippedCount} wurden manuell übersprungen.</div>
+                            <div>{skippedCount} sind übersprungen oder bereits vorhanden.</div>
                         </div>
 
                         <RowBlock title="Neu / importierbar" rows={preview.newRows} />
@@ -265,6 +262,11 @@ export default function ImportClient() {
                                         onChange={(next) => updateEditableRow(row.rowKey, () => next)}
                                         onSwap={() => swapDirection(row.rowKey)}
                                         onRevalidate={() => revalidateRow(row)}
+                                        onAccept={async () => {
+                                            updateEditableRow(row.rowKey, (entry) => ({ ...entry, selectedAction: "keep" }));
+                                            await revalidateRow({ ...row, selectedAction: "keep" });
+                                        }}
+                                        onSkip={() => updateEditableRow(row.rowKey, (entry) => ({ ...entry, selectedAction: "skip", status: "skipped", reason: "Vom Nutzer übersprungen." }))}
                                     />
                                 ))}
                             </div>
@@ -277,10 +279,10 @@ export default function ImportClient() {
 }
 
 function statusBadge(status: EditablePreviewRow["status"]) {
-    if (status === "importable") return "✅ Importierbar";
+    if (status === "importable") return "✅ Akzeptiert";
     if (status === "duplicate") return "ℹ️ Bereits vorhanden";
-    if (status === "conflict") return "⚠️ Konflikt";
-    if (status === "ambiguous") return "⚠️ Unklar";
+    if (status === "conflict") return "⚠️ Prüfen";
+    if (status === "ambiguous") return "⚠️ Richtung prüfen";
     if (status === "skipped") return "⏭️ Übersprungen";
     return "❌ Ungültig";
 }
@@ -291,13 +293,18 @@ function EditableRowCard({
     onChange,
     onSwap,
     onRevalidate,
+    onAccept,
+    onSkip,
 }: {
     row: EditablePreviewRow;
     busy: boolean;
     onChange: (row: EditablePreviewRow) => void;
     onSwap: () => void;
     onRevalidate: () => void;
+    onAccept: () => void;
+    onSkip: () => void;
 }) {
+    const [showAdvanced, setShowAdvanced] = useState(false);
     const setDirection = (direction: ResolvedDirection) => onChange({ ...row, direction, status: "ambiguous", reason: "Richtung geändert. Bitte neu prüfen." });
 
     return (
@@ -311,13 +318,20 @@ function EditableRowCard({
                 <input className="rounded-lg border px-2 py-1 bg-transparent" value={row.swahili} onChange={(e) => onChange({ ...row, swahili: e.target.value })} placeholder="Swahili" />
             </div>
             <div className="flex flex-wrap gap-2">
-                <button className="rounded-lg border px-2 py-1" onClick={onSwap}>Richtung tauschen</button>
-                <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("DE_LEFT_SW_RIGHT")}>DE → SW</button>
-                <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("SW_LEFT_DE_RIGHT")}>SW → DE</button>
-                <button className="rounded-lg border px-2 py-1" onClick={() => onChange({ ...row, selectedAction: "keep" })}>Übernehmen</button>
-                <button className="rounded-lg border px-2 py-1" onClick={() => onChange({ ...row, selectedAction: "skip", status: "skipped" })}>Überspringen</button>
-                <button className="rounded-lg border px-2 py-1" onClick={onRevalidate} disabled={busy}>{busy ? "Prüfe..." : "Neu prüfen"}</button>
+                <button className="rounded-lg border px-2 py-1" onClick={onAccept} disabled={busy}>{busy ? "Prüfe..." : "Akzeptieren"}</button>
+                <button className="rounded-lg border px-2 py-1" onClick={onSkip}>Überspringen</button>
+                <button className="rounded-lg border px-2 py-1" onClick={() => setShowAdvanced((prev) => !prev)}>
+                    {showAdvanced ? "Weniger Optionen" : "Bearbeiten"}
+                </button>
             </div>
+            {showAdvanced ? (
+                <div className="flex flex-wrap gap-2">
+                    <button className="rounded-lg border px-2 py-1" onClick={onSwap}>Richtung tauschen</button>
+                    <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("DE_LEFT_SW_RIGHT")}>DE → SW</button>
+                    <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("SW_LEFT_DE_RIGHT")}>SW → DE</button>
+                    <button className="rounded-lg border px-2 py-1" onClick={onRevalidate} disabled={busy}>{busy ? "Prüfe..." : "Neu prüfen"}</button>
+                </div>
+            ) : null}
             <p className="text-xs text-muted">{row.reason}</p>
             {row.directionExplanation ? <p className="text-xs text-muted">{row.directionExplanation}</p> : null}
             {row.existingMatches?.length ? (

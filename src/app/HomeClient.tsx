@@ -121,14 +121,6 @@ export default function HomeClient({ ownerKey }: Props) {
             <div className="text-xl font-semibold">📈 Statistik</div>
             <div className="mt-2 text-sm text-muted">Fortschritt, Level und Lernqualität im Dashboard.</div>
           </button>
-
-          <button
-            onClick={() => router.push("/import")}
-            className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
-          >
-            <div className="text-xl font-semibold">📥 Bulk Import</div>
-            <div className="mt-2 text-sm text-muted">Vokabelliste einfügen, prüfen und importieren.</div>
-          </button>
         </div>
       </div>
     </main>
