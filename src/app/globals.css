@@ -11,35 +11,35 @@
 }
 
 :root {
-  /* Contrast & warmth tuning */
-  --background: #f3ebdf;
-  --background-alt: #efe4d6;
-  --foreground: #201a14;
-  --surface: #fff8ee;
-  --surface-elevated: #f9ead8;
-  --surface-strong: #f4dfc7;
-  --border: #dac7b4;
-  --border-strong: #c4ab92;
-  --text-muted: #5a4d42;
-  --text-on-accent: #fff7ee;
-  --accent-primary: #e9c67c;
-  --accent-primary-strong: #d2ab5b;
-  --accent-cta: #e2702c;
-  --accent-cta-strong: #c95b1b;
-  --accent-cta-soft: rgba(226, 112, 44, 0.16);
-  --accent-success: #1f7a43;
-  --accent-success-strong: #166636;
-  --accent-success-soft: rgba(31, 122, 67, 0.18);
-  --accent-danger: #c2452c;
-  --accent-danger-strong: #a43620;
-  --accent-danger-soft: rgba(194, 69, 44, 0.18);
-  --accent-secondary: #2e5f4f;
+  /* Warm-light base */
+  --background: #fbf4e7;
+  --background-alt: #f6ecd9;
+  --foreground: #2c2118;
+  --surface: #fffaf0;
+  --surface-elevated: #f8ecd8;
+  --surface-strong: #f2dfc3;
+  --border: #ddccb4;
+  --border-strong: #cdb08f;
+  --text-muted: #695241;
+  --text-on-accent: #fff9f2;
+  --accent-primary: #efc96f;
+  --accent-primary-strong: #daaa42;
+  --accent-cta: #de6d2d;
+  --accent-cta-strong: #bf5420;
+  --accent-cta-soft: rgba(222, 109, 45, 0.14);
+  --accent-success: #23834a;
+  --accent-success-strong: #1b6b3b;
+  --accent-success-soft: rgba(35, 131, 74, 0.16);
+  --accent-danger: #c55336;
+  --accent-danger-strong: #a83f26;
+  --accent-danger-soft: rgba(197, 83, 54, 0.14);
+  --accent-secondary: #8d5c2f;
   --overlay: rgba(32, 24, 16, 0.6);
   --overlay-focus: rgba(20, 15, 10, 0.5);
-  --status-info-bg: rgba(46, 95, 79, 0.12);
-  --status-warning-bg: rgba(226, 112, 44, 0.16);
-  --shadow-warm: 0 18px 36px rgba(32, 20, 8, 0.24);
-  --shadow-soft: 0 10px 24px rgba(32, 20, 8, 0.14);
+  --status-info-bg: rgba(141, 92, 47, 0.12);
+  --status-warning-bg: rgba(222, 109, 45, 0.14);
+  --shadow-warm: 0 18px 36px rgba(74, 44, 16, 0.16);
+  --shadow-soft: 0 10px 24px rgba(74, 44, 16, 0.1);
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 
   /* Font Variables */
@@ -47,40 +47,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1c1914;
-    --background-alt: #181511;
-    --foreground: #f6f1e6;
-    --surface: #242018;
-    --surface-elevated: #2d271f;
-    --surface-strong: #3a3024;
-    --border: #3d3428;
-    --border-strong: #5a4b38;
-    --text-muted: #c1b29f;
-    --text-on-accent: #1b1712;
-    --accent-primary: #f2c96c;
-    --accent-primary-strong: #e2b552;
-    --accent-cta: #f2904c;
-    --accent-cta-strong: #d86f2a;
-    --accent-cta-soft: rgba(242, 144, 76, 0.22);
-    --accent-success: #5bb073;
-    --accent-success-strong: #42985a;
-    --accent-success-soft: rgba(91, 176, 115, 0.24);
-    --accent-danger: #e46a52;
-    --accent-danger-strong: #c95440;
-    --accent-danger-soft: rgba(228, 106, 82, 0.24);
-    --accent-secondary: #6cb291;
-    --overlay: rgba(18, 14, 10, 0.7);
-    --overlay-focus: rgba(18, 14, 10, 0.55);
-    --status-info-bg: rgba(108, 178, 145, 0.18);
-    --status-warning-bg: rgba(242, 144, 76, 0.2);
-    --shadow-warm: 0 14px 32px rgba(0, 0, 0, 0.45);
-    --shadow-soft: 0 8px 20px rgba(0, 0, 0, 0.3);
-    --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  }
 }
 
 @layer components {
@@ -115,9 +81,9 @@
   }
 
   .btn-secondary {
-    background-color: var(--surface-strong);
+    background-color: var(--surface-elevated);
     color: var(--foreground);
-    border-color: var(--border-strong);
+    border-color: var(--border);
   }
 
   .btn-secondary:hover:not(:disabled) {
@@ -145,7 +111,7 @@
   }
 
   .btn-ghost {
-    background-color: var(--surface);
+    background-color: var(--surface-elevated);
     color: var(--text-muted);
     border-color: var(--border);
   }
@@ -170,9 +136,9 @@
 
   .badge {
     @apply inline-flex min-w-8 items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold tracking-wide;
-    background-color: var(--surface-elevated);
+    background-color: var(--surface);
     color: var(--foreground);
-    border-color: var(--border);
+    border-color: var(--border-strong);
     box-shadow: var(--shadow-inset);
   }
 
@@ -204,14 +170,14 @@
 
   .panel {
     @apply rounded-2xl border p-4;
-    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-elevated) 100%);
+    background: linear-gradient(180deg, #fffdf8 0%, var(--surface-elevated) 100%);
     border-color: var(--border);
     box-shadow: var(--shadow-soft), var(--shadow-inset);
   }
 
   .panel-subtle {
     @apply rounded-xl border p-3;
-    background-color: var(--surface);
+    background-color: #fffdf9;
     border-color: var(--border);
   }
 

@@ -76,7 +76,7 @@ export default function HomeClient({ ownerKey }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-base-alt p-6 flex justify-center">
+    <main className="min-h-screen bg-base p-6 flex justify-center">
       <div className="w-full max-w-xl">
         <h1 className="text-4xl font-semibold tracking-wide">Swahili</h1>
 
@@ -92,9 +92,10 @@ export default function HomeClient({ ownerKey }: Props) {
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <button
             onClick={() => router.push("/trainer")}
-            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm border-cta"
           >
-            <div className="text-xl font-semibold">Vokabeltrainer</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Lernen</div>
+            <div className="mt-2 text-xl font-semibold">Vokabeltrainer</div>
             <div className="mt-2 text-sm text-muted">Trainiere deine gespeicherten Karten (Leitner).</div>
           </button>
 
@@ -102,7 +103,8 @@ export default function HomeClient({ ownerKey }: Props) {
             onClick={() => router.push("/path")}
             className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
-            <div className="text-xl font-semibold">Lernpfad</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-primary-strong">Struktur</div>
+            <div className="mt-2 text-xl font-semibold">Lernpfad</div>
             <div className="mt-2 text-sm text-muted">Kategorien von leicht bis schwer.</div>
           </button>
 
@@ -110,7 +112,8 @@ export default function HomeClient({ ownerKey }: Props) {
             onClick={() => router.push("/sentence-trainer")}
             className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
-            <div className="text-xl font-semibold">Satztrainer</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-success-strong">Praxis</div>
+            <div className="mt-2 text-xl font-semibold">Satztrainer</div>
             <div className="mt-2 text-sm text-muted">Baue Sätze aus deinem Wortschatz.</div>
           </button>
 
@@ -118,7 +121,8 @@ export default function HomeClient({ ownerKey }: Props) {
             onClick={() => router.push("/stats")}
             className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
-            <div className="text-xl font-semibold">📈 Statistik</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-secondary">Fortschritt</div>
+            <div className="mt-2 text-xl font-semibold">📈 Statistik</div>
             <div className="mt-2 text-sm text-muted">Fortschritt, Level und Lernqualität im Dashboard.</div>
           </button>
         </div>

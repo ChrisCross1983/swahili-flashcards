@@ -1907,7 +1907,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     })();
 
     return (
-        <main className="min-h-screen p-6 flex justify-center">
+        <main className="min-h-screen bg-base p-6 flex justify-center">
             <div className="w-full max-w-xl">
                 <h1 className="text-2xl font-semibold tracking-tight">{trainerTitle}</h1>
 
@@ -1978,9 +1978,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                         setStatus("");
                                     }}
-                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                    className="rounded-[32px] border border-cta bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
-                                    <div className="text-xl font-semibold">{learnLabel}</div>
+                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Training</div>
+                                    <div className="mt-2 text-xl font-semibold">{learnLabel}</div>
                                     <div className="mt-2 text-sm text-muted">
                                         {learnHint}
                                     </div>
@@ -2002,9 +2003,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                         setOpenCreate(true);
                                     }}
-                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                    className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
-                                    <div className="text-xl font-semibold">{createLabel}</div>
+                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-primary-strong">Erstellen</div>
+                                    <div className="mt-2 text-xl font-semibold">{createLabel}</div>
                                     <div className="mt-2 text-sm text-muted">
                                         {createHint}
                                     </div>
@@ -2017,19 +2019,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setOpenCards(true);
                                         loadCards();
                                     }}
-                                    className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                    className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
-                                    <div className="text-xl font-semibold">{cardsLabel}</div>
+                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-secondary">Verwalten</div>
+                                    <div className="mt-2 text-xl font-semibold">{cardsLabel}</div>
                                     <div className="mt-2 text-sm text-muted">
                                         Durchsuchen, bearbeiten und aufräumen.
                                     </div>
                                 </button>
                                 {!isSentenceTrainer ? (
                                     <button
-                                        className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+                                        className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                         onClick={() => router.push("/import")}
                                     >
-                                        <div className="text-xl font-semibold">📥 Bulk Import</div>
+                                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-primary-strong">Import</div>
+                                        <div className="mt-2 text-xl font-semibold">📥 Bulk Import</div>
                                         <div className="mt-2 text-sm text-muted">
                                             Vokabelliste einfügen, prüfen und importieren.
                                         </div>

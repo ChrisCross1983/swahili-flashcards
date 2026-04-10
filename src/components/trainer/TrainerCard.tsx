@@ -49,7 +49,7 @@ export default function TrainerCard({
                 </div>
             ) : (
                 <div className={reveal ? "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
-                    <div>
+                    <div className="rounded-2xl border border-soft bg-surface-elevated p-4">
                         <div className="text-xs font-semibold tracking-wide text-muted uppercase">Übersetze</div>
                         <div className="mt-2 text-2xl font-semibold text-primary">
                             <CardText>{prompt}</CardText>
@@ -58,8 +58,8 @@ export default function TrainerCard({
 
                     {reveal ? (
                         <div className="space-y-4">
-                            <div className="rounded-2xl border border-soft bg-surface-elevated p-4">
-                                <div className="text-xs font-semibold tracking-wide text-muted uppercase">Antwort</div>
+                            <div className="rounded-2xl border border-cta bg-surface p-4 shadow-soft">
+                                <div className="text-xs font-semibold tracking-wide text-accent-cta uppercase">Antwort</div>
                                 <div className="mt-1 text-xl font-semibold text-primary">
                                     <CardText>{answer}</CardText>
                                 </div>

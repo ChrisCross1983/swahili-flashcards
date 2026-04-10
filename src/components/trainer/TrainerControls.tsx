@@ -33,11 +33,11 @@ export default function TrainerControls({
                 </div>
             ) : null}
             <div className="mt-10 grid grid-cols-2 gap-6">
-                <button type="button" className="btn btn-secondary py-4 text-base active:scale-[0.99]" onClick={onWrong}>
+                <button type="button" className="btn btn-danger py-4 text-base active:scale-[0.99]" onClick={onWrong}>
                     Nicht gewusst
                 </button>
 
-                <button type="button" className="btn btn-primary py-4 text-base active:scale-[0.99]" onClick={onCorrect}>
+                <button type="button" className="btn btn-success py-4 text-base active:scale-[0.99]" onClick={onCorrect}>
                     Gewusst
                 </button>
             </div>

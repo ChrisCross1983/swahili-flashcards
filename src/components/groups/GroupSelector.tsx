@@ -97,7 +97,7 @@ export default function GroupSelector({
                     <button
                         type="button"
                         className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${allActive
-                            ? "border-strong bg-surface-strong text-primary shadow-soft"
+                            ? "border-cta bg-accent-cta-soft text-accent-cta-strong shadow-soft"
                             : "border-soft bg-surface hover:bg-surface-elevated text-muted"
                             }`}
                         onClick={onSelectAll}
@@ -114,7 +114,7 @@ export default function GroupSelector({
                             type="button"
                             key={group.id}
                             className={`rounded-full border px-2 py-1 text-xs transition ${isSelected
-                                ? "border-strong bg-surface-strong shadow-soft"
+                                ? "border-cta bg-accent-cta-soft shadow-soft"
                                 : "border-soft bg-surface hover:bg-surface-elevated"
                                 }`}
                             onClick={() => toggle(group.id)}
