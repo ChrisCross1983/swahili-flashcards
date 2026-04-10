@@ -50,14 +50,14 @@ export default function ConfirmDialog({
             role="presentation"
         >
             <div
-                className="w-full max-w-md rounded-2xl border border-soft bg-surface-elevated p-6 shadow-warm"
+                className="w-full max-w-md rounded-2xl border border-soft bg-surface p-6 shadow-warm"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
                 aria-describedby={descriptionId}
                 onClick={(event) => event.stopPropagation()}
             >
-                <div className="text-lg font-semibold" id={titleId}>
+                <div className="text-lg font-semibold tracking-wide" id={titleId}>
                     {title}
                 </div>
                 <p className="mt-2 text-sm text-muted" id={descriptionId}>
@@ -68,14 +68,14 @@ export default function ConfirmDialog({
                     <button
                         ref={cancelButtonRef}
                         type="button"
-                        className="rounded-xl border px-4 py-2 text-sm"
+                        className="btn btn-secondary"
                         onClick={onCancel}
                     >
                         {cancelLabel}
                     </button>
                     <button
                         type="button"
-                        className="rounded-xl bg-accent-cta px-4 py-2 text-sm text-on-accent"
+                        className="btn btn-primary"
                         onClick={onConfirm}
                     >
                         {confirmLabel}

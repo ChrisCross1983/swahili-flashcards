@@ -114,20 +114,20 @@ export default function ManageGroupsSheet({
 
     return (
         <FullScreenSheet open={open} title="Gruppen verwalten" onClose={onClose}>
-            <div className="rounded-2xl border p-4 space-y-3">
-                <div className="text-sm font-medium">Neue Gruppe</div>
+            <div className="panel space-y-3">
+                <div className="text-sm font-semibold tracking-wide">Neue Gruppe</div>
                 <div className="flex gap-2">
                     <input
-                        className="flex-1 rounded-xl border px-3 py-2"
+                        className="flex-1 rounded-xl border border-soft bg-base px-3 py-2"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="z.B. Begrüßung"
                     />
-                    <button type="button" className="rounded-xl border px-3 py-2" onClick={onCreate} disabled={busyId === "create"}>
+                    <button type="button" className="btn btn-primary" onClick={onCreate} disabled={busyId === "create"}>
                         {busyId === "create" ? "Anlegen…" : "Anlegen"}
                     </button>
                 </div>
-                {status ? <p className="text-sm text-muted">{status}</p> : null}
+                {status ? <p className="status-note">{status}</p> : null}
             </div>
 
             <div className="mt-4 space-y-2">
@@ -137,17 +137,17 @@ export default function ManageGroupsSheet({
                     const isBusy = busyId === group.id;
 
                     return (
-                        <div key={group.id} className="rounded-xl border p-3 space-y-3">
+                        <div key={group.id} className="panel-subtle space-y-3">
                             <div className="flex items-start justify-between gap-2">
                                 <div>
                                     {isEditing ? (
                                         <input
-                                            className="rounded-lg border px-2 py-1 text-sm"
+                                            className="rounded-lg border border-soft bg-base px-2 py-1 text-sm"
                                             value={editingName}
                                             onChange={(event) => setEditingName(event.target.value)}
                                         />
                                     ) : (
-                                        <div className="font-medium">{group.name}</div>
+                                        <div className="font-semibold">{group.name}</div>
                                     )}
                                     <p className="text-xs text-muted mt-1">{count} Karten</p>
                                 </div>
@@ -155,7 +155,7 @@ export default function ManageGroupsSheet({
                                 <div className="flex flex-wrap gap-2 justify-end">
                                     <button
                                         type="button"
-                                        className="rounded-lg border px-2 py-1 text-sm"
+                                        className="btn btn-ghost text-sm"
                                         onClick={() => onOpenGroup?.(group.id)}
                                     >
                                         Öffnen
@@ -165,7 +165,7 @@ export default function ManageGroupsSheet({
                                         <>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border px-2 py-1 text-sm"
+                                                className="btn btn-primary text-sm"
                                                 onClick={() => submitRename(group)}
                                                 disabled={isBusy}
                                             >
@@ -173,21 +173,21 @@ export default function ManageGroupsSheet({
                                             </button>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border px-2 py-1 text-sm"
+                                                className="btn btn-ghost text-sm"
                                                 onClick={() => setEditingId(null)}
                                             >
                                                 Abbrechen
                                             </button>
                                         </>
                                     ) : (
-                                        <button type="button" className="rounded-lg border px-2 py-1 text-sm" onClick={() => startRename(group)}>
+                                        <button type="button" className="btn btn-ghost text-sm" onClick={() => startRename(group)}>
                                             Umbenennen
                                         </button>
                                     )}
 
                                     <button
                                         type="button"
-                                        className="rounded-lg border px-2 py-1 text-sm"
+                                        className="btn btn-danger text-sm"
                                         onClick={() => onDelete(group)}
                                         disabled={isBusy}
                                     >

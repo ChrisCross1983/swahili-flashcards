@@ -27,18 +27,18 @@ export default function TrainerCard({
     backContent,
 }: Props) {
     return (
-        <div className="rounded-3xl border border-soft bg-surface p-6 shadow-soft" data-testid="trainer-card-shell" data-mode={isFlipped ? "notes" : "front"}>
+        <div className="rounded-3xl border border-soft bg-surface p-6 shadow-warm" data-testid="trainer-card-shell" data-mode={isFlipped ? "notes" : "front"}>
             {isFlipped ? (
                 <div className="space-y-4" data-testid="trainer-card-back">
                     <div className="flex items-center justify-between gap-3">
                         <div>
-                            <div className="text-sm font-semibold text-primary">Eigene Notizen</div>
+                            <div className="text-sm font-semibold tracking-wide text-primary">Eigene Notizen</div>
                             <div className="text-xs text-muted">Dein persönlicher Lernbereich für diese Karte.</div>
                         </div>
                         {onFlipBack ? (
                             <button
                                 type="button"
-                                className="rounded-full border border-soft px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface-elevated"
+                                className="btn btn-utility rounded-full px-3 py-1.5 text-xs font-medium"
                                 onClick={onFlipBack}
                             >
                                 Zur Vorderseite
@@ -50,7 +50,7 @@ export default function TrainerCard({
             ) : (
                 <div className={reveal ? "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
                     <div>
-                        <div className="text-sm text-muted">Übersetze:</div>
+                        <div className="text-xs font-semibold tracking-wide text-muted uppercase">Übersetze</div>
                         <div className="mt-2 text-2xl font-semibold text-primary">
                             <CardText>{prompt}</CardText>
                         </div>
@@ -58,8 +58,8 @@ export default function TrainerCard({
 
                     {reveal ? (
                         <div className="space-y-4">
-                            <div className="rounded-2xl bg-surface-elevated p-4">
-                                <div className="text-sm text-muted">Antwort</div>
+                            <div className="rounded-2xl border border-soft bg-surface-elevated p-4">
+                                <div className="text-xs font-semibold tracking-wide text-muted uppercase">Antwort</div>
                                 <div className="mt-1 text-xl font-semibold text-primary">
                                     <CardText>{answer}</CardText>
                                 </div>
@@ -73,11 +73,11 @@ export default function TrainerCard({
 
                             {onOpenLearningHelp ? (
                                 <div className="flex items-center justify-between gap-3">
-                                    {learningTypeLabel ? <span className="inline-flex rounded-full border border-soft bg-surface px-2 py-1 text-xs font-semibold text-muted">{learningTypeLabel}</span> : <span />}
+                                    {learningTypeLabel ? <span className="badge">{learningTypeLabel}</span> : <span />}
 
                                     <button
                                         type="button"
-                                        className="rounded-full border border-soft bg-surface px-3 py-1.5 text-sm font-medium text-primary hover:bg-surface-elevated"
+                                        className="btn btn-secondary rounded-full px-3 py-1.5 text-sm font-medium"
                                         onClick={onOpenLearningHelp}
                                     >
                                         Eigene Notizen

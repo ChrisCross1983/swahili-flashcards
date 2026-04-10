@@ -76,15 +76,15 @@ export default function HomeClient({ ownerKey }: Props) {
   }
 
   return (
-    <main className="min-h-screen p-6 flex justify-center">
+    <main className="min-h-screen bg-base-alt p-6 flex justify-center">
       <div className="w-full max-w-xl">
-        <h1 className="text-3xl font-semibold">Swahili</h1>
+        <h1 className="text-4xl font-semibold tracking-wide">Swahili</h1>
 
         <div className="mt-3 flex items-center justify-between">
           <div className="text-xs text-muted">
             Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
           </div>
-          <button className="rounded-xl border px-3 py-2 text-sm" onClick={logout}>
+          <button className="btn btn-secondary text-sm" onClick={logout}>
             Logout
           </button>
         </div>
@@ -92,7 +92,7 @@ export default function HomeClient({ ownerKey }: Props) {
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <button
             onClick={() => router.push("/trainer")}
-            className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xl font-semibold">Vokabeltrainer</div>
             <div className="mt-2 text-sm text-muted">Trainiere deine gespeicherten Karten (Leitner).</div>
@@ -100,7 +100,7 @@ export default function HomeClient({ ownerKey }: Props) {
 
           <button
             onClick={() => router.push("/path")}
-            className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xl font-semibold">Lernpfad</div>
             <div className="mt-2 text-sm text-muted">Kategorien von leicht bis schwer.</div>
@@ -108,7 +108,7 @@ export default function HomeClient({ ownerKey }: Props) {
 
           <button
             onClick={() => router.push("/sentence-trainer")}
-            className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xl font-semibold">Satztrainer</div>
             <div className="mt-2 text-sm text-muted">Baue Sätze aus deinem Wortschatz.</div>
@@ -116,7 +116,7 @@ export default function HomeClient({ ownerKey }: Props) {
 
           <button
             onClick={() => router.push("/stats")}
-            className="rounded-[32px] border p-8 text-left shadow-soft hover:shadow-warm transition"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xl font-semibold">📈 Statistik</div>
             <div className="mt-2 text-sm text-muted">Fortschritt, Level und Lernqualität im Dashboard.</div>

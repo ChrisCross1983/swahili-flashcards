@@ -89,16 +89,16 @@ export default function GroupSelector({
     }
 
     return (
-        <div>
-            <div className="text-sm font-medium">{label}</div>
+        <div className="panel-subtle space-y-3">
+            <div className="text-sm font-semibold tracking-wide">{label}</div>
 
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
                 {showAllOption ? (
                     <button
                         type="button"
                         className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${allActive
-                            ? "border-accent bg-accent-success-soft text-primary"
-                            : "border-soft bg-surface hover:bg-surface-elevated"
+                            ? "border-strong bg-surface-strong text-primary shadow-soft"
+                            : "border-soft bg-surface hover:bg-surface-elevated text-muted"
                             }`}
                         onClick={onSelectAll}
                     >
@@ -114,7 +114,7 @@ export default function GroupSelector({
                             type="button"
                             key={group.id}
                             className={`rounded-full border px-2 py-1 text-xs transition ${isSelected
-                                ? "border-accent bg-accent-success-soft"
+                                ? "border-strong bg-surface-strong shadow-soft"
                                 : "border-soft bg-surface hover:bg-surface-elevated"
                                 }`}
                             onClick={() => toggle(group.id)}
@@ -124,7 +124,7 @@ export default function GroupSelector({
                             <span className="inline-flex items-center gap-1">
                                 {isSelected ? <span aria-hidden="true">✓</span> : null}
                                 <GroupBadge group={group} />
-                                {isAssigned && !isSelected ? <span className="text-[10px] text-muted">(bereits)</span> : null}
+                                {isAssigned && !isSelected ? <span className="text-[10px] text-muted">• bereits</span> : null}
                             </span>
                         </button>
                     );
@@ -134,18 +134,18 @@ export default function GroupSelector({
             {groups.length === 0 ? <p className="mt-2 text-sm text-muted">{emptyText}</p> : null}
 
             {allowCreate ? (
-                <div className="mt-3 rounded-xl border border-soft p-3">
-                    <div className="text-xs font-semibold text-muted">Neue Gruppe erstellen</div>
+                <div className="rounded-xl border border-soft bg-surface p-3">
+                    <div className="text-xs font-semibold tracking-wide text-muted">Neue Gruppe erstellen</div>
                     <div className="mt-2 flex gap-2">
                         <input
-                            className="flex-1 rounded-lg border px-3 py-2 text-sm"
+                            className="flex-1 rounded-lg border border-soft bg-base px-3 py-2 text-sm"
                             value={newGroupName}
                             onChange={(event) => setNewGroupName(event.target.value)}
                             placeholder="z.B. Begrüßung"
                         />
                         <button
                             type="button"
-                            className="rounded-lg border px-3 py-2 text-sm"
+                            className="btn btn-secondary rounded-lg px-3 py-2 text-sm"
                             onClick={handleCreate}
                             disabled={createBusy}
                         >

@@ -157,7 +157,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
         <>
             <FullScreenSheet open={open} onClose={onClose} title="Duplikate prüfen">
                 <div className="space-y-4">
-                    <div className="rounded-xl border bg-surface p-3 text-sm">
+                    <div className="panel text-sm">
                         <p>
                             Strikte Dubletten (inkl. didaktischer Varianten): <strong>{strictClusters.length}</strong> · Verdächtige Kandidaten: <strong>{reviewClusters.length}</strong>
                         </p>
@@ -167,12 +167,12 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                        <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => void loadDuplicates()} disabled={loading}>
+                        <button type="button" className="btn btn-secondary text-sm" onClick={() => void loadDuplicates()} disabled={loading}>
                             {loading ? "Scanne…" : "Neu scannen"}
                         </button>
                         <button
                             type="button"
-                            className="rounded-xl bg-accent-cta px-3 py-2 text-sm text-on-accent disabled:opacity-60"
+                            className="btn btn-danger text-sm disabled:opacity-60"
                             onClick={() => setConfirmOpen(true)}
                             disabled={deleting || selectedCount === 0 || clusters.length === 0}
                         >
@@ -180,10 +180,10 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                         </button>
                     </div>
 
-                    {status ? <p className="rounded-xl border bg-surface p-3 text-sm">{status}</p> : null}
+                    {status ? <p className="status-note">{status}</p> : null}
 
                     {!loading && clusters.length === 0 ? (
-                        <div className="rounded-xl border bg-surface p-4 text-sm text-muted">
+                        <div className="status-note status-info">
                             Keine Dubletten gefunden. Deine Karten sehen sauber aus. 🎉
                         </div>
                     ) : null}
@@ -192,9 +192,9 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                         <section className="space-y-3">
                             <h3 className="text-sm font-semibold">Echte Dubletten</h3>
                             {strictClusters.map((cluster) => (
-                                <div key={cluster.clusterId} className="rounded-xl border bg-surface p-3 space-y-3">
+                                <div key={cluster.clusterId} className="panel-subtle space-y-3">
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="rounded-full border px-2 py-0.5 text-xs">{badgeLabel(cluster.kind)}</span>
+                                        <span className="badge">{badgeLabel(cluster.kind)}</span>
                                         <span className="text-xs text-muted">{cluster.clusterId}</span>
                                     </div>
                                     <p className="text-xs text-muted">{cluster.reason}</p>
@@ -205,7 +205,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                                         {cluster.cards.map((card) => {
                                             const checked = selectedDeleteIds[cluster.clusterId]?.has(card.id) ?? false;
                                             return (
-                                                <label key={card.id} className="flex items-start gap-3 rounded-lg border p-2 text-sm">
+                                                <label key={card.id} className="flex items-start gap-3 rounded-lg border border-soft bg-surface p-2 text-sm">
                                                     <input
                                                         type="checkbox"
                                                         className="mt-1"
@@ -232,9 +232,9 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                         <section className="space-y-3">
                             <h3 className="text-sm font-semibold">Verdächtige ähnliche Karten</h3>
                             {reviewClusters.map((cluster) => (
-                                <div key={cluster.clusterId} className="rounded-xl border bg-surface p-3 space-y-3">
+                                <div key={cluster.clusterId} className="panel-subtle space-y-3">
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="rounded-full border px-2 py-0.5 text-xs">{badgeLabel(cluster.kind)}</span>
+                                        <span className="badge">{badgeLabel(cluster.kind)}</span>
                                         <span className="text-xs text-muted">{cluster.clusterId}</span>
                                     </div>
                                     <p className="text-xs text-muted">{cluster.reason}</p>
@@ -246,7 +246,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                                         {cluster.cards.map((card) => {
                                             const checked = selectedDeleteIds[cluster.clusterId]?.has(card.id) ?? false;
                                             return (
-                                                <label key={card.id} className="flex items-start gap-3 rounded-lg border p-2 text-sm">
+                                                <label key={card.id} className="flex items-start gap-3 rounded-lg border border-soft bg-surface p-2 text-sm">
                                                     <input
                                                         type="checkbox"
                                                         className="mt-1"

@@ -192,55 +192,55 @@ export default function ImportClient() {
     }
 
     return (
-        <main className="min-h-screen p-6 flex justify-center">
+        <main className="min-h-screen bg-base-alt p-6 flex justify-center">
             <div className="w-full max-w-4xl">
                 <div className="flex items-center justify-between gap-3">
-                    <h1 className="text-2xl font-semibold">Bulk Import (Vokabeln)</h1>
-                    <button className="rounded-xl border px-3 py-2 text-sm" onClick={() => router.push("/trainer")}>Zurück</button>
+                    <h1 className="text-3xl font-semibold tracking-wide">Bulk Import (Vokabeln)</h1>
+                    <button className="btn btn-secondary text-sm" onClick={() => router.push("/trainer")}>Zurück</button>
                 </div>
 
                 <p className="mt-3 text-sm text-muted">Liste einfügen, prüfen, problematische Zeilen direkt lösen, dann importieren.</p>
 
-                <div className="mt-6 rounded-2xl border p-4">
-                    <label className="text-sm font-medium">Zuordnung</label>
-                    <select className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" value={mappingMode} onChange={(e) => setMappingMode(e.target.value as MappingMode)}>
+                <div className="mt-6 panel space-y-4">
+                    <label className="text-sm font-semibold tracking-wide">Zuordnung</label>
+                    <select className="w-full rounded-xl border border-soft bg-base px-3 py-2" value={mappingMode} onChange={(e) => setMappingMode(e.target.value as MappingMode)}>
                         <option value="AUTO">Automatisch erkennen (empfohlen)</option>
                         <option value="DE_LEFT_SW_RIGHT">Deutsch links / Swahili rechts</option>
                         <option value="SW_LEFT_DE_RIGHT">Swahili links / Deutsch rechts</option>
                     </select>
 
-                    <div className="mt-4 rounded-xl border p-3">
-                        <label className="text-sm font-medium">Import-Zielgruppe (optional)</label>
-                        <select className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" value={groupMode} onChange={(e) => setGroupMode(e.target.value as any)}>
+                    <div className="panel-subtle">
+                        <label className="text-sm font-semibold">Import-Zielgruppe (optional)</label>
+                        <select className="mt-2 w-full rounded-xl border border-soft bg-base px-3 py-2" value={groupMode} onChange={(e) => setGroupMode(e.target.value as any)}>
                             <option value="none">Keine Gruppe</option>
                             <option value="existing">Bestehende Gruppe</option>
                             <option value="new">Neue Gruppe erstellen</option>
                         </select>
                         {groupMode === "existing" ? (
-                            <select className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}>
+                            <select className="mt-2 w-full rounded-xl border border-soft bg-base px-3 py-2" value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}>
                                 <option value="">Bitte wählen</option>
                                 {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
                             </select>
                         ) : null}
                         {groupMode === "new" ? (
-                            <input className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent" placeholder="Neue Gruppe" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} />
+                            <input className="mt-2 w-full rounded-xl border border-soft bg-base px-3 py-2" placeholder="Neue Gruppe" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} />
                         ) : null}
                     </div>
 
-                    <label className="mt-4 block text-sm font-medium">Text einfügen</label>
-                    <textarea className="mt-2 h-64 w-full rounded-xl border p-3 bg-transparent" placeholder="1. Hund = mbwa\n• Katze - paka\nmbwa = Hund" value={rawText} onChange={(e) => setRawText(e.target.value)} />
+                    <label className="block text-sm font-semibold tracking-wide">Text einfügen</label>
+                    <textarea className="h-64 w-full rounded-xl border border-soft bg-base p-3" placeholder="1. Hund = mbwa\n• Katze - paka\nmbwa = Hund" value={rawText} onChange={(e) => setRawText(e.target.value)} />
 
                     <div className="mt-4 flex gap-3">
-                        <button className="rounded-xl border px-4 py-2 text-sm" onClick={analyzeImport} disabled={isPreviewing || !rawText.trim()}>{isPreviewing ? "Prüfe..." : "Import prüfen"}</button>
-                        <button className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50" onClick={commitImport} disabled={!canCommit}>{isCommitting ? "Importiere..." : `${importableCount} Wortpaare importieren`}</button>
+                        <button className="btn btn-secondary text-sm" onClick={analyzeImport} disabled={isPreviewing || !rawText.trim()}>{isPreviewing ? "Prüfe..." : "Import prüfen"}</button>
+                        <button className="btn btn-primary text-sm disabled:opacity-50" onClick={commitImport} disabled={!canCommit}>{isCommitting ? "Importiere..." : `${importableCount} Wortpaare importieren`}</button>
                     </div>
                 </div>
 
-                {status ? <p className="mt-4 text-sm">{status}</p> : null}
+                {status ? <p className="mt-4 status-note">{status}</p> : null}
 
                 {preview ? (
                     <div className="mt-6 space-y-4">
-                        <div className="rounded-2xl border p-4 text-sm space-y-1">
+                        <div className="panel text-sm space-y-1">
                             <div>{importableCount} Zeilen sind aktuell importierbar.</div>
                             <div>{preview.counts.duplicates} bereits vorhanden.</div>
                             <div>{needsReviewCount} brauchen noch Review.</div>
@@ -250,8 +250,8 @@ export default function ImportClient() {
                         <RowBlock title="Neu / importierbar" rows={preview.newRows} />
                         <RowBlock title="Bereits vorhanden" rows={preview.exactDuplicates} />
 
-                        <div className="rounded-2xl border p-4">
-                            <h2 className="font-medium">Review erforderlich ({editableRows.length})</h2>
+                        <div className="panel">
+                            <h2 className="font-semibold">Review erforderlich ({editableRows.length})</h2>
                             {editableRows.length === 0 ? <p className="mt-2 text-sm text-muted">Keine Einträge.</p> : null}
                             <div className="mt-3 space-y-3">
                                 {editableRows.map((row) => (
@@ -308,28 +308,28 @@ function EditableRowCard({
     const setDirection = (direction: ResolvedDirection) => onChange({ ...row, direction, status: "ambiguous", reason: "Richtung geändert. Bitte neu prüfen." });
 
     return (
-        <div className="rounded-xl border p-3 text-sm space-y-2">
+        <div className="panel-subtle text-sm space-y-2">
             <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">Zeile {row.lineNumber}</span>
-                <span>{statusBadge(row.status)}</span>
+                <span className="font-semibold">Zeile {row.lineNumber}</span>
+                <span className="badge">{statusBadge(row.status)}</span>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-                <input className="rounded-lg border px-2 py-1 bg-transparent" value={row.german} onChange={(e) => onChange({ ...row, german: e.target.value })} placeholder="Deutsch" />
-                <input className="rounded-lg border px-2 py-1 bg-transparent" value={row.swahili} onChange={(e) => onChange({ ...row, swahili: e.target.value })} placeholder="Swahili" />
+                <input className="rounded-lg border border-soft px-2 py-1 bg-base" value={row.german} onChange={(e) => onChange({ ...row, german: e.target.value })} placeholder="Deutsch" />
+                <input className="rounded-lg border border-soft px-2 py-1 bg-base" value={row.swahili} onChange={(e) => onChange({ ...row, swahili: e.target.value })} placeholder="Swahili" />
             </div>
             <div className="flex flex-wrap gap-2">
-                <button className="rounded-lg border px-2 py-1" onClick={onAccept} disabled={busy}>{busy ? "Prüfe..." : "Akzeptieren"}</button>
-                <button className="rounded-lg border px-2 py-1" onClick={onSkip}>Überspringen</button>
-                <button className="rounded-lg border px-2 py-1" onClick={() => setShowAdvanced((prev) => !prev)}>
+                <button className="btn btn-primary text-xs" onClick={onAccept} disabled={busy}>{busy ? "Prüfe..." : "Akzeptieren"}</button>
+                <button className="btn btn-ghost text-xs" onClick={onSkip}>Überspringen</button>
+                <button className="btn btn-utility text-xs" onClick={() => setShowAdvanced((prev) => !prev)}>
                     {showAdvanced ? "Weniger Optionen" : "Bearbeiten"}
                 </button>
             </div>
             {showAdvanced ? (
                 <div className="flex flex-wrap gap-2">
-                    <button className="rounded-lg border px-2 py-1" onClick={onSwap}>Richtung tauschen</button>
-                    <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("DE_LEFT_SW_RIGHT")}>DE → SW</button>
-                    <button className="rounded-lg border px-2 py-1" onClick={() => setDirection("SW_LEFT_DE_RIGHT")}>SW → DE</button>
-                    <button className="rounded-lg border px-2 py-1" onClick={onRevalidate} disabled={busy}>{busy ? "Prüfe..." : "Neu prüfen"}</button>
+                    <button className="btn btn-ghost text-xs" onClick={onSwap}>Richtung tauschen</button>
+                    <button className="btn btn-ghost text-xs" onClick={() => setDirection("DE_LEFT_SW_RIGHT")}>DE → SW</button>
+                    <button className="btn btn-ghost text-xs" onClick={() => setDirection("SW_LEFT_DE_RIGHT")}>SW → DE</button>
+                    <button className="btn btn-secondary text-xs" onClick={onRevalidate} disabled={busy}>{busy ? "Prüfe..." : "Neu prüfen"}</button>
                 </div>
             ) : null}
             <p className="text-xs text-muted">{row.reason}</p>
@@ -348,8 +348,8 @@ function EditableRowCard({
 
 function RowBlock({ title, rows }: { title: string; rows: ParsedImportRow[] }) {
     return (
-        <div className="rounded-2xl border p-4">
-            <h2 className="font-medium">{title} ({rows.length})</h2>
+        <div className="panel">
+            <h2 className="font-semibold">{title} ({rows.length})</h2>
             {rows.length === 0 ? <p className="mt-2 text-sm text-muted">Keine Einträge.</p> : null}
             {rows.length > 0 ? (
                 <ul className="mt-2 space-y-1 text-sm">

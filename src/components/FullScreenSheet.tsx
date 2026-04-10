@@ -23,17 +23,17 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-base h-dvh">
+        <div className="fixed inset-0 z-50 bg-base-alt h-dvh">
             <div className="h-full flex flex-col">
-                <div className="flex items-center justify-between border-b px-4 py-3">
-                    <div className="text-base font-semibold">
+                <div className="flex items-center justify-between border-b border-soft bg-surface px-4 py-3 shadow-soft">
+                    <div className="text-base font-semibold tracking-wide">
                         {title ?? ""}
                     </div>
 
                     <button
                         type="button"
                         onClick={onClose}
-                        className="rounded-full border px-3 py-1 text-sm"
+                        className="btn btn-utility rounded-full px-3 py-1 text-sm"
                         aria-label="Schließen"
                     >
                         ✕
@@ -41,7 +41,7 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
                 </div>
 
                 <div className="flex-1 overflow-auto px-4 py-4 flex justify-center">
-                    <div className="w-full max-w-xl">
+                    <div className="w-full max-w-xl pb-8">
                         {children}
                     </div>
                 </div>

@@ -20,14 +20,14 @@ export default function TrainerStatus({
     onToggleDirectionMenu,
 }: Props) {
     return (
-        <div className="mb-3">
+        <div className="mb-4 rounded-2xl border border-soft bg-surface p-3 shadow-soft">
             <div className="flex items-center justify-between">
                 <div className="text-sm text-muted">
                     Karte <span className="font-medium text-primary">{currentNumber}</span> von{" "}
                     <span className="font-medium text-primary">{sessionTotal}</span>
                 </div>
 
-                <div className="rounded-full border px-3 py-1 text-sm text-muted bg-surface shadow-soft">
+                <div className="rounded-full border border-soft bg-surface-elevated px-3 py-1 text-sm text-muted">
                     ✔︎ <span className="font-medium">{answeredCount === 0 ? "—" : `${safePct}%`}</span>{" "}
                     <span className="text-muted">sicher</span>
                 </div>
@@ -45,7 +45,7 @@ export default function TrainerStatus({
                     </span>
                 </div>
 
-                <button type="button" className="btn btn-ghost text-sm whitespace-nowrap" onClick={onToggleDirectionMenu}>
+                <button type="button" className="btn btn-utility text-sm whitespace-nowrap" onClick={onToggleDirectionMenu}>
                     Richtung ändern
                 </button>
             </div>
