@@ -84,7 +84,22 @@ export async function GET(req: Request) {
     const id = searchParams.get("id");
     const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
     const groupIds = parseGroupIds(searchParams);
-    const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
+    let allowedCardIds: string[] | null;
+
+    try {
+        allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
+    } catch (error) {
+        console.error("[api/cards] group filter resolution failed", {
+            ownerKey,
+            type: resolvedType,
+            groupCount: groupIds.length,
+            error,
+        });
+        return NextResponse.json(
+            { error: "Karten konnten nicht geladen werden (Gruppenfilter)." },
+            { status: 500 }
+        );
+    }
 
     if (allowedCardIds && allowedCardIds.length === 0) {
         if (id) return NextResponse.json({ card: null });
@@ -121,7 +136,22 @@ export async function GET(req: Request) {
     }
 
     const cards = data ?? [];
-    const groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType);
+
+    let groupsByCard: Map<string, Array<{ id: string; name: string; color: string | null }>>;
+    try {
+        groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType);
+    } catch (error) {
+        console.error("[api/cards] card group enrichment failed", {
+            ownerKey,
+            type: resolvedType,
+            cardCount: cards.length,
+            error,
+        });
+        return NextResponse.json(
+            { error: "Karten konnten nicht vollständig geladen werden (Gruppen)." },
+            { status: 500 }
+        );
+    }
 
     if (id) {
         const card = cards[0] ? { ...cards[0], groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;

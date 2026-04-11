@@ -12,9 +12,20 @@ function withFilterParams(url: string, cardType: CardType, groupIds?: string[]):
 }
 
 async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
-    const json = await res.json().catch(() => ({}));
+    const bodyText = await res.text();
+    let json: unknown = {};
+
+    if (bodyText) {
+        try {
+            json = JSON.parse(bodyText);
+        } catch {
+            throw new Error(`${fallback} (ungültige Antwort vom Server, HTTP ${res.status})`);
+        }
+    }
+
     if (!res.ok) {
-        throw new Error((json as { error?: string }).error ?? fallback);
+        const message = (json as { error?: string }).error ?? fallback;
+        throw new Error(`${message} (HTTP ${res.status})`);
     }
     return json as T;
 }
@@ -39,16 +50,18 @@ export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: strin
     const res = await fetch(withFilterParams("/api/cards/all", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<{ items?: any[]; cards?: any[] }>(res, "Aktion fehlgeschlagen.");
     const source = json.items ?? json.cards ?? [];
-    return source.map((c) => ({
-        cardId: c.id,
-        level: 0,
-        dueDate: null,
-        german: c.german_text,
-        swahili: c.swahili_text,
-        imagePath: c.image_path ?? null,
-        audio_path: c.audio_path ?? null,
-        groups: c.groups ?? [],
-    }));
+    return source
+        .filter((c) => c && c.id)
+        .map((c) => ({
+            cardId: c.id,
+            level: 0,
+            dueDate: null,
+            german: c.german_text,
+            swahili: c.swahili_text,
+            imagePath: c.image_path ?? null,
+            audio_path: c.audio_path ?? null,
+            groups: c.groups ?? [],
+        }));
 }
 
 export async function fetchLastMissedItems(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {

@@ -1,5 +1,7 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 
+const CARD_GROUPS_BATCH_SIZE = 200;
+
 export type ResolvedCardType = "vocab" | "sentence" | null;
 
 export function resolveCardTypeFilter(typeParam: string | null): ResolvedCardType {
@@ -83,21 +85,33 @@ export async function getAllowedCardIdsByGroups(ownerKey: string, groupIds: stri
 export async function getCardGroups(ownerKey: string, cardIds: string[], resolvedType: ResolvedCardType) {
     if (cardIds.length === 0) return new Map<string, Array<{ id: string; name: string; color: string | null }>>();
 
-    let query = supabaseServer
-        .from("card_groups")
-        .select("card_id, groups!inner(id, name, color, type_scope)")
-        .eq("owner_key", ownerKey)
-        .in("card_id", cardIds);
+    const rows: any[] = [];
 
-    query = applyGroupTypeScopeFilter(query, resolvedType, { foreignTable: "groups" });
+    for (let index = 0; index < cardIds.length; index += CARD_GROUPS_BATCH_SIZE) {
+        const chunk = cardIds.slice(index, index + CARD_GROUPS_BATCH_SIZE);
 
-    const { data, error } = await query;
+        let query = supabaseServer
+            .from("card_groups")
+            .select("card_id, groups!inner(id, name, color, type_scope)")
+            .eq("owner_key", ownerKey)
+            .in("card_id", chunk);
 
-    if (error) throw new Error(error.message);
+        query = applyGroupTypeScopeFilter(query, resolvedType, { foreignTable: "groups" });
+
+        const { data, error } = await query;
+
+        if (error) {
+            throw new Error(error.message);
+        }
+
+        if (Array.isArray(data) && data.length > 0) {
+            rows.push(...data);
+        }
+    }
 
     const map = new Map<string, Array<{ id: string; name: string; color: string | null }>>();
 
-    for (const row of data ?? []) {
+    for (const row of rows) {
         const cardId = String((row as any).card_id);
         const group = (row as any).groups;
         if (!group) continue;
@@ -112,3 +126,7 @@ export async function getCardGroups(ownerKey: string, cardIds: string[], resolve
 
     return map;
 }
+
+export const __internal = {
+    CARD_GROUPS_BATCH_SIZE,
+};

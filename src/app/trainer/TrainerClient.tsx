@@ -82,6 +82,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
+    const [learnLoadError, setLearnLoadError] = useState<string | null>(null);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [cards, setCards] = useState<any[]>([]);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -1080,6 +1081,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     async function loadToday() {
         setStatus("Lade fällige Karten...");
+        setLearnLoadError(null);
 
         try {
             const items = await fetchTodayItems(cardType, trainerGroupIds)
@@ -1103,7 +1105,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setStatus(`Fällig heute: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {
-            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
+            setStatus(message);
+            setLearnLoadError(message);
             return { ok: false as const, items: [] as TodayItem[] };
         }
     }
@@ -1111,6 +1115,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     async function loadAllForDrill() {
         setStatus("Lade alle Karten...");
         setLastMissedEmpty(false);
+        setLearnLoadError(null);
 
         try {
             const items = await fetchAllCardsForDrill(cardType, trainerGroupIds)
@@ -1126,7 +1131,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setStatus(`Alle Karten: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {
-            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
+            setStatus(message);
+            setLearnLoadError(message);
             return { ok: false as const, items: [] as TodayItem[] };
         }
     }
@@ -1134,6 +1141,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     async function loadLastMissed() {
         setStatus("Lade zuletzt nicht gewusste Karten...");
         setLastMissedEmpty(false);
+        setLearnLoadError(null);
 
         try {
             const items = await fetchLastMissedItems(cardType, trainerGroupIds)
@@ -1158,7 +1166,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setStatus(`Zuletzt nicht gewusst: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {
-            setStatus(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
+            setStatus(message);
+            setLearnLoadError(message);
             return { ok: false as const, items: [] as TodayItem[] };
         }
     }
@@ -2307,6 +2317,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 }
 
                                                 resetSessionTracking();
+                                                setLearnLoadError(null);
                                                 setTodayItems([]);
 
                                                 const chosen =
@@ -2356,6 +2367,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
                                                 {/* Start hint */}
                                                 {startHint}
+                                            </div>
+                                        ) : null}
+
+                                        {learnLoadError ? (
+                                            <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">
+                                                {learnLoadError}
                                             </div>
                                         ) : null}
                                     </div >
