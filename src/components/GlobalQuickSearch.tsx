@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
 import { createPortal } from "react-dom";
 import CardText from "@/components/ui/CardText";
+import { lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -88,38 +89,10 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
 
     useEffect(() => {
         if (!open) return;
-        // Reset overflow/zoom state while search is open.
-        const html = document.documentElement;
-        const body = document.body;
-        const prev = {
-            htmlOverflowX: html.style.overflowX,
-            htmlWidth: html.style.width,
-            htmlTransform: html.style.transform,
-            htmlZoom: (html.style as CSSStyleDeclaration & { zoom?: string }).zoom,
-            bodyOverflowX: body.style.overflowX,
-            bodyWidth: body.style.width,
-            bodyTransform: body.style.transform,
-            bodyZoom: (body.style as CSSStyleDeclaration & { zoom?: string }).zoom,
-        };
-
-        html.style.overflowX = "hidden";
-        html.style.width = "100%";
-        html.style.transform = "none";
-        (html.style as CSSStyleDeclaration & { zoom?: string }).zoom = "1";
-        body.style.overflowX = "hidden";
-        body.style.width = "100%";
-        body.style.transform = "none";
-        (body.style as CSSStyleDeclaration & { zoom?: string }).zoom = "1";
+        lockBodyScroll();
 
         return () => {
-            html.style.overflowX = prev.htmlOverflowX;
-            html.style.width = prev.htmlWidth;
-            html.style.transform = prev.htmlTransform;
-            (html.style as CSSStyleDeclaration & { zoom?: string }).zoom = prev.htmlZoom ?? "";
-            body.style.overflowX = prev.bodyOverflowX;
-            body.style.width = prev.bodyWidth;
-            body.style.transform = prev.bodyTransform;
-            (body.style as CSSStyleDeclaration & { zoom?: string }).zoom = prev.bodyZoom ?? "";
+            unlockBodyScroll();
         };
     }, [open]);
 
@@ -248,7 +221,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
                                 placeholder="Deutsch oder Swahili suchen..."
-                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm shadow-soft focus:border-accent focus:outline-none"
+                                className="w-full rounded-xl border border-soft px-4 py-3 text-base md:text-sm shadow-soft focus:border-accent focus:outline-none"
                             />
 
                             <div className="max-h-72 overflow-auto rounded-xl border border-soft bg-surface">

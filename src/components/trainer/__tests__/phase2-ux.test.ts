@@ -24,10 +24,39 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("keeps memberships editable with vocab scope and inline group creation", () => {
-        expect(trainerSource).toContain("assignedIds={(cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))?.groups ?? []).map((group: any) => String(group.id))}");
-        expect(trainerSource).toContain("allowCreate");
+        expect(trainerSource).toContain("Wähle eine oder mehrere Gruppen für diese Karte.");
+        expect(trainerSource).toContain("aria-pressed={isSelected}");
+        expect(trainerSource).toContain("Gruppenzuordnung gespeichert.");
         expect(trainerSource).toContain("fetchGroups(cardType)");
         expect(trainerSource).toContain("assignCardsToGroup(cardType, groupId");
+    });
+
+    it("uses notes sheet with single field and forgiving persistence", () => {
+        expect(trainerSource).toContain("title=\"Eigene Notizen\"");
+        expect(trainerSource).toContain("setCardNoteDraft({ mainNotes:");
+        expect(trainerSource).toContain("Automatisch gespeichert");
+        expect(trainerSource).not.toContain("onFlipBack");
+    });
+
+    it("prevents search overlay from mutating zoom or transform state", () => {
+        const searchSource = fs.readFileSync(path.join(root, "src/components/GlobalQuickSearch.tsx"), "utf8");
+        expect(searchSource).toContain("lockBodyScroll()");
+        expect(searchSource).not.toContain("html.style.transform");
+        expect(searchSource).not.toContain("zoom = \"1\"");
+    });
+
+    it("uses stronger layering and local close controls for sheets", () => {
+        const sheetSource = fs.readFileSync(path.join(root, "src/components/FullScreenSheet.tsx"), "utf8");
+        expect(sheetSource).toContain("bg-overlay");
+        expect(sheetSource).toContain("md:rounded-3xl");
+        expect(sheetSource).toContain("aria-label=\"Schließen\"");
+    });
+
+    it("reduces mobile floating tool obstruction in focused trainer mode", () => {
+        const overlaysSource = fs.readFileSync(path.join(root, "src/components/GlobalOverlays.tsx"), "utf8");
+        expect(overlaysSource).toContain("focusedTrainerMode");
+        expect(overlaysSource).toContain("mobileToolsOpen");
+        expect(overlaysSource).toContain("Schnellaktionen öffnen");
     });
 
     it("keeps bulk import out of home and available in vocab trainer", () => {

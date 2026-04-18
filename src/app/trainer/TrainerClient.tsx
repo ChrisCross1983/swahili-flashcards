@@ -147,8 +147,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
     const [savingCardGroups, setSavingCardGroups] = useState(false);
     const [formGroupIds, setFormGroupIds] = useState<string[]>([]);
-    const [learningHelpFlipped, setLearningHelpFlipped] = useState(false);
-    const [cardNoteDraft, setCardNoteDraft] = useState({ mainNotes: "", memoryHint: "", exampleSentence: "", confusionNote: "" });
+    const [notesSheetOpen, setNotesSheetOpen] = useState(false);
+    const [cardNoteCardId, setCardNoteCardId] = useState<string | null>(null);
+    const [cardNoteDraft, setCardNoteDraft] = useState({ mainNotes: "" });
     const [cardNoteLoading, setCardNoteLoading] = useState(false);
     const [cardNoteSaving, setCardNoteSaving] = useState(false);
     const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
@@ -199,6 +200,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
+    const savedCardNoteRef = useRef("");
+    const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -306,7 +309,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }, [openLearn, refreshSetupCounts]);
 
     useEffect(() => {
-        setLearningHelpFlipped(false);
+        setNotesSheetOpen(false);
     }, [currentIndex, reveal]);
 
     async function uploadImage(): Promise<string | null> {
@@ -996,7 +999,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setCurrentIndex(adjusted.index);
             setReveal(adjusted.reveal);
             if (adjusted.deletedCurrent) {
-                setLearningHelpFlipped(false);
+                setNotesSheetOpen(false);
             }
             if (adjusted.ended) {
                 setLearnDone(true);
@@ -1284,7 +1287,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const item = todayItems[currentIndex];
         const cardId = resolveCardId(item);
         if (!item || !cardId) return;
-        setLearningHelpFlipped(true);
+        setNotesSheetOpen(true);
+        setCardNoteCardId(cardId);
         setCardNoteLoading(true);
         setCardNoteSaveState(null);
         try {
@@ -1293,10 +1297,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht geladen werden.");
             setCardNoteDraft({
                 mainNotes: json.note?.main_notes ?? "",
-                memoryHint: json.note?.memory_hint ?? "",
-                exampleSentence: json.note?.example_sentence ?? "",
-                confusionNote: json.note?.confusion_note ?? "",
             });
+            savedCardNoteRef.current = json.note?.main_notes ?? "";
         } catch (error) {
             setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
         } finally {
@@ -1304,9 +1306,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    async function saveCardNotes() {
-        const item = todayItems[currentIndex];
-        const cardId = resolveCardId(item);
+    const saveCardNotes = useCallback(async (noteText: string, explicitCardId?: string) => {
+        const cardId = explicitCardId ?? cardNoteCardId ?? resolveCardId(todayItems[currentIndex]);
         if (!cardId) return;
         setCardNoteSaving(true);
         setCardNoteSaveState(null);
@@ -1316,24 +1317,26 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     cardId,
-                    mainNotes: cardNoteDraft.mainNotes,
-                    memoryHint: cardNoteDraft.memoryHint,
-                    exampleSentence: cardNoteDraft.exampleSentence,
-                    confusionNote: cardNoteDraft.confusionNote,
+                    mainNotes: noteText,
                 }),
             });
             const json = await res.json();
             if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
-            setCardNoteSaveState("Gespeichert");
+            savedCardNoteRef.current = noteText;
+            setCardNoteSaveState("Automatisch gespeichert");
         } catch (error) {
             setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
         } finally {
             setCardNoteSaving(false);
         }
-    }
+    }, [cardNoteCardId, currentIndex, todayItems]);
 
-    function flipBackToPrompt() {
-        setLearningHelpFlipped(false);
+    async function closeNotesSheet() {
+        if (cardNoteDraft.mainNotes !== savedCardNoteRef.current) {
+            await saveCardNotes(cardNoteDraft.mainNotes, cardNoteCardId ?? undefined);
+        }
+        setNotesSheetOpen(false);
+        setCardNoteCardId(null);
     }
 
     async function gradeCurrent(correct: boolean) {
@@ -1915,6 +1918,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const next = new Set<string>(cardGroupsDraft.map(String));
         return existing.size === next.size && Array.from(existing).every((id) => next.has(id));
     })();
+
+    useEffect(() => {
+        if (!notesSheetOpen || cardNoteLoading) return;
+        if (cardNoteDraft.mainNotes === savedCardNoteRef.current) return;
+        if (noteSaveTimerRef.current) {
+            clearTimeout(noteSaveTimerRef.current);
+        }
+        noteSaveTimerRef.current = setTimeout(() => {
+            void saveCardNotes(cardNoteDraft.mainNotes);
+        }, 700);
+
+        return () => {
+            if (noteSaveTimerRef.current) {
+                clearTimeout(noteSaveTimerRef.current);
+                noteSaveTimerRef.current = null;
+            }
+        };
+    }, [notesSheetOpen, cardNoteLoading, cardNoteDraft.mainNotes, saveCardNotes]);
 
     return (
         <main className="min-h-screen bg-base p-6 flex justify-center">
@@ -2804,21 +2825,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             learningTypeLabel={null}
-                                                            isFlipped={learningHelpFlipped}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
-                                                            onFlipBack={flipBackToPrompt}
-                                                            backContent={
-                                                                <LearningHelpPanel
-                                                                    loading={cardNoteLoading}
-                                                                    draft={cardNoteDraft}
-                                                                    saveStateText={cardNoteSaveState}
-                                                                    saving={cardNoteSaving}
-                                                                    onChange={(field, value) => setCardNoteDraft((prev) => ({ ...prev, [field]: value }))}
-                                                                    onSave={() => {
-                                                                        void saveCardNotes();
-                                                                    }}
-                                                                />
-                                                            }
                                                         />
                                                     </div>
 
@@ -2904,6 +2911,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     onConfirm={endSessionEarly}
                                 />
                             </FullScreenSheet >
+
+                            <FullScreenSheet
+                                open={notesSheetOpen}
+                                title="Eigene Notizen"
+                                onClose={() => {
+                                    void closeNotesSheet();
+                                }}
+                            >
+                                <LearningHelpPanel
+                                    loading={cardNoteLoading}
+                                    draft={cardNoteDraft}
+                                    saveStateText={cardNoteSaving ? "Speichert…" : cardNoteSaveState}
+                                    onChange={(value) => {
+                                        setCardNoteSaveState("Ungespeicherte Änderung…");
+                                        setCardNoteDraft({ mainNotes: value });
+                                    }}
+                                />
+                            </FullScreenSheet>
 
                             {/* Create Modal */}
                             < FullScreenSheet
@@ -3612,16 +3637,33 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                             >
                                 <div className="space-y-4">
-                                    <GroupSelector
-                                        groups={groups}
-                                        selectedIds={cardGroupsDraft}
-                                        onChange={setCardGroupsDraft}
-                                        cardType={cardType}
-                                        label="Gruppen auswählen"
-                                        assignedIds={(cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))?.groups ?? []).map((group: any) => String(group.id))}
-                                        allowCreate
-                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
-                                    />
+                                    <p className="text-sm text-muted">Wähle eine oder mehrere Gruppen für diese Karte.</p>
+                                    <div className="max-h-[50dvh] space-y-2 overflow-y-auto rounded-2xl border border-soft bg-surface p-2">
+                                        {groups.map((group) => {
+                                            const isSelected = cardGroupsDraft.includes(group.id);
+                                            return (
+                                                <button
+                                                    key={group.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setCardGroupsDraft((prev) => prev.includes(group.id)
+                                                            ? prev.filter((id) => id !== group.id)
+                                                            : [...prev, group.id]);
+                                                    }}
+                                                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${isSelected ? "border-accent-success bg-accent-success-soft" : "border-soft bg-surface-elevated hover:bg-surface"}`}
+                                                    aria-pressed={isSelected}
+                                                >
+                                                    <span>{group.name}</span>
+                                                    <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs ${isSelected ? "border-accent-success bg-accent-success text-on-accent" : "border-soft text-muted"}`}>
+                                                        {isSelected ? "✓" : ""}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                        {groups.length === 0 ? (
+                                            <p className="p-2 text-sm text-muted">Noch keine Gruppen vorhanden.</p>
+                                        ) : null}
+                                    </div>
                                     {cardGroupsStatus ? <p className="text-sm text-muted">{cardGroupsStatus}</p> : null}
                                     <div className="flex gap-2">
                                         <button type="button" className="btn btn-primary" onClick={saveCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>

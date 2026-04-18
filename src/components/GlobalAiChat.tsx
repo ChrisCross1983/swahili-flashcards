@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
+import { lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 import type { CardProposal, ExplainedConcept } from "@/lib/cards/proposals";
 import {
     detectSaveIntent,
@@ -129,6 +130,12 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
     useEffect(() => {
         if (!open) return;
         inputRef.current?.focus();
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        lockBodyScroll();
+        return () => unlockBodyScroll();
     }, [open]);
 
     const textHistory: Array<{ role: "user" | "assistant"; text: string }> = messages

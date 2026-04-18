@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import TrainerCard from "@/components/trainer/TrainerCard";
 
-describe("trainer card two-mode layout", () => {
+describe("trainer card layout", () => {
     it("renders compact front layout before reveal and expanded layout after reveal", () => {
         const compact = renderToStaticMarkup(
             <TrainerCard
@@ -14,7 +14,6 @@ describe("trainer card two-mode layout", () => {
                 answer="kitabu"
                 imagePath={null}
                 imageBaseUrl="https://example.com"
-                isFlipped={false}
             />,
         );
 
@@ -25,7 +24,6 @@ describe("trainer card two-mode layout", () => {
                 answer="kitabu"
                 imagePath={null}
                 imageBaseUrl="https://example.com"
-                isFlipped={false}
                 onOpenLearningHelp={() => undefined}
             />,
         );
@@ -36,7 +34,7 @@ describe("trainer card two-mode layout", () => {
         expect(expanded).toContain("Antwort");
     });
 
-    it("uses personal notes label in the second mode", () => {
+    it("keeps notes action on the front side", () => {
         const tips = renderToStaticMarkup(
             <TrainerCard
                 reveal
@@ -44,17 +42,13 @@ describe("trainer card two-mode layout", () => {
                 answer="kitabu"
                 imagePath={null}
                 imageBaseUrl="https://example.com"
-                isFlipped
-                onFlipBack={() => undefined}
-                backContent={<div>Tip content</div>}
+                onOpenLearningHelp={() => undefined}
             />,
         );
 
-        expect(tips).toContain('data-mode="notes"');
+        expect(tips).toContain('data-mode="front"');
         expect(tips).toContain("Eigene Notizen");
-        expect(tips).toContain("Zur Vorderseite");
-        expect(tips.match(/Zur Vorderseite/g)?.length ?? 0).toBe(1);
-        expect(tips).not.toContain("Karte umdrehen");
+        expect(tips).not.toContain("Zur Vorderseite");
     });
 });
 
