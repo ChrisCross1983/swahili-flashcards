@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import GlobalQuickSearch from "@/components/GlobalQuickSearch";
 import GlobalAiChat from "@/components/GlobalAiChat";
 import { useTrainingContext } from "@/lib/aiContext";
@@ -17,6 +17,12 @@ export default function GlobalOverlays({ ownerKey }: Props) {
     const trainingContext = useTrainingContext();
     const pathname = usePathname();
     const focusedTrainerMode = pathname?.startsWith("/trainer") && Boolean(trainingContext?.german || trainingContext?.swahili);
+
+    useEffect(() => {
+        if (focusedTrainerMode) {
+            setMobileToolsOpen(false);
+        }
+    }, [focusedTrainerMode]);
 
     return (
         <>
@@ -41,7 +47,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
             </div>
 
             <div className="fixed bottom-3 right-3 z-[2147483647] flex flex-col items-end gap-2 md:hidden">
-                {!focusedTrainerMode || mobileToolsOpen ? (
+                {mobileToolsOpen ? (
                     <>
                         <button
                             type="button"

@@ -3630,40 +3630,22 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                             <FullScreenSheet
                                 open={cardGroupsEditorOpen}
-                                title="Gruppen bearbeiten"
+                                title="Gruppen auswählen"
                                 onClose={() => {
                                     setCardGroupsEditorOpen(false);
                                     setCardGroupsCardId(null);
                                 }}
                             >
                                 <div className="space-y-4">
-                                    <p className="text-sm text-muted">Wähle eine oder mehrere Gruppen für diese Karte.</p>
-                                    <div className="max-h-[50dvh] space-y-2 overflow-y-auto rounded-2xl border border-soft bg-surface p-2">
-                                        {groups.map((group) => {
-                                            const isSelected = cardGroupsDraft.includes(group.id);
-                                            return (
-                                                <button
-                                                    key={group.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setCardGroupsDraft((prev) => prev.includes(group.id)
-                                                            ? prev.filter((id) => id !== group.id)
-                                                            : [...prev, group.id]);
-                                                    }}
-                                                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${isSelected ? "border-accent-success bg-accent-success-soft" : "border-soft bg-surface-elevated hover:bg-surface"}`}
-                                                    aria-pressed={isSelected}
-                                                >
-                                                    <span>{group.name}</span>
-                                                    <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs ${isSelected ? "border-accent-success bg-accent-success text-on-accent" : "border-soft text-muted"}`}>
-                                                        {isSelected ? "✓" : ""}
-                                                    </span>
-                                                </button>
-                                            );
-                                        })}
-                                        {groups.length === 0 ? (
-                                            <p className="p-2 text-sm text-muted">Noch keine Gruppen vorhanden.</p>
-                                        ) : null}
-                                    </div>
+                                    <GroupSelector
+                                        groups={groups}
+                                        selectedIds={cardGroupsDraft}
+                                        onChange={setCardGroupsDraft}
+                                        cardType={cardType}
+                                        label="Gruppen"
+                                        allowCreate
+                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                    />
                                     {cardGroupsStatus ? <p className="text-sm text-muted">{cardGroupsStatus}</p> : null}
                                     <div className="flex gap-2">
                                         <button type="button" className="btn btn-primary" onClick={saveCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>

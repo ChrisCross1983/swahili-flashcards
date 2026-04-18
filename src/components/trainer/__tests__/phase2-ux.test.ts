@@ -24,8 +24,10 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("keeps memberships editable with vocab scope and inline group creation", () => {
-        expect(trainerSource).toContain("Wähle eine oder mehrere Gruppen für diese Karte.");
-        expect(trainerSource).toContain("aria-pressed={isSelected}");
+        expect(trainerSource).toContain("open={cardGroupsEditorOpen}");
+        expect(trainerSource).toContain("selectedIds={cardGroupsDraft}");
+        expect(trainerSource).toContain("onChange={setCardGroupsDraft}");
+        expect(trainerSource).toContain("allowCreate");
         expect(trainerSource).toContain("Gruppenzuordnung gespeichert.");
         expect(trainerSource).toContain("fetchGroups(cardType)");
         expect(trainerSource).toContain("assignCardsToGroup(cardType, groupId");
@@ -56,6 +58,9 @@ describe("phase 2 product UX cleanup", () => {
         const overlaysSource = fs.readFileSync(path.join(root, "src/components/GlobalOverlays.tsx"), "utf8");
         expect(overlaysSource).toContain("focusedTrainerMode");
         expect(overlaysSource).toContain("mobileToolsOpen");
+        expect(overlaysSource).toContain("if (focusedTrainerMode)");
+        expect(overlaysSource).toContain("{mobileToolsOpen ? (");
+        expect(overlaysSource).not.toContain("!focusedTrainerMode || mobileToolsOpen");
         expect(overlaysSource).toContain("Schnellaktionen öffnen");
     });
 
