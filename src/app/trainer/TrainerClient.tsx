@@ -34,8 +34,8 @@ import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
 import { canStartTraining, materialLabel, resolveTrainingGroupIds, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
-import GroupSelector from "@/components/groups/GroupSelector";
 import GroupBadge from "@/components/groups/GroupBadge";
+import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
 import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
@@ -98,7 +98,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [openCreate, setOpenCreate] = useState(false);
-    const [formGroupSelectorOpen, setFormGroupSelectorOpen] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
@@ -1579,7 +1578,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }
 
     function handleCancelEdit() {
-        setFormGroupSelectorOpen(false);
         if (returnToLearn) {
             setReturnToLearn(false);
             setOpenCreate(false);
@@ -1676,7 +1674,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         [groups, formGroupIds]
     );
     const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
-    const useCompactFormGroupPicker = !isSentenceTrainer || Boolean(editingId);
+    const cardGroupsSelected = useMemo(
+        () => groups.filter((group) => cardGroupsDraft.includes(group.id)),
+        [groups, cardGroupsDraft]
+    );
+    const cardGroupsSummary = useMemo(() => visibleBadgeSummary(cardGroupsSelected, 2), [cardGroupsSelected]);
     const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
@@ -2959,42 +2961,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     />
 
                                     <div className="mt-4 rounded-xl border p-3">
-                                        {!useCompactFormGroupPicker ? (
-                                            <GroupSelector
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div className="space-y-2">
+                                                <div className="text-sm font-medium">Gruppen</div>
+                                                <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+                                                    {formGroupSummary.visible.length > 0 ? (
+                                                        <>
+                                                            {formGroupSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                            {formGroupSummary.overflow > 0 ? (
+                                                                <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{formGroupSummary.overflow}</span>
+                                                            ) : null}
+                                                        </>
+                                                    ) : (
+                                                        <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <CompactGroupPicker
                                                 groups={groups}
                                                 selectedIds={formGroupIds}
                                                 onChange={setFormGroupIds}
                                                 cardType={cardType}
-                                                label="Gruppen"
+                                                triggerLabel={formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
                                                 allowCreate
                                                 onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
                                             />
-                                        ) : (
-                                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                                <div className="space-y-2">
-                                                    <div className="text-sm font-medium">Gruppen</div>
-                                                    <div className="flex min-h-7 flex-wrap items-center gap-1.5">
-                                                        {formGroupSummary.visible.length > 0 ? (
-                                                            <>
-                                                                {formGroupSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
-                                                                {formGroupSummary.overflow > 0 ? (
-                                                                    <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{formGroupSummary.overflow}</span>
-                                                                ) : null}
-                                                            </>
-                                                        ) : (
-                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-ghost text-sm whitespace-nowrap"
-                                                    onClick={() => setFormGroupSelectorOpen(true)}
-                                                >
-                                                    {formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
-                                                </button>
-                                            </div>
-                                        )}
+                                        </div>
                                     </div>
 
                                     <div className="mt-6 text-sm font-medium">Medien</div>
@@ -3316,29 +3308,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }
                             </FullScreenSheet >
 
-                            <FullScreenSheet
-                                open={useCompactFormGroupPicker && formGroupSelectorOpen}
-                                title="Gruppen auswählen"
-                                onClose={() => setFormGroupSelectorOpen(false)}
-                            >
-                                <div className="space-y-4">
-                                    <GroupSelector
-                                        groups={groups}
-                                        selectedIds={formGroupIds}
-                                        onChange={setFormGroupIds}
-                                        cardType={cardType}
-                                        label="Gruppen"
-                                        allowCreate
-                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
-                                    />
-                                    <div className="flex gap-2">
-                                        <button type="button" className="btn btn-primary" onClick={() => setFormGroupSelectorOpen(false)}>
-                                            Fertig
-                                        </button>
-                                    </div>
-                                </div>
-                            </FullScreenSheet>
-
                             {/* Suggestion Modal */}
                             < FullScreenSheet
                                 open={suggestOpen}
@@ -3638,15 +3607,34 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                             >
                                 <div className="space-y-4">
-                                    <GroupSelector
-                                        groups={groups}
-                                        selectedIds={cardGroupsDraft}
-                                        onChange={setCardGroupsDraft}
-                                        cardType={cardType}
-                                        label="Gruppen"
-                                        allowCreate
-                                        onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
-                                    />
+                                    <div className="rounded-xl border p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div className="space-y-2">
+                                                <div className="text-sm font-medium">Gruppen</div>
+                                                <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+                                                    {cardGroupsSummary.visible.length > 0 ? (
+                                                        <>
+                                                            {cardGroupsSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                            {cardGroupsSummary.overflow > 0 ? (
+                                                                <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{cardGroupsSummary.overflow}</span>
+                                                            ) : null}
+                                                        </>
+                                                    ) : (
+                                                        <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <CompactGroupPicker
+                                                groups={groups}
+                                                selectedIds={cardGroupsDraft}
+                                                onChange={setCardGroupsDraft}
+                                                cardType={cardType}
+                                                triggerLabel="Gruppen bearbeiten"
+                                                allowCreate
+                                                onGroupCreated={(group) => setGroups((prev) => [...prev, group].sort((a, b) => a.name.localeCompare(b.name)))}
+                                            />
+                                        </div>
+                                    </div>
                                     {cardGroupsStatus ? <p className="text-sm text-muted">{cardGroupsStatus}</p> : null}
                                     <div className="flex gap-2">
                                         <button type="button" className="btn btn-primary" onClick={saveCardGroups} disabled={savingCardGroups || cardGroupsUnchanged}>
