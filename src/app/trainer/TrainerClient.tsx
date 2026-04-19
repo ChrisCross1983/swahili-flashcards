@@ -1676,6 +1676,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         [groups, formGroupIds]
     );
     const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
+    const useCompactFormGroupPicker = !isSentenceTrainer || Boolean(editingId);
     const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
@@ -2958,7 +2959,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     />
 
                                     <div className="mt-4 rounded-xl border p-3">
-                                        {isSentenceTrainer ? (
+                                        {!useCompactFormGroupPicker ? (
                                             <GroupSelector
                                                 groups={groups}
                                                 selectedIds={formGroupIds}
@@ -3316,7 +3317,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             </FullScreenSheet >
 
                             <FullScreenSheet
-                                open={!isSentenceTrainer && formGroupSelectorOpen}
+                                open={useCompactFormGroupPicker && formGroupSelectorOpen}
                                 title="Gruppen auswählen"
                                 onClose={() => setFormGroupSelectorOpen(false)}
                             >

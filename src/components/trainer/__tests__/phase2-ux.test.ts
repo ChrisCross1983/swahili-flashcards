@@ -14,13 +14,16 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("visibleBadgeSummary(c.groups ?? [], 2)");
     });
 
-    it("uses compact group selection in vocab create/edit flows", () => {
+    it("uses compact group selection in the learning-card and card-edit flows", () => {
         expect(trainerSource).toContain("const [formGroupSelectorOpen, setFormGroupSelectorOpen] = useState(false);");
-        expect(trainerSource).toContain("open={!isSentenceTrainer && formGroupSelectorOpen}");
+        expect(trainerSource).toContain("const useCompactFormGroupPicker = !isSentenceTrainer || Boolean(editingId);");
+        expect(trainerSource).toContain("open={useCompactFormGroupPicker && formGroupSelectorOpen}");
         expect(trainerSource).toContain("title=\"Gruppen auswählen\"");
         expect(trainerSource).toContain("formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);");
-        expect(trainerSource).toContain("{isSentenceTrainer ? (");
+        expect(trainerSource).toContain("{!useCompactFormGroupPicker ? (");
         expect(trainerSource).toContain("{formSelectedGroups.length > 0 ? \"Gruppen bearbeiten\" : \"➕ Gruppe\"}");
+        expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
+        expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
     });
 
     it("keeps memberships editable with vocab scope and inline group creation", () => {
