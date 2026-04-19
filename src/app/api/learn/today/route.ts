@@ -26,7 +26,7 @@ export async function GET(req: Request) {
       card_id,
       level,
       due_date,
-      cards!inner(id, german_text, swahili_text, image_path, audio_path, type)
+      cards!inner(id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, type)
     `
     )
     .eq("owner_key", ownerKey)
@@ -54,6 +54,8 @@ export async function GET(req: Request) {
     dueDate: row.due_date,
     german: row.cards.german_text,
     swahili: row.cards.swahili_text,
+    german_example: row.cards.german_example ?? null,
+    swahili_example: row.cards.swahili_example ?? null,
     imagePath: row.cards.image_path ?? null,
     audio_path: row.cards.audio_path ?? null,
     type: row.cards.type ?? null,

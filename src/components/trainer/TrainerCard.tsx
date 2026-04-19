@@ -1,9 +1,15 @@
+"use client";
+
+import { useState } from "react";
 import CardText from "@/components/ui/CardText";
+import FormattedExampleText from "@/components/ui/FormattedExampleText";
 
 type Props = {
     reveal: boolean;
     prompt: string;
     answer: string;
+    promptExample?: string | null;
+    answerExample?: string | null;
     imagePath: string | null;
     imageBaseUrl: string;
     learningTypeLabel?: string | null;
@@ -14,11 +20,16 @@ export default function TrainerCard({
     reveal,
     prompt,
     answer,
+    promptExample,
+    answerExample,
     imagePath,
     imageBaseUrl,
     learningTypeLabel,
     onOpenLearningHelp,
 }: Props) {
+    const [showPromptExample, setShowPromptExample] = useState(false);
+    const [showAnswerExample, setShowAnswerExample] = useState(false);
+
     return (
         <div className="rounded-3xl border border-soft bg-surface p-6 shadow-warm" data-testid="trainer-card-shell" data-mode="front">
             <div className={reveal ? "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
@@ -27,6 +38,22 @@ export default function TrainerCard({
                     <div className="mt-2 text-2xl font-semibold text-primary">
                         <CardText>{prompt}</CardText>
                     </div>
+                    {promptExample?.trim() ? (
+                        <div className="mt-3">
+                            <button
+                                type="button"
+                                className="text-xs font-medium text-muted hover:text-primary"
+                                onClick={() => setShowPromptExample((open) => !open)}
+                            >
+                                {showPromptExample ? "Beispielsatz ausblenden" : "Beispielsatz anzeigen"}
+                            </button>
+                            {showPromptExample ? (
+                                <div className="mt-2 rounded-xl bg-surface p-3">
+                                    <FormattedExampleText text={promptExample} />
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
 
                 {reveal ? (
@@ -36,6 +63,22 @@ export default function TrainerCard({
                             <div className="mt-1 text-xl font-semibold text-primary">
                                 <CardText>{answer}</CardText>
                             </div>
+                            {answerExample?.trim() ? (
+                                <div className="mt-3">
+                                    <button
+                                        type="button"
+                                        className="text-xs font-medium text-muted hover:text-primary"
+                                        onClick={() => setShowAnswerExample((open) => !open)}
+                                    >
+                                        {showAnswerExample ? "Beispielsatz ausblenden" : "Beispielsatz anzeigen"}
+                                    </button>
+                                    {showAnswerExample ? (
+                                        <div className="mt-2 rounded-xl bg-surface-elevated p-3">
+                                            <FormattedExampleText text={answerExample} />
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
                         </div>
 
                         {imagePath ? (

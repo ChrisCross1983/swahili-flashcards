@@ -17,7 +17,7 @@ describe("card domain matching", () => {
 
 describe("findExistingMatch", () => {
     const cards = [
-        { id: "v-1", swahili_text: "habari", german_text: "hallo", type: "vocab" },
+        { id: "v-1", swahili_text: "habari", german_text: "hallo", swahili_example: "==habari== rafiki", german_example: "==Hallo== Freund", type: "vocab" },
         { id: "s-1", swahili_text: "habari", german_text: "hallo", type: "sentence" },
         { id: "v-2", swahili_text: "asante", german_text: "danke", type: null },
     ];
@@ -36,5 +36,10 @@ describe("findExistingMatch", () => {
     it("still reports same-domain partial conflicts", () => {
         const result = findExistingMatch(cards, { sw: "asante", de: "vielen dank", type: "vocab" });
         expect(result).toEqual({ existingId: "v-2", match: "sw" });
+    });
+
+    it("ignores example fields for existence semantics", () => {
+        const result = findExistingMatch(cards, { sw: "habari", de: "hallo", type: "vocab" });
+        expect(result).toEqual({ existingId: "v-1", match: "pair" });
     });
 });

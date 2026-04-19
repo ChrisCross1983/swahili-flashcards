@@ -6,6 +6,8 @@ export type ExistingCardLike = {
     id: string | number;
     swahili_text?: string | null;
     german_text?: string | null;
+    swahili_example?: string | null;
+    german_example?: string | null;
     type?: string | null;
 };
 

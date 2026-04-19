@@ -11,8 +11,8 @@ describe("trainer api", () => {
         vi.stubGlobal("fetch", vi.fn(async () =>
             new Response(JSON.stringify({
                 cards: [
-                    { id: "1", german_text: "Haus", swahili_text: "nyumba", image_path: null, audio_path: null, groups: [] },
-                    { id: "2", german_text: "Wasser", swahili_text: "maji", image_path: "img/2", audio_path: "audio/2", groups: [{ id: "g1", name: "Basics" }] },
+                    { id: "1", german_text: "Haus", swahili_text: "nyumba", german_example: null, swahili_example: null, image_path: null, audio_path: null, groups: [] },
+                    { id: "2", german_text: "Wasser", swahili_text: "maji", german_example: "Ich trinke ==Wasser==.", swahili_example: "Ninakunywa ==maji==.", image_path: "img/2", audio_path: "audio/2", groups: [{ id: "g1", name: "Basics" }] },
                 ],
             }), { status: 200 })
         ));
@@ -21,7 +21,7 @@ describe("trainer api", () => {
 
         expect(items).toHaveLength(2);
         expect(items[0]).toMatchObject({ cardId: "1", german: "Haus", swahili: "nyumba" });
-        expect(items[1]).toMatchObject({ cardId: "2", imagePath: "img/2", audio_path: "audio/2" });
+        expect(items[1]).toMatchObject({ cardId: "2", german_example: "Ich trinke ==Wasser==.", swahili_example: "Ninakunywa ==maji==.", imagePath: "img/2", audio_path: "audio/2" });
     });
 
     it("surfaces backend errors with status for all-cards drill load", async () => {

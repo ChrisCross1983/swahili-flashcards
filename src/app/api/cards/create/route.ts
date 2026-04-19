@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { canonicalizeToSwDe } from "@/lib/cards/saveFlow";
 import { requireUser } from "@/lib/api/auth";
 import { findExistingMatch } from "@/lib/cards/existence";
+import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 
 type CreateCardBody = {
     type?: "vocab" | "sentence";
@@ -14,6 +15,8 @@ type CreateCardBody = {
     context?: string | null;
     tags?: string[];
     notes?: string | null;
+    front_example?: string | null;
+    back_example?: string | null;
 };
 
 const RATE_LIMIT = {
@@ -61,6 +64,8 @@ export async function POST(req: Request) {
     const type = body.type;
     const frontLang = body.front_lang === "sw" || body.front_lang === "de" ? body.front_lang : "sw";
     const backLang = body.back_lang === "sw" || body.back_lang === "de" ? body.back_lang : "de";
+    const frontExample = typeof body.front_example === "string" ? sanitizeExampleMarkup(body.front_example) : "";
+    const backExample = typeof body.back_example === "string" ? sanitizeExampleMarkup(body.back_example) : "";
 
     if (!frontText || !backText || !type) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
@@ -71,6 +76,12 @@ export async function POST(req: Request) {
         back_lang: backLang,
         front_text: frontText,
         back_text: backText,
+    });
+    const canonicalExamples = canonicalizeToSwDe({
+        front_lang: frontLang,
+        back_lang: backLang,
+        front_text: frontExample,
+        back_text: backExample,
     });
 
     if (!canonical.sw || !canonical.de) {
@@ -114,6 +125,8 @@ export async function POST(req: Request) {
             owner_key: ownerKey,
             swahili_text: canonical.sw,
             german_text: canonical.de,
+            swahili_example: canonicalExamples.sw || null,
+            german_example: canonicalExamples.de || null,
             type,
         })
         .select("id")

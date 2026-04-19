@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
+import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 
 type CreateCardBody = {
     german: string;
     swahili: string;
+    germanExample?: string | null;
+    swahiliExample?: string | null;
     imagePath?: string | null;
     type?: "vocab" | "sentence";
 };
@@ -19,6 +22,8 @@ export async function POST(req: Request) {
     const ownerKey = user.id;
     const german = body.german?.trim();
     const swahili = body.swahili?.trim();
+    const germanExample = typeof body.germanExample === "string" ? sanitizeExampleMarkup(body.germanExample) : "";
+    const swahiliExample = typeof body.swahiliExample === "string" ? sanitizeExampleMarkup(body.swahiliExample) : "";
     const type = body.type === "sentence" ? "sentence" : "vocab";
 
     if (!german || !swahili) {
@@ -34,10 +39,12 @@ export async function POST(req: Request) {
             owner_key: ownerKey,
             german_text: german,
             swahili_text: swahili,
+            german_example: germanExample || null,
+            swahili_example: swahiliExample || null,
             image_path: body.imagePath ?? null,
             type,
         })
-        .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
+        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, created_at, type")
         .single();
 
     if (error) {
@@ -108,7 +115,7 @@ export async function GET(req: Request) {
 
     let query = supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
+        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, created_at, type")
         .eq("owner_key", ownerKey);
 
     if (id) query = query.eq("id", id);
@@ -215,6 +222,8 @@ type UpdateCardBody = {
     id: string;
     german?: string;
     swahili?: string;
+    germanExample?: string | null;
+    swahiliExample?: string | null;
     imagePath?: string | null;
     type?: "vocab" | "sentence";
 };
@@ -233,6 +242,8 @@ export async function PATCH(req: Request) {
     const updates: Record<string, string | null> = {};
     if (typeof body.german === "string") updates.german_text = body.german.trim();
     if (typeof body.swahili === "string") updates.swahili_text = body.swahili.trim();
+    if ("germanExample" in body) updates.german_example = sanitizeExampleMarkup(body.germanExample ?? "") || null;
+    if ("swahiliExample" in body) updates.swahili_example = sanitizeExampleMarkup(body.swahiliExample ?? "") || null;
     if ("imagePath" in body) updates.image_path = body.imagePath ?? null;
     if (body.type === "vocab" || body.type === "sentence") updates.type = body.type;
 

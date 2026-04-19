@@ -24,3 +24,11 @@ export function readGerman(item: TodayItem | null | undefined): string {
 export function readSwahili(item: TodayItem | null | undefined): string {
     return item?.swahili_text ?? item?.swahili ?? item?.sw ?? "";
 }
+
+export function readGermanExample(item: TodayItem | null | undefined): string {
+    return item?.german_example ?? item?.de_example ?? "";
+}
+
+export function readSwahiliExample(item: TodayItem | null | undefined): string {
+    return item?.swahili_example ?? item?.sw_example ?? "";
+}

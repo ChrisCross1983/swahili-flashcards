@@ -7,6 +7,7 @@ import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import CardText from "@/components/ui/CardText";
+import ExampleField from "@/components/ExampleField";
 import {
     formatDays,
     getIntervalDays,
@@ -26,7 +27,8 @@ import {
 } from "@/lib/trainer/api";
 import { findNextUnansweredIndex, removeDeletedCardsFromSession } from "@/lib/trainer/engine";
 import type { CardType, Direction, LeitnerStats, TodayItem } from "@/lib/trainer/types";
-import { readGerman, readSwahili, resolveCardId, shuffleArray } from "@/lib/trainer/utils";
+import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId, shuffleArray } from "@/lib/trainer/utils";
+import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerControls from "@/components/trainer/TrainerControls";
@@ -79,6 +81,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
+    const [germanExample, setGermanExample] = useState("");
+    const [swahiliExample, setSwahiliExample] = useState("");
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
@@ -128,7 +132,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
-    const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string } | null>(null);
+    const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string; germanExample: string; swahiliExample: string } | null>(null);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
     const [setupCounts, setSetupCounts] = useState({
         todayDue: 0,
@@ -516,6 +520,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         try {
             const trimmedGerman = german.trim();
             const trimmedSwahili = swahili.trim();
+            const trimmedGermanExample = sanitizeExampleMarkup(germanExample);
+            const trimmedSwahiliExample = sanitizeExampleMarkup(swahiliExample);
 
             // Warnung nur beim ersten Versuch
             if (!skipWarning) {
@@ -541,6 +547,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 body: JSON.stringify({
                     german: trimmedGerman,
                     swahili: trimmedSwahili,
+                    germanExample: trimmedGermanExample || null,
+                    swahiliExample: trimmedSwahiliExample || null,
                     imagePath,
                     type: cardType,
                 }),
@@ -602,6 +610,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             // Create-Flow: Formular für nächste Karte vorbereiten
             setGerman("");
             setSwahili("");
+            setGermanExample("");
+            setSwahiliExample("");
             resetImageInputs();
 
             setPendingAudioBlob(null);
@@ -633,6 +643,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             const trimmedGerman = german.trim();
             const trimmedSwahili = swahili.trim();
+            const trimmedGermanExample = sanitizeExampleMarkup(germanExample);
+            const trimmedSwahiliExample = sanitizeExampleMarkup(swahiliExample);
             if (!trimmedGerman || !trimmedSwahili) {
                 setStatus("Bitte Deutsch und Swahili ausfüllen.");
                 return;
@@ -651,6 +663,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 id: editingId,
                 german: trimmedGerman,
                 swahili: trimmedSwahili,
+                germanExample: trimmedGermanExample || null,
+                swahiliExample: trimmedSwahiliExample || null,
             };
 
             if (imagePath !== undefined) body.imagePath = imagePath;
@@ -711,6 +725,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                         image_path: updated.image_path ?? null,
                         german_text: updated.german_text,
                         swahili_text: updated.swahili_text,
+                        german_example: updated.german_example ?? null,
+                        swahili_example: updated.swahili_example ?? null,
                         groups: nextGroups,
                     };
                 })
@@ -719,6 +735,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             // ✅ Edit-Inputs resetten
             setGerman("");
             setSwahili("");
+            setGermanExample("");
+            setSwahiliExample("");
             setImageFile(null);
             setSuggestedImagePath(null);
             setSelectedSuggestUrl(null);
@@ -755,6 +773,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                 setGerman("");
                 setSwahili("");
+                setGermanExample("");
+                setSwahiliExample("");
                 resetImageInputs();
 
                 setDuplicateHint(null);
@@ -834,6 +854,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditingId(card.id);
         setGerman(card.german_text ?? "");
         setSwahili(card.swahili_text ?? "");
+        setGermanExample(card.german_example ?? "");
+        setSwahiliExample(card.swahili_example ?? "");
         setDuplicateHint(null);
         setImageFile(null);
         setEditAudioPath(card.audio_path ?? null);
@@ -935,6 +957,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditingId(null);
         setGerman("");
         setSwahili("");
+        setGermanExample("");
+        setSwahiliExample("");
         setFormGroupIds([]);
         setImageFile(null);
         setDuplicateHint(null);
@@ -1061,6 +1085,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditingId(String(item.cardId ?? item.id));
         setGerman(currentGerman ?? "");
         setSwahili(currentSwahili ?? "");
+        setGermanExample(currentGermanExample ?? "");
+        setSwahiliExample(currentSwahiliExample ?? "");
         setEditAudioPath(item.audio_path ?? null);
         setDuplicateHint(null);
         setDuplicatePreview(null);
@@ -1598,6 +1624,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             setGerman(createDraft.german);
             setSwahili(createDraft.swahili);
+            setGermanExample(createDraft.germanExample);
+            setSwahiliExample(createDraft.swahiliExample);
 
             setCreateDraft(null);
             setFormGroupIds([]);
@@ -1618,6 +1646,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             setGerman("");
             setSwahili("");
+            setGermanExample("");
+            setSwahiliExample("");
             setFormGroupIds([]);
             resetImageInputs();
 
@@ -1684,6 +1714,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentGerman = readGerman(currentItem);
 
     const currentSwahili = readSwahili(currentItem);
+    const currentGermanExample = readGermanExample(currentItem);
+    const currentSwahiliExample = readSwahiliExample(currentItem);
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
 
@@ -2822,9 +2854,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                     <div className="mt-8">
                                                         <TrainerCard
+                                                            key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}`}
                                                             reveal={reveal}
                                                             prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
                                                             answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
+                                                            promptExample={direction === "DE_TO_SW" ? currentGermanExample : currentSwahiliExample}
+                                                            answerExample={direction === "DE_TO_SW" ? currentSwahiliExample : currentGermanExample}
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             learningTypeLabel={null}
@@ -2959,6 +2994,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         placeholder="z.B. Habari za asubuhi"
                                         rows={3}
                                     />
+
+                                    <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Optionaler Kontext · Beispielsätze</div>
+                                        <div className="mt-3 space-y-4">
+                                            <ExampleField
+                                                label="Beispielsatz (Deutsch)"
+                                                value={germanExample}
+                                                onChange={setGermanExample}
+                                                placeholder="z.B. Ich lese ==das Buch== am Abend."
+                                            />
+                                            <ExampleField
+                                                label="Beispielsatz (Swahili)"
+                                                value={swahiliExample}
+                                                onChange={setSwahiliExample}
+                                                placeholder="z.B. Ninasoma ==kitabu== jioni."
+                                            />
+                                        </div>
+                                    </div>
 
                                     <div className="mt-4 rounded-xl border p-3">
                                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3207,7 +3260,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
                                                             onClick={() => {
                                                                 // Duplikat direkt bearbeiten
-                                                                setCreateDraft({ german, swahili });
+                                                                setCreateDraft({ german, swahili, germanExample, swahiliExample });
                                                                 const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
                                                                 startEdit(full, "create");
                                                                 setDuplicateHint(null);

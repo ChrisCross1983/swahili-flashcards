@@ -12,6 +12,7 @@ describe("trainer card layout", () => {
                 reveal={false}
                 prompt="Buch"
                 answer="kitabu"
+                promptExample="Ich lese **Buch**."
                 imagePath={null}
                 imageBaseUrl="https://example.com"
             />,
@@ -22,6 +23,8 @@ describe("trainer card layout", () => {
                 reveal
                 prompt="Buch"
                 answer="kitabu"
+                promptExample="Ich lese **Buch**."
+                answerExample="Ninasoma **kitabu**."
                 imagePath={null}
                 imageBaseUrl="https://example.com"
                 onOpenLearningHelp={() => undefined}
@@ -30,8 +33,24 @@ describe("trainer card layout", () => {
 
         expect(compact).toContain('data-layout="compact"');
         expect(compact).not.toContain("Antwort");
+        expect(compact).toContain("Beispielsatz anzeigen");
+        expect(compact).not.toContain("Ich lese **Buch**.");
         expect(expanded).toContain('data-layout="expanded"');
         expect(expanded).toContain("Antwort");
+    });
+
+    it("only renders example toggle when an example exists", () => {
+        const withoutExample = renderToStaticMarkup(
+            <TrainerCard
+                reveal={false}
+                prompt="Haus"
+                answer="nyumba"
+                imagePath={null}
+                imageBaseUrl="https://example.com"
+            />,
+        );
+
+        expect(withoutExample).not.toContain("Beispielsatz anzeigen");
     });
 
     it("keeps notes action on the front side", () => {

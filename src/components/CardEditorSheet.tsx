@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
+import ExampleField from "@/components/ExampleField";
+import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -12,6 +14,8 @@ export type CardEditorCard = {
     id: string;
     german_text: string;
     swahili_text: string;
+    german_example?: string | null;
+    swahili_example?: string | null;
     image_path: string | null;
     audio_path: string | null;
 };
@@ -37,6 +41,8 @@ export default function CardEditorSheet({
 }: Props) {
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
+    const [germanExample, setGermanExample] = useState("");
+    const [swahiliExample, setSwahiliExample] = useState("");
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
@@ -59,6 +65,8 @@ export default function CardEditorSheet({
     const resetState = useCallback(() => {
         setGerman("");
         setSwahili("");
+        setGermanExample("");
+        setSwahiliExample("");
         setImageFile(null);
         setPreviewUrl(null);
         setStatus(null);
@@ -115,6 +123,8 @@ export default function CardEditorSheet({
 
             setGerman(card.german_text ?? "");
             setSwahili(card.swahili_text ?? "");
+            setGermanExample(card.german_example ?? "");
+            setSwahiliExample(card.swahili_example ?? "");
             setEditAudioPath(card.audio_path ?? null);
             setSelectedImagePath(card.image_path ?? null);
             setSuggestedImagePath(null);
@@ -136,6 +146,8 @@ export default function CardEditorSheet({
         if (initialCard && String(initialCard.id) === String(cardId)) {
             setGerman(initialCard.german_text ?? "");
             setSwahili(initialCard.swahili_text ?? "");
+            setGermanExample(initialCard.german_example ?? "");
+            setSwahiliExample(initialCard.swahili_example ?? "");
             setEditAudioPath(initialCard.audio_path ?? null);
             setSelectedImagePath(initialCard.image_path ?? null);
             setSuggestedImagePath(null);
@@ -334,6 +346,8 @@ export default function CardEditorSheet({
                 id: cardId,
                 german,
                 swahili,
+                germanExample: sanitizeExampleMarkup(germanExample) || null,
+                swahiliExample: sanitizeExampleMarkup(swahiliExample) || null,
             };
 
             if (imagePath !== undefined) body.imagePath = imagePath;
@@ -413,6 +427,24 @@ export default function CardEditorSheet({
                             placeholder="z.B. Habari za asubuhi"
                             rows={3}
                         />
+
+                        <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Optionaler Kontext · Beispielsätze</div>
+                            <div className="mt-3 space-y-4">
+                                <ExampleField
+                                    label="Beispielsatz (Deutsch)"
+                                    value={germanExample}
+                                    onChange={setGermanExample}
+                                    placeholder="z.B. Ich lese ==das Buch== am Abend."
+                                />
+                                <ExampleField
+                                    label="Beispielsatz (Swahili)"
+                                    value={swahiliExample}
+                                    onChange={setSwahiliExample}
+                                    placeholder="z.B. Ninasoma ==kitabu== jioni."
+                                />
+                            </div>
+                        </div>
 
                         <div className="mt-6 text-sm font-medium">Medien</div>
 

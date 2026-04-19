@@ -18,7 +18,11 @@ export type TodayItem = {
     de?: string;
     swahili?: string;
     swahili_text?: string;
+    german_example?: string | null;
+    swahili_example?: string | null;
     sw?: string;
+    de_example?: string | null;
+    sw_example?: string | null;
     type?: CardType;
     imagePath?: string | null;
     image_path?: string | null;
