@@ -43,6 +43,9 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("title=\"Eigene Notizen\"");
         expect(trainerSource).toContain("setCardNoteDraft({ mainNotes:");
         expect(trainerSource).toContain("Automatisch gespeichert");
+        expect(trainerSource).toContain("const closeNotesSheet = useCallback");
+        expect(trainerSource).toContain("const handleNotesOverlayClose = useCallback");
+        expect(trainerSource).toContain("onClose={handleNotesOverlayClose}");
         expect(trainerSource).not.toMatch(/<FullScreenSheet\s+open=\{notesSheetOpen\}/);
         expect(trainerSource).not.toContain("onFlipBack");
     });

@@ -34,10 +34,14 @@ describe("trainer card layout", () => {
         expect(compact).toContain('data-layout="compact"');
         expect(compact).not.toContain("Antwort");
         expect(compact).toContain("Beispielsatz anzeigen");
+        expect(compact).toContain("prompt-example-toggle");
+        expect(compact).not.toContain("prompt-example-content");
         expect(compact).toContain("aria-expanded=\"false\"");
         expect(compact).not.toContain("Ich lese **Buch**.");
         expect(expanded).toContain('data-layout="expanded"');
         expect(expanded).toContain("Antwort");
+        expect(expanded).toContain("answer-example-toggle");
+        expect(expanded).not.toContain("answer-example-content");
     });
 
     it("only renders example toggle when an example exists", () => {
@@ -80,6 +84,8 @@ describe("trainer card example disclosure affordance", () => {
 
         expect(source).toContain("aria-expanded={open}");
         expect(source).toContain("aria-controls={id}");
+        expect(source).toContain("data-testid={`${id}-toggle`}");
+        expect(source).toContain("data-tone=\"secondary\"");
         expect(source).toContain("Beispielsatz {open ? \"ausblenden\" : \"anzeigen\"}");
         expect(source).toContain("{open ? \"▾\" : \"▸\"}");
     });

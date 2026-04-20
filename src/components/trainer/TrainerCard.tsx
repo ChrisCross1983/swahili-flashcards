@@ -25,19 +25,27 @@ type ExampleDisclosureProps = {
 
 function ExampleDisclosure({ id, open, onToggle, text }: ExampleDisclosureProps) {
     return (
-        <div className="mt-3">
+        <div className="mt-2.5">
             <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-xl border border-soft bg-surface px-3 py-2 text-left text-xs font-medium text-muted transition hover:border-default hover:text-primary"
+                className="group flex w-full items-center justify-between rounded-lg px-1 py-1.5 text-left text-xs font-medium text-muted transition hover:text-primary"
                 onClick={onToggle}
                 aria-expanded={open}
                 aria-controls={id}
+                data-testid={`${id}-toggle`}
             >
-                <span>Beispielsatz {open ? "ausblenden" : "anzeigen"}</span>
-                <span aria-hidden="true" className="text-sm text-muted">{open ? "▾" : "▸"}</span>
+                <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden="true" className="text-[11px] text-muted transition group-hover:text-primary">{open ? "▾" : "▸"}</span>
+                    <span>Beispielsatz {open ? "ausblenden" : "anzeigen"}</span>
+                </span>
             </button>
             {open ? (
-                <div id={id} className="mt-2 rounded-xl bg-surface p-3">
+                <div
+                    id={id}
+                    className="mt-1.5 rounded-lg border border-soft bg-surface px-3 py-2.5 text-sm text-muted"
+                    data-testid={`${id}-content`}
+                    data-tone="secondary"
+                >
                     <FormattedExampleText text={text} />
                 </div>
             ) : null}

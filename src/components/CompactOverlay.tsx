@@ -20,6 +20,11 @@ export default function CompactOverlay({
 }: Props) {
     const titleId = useId();
     const closeRef = useRef<HTMLButtonElement | null>(null);
+    const onCloseRef = useRef(onClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
 
     useEffect(() => {
         if (!open) return;
@@ -30,7 +35,7 @@ export default function CompactOverlay({
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                onClose();
+                onCloseRef.current();
             }
         };
 
@@ -39,7 +44,7 @@ export default function CompactOverlay({
             window.removeEventListener("keydown", handleKeyDown);
             unlockBodyScroll();
         };
-    }, [open, onClose]);
+    }, [open]);
 
     if (!open) return null;
 

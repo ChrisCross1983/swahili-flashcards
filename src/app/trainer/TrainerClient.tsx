@@ -1363,13 +1363,17 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }, [cardNoteCardId, currentIndex, todayItems]);
 
-    async function closeNotesSheet() {
+    const closeNotesSheet = useCallback(async () => {
         if (cardNoteDraft.mainNotes !== savedCardNoteRef.current) {
             await saveCardNotes(cardNoteDraft.mainNotes, cardNoteCardId ?? undefined);
         }
         setNotesSheetOpen(false);
         setCardNoteCardId(null);
-    }
+    }, [cardNoteCardId, cardNoteDraft.mainNotes, saveCardNotes]);
+
+    const handleNotesOverlayClose = useCallback(() => {
+        void closeNotesSheet();
+    }, [closeNotesSheet]);
 
     async function gradeCurrent(correct: boolean) {
         if (isRecording) {
@@ -2963,9 +2967,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <CompactOverlay
                                 open={notesSheetOpen}
                                 title="Eigene Notizen"
-                                onClose={() => {
-                                    void closeNotesSheet();
-                                }}
+                                onClose={handleNotesOverlayClose}
                             >
                                 <LearningHelpPanel
                                     loading={cardNoteLoading}
