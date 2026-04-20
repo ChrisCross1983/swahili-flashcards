@@ -34,6 +34,7 @@ describe("trainer card layout", () => {
         expect(compact).toContain('data-layout="compact"');
         expect(compact).not.toContain("Antwort");
         expect(compact).toContain("Beispielsatz anzeigen");
+        expect(compact).toContain("aria-expanded=\"false\"");
         expect(compact).not.toContain("Ich lese **Buch**.");
         expect(expanded).toContain('data-layout="expanded"');
         expect(expanded).toContain("Antwort");
@@ -68,6 +69,19 @@ describe("trainer card layout", () => {
         expect(tips).toContain('data-mode="front"');
         expect(tips).toContain("Eigene Notizen");
         expect(tips).not.toContain("Zur Vorderseite");
+    });
+});
+
+describe("trainer card example disclosure affordance", () => {
+    it("uses a dedicated disclosure row with explicit expanded/collapsed semantics", () => {
+        const root = process.cwd();
+        const filePath = path.join(root, "src/components/trainer/TrainerCard.tsx");
+        const source = fs.readFileSync(filePath, "utf8");
+
+        expect(source).toContain("aria-expanded={open}");
+        expect(source).toContain("aria-controls={id}");
+        expect(source).toContain("Beispielsatz {open ? \"ausblenden\" : \"anzeigen\"}");
+        expect(source).toContain("{open ? \"▾\" : \"▸\"}");
     });
 });
 

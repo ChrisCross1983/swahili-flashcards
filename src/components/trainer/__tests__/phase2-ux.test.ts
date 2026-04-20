@@ -39,10 +39,33 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("uses notes sheet with single field and forgiving persistence", () => {
+        expect(trainerSource).toContain("<CompactOverlay");
         expect(trainerSource).toContain("title=\"Eigene Notizen\"");
         expect(trainerSource).toContain("setCardNoteDraft({ mainNotes:");
         expect(trainerSource).toContain("Automatisch gespeichert");
+        expect(trainerSource).not.toMatch(/<FullScreenSheet\s+open=\{notesSheetOpen\}/);
         expect(trainerSource).not.toContain("onFlipBack");
+    });
+
+    it("keeps create/edit flow progressive with optional examples collapsed behind disclosure", () => {
+        expect(trainerSource).toContain("Schritt 1 · Kartenpaar");
+        expect(trainerSource).toContain("Schritt 2 · Optionaler Kontext");
+        expect(trainerSource).toContain("Optional: Beispielsätze hinzufügen");
+        expect(trainerSource).toContain("setOptionalExamplesOpen((open) => !open)");
+        expect(trainerSource).toContain("aria-expanded={optionalExamplesOpen}");
+        expect(trainerSource).toContain("data-testid=\"optional-examples-section\"");
+        expect(trainerSource).toContain("Beispielsatz Deutsch (optional)");
+        expect(trainerSource).toContain("Beispielsatz Swahili (optional)");
+    });
+
+    it("keeps emphasis tools available but visually secondary", () => {
+        const exampleFieldSource = fs.readFileSync(path.join(root, "src/components/ExampleField.tsx"), "utf8");
+        expect(exampleFieldSource).toContain("Text hervorheben");
+        expect(exampleFieldSource).toContain("aria-expanded={revealTools}");
+        expect(exampleFieldSource).toContain("data-testid=\"example-emphasis-tools\"");
+        expect(exampleFieldSource).toContain("Fett");
+        expect(exampleFieldSource).toContain("Unterstreichen");
+        expect(exampleFieldSource).toContain("Markieren");
     });
 
     it("prevents search overlay from mutating zoom or transform state", () => {

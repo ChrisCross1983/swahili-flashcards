@@ -43,6 +43,7 @@ export default function CardEditorSheet({
     const [swahili, setSwahili] = useState("");
     const [germanExample, setGermanExample] = useState("");
     const [swahiliExample, setSwahiliExample] = useState("");
+    const [optionalExamplesOpen, setOptionalExamplesOpen] = useState(false);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
@@ -67,6 +68,7 @@ export default function CardEditorSheet({
         setSwahili("");
         setGermanExample("");
         setSwahiliExample("");
+        setOptionalExamplesOpen(false);
         setImageFile(null);
         setPreviewUrl(null);
         setStatus(null);
@@ -125,6 +127,7 @@ export default function CardEditorSheet({
             setSwahili(card.swahili_text ?? "");
             setGermanExample(card.german_example ?? "");
             setSwahiliExample(card.swahili_example ?? "");
+            setOptionalExamplesOpen(Boolean((card.german_example ?? "").trim() || (card.swahili_example ?? "").trim()));
             setEditAudioPath(card.audio_path ?? null);
             setSelectedImagePath(card.image_path ?? null);
             setSuggestedImagePath(null);
@@ -148,6 +151,7 @@ export default function CardEditorSheet({
             setSwahili(initialCard.swahili_text ?? "");
             setGermanExample(initialCard.german_example ?? "");
             setSwahiliExample(initialCard.swahili_example ?? "");
+            setOptionalExamplesOpen(Boolean((initialCard.german_example ?? "").trim() || (initialCard.swahili_example ?? "").trim()));
             setEditAudioPath(initialCard.audio_path ?? null);
             setSelectedImagePath(initialCard.image_path ?? null);
             setSuggestedImagePath(null);
@@ -408,7 +412,7 @@ export default function CardEditorSheet({
                     </div>
                 ) : (
                     <div className="rounded-2xl border border-soft p-6 shadow-soft bg-surface">
-                        {/* Enable multi-line entry for sentences/paragraphs. */}
+                        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Schritt 1 · Kartenpaar</div>
                         <label className="block text-sm font-medium">Deutsch</label>
                         <textarea
                             className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
@@ -418,7 +422,6 @@ export default function CardEditorSheet({
                             rows={3}
                         />
 
-                        {/* Enable multi-line entry for sentences/paragraphs. */}
                         <label className="block text-sm font-medium mt-4">Swahili</label>
                         <textarea
                             className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap"
@@ -429,21 +432,35 @@ export default function CardEditorSheet({
                         />
 
                         <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Optionaler Kontext · Beispielsätze</div>
-                            <div className="mt-3 space-y-4">
-                                <ExampleField
-                                    label="Beispielsatz (Deutsch)"
-                                    value={germanExample}
-                                    onChange={setGermanExample}
-                                    placeholder="z.B. Ich lese ==das Buch== am Abend."
-                                />
-                                <ExampleField
-                                    label="Beispielsatz (Swahili)"
-                                    value={swahiliExample}
-                                    onChange={setSwahiliExample}
-                                    placeholder="z.B. Ninasoma ==kitabu== jioni."
-                                />
-                            </div>
+                            <button
+                                type="button"
+                                className="flex w-full items-start justify-between gap-3 text-left"
+                                onClick={() => setOptionalExamplesOpen((open) => !open)}
+                                aria-expanded={optionalExamplesOpen}
+                            >
+                                <span>
+                                    <span className="block text-xs font-semibold uppercase tracking-wide text-muted">Schritt 2 · Optionaler Kontext</span>
+                                    <span className="mt-1 block text-sm font-medium text-primary">Optional: Beispielsätze hinzufügen</span>
+                                    <span className="mt-1 block text-xs text-muted">Nur wenn du mit Kontext lernen möchtest.</span>
+                                </span>
+                                <span className="pt-0.5 text-sm text-muted" aria-hidden="true">{optionalExamplesOpen ? "▾" : "▸"}</span>
+                            </button>
+                            {optionalExamplesOpen ? (
+                                <div className="mt-3 space-y-4">
+                                    <ExampleField
+                                        label="Beispielsatz Deutsch (optional)"
+                                        value={germanExample}
+                                        onChange={setGermanExample}
+                                        placeholder="z.B. Ich lese ==das Buch== am Abend."
+                                    />
+                                    <ExampleField
+                                        label="Beispielsatz Swahili (optional)"
+                                        value={swahiliExample}
+                                        onChange={setSwahiliExample}
+                                        placeholder="z.B. Ninasoma ==kitabu== jioni."
+                                    />
+                                </div>
+                            ) : null}
                         </div>
 
                         <div className="mt-6 text-sm font-medium">Medien</div>

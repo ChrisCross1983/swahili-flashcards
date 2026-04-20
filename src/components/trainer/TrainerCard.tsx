@@ -16,6 +16,35 @@ type Props = {
     onOpenLearningHelp?: () => void;
 };
 
+type ExampleDisclosureProps = {
+    id: string;
+    open: boolean;
+    onToggle: () => void;
+    text: string;
+};
+
+function ExampleDisclosure({ id, open, onToggle, text }: ExampleDisclosureProps) {
+    return (
+        <div className="mt-3">
+            <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-xl border border-soft bg-surface px-3 py-2 text-left text-xs font-medium text-muted transition hover:border-default hover:text-primary"
+                onClick={onToggle}
+                aria-expanded={open}
+                aria-controls={id}
+            >
+                <span>Beispielsatz {open ? "ausblenden" : "anzeigen"}</span>
+                <span aria-hidden="true" className="text-sm text-muted">{open ? "▾" : "▸"}</span>
+            </button>
+            {open ? (
+                <div id={id} className="mt-2 rounded-xl bg-surface p-3">
+                    <FormattedExampleText text={text} />
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 export default function TrainerCard({
     reveal,
     prompt,
@@ -39,20 +68,12 @@ export default function TrainerCard({
                         <CardText>{prompt}</CardText>
                     </div>
                     {promptExample?.trim() ? (
-                        <div className="mt-3">
-                            <button
-                                type="button"
-                                className="text-xs font-medium text-muted hover:text-primary"
-                                onClick={() => setShowPromptExample((open) => !open)}
-                            >
-                                {showPromptExample ? "Beispielsatz ausblenden" : "Beispielsatz anzeigen"}
-                            </button>
-                            {showPromptExample ? (
-                                <div className="mt-2 rounded-xl bg-surface p-3">
-                                    <FormattedExampleText text={promptExample} />
-                                </div>
-                            ) : null}
-                        </div>
+                        <ExampleDisclosure
+                            id="prompt-example"
+                            open={showPromptExample}
+                            onToggle={() => setShowPromptExample((open) => !open)}
+                            text={promptExample}
+                        />
                     ) : null}
                 </div>
 
@@ -64,20 +85,12 @@ export default function TrainerCard({
                                 <CardText>{answer}</CardText>
                             </div>
                             {answerExample?.trim() ? (
-                                <div className="mt-3">
-                                    <button
-                                        type="button"
-                                        className="text-xs font-medium text-muted hover:text-primary"
-                                        onClick={() => setShowAnswerExample((open) => !open)}
-                                    >
-                                        {showAnswerExample ? "Beispielsatz ausblenden" : "Beispielsatz anzeigen"}
-                                    </button>
-                                    {showAnswerExample ? (
-                                        <div className="mt-2 rounded-xl bg-surface-elevated p-3">
-                                            <FormattedExampleText text={answerExample} />
-                                        </div>
-                                    ) : null}
-                                </div>
+                                <ExampleDisclosure
+                                    id="answer-example"
+                                    open={showAnswerExample}
+                                    onToggle={() => setShowAnswerExample((open) => !open)}
+                                    text={answerExample}
+                                />
                             ) : null}
                         </div>
 

@@ -14,10 +14,10 @@ describe("learning notes panel", () => {
             />,
         );
 
-        expect(html).toContain("Eigene Notizen");
         expect(html).toContain("textarea");
         expect(html).toContain("automatisch gespeichert");
-        expect(html).not.toContain("Merkhilfe");
+        expect(html).toContain("Notiz");
+        expect(html).toContain("min-h-28");
         expect(html).not.toContain("Beispielsatz");
         expect(html).not.toContain("Verwechslungswort");
     });

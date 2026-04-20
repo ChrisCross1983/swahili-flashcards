@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
+import CompactOverlay from "@/components/CompactOverlay";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import CardText from "@/components/ui/CardText";
 import ExampleField from "@/components/ExampleField";
@@ -150,6 +151,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardGroupsStatus, setCardGroupsStatus] = useState<string | null>(null);
     const [savingCardGroups, setSavingCardGroups] = useState(false);
     const [formGroupIds, setFormGroupIds] = useState<string[]>([]);
+    const [optionalExamplesOpen, setOptionalExamplesOpen] = useState(false);
     const [notesSheetOpen, setNotesSheetOpen] = useState(false);
     const [cardNoteCardId, setCardNoteCardId] = useState<string | null>(null);
     const [cardNoteDraft, setCardNoteDraft] = useState({ mainNotes: "" });
@@ -612,6 +614,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahili("");
             setGermanExample("");
             setSwahiliExample("");
+            setOptionalExamplesOpen(false);
             resetImageInputs();
 
             setPendingAudioBlob(null);
@@ -737,6 +740,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahili("");
             setGermanExample("");
             setSwahiliExample("");
+            setOptionalExamplesOpen(false);
             setImageFile(null);
             setSuggestedImagePath(null);
             setSelectedSuggestUrl(null);
@@ -775,6 +779,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 setSwahili("");
                 setGermanExample("");
                 setSwahiliExample("");
+                setOptionalExamplesOpen(false);
                 resetImageInputs();
 
                 setDuplicateHint(null);
@@ -856,6 +861,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setSwahili(card.swahili_text ?? "");
         setGermanExample(card.german_example ?? "");
         setSwahiliExample(card.swahili_example ?? "");
+        setOptionalExamplesOpen(Boolean((card.german_example ?? "").trim() || (card.swahili_example ?? "").trim()));
         setDuplicateHint(null);
         setImageFile(null);
         setEditAudioPath(card.audio_path ?? null);
@@ -1087,6 +1093,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setSwahili(currentSwahili ?? "");
         setGermanExample(currentGermanExample ?? "");
         setSwahiliExample(currentSwahiliExample ?? "");
+        setOptionalExamplesOpen(Boolean((currentGermanExample ?? "").trim() || (currentSwahiliExample ?? "").trim()));
         setEditAudioPath(item.audio_path ?? null);
         setDuplicateHint(null);
         setDuplicatePreview(null);
@@ -1626,6 +1633,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahili(createDraft.swahili);
             setGermanExample(createDraft.germanExample);
             setSwahiliExample(createDraft.swahiliExample);
+            setOptionalExamplesOpen(Boolean(createDraft.germanExample.trim() || createDraft.swahiliExample.trim()));
 
             setCreateDraft(null);
             setFormGroupIds([]);
@@ -1648,6 +1656,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahili("");
             setGermanExample("");
             setSwahiliExample("");
+            setOptionalExamplesOpen(false);
             setFormGroupIds([]);
             resetImageInputs();
 
@@ -2066,6 +2075,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setPendingAudioBlob(null);
                                         setPendingAudioType(null);
                                         setFormGroupIds([]);
+                                        setOptionalExamplesOpen(false);
 
                                         setOpenCreate(true);
                                     }}
@@ -2950,7 +2960,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 />
                             </FullScreenSheet >
 
-                            <FullScreenSheet
+                            <CompactOverlay
                                 open={notesSheetOpen}
                                 title="Eigene Notizen"
                                 onClose={() => {
@@ -2966,7 +2976,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setCardNoteDraft({ mainNotes: value });
                                     }}
                                 />
-                            </FullScreenSheet>
+                            </CompactOverlay>
 
                             {/* Create Modal */}
                             < FullScreenSheet
@@ -2975,7 +2985,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onClose={handleCancelEdit}
                             >
                                 <div className="rounded-2xl border p-6 shadow-soft bg-surface">
-                                    {/* Enable multi-line entry for sentences/paragraphs. */}
+                                    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Schritt 1 · Kartenpaar</div>
                                     <label className="block text-sm font-medium">Deutsch</label>
                                     <textarea
                                         className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
@@ -2985,7 +2995,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         rows={3}
                                     />
 
-                                    {/* Enable multi-line entry for sentences/paragraphs. */}
                                     <label className="block text-sm font-medium mt-4">Swahili</label>
                                     <textarea
                                         className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
@@ -2996,21 +3005,36 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     />
 
                                     <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
-                                        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Optionaler Kontext · Beispielsätze</div>
-                                        <div className="mt-3 space-y-4">
-                                            <ExampleField
-                                                label="Beispielsatz (Deutsch)"
-                                                value={germanExample}
-                                                onChange={setGermanExample}
-                                                placeholder="z.B. Ich lese ==das Buch== am Abend."
-                                            />
-                                            <ExampleField
-                                                label="Beispielsatz (Swahili)"
-                                                value={swahiliExample}
-                                                onChange={setSwahiliExample}
-                                                placeholder="z.B. Ninasoma ==kitabu== jioni."
-                                            />
-                                        </div>
+                                        <button
+                                            type="button"
+                                            className="flex w-full items-start justify-between gap-3 text-left"
+                                            onClick={() => setOptionalExamplesOpen((open) => !open)}
+                                            aria-expanded={optionalExamplesOpen}
+                                        >
+                                            <span>
+                                                <span className="block text-xs font-semibold uppercase tracking-wide text-muted">Schritt 2 · Optionaler Kontext</span>
+                                                <span className="mt-1 block text-sm font-medium text-primary">Optional: Beispielsätze hinzufügen</span>
+                                                <span className="mt-1 block text-xs text-muted">Nur wenn du mit Kontext lernen möchtest.</span>
+                                            </span>
+                                            <span className="pt-0.5 text-sm text-muted" aria-hidden="true">{optionalExamplesOpen ? "▾" : "▸"}</span>
+                                        </button>
+
+                                        {optionalExamplesOpen ? (
+                                            <div className="mt-3 space-y-4" data-testid="optional-examples-section">
+                                                <ExampleField
+                                                    label="Beispielsatz Deutsch (optional)"
+                                                    value={germanExample}
+                                                    onChange={setGermanExample}
+                                                    placeholder="z.B. Ich lese ==das Buch== am Abend."
+                                                />
+                                                <ExampleField
+                                                    label="Beispielsatz Swahili (optional)"
+                                                    value={swahiliExample}
+                                                    onChange={setSwahiliExample}
+                                                    placeholder="z.B. Ninasoma ==kitabu== jioni."
+                                                />
+                                            </div>
+                                        ) : null}
                                     </div>
 
                                     <div className="mt-4 rounded-xl border p-3">
