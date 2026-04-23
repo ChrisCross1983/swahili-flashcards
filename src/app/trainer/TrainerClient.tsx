@@ -58,6 +58,7 @@ type Props = {
     ownerKey: string;
     cardType?: CardType;
 };
+type QuickStartPreset = "today" | "all" | "last-missed";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -66,10 +67,6 @@ const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const isSentenceTrainer = cardType === "sentence";
     const trainerTitle = isSentenceTrainer ? "Satztrainer" : "Swahili Flashcards (MVP)";
-    const learnLabel = isSentenceTrainer ? "Sätze trainieren" : "Vokabeln lernen";
-    const learnHint = isSentenceTrainer
-        ? "Starte deine fälligen Sätze im Fokus-Modus."
-        : "Starte deine fälligen Karten im Fokus-Modus.";
     const createLabel = isSentenceTrainer ? "Neue Sätze anlegen" : "Neue Wörter anlegen";
     const createHint = isSentenceTrainer
         ? "Neue Sätze anlegen (Deutsch ↔ Swahili)."
@@ -108,7 +105,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [learnStarted, setLearnStarted] = useState(false);
     const [returnToLearn, setReturnToLearn] = useState(false);
-    const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>(null);
+    const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>("RANDOM");
     const [learnDone, setLearnDone] = useState(false);
     const [sessionCorrect, setSessionCorrect] = useState(0);
     const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
@@ -141,6 +138,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
+    const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
     const [groups, setGroups] = useState<Group[]>([]);
     const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
@@ -207,6 +205,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const quickStartInFlightRef = useRef(false);
+    const quickStartHandledRef = useRef(false);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -312,6 +312,66 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!openLearn) return;
         void refreshSetupCounts();
     }, [openLearn, refreshSetupCounts]);
+
+    useEffect(() => {
+        void refreshSetupCounts();
+    }, [refreshSetupCounts]);
+
+    useEffect(() => {
+        if (!openLearn) return;
+        if (learnMode) return;
+        setLearnMode(setupCounts.todayDue > 0 ? "LEITNER_TODAY" : "DRILL");
+    }, [learnMode, openLearn, setupCounts.todayDue]);
+
+    async function runQuickStart(preset: QuickStartPreset) {
+        if (quickStartInFlightRef.current) return;
+        quickStartInFlightRef.current = true;
+        setOpenLearn(true);
+        setAdvancedSetupOpen(false);
+
+        try {
+            const counts = await fetchSetupCounts(cardType, trainerGroupIds);
+            setSetupCounts(counts);
+
+            if (preset === "today" && counts.todayDue > 0) {
+                await startLearningSession({
+                    learnMode: "LEITNER_TODAY",
+                    trainingMaterial: { kind: "ALL" },
+                    directionMode: directionMode ?? "RANDOM",
+                    skipValidationHighlights: true,
+                });
+                return;
+            }
+
+            if (preset === "last-missed") {
+                await startLearningSession({
+                    learnMode: "DRILL",
+                    trainingMaterial: { kind: "LAST_MISSED" },
+                    directionMode: directionMode ?? "RANDOM",
+                    skipValidationHighlights: true,
+                });
+                return;
+            }
+
+            await startLearningSession({
+                learnMode: "DRILL",
+                trainingMaterial: { kind: "ALL" },
+                directionMode: directionMode ?? "RANDOM",
+                skipValidationHighlights: true,
+            });
+        } finally {
+            quickStartInFlightRef.current = false;
+        }
+    }
+
+    useEffect(() => {
+        const quickStart = searchParams.get("quickStart");
+        if (!quickStart || quickStartHandledRef.current || mode !== "leitner") return;
+        if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
+        quickStartHandledRef.current = true;
+        void runQuickStart(quickStart);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mode, searchParams]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -1241,6 +1301,77 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         loopGuardRef.current = { cardId: null, streak: 0 };
     }
 
+    async function startLearningSession(config?: {
+        learnMode?: "LEITNER_TODAY" | "DRILL";
+        trainingMaterial?: TrainingMaterial;
+        directionMode?: "DE_TO_SW" | "SW_TO_DE" | "RANDOM";
+        skipValidationHighlights?: boolean;
+    }) {
+        const nextLearnMode = config?.learnMode ?? learnMode;
+        const nextTrainingMaterial = config?.trainingMaterial ?? trainingMaterial;
+        const nextDirectionMode = config?.directionMode ?? directionMode;
+        const skipValidationHighlights = config?.skipValidationHighlights ?? false;
+
+        if (!nextLearnMode) {
+            if (!skipValidationHighlights) triggerSetupHighlight("LEARNMODE");
+            return;
+        }
+
+        if (!nextDirectionMode) {
+            if (!skipValidationHighlights) triggerSetupHighlight("DIRECTION");
+            return;
+        }
+
+        if (!canStartTraining(nextLearnMode, nextTrainingMaterial, nextDirectionMode)) {
+            if (!skipValidationHighlights) triggerSetupHighlight("MATERIAL");
+            return;
+        }
+
+        setLearnMode(nextLearnMode);
+        setTrainingMaterial(nextTrainingMaterial);
+        setDirectionMode(nextDirectionMode);
+        resetSessionTracking();
+        setLearnLoadError(null);
+        setTodayItems([]);
+
+        const chosen =
+            nextDirectionMode === "RANDOM"
+                ? Math.random() < 0.5
+                    ? "DE_TO_SW"
+                    : "SW_TO_DE"
+                : nextDirectionMode;
+
+        setDirection(chosen);
+        setReveal(false);
+        setCurrentIndex(0);
+
+        let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
+
+        if (nextLearnMode === "LEITNER_TODAY") {
+            loadResult = await loadToday();
+            await loadLeitnerStats();
+            if (loadResult.ok && loadResult.items.length === 0) {
+                await persistLearnSession({
+                    mode: "LEITNER",
+                    totalCount: 0,
+                    correctCount: 0,
+                    wrongCardIds: [],
+                });
+            }
+        } else if (nextTrainingMaterial.kind === "ALL" || nextTrainingMaterial.kind === "GROUP") {
+            loadResult = await loadAllForDrill();
+        } else {
+            loadResult = await loadLastMissed();
+        }
+
+        if (!loadResult.ok) {
+            setLearnStarted(false);
+            return;
+        }
+
+        setLearnStarted(true);
+    }
+
     async function persistLearnSession(params: {
         mode: "LEITNER" | "DRILL";
         totalCount: number;
@@ -1959,6 +2090,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 : missingDirection
                     ? "Abfragerichtung wählen"
                     : null;
+    const recommendation = setupCounts.todayDue > 0
+        ? `Heute fällig: ${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"}`
+        : setupCounts.lastMissedCount > 0
+            ? `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`
+            : `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
     const cardGroupsUnchanged = (() => {
         const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
             ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
@@ -2037,32 +2173,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
                                 <button
                                     onClick={() => {
-                                        setOpenLearn(true);
-
-                                        // Setup sauber zurücksetzen
-                                        setLearnStarted(false);
-                                        setLearnDone(false);
-                                        setShowSummary(false);
-
-                                        // NICHTS vorauswählen (UX!)
-                                        setLearnMode(null);
-                                        setDirectionMode(null);
-                                        setTrainingMaterial({ kind: "ALL" });
-
-                                        // Session reset
-                                        setTodayItems([]);
-                                        setCurrentIndex(0);
-                                        setReveal(false);
-                                        resetSessionTracking();
-
-                                        setStatus("");
+                                        void runQuickStart("today");
                                     }}
                                     className="rounded-[32px] border border-cta bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
                                     <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Training</div>
-                                    <div className="mt-2 text-xl font-semibold">{learnLabel}</div>
+                                    <div className="mt-2 text-xl font-semibold">{setupCounts.todayDue > 0 ? "Heute lernen" : "Weiterlernen"}</div>
                                     <div className="mt-2 text-sm text-muted">
-                                        {learnHint}
+                                        {setupCounts.todayDue > 0
+                                            ? `${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"} warten auf dich.`
+                                            : "Direkt starten mit einer sinnvollen Standard-Session."}
                                     </div>
                                 </button>
 
@@ -2142,7 +2262,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setStatus("");
 
                                         setLearnMode(null);
-                                        setDirectionMode(null);
+                                        setDirectionMode("RANDOM");
                                         setTrainingMaterial({ kind: "ALL" });
                                         resetSessionTracking();
 
@@ -2155,290 +2275,272 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 {/* === SETUP === */}
                                 {!learnStarted && (
                                     <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Einstellungen</div>
-                                        {/* Hint card for setup guidance */}
+                                        <div className="text-sm font-semibold text-primary">Direkt starten</div>
                                         <div className="mt-2 hint-card border border-soft">
-                                            Wähle Lernmethode, Abfragerichtung – dann starten wir.
+                                            <span className="font-medium text-primary">Empfohlen für dich:</span>{" "}
+                                            {setupCountsLoading ? "Lade Empfehlung…" : recommendation}
                                         </div>
 
-                                        <div
-                                            ref={learnModeRef}
-                                            className="mt-4"
-                                        >
-                                            <div
-                                                className={
-                                                    learnModeHighlight
-                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                        : ""
-                                                }
+                                        <div className="mt-3 grid grid-cols-1 gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => void runQuickStart("today")}
+                                                className="relative rounded-2xl border border-accent bg-accent-cta-soft p-4 text-left transition hover:shadow-soft"
                                             >
-                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Lernmethode</div>
-                                                    <div className="mt-2 grid grid-cols-1 gap-3">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setLearnMode("LEITNER_TODAY");
-                                                            }}
-                                                            className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-start justify-between gap-3 pr-10">
-                                                                <div>
-                                                                    <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
-                                                                    <div className="mt-1 text-sm text-muted">
-                                                                        Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
-                                                                    </div>
-                                                                </div>
-
-                                                                {isLeitnerSelected ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                            {/* Count badge */}
-                                                            <div className="count-badge absolute right-4 top-4">
-                                                                {setupCountsLoading ? "…" : setupCounts.todayDue}
-                                                            </div>
-                                                        </button>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setLearnMode("DRILL");
-                                                            }}
-                                                            className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-start justify-between gap-3 pr-10">
-                                                                <div>
-                                                                    <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
-                                                                    <div className="mt-1 text-sm text-muted">
-                                                                        Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
-                                                                    </div>
-                                                                </div>
-
-                                                                {isDrillSelected ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                            {/* Count badge */}
-                                                            <div className="count-badge absolute right-4 top-4">
-                                                                {setupCountsLoading ? "…" : setupCounts.totalCards}
-                                                            </div>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div ref={materialRef} className="mt-4">
-                                            <div
-                                                className={
-                                                    materialHighlight
-                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                        : ""
-                                                }
+                                                <div className="font-semibold">Heute lernen</div>
+                                                <div className="mt-1 text-sm text-muted">Leitner-Session mit fälligen Karten.</div>
+                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void runQuickStart("all")}
+                                                className="relative rounded-2xl border border-soft bg-surface p-4 text-left transition hover:bg-surface-elevated"
                                             >
-                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
-                                                    <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
-                                                        <select
-                                                            className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                            value={trainingMaterial.kind}
-                                                            onChange={(event) => {
-                                                                const next = event.target.value;
-                                                                if (next === "GROUP") {
-                                                                    setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
-                                                                    return;
-                                                                }
-                                                                setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
-                                                            }}
-                                                        >
-                                                            <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
-                                                            <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
-                                                            <option value="GROUP">Bestimmte Gruppe…</option>
-                                                        </select>
-
-                                                        {trainingMaterial.kind === "GROUP" ? (
-                                                            <div className="mt-2 space-y-2">
-                                                                <select
-                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                    value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
-                                                                    onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
-                                                                >
-                                                                    <option value="">Gruppe auswählen…</option>
-                                                                    {groups.map((group) => (
-                                                                        <option key={group.id} value={group.id}>{group.name}</option>
-                                                                    ))}
-                                                                </select>
-                                                                <div className="flex items-center justify-between text-xs text-muted">
-                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div
-                                            ref={directionRef}
-                                            className="mt-4"
-                                        >
-                                            <div
-                                                className={
-                                                    directionHighlight
-                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                        : ""
-                                                }
+                                                <div className="font-semibold">Alle Karten üben</div>
+                                                <div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div>
+                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.totalCards}</div>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void runQuickStart("last-missed")}
+                                                className="relative rounded-2xl border border-soft bg-surface p-4 text-left transition hover:bg-surface-elevated"
                                             >
-                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
-                                                    <div className="mt-2 grid grid-cols-1 gap-3">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setDirectionMode("DE_TO_SW")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Deutsch → Swahili</span>
-                                                                {directionMode === "DE_TO_SW" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setDirectionMode("SW_TO_DE")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Swahili → Deutsch</span>
-                                                                {directionMode === "SW_TO_DE" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setDirectionMode("RANDOM")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Zufällig (Abwechslung)</span>
-                                                                {directionMode === "RANDOM" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                                <div className="font-semibold">Zuletzt nicht gewusst</div>
+                                                <div className="mt-1 text-sm text-muted">Gezielte Wiederholung schwieriger Karten.</div>
+                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
+                                            </button>
                                         </div>
 
-                                        {/* Primary CTA */}
                                         <button
-                                            className={`mt-4 w-full btn btn-primary py-3 text-base`}
                                             type="button"
-                                            disabled={startDisabled}
-                                            onClick={async () => {
-
-                                                if (!learnMode) {
-                                                    triggerSetupHighlight("LEARNMODE");
-                                                    return;
-                                                }
-
-                                                if (!directionMode) {
-                                                    triggerSetupHighlight("DIRECTION");
-                                                    return;
-                                                }
-
-                                                if (!canStartTraining(learnMode, trainingMaterial, directionMode)) {
-                                                    triggerSetupHighlight("MATERIAL");
-                                                    return;
-                                                }
-
-                                                resetSessionTracking();
-                                                setLearnLoadError(null);
-                                                setTodayItems([]);
-
-                                                const chosen =
-                                                    directionMode === "RANDOM"
-                                                        ? Math.random() < 0.5
-                                                            ? "DE_TO_SW"
-                                                            : "SW_TO_DE"
-                                                        : directionMode;
-
-                                                setDirection(chosen);
-                                                setReveal(false);
-                                                setCurrentIndex(0);
-
-                                                let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
-
-                                                if (learnMode === "LEITNER_TODAY") {
-                                                    loadResult = await loadToday();
-                                                    await loadLeitnerStats();
-                                                    if (loadResult.ok && loadResult.items.length === 0) {
-                                                        await persistLearnSession({
-                                                            mode: "LEITNER",
-                                                            totalCount: 0,
-                                                            correctCount: 0,
-                                                            wrongCardIds: [],
-                                                        });
-                                                    }
-                                                } else {
-                                                    if (trainingMaterial.kind === "ALL" || trainingMaterial.kind === "GROUP") {
-                                                        loadResult = await loadAllForDrill();
-                                                    } else {
-                                                        loadResult = await loadLastMissed();
-                                                    }
-                                                }
-
-                                                if (!loadResult.ok) {
-                                                    setLearnStarted(false);
-                                                    return;
-                                                }
-
-                                                setLearnStarted(true);
-                                            }}
+                                            className="mt-4 w-full rounded-xl border border-soft px-3 py-2 text-left text-sm font-medium"
+                                            aria-expanded={advancedSetupOpen}
+                                            onClick={() => setAdvancedSetupOpen((open) => !open)}
                                         >
-                                            Start
+                                            {advancedSetupOpen ? "Weniger Optionen" : "Mehr Optionen"}
                                         </button>
 
-                                        {startHint ? (
-                                            <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                                                {/* Start hint */}
-                                                {startHint}
+                                        {advancedSetupOpen ? (<>
+                                            <div
+                                                ref={learnModeRef}
+                                                className="mt-4"
+                                            >
+                                                <div
+                                                    className={
+                                                        learnModeHighlight
+                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                            : ""
+                                                    }
+                                                >
+                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                        <div className="text-sm font-semibold text-primary">Lernmethode</div>
+                                                        <div className="mt-2 grid grid-cols-1 gap-3">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setLearnMode("LEITNER_TODAY");
+                                                                }}
+                                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
+                                                                    ? "border-accent bg-surface shadow-soft"
+                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                    }`}
+                                                            >
+                                                                <div className="flex items-start justify-between gap-3 pr-10">
+                                                                    <div>
+                                                                        <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
+                                                                        <div className="mt-1 text-sm text-muted">
+                                                                            Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {isLeitnerSelected ? (
+                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                            ✓
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                                {/* Count badge */}
+                                                                <div className="count-badge absolute right-4 top-4">
+                                                                    {setupCountsLoading ? "…" : setupCounts.todayDue}
+                                                                </div>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setLearnMode("DRILL");
+                                                                }}
+                                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
+                                                                    ? "border-accent bg-surface shadow-soft"
+                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                    }`}
+                                                            >
+                                                                <div className="flex items-start justify-between gap-3 pr-10">
+                                                                    <div>
+                                                                        <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
+                                                                        <div className="mt-1 text-sm text-muted">
+                                                                            Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {isDrillSelected ? (
+                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                            ✓
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                                {/* Count badge */}
+                                                                <div className="count-badge absolute right-4 top-4">
+                                                                    {setupCountsLoading ? "…" : setupCounts.totalCards}
+                                                                </div>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        ) : null}
+
+                                            <div ref={materialRef} className="mt-4">
+                                                <div
+                                                    className={
+                                                        materialHighlight
+                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                            : ""
+                                                    }
+                                                >
+                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                        <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
+                                                        <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
+                                                            <select
+                                                                className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                value={trainingMaterial.kind}
+                                                                onChange={(event) => {
+                                                                    const next = event.target.value;
+                                                                    if (next === "GROUP") {
+                                                                        setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
+                                                                        return;
+                                                                    }
+                                                                    setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
+                                                                }}
+                                                            >
+                                                                <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
+                                                                <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
+                                                                <option value="GROUP">Bestimmte Gruppe…</option>
+                                                            </select>
+
+                                                            {trainingMaterial.kind === "GROUP" ? (
+                                                                <div className="mt-2 space-y-2">
+                                                                    <select
+                                                                        className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                        value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
+                                                                        onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
+                                                                    >
+                                                                        <option value="">Gruppe auswählen…</option>
+                                                                        {groups.map((group) => (
+                                                                            <option key={group.id} value={group.id}>{group.name}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <div className="flex items-center justify-between text-xs text-muted">
+                                                                        <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                                        <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                ref={directionRef}
+                                                className="mt-4"
+                                            >
+                                                <div
+                                                    className={
+                                                        directionHighlight
+                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                            : ""
+                                                    }
+                                                >
+                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                        <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
+                                                        <div className="mt-2 grid grid-cols-1 gap-3">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDirectionMode("DE_TO_SW")}
+                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
+                                                                    ? "border-accent bg-surface shadow-soft"
+                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                    }`}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <span>Deutsch → Swahili</span>
+                                                                    {directionMode === "DE_TO_SW" ? (
+                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                            ✓
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDirectionMode("SW_TO_DE")}
+                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
+                                                                    ? "border-accent bg-surface shadow-soft"
+                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                    }`}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <span>Swahili → Deutsch</span>
+                                                                    {directionMode === "SW_TO_DE" ? (
+                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                            ✓
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDirectionMode("RANDOM")}
+                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
+                                                                    ? "border-accent bg-surface shadow-soft"
+                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                    }`}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <span>Zufällig (Abwechslung)</span>
+                                                                    {directionMode === "RANDOM" ? (
+                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                            ✓
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Primary CTA */}
+                                            <button
+                                                className={`mt-4 w-full btn btn-primary py-3 text-base`}
+                                                type="button"
+                                                disabled={startDisabled}
+                                                onClick={() => void startLearningSession()}
+                                            >
+                                                Start mit diesen Optionen
+                                            </button>
+
+                                            {startHint ? (
+                                                <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                                    {/* Start hint */}
+                                                    {startHint}
+                                                </div>
+                                            ) : null}
+                                        </>) : null}
 
                                         {learnLoadError ? (
                                             <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">
@@ -2504,7 +2606,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             setStatus("");
 
                                                             setLearnMode(null);
-                                                            setDirectionMode(null);
+                                                            setDirectionMode("RANDOM");
                                                             setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
@@ -2651,7 +2753,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             setStatus("");
 
                                                             setLearnMode(null);
-                                                            setDirectionMode(null);
+                                                            setDirectionMode("RANDOM");
                                                             setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
@@ -2682,7 +2784,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             setStatus("");
 
                                                             setLearnMode(null);
-                                                            setDirectionMode(null);
+                                                            setDirectionMode("RANDOM");
                                                             setTrainingMaterial({ kind: "ALL" });
                                                             resetSessionTracking();
                                                         }}
@@ -2723,7 +2825,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                             setStatus("");
 
                                                                             setLearnMode(null);
-                                                                            setDirectionMode(null);
+                                                                            setDirectionMode("RANDOM");
                                                                             setTrainingMaterial({ kind: "ALL" });
                                                                             resetSessionTracking();
                                                                         }}

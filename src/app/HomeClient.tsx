@@ -55,7 +55,6 @@ export default function HomeClient({ ownerKey }: Props) {
 
   useEffect(() => {
     loadLeitnerStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadLeitnerStats() {
@@ -75,6 +74,13 @@ export default function HomeClient({ ownerKey }: Props) {
     window.location.href = "/login";
   }
 
+  const hasDueToday = leitnerUi.todayCount > 0;
+  const primaryCtaLabel = hasDueToday ? "Heute lernen" : "Alle Karten üben";
+  const primaryCtaHint = hasDueToday
+    ? `${leitnerUi.todayCount} Karten sind heute fällig.`
+    : "Heute ist nichts fällig – übe alle Karten im schnellen Drill.";
+  const primaryCtaTarget = hasDueToday ? "/trainer?quickStart=today" : "/trainer?quickStart=all";
+
   return (
     <main className="min-h-screen bg-base p-6 flex justify-center">
       <div className="w-full max-w-xl">
@@ -89,10 +95,22 @@ export default function HomeClient({ ownerKey }: Props) {
           </button>
         </div>
 
-        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <button
+          onClick={() => router.push(primaryCtaTarget)}
+          className="mt-8 w-full panel text-left rounded-[32px] p-7 border-2 border-cta shadow-warm transition hover:shadow-soft"
+        >
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Empfohlen für dich</div>
+          <div className="mt-2 text-2xl font-semibold">{primaryCtaLabel}</div>
+          <div className="mt-2 text-sm text-muted">{primaryCtaHint}</div>
+          <div className="mt-4 inline-flex rounded-xl bg-accent-cta-soft px-3 py-1.5 text-sm font-medium text-accent-cta">
+            Direkt starten
+          </div>
+        </button>
+
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <button
             onClick={() => router.push("/trainer")}
-            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm border-cta"
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Lernen</div>
             <div className="mt-2 text-xl font-semibold">Vokabeltrainer</div>
