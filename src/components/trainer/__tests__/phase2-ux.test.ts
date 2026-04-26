@@ -114,7 +114,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("router.replace(query ? `${pathname}?${query}` : pathname)");
     });
 
-    it("uses selectable training presets with a single unified start CTA", () => {
+    it("uses one clear trainer start sequence without advanced options toggles", () => {
         expect(trainerSource).toContain("selectedTrainingPreset");
         expect(trainerSource).toContain("recommendedQuickStartPreset");
         expect(trainerSource).toContain("hasAutoOpenedSetupRef");
@@ -123,10 +123,13 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("aria-pressed={selectedPreset === \"all\"}");
         expect(trainerSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
         expect(trainerSource).toContain("Session starten ·");
+        expect(trainerSource).toContain("Empfohlen für dich:");
         expect(trainerSource).not.toContain("runQuickStart(");
         expect(trainerSource).not.toContain("Start mit diesen Optionen");
-        expect(trainerSource).toContain("Optionen anpassen");
-        expect(trainerSource).toContain("Optional: Richtung und Gruppe anpassen.");
+        expect(trainerSource).not.toContain("Optionen einblenden");
+        expect(trainerSource).not.toContain("Optionen ausblenden");
+        expect(trainerSource).not.toContain("Mehr Kontrolle");
+        expect(trainerSource).not.toContain("Weniger Kontrolle");
     });
 
     it("removes redundant advanced learning-method controls and duplicate setup CTA", () => {
@@ -137,9 +140,19 @@ describe("phase 2 product UX cleanup", () => {
         expect((trainerSource.match(/Session starten ·/g) ?? []).length).toBe(1);
     });
 
-    it("keeps optional direction and group settings and hides group/material for last missed", () => {
-        expect(trainerSource).toContain("selectedPreset !== \"last-missed\" ? (");
+    it("keeps material refinement only for all-cards mode and removes duplicate last-missed material choice", () => {
+        expect(trainerSource).toContain("selectedPreset === \"all\" ? (");
         expect(trainerSource).toContain("setTrainingMaterial({ kind: \"GROUP\"");
+        expect(trainerSource).not.toContain("<option value=\"LAST_MISSED\">");
+        expect(trainerSource).toContain("Session starten · {selectedQuickStartLabel}");
+        expect(trainerSource).toContain("activeTrainerGroupName ?? \"Gruppe wählen\"");
+    });
+
+    it("keeps direction visible in main start flow with accessible selected states", () => {
+        expect(trainerSource).toContain("text-sm font-semibold text-primary\">Abfragerichtung");
+        expect(trainerSource).toContain("aria-pressed={directionMode === \"DE_TO_SW\"}");
+        expect(trainerSource).toContain("aria-pressed={directionMode === \"SW_TO_DE\"}");
+        expect(trainerSource).toContain("aria-pressed={directionMode === \"RANDOM\"}");
         expect(trainerSource).toContain("setDirectionMode(\"RANDOM\")");
     });
 
@@ -163,10 +176,10 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).not.toContain("Search Modal");
     });
 
-    it("keeps advanced setup collapsed by default and still expandable", () => {
-        expect(trainerSource).toContain("const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);");
-        expect(trainerSource).toContain("aria-expanded={advancedSetupOpen}");
-        expect(trainerSource).toContain("setAdvancedSetupOpen((open) => !open)");
+    it("keeps exactly one start CTA and start readiness guard", () => {
+        expect((trainerSource.match(/Session starten ·/g) ?? []).length).toBe(1);
+        expect(trainerSource).toContain("const startDisabled = !canStartTraining");
+        expect(trainerSource).toContain("selectedSessionConfig.trainingMaterial.kind === \"GROUP\" && !selectedSessionConfig.trainingMaterial.groupId");
     });
 
     it("keeps trainer sheet fullscreen on mobile while preserving desktop framing", () => {

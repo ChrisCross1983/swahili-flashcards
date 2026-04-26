@@ -138,7 +138,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
-    const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
     const [groups, setGroups] = useState<Group[]>([]);
     const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
@@ -329,7 +328,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEntryQuickStartPreset(quickStart);
         setSelectedTrainingPreset(quickStart);
         setOpenLearn(true);
-        setAdvancedSetupOpen(false);
 
         const params = new URLSearchParams(searchParams.toString());
         params.delete("quickStart");
@@ -1991,7 +1989,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         ? "Heute lernen"
         : selectedPreset === "last-missed"
             ? "Zuletzt nicht gewusst"
-            : "Alle Karten üben";
+            : trainingMaterial.kind === "GROUP"
+                ? (activeTrainerGroupName ?? "Gruppe wählen")
+                : "Alle Karten";
     const selectedSessionConfig = selectedPreset === "today"
         ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
         : selectedPreset === "last-missed"
@@ -2158,7 +2158,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 <button
                                     onClick={() => {
                                         setOpenLearn(true);
-                                        setAdvancedSetupOpen(false);
                                     }}
                                     className="rounded-[32px] border border-cta bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
@@ -2260,7 +2259,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 {/* === SETUP === */}
                                 {!learnStarted && (
                                     <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Trainingsmodus wählen</div>
                                         <div className="mt-2 hint-card border border-soft">
                                             <span className="font-medium text-primary">Empfohlen für dich:</span>{" "}
                                             {setupCountsLoading ? "Lade Empfehlung…" : recommendation}
@@ -2308,166 +2306,148 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </button>
                                         </div>
 
-                                        <button
-                                            type="button"
-                                            className="mt-4 w-full rounded-xl border border-soft px-3 py-2 text-left text-sm font-medium"
-                                            aria-expanded={advancedSetupOpen}
-                                            onClick={() => setAdvancedSetupOpen((open) => !open)}
-                                        >
-                                            {advancedSetupOpen ? "Optionen ausblenden" : "Optionen anpassen"}
-                                        </button>
-                                        <div className="mt-2 text-xs text-muted">Optional: Richtung und Gruppe anpassen.</div>
+                                        {selectedPreset === "all" ? (
+                                            <div ref={materialRef} className="mt-4 rounded-2xl border border-soft bg-surface p-4 shadow-soft">
+                                                <div className={materialHighlight ? "rounded-xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft" : ""}>
+                                                    <div className="text-sm font-semibold text-primary">Material</div>
+                                                    <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
+                                                        <label className="text-xs text-muted" htmlFor="all-material-select">Material auswählen</label>
+                                                        <select
+                                                            id="all-material-select"
+                                                            className="mt-1 w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                            value={trainingMaterial.kind === "GROUP" ? "GROUP" : "ALL"}
+                                                            onChange={(event) => {
+                                                                const next = event.target.value;
+                                                                if (next === "GROUP") {
+                                                                    setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
+                                                                    return;
+                                                                }
+                                                                setTrainingMaterial({ kind: "ALL" });
+                                                            }}
+                                                        >
+                                                            <option value="ALL">Alle Karten</option>
+                                                            <option value="GROUP">Bestimmte Gruppe…</option>
+                                                        </select>
 
-                                        {advancedSetupOpen ? (<>
-                                            {selectedPreset !== "last-missed" ? (
-                                                <div ref={materialRef} className="mt-4">
-                                                    <div
-                                                        className={
-                                                            materialHighlight
-                                                                ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                                : ""
-                                                        }
-                                                    >
-                                                        <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                            <div className="text-sm font-semibold text-primary">Trainingsmaterial</div>
-                                                            <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
+                                                        {trainingMaterial.kind === "GROUP" ? (
+                                                            <div className="mt-2 space-y-2">
                                                                 <select
                                                                     className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                    value={selectedSessionConfig.trainingMaterial.kind === "GROUP" ? "GROUP" : "ALL"}
-                                                                    onChange={(event) => {
-                                                                        const next = event.target.value;
-                                                                        if (next === "GROUP") {
-                                                                            setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
-                                                                            return;
-                                                                        }
-                                                                        setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
-                                                                    }}
+                                                                    value={trainingMaterial.groupId ?? ""}
+                                                                    onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
                                                                 >
-                                                                    <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
-                                                                    <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
-                                                                    <option value="GROUP">Bestimmte Gruppe…</option>
+                                                                    <option value="">Gruppe auswählen…</option>
+                                                                    {groups.map((group) => (
+                                                                        <option key={group.id} value={group.id}>{group.name}</option>
+                                                                    ))}
                                                                 </select>
-
-                                                                {trainingMaterial.kind === "GROUP" ? (
-                                                                    <div className="mt-2 space-y-2">
-                                                                        <select
-                                                                            className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                            value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
-                                                                            onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
-                                                                        >
-                                                                            <option value="">Gruppe auswählen…</option>
-                                                                            {groups.map((group) => (
-                                                                                <option key={group.id} value={group.id}>{group.name}</option>
-                                                                            ))}
-                                                                        </select>
-                                                                        <div className="flex items-center justify-between text-xs text-muted">
-                                                                            <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                                            <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                                                        </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
-                                                                )}
+                                                                <div className="flex items-center justify-between text-xs text-muted">
+                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : null}
-
-                                            <div
-                                                ref={directionRef}
-                                                className="mt-4"
-                                            >
-                                                <div
-                                                    className={
-                                                        directionHighlight
-                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                            : ""
-                                                    }
-                                                >
-                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                        <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
-                                                        <div className="mt-2 grid grid-cols-1 gap-3">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setDirectionMode("DE_TO_SW")}
-                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
-                                                                    ? "border-accent bg-surface shadow-soft"
-                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-center justify-between">
-                                                                    <span>Deutsch → Swahili</span>
-                                                                    {directionMode === "DE_TO_SW" ? (
-                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                            ✓
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setDirectionMode("SW_TO_DE")}
-                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
-                                                                    ? "border-accent bg-surface shadow-soft"
-                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-center justify-between">
-                                                                    <span>Swahili → Deutsch</span>
-                                                                    {directionMode === "SW_TO_DE" ? (
-                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                            ✓
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setDirectionMode("RANDOM")}
-                                                                className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
-                                                                    ? "border-accent bg-surface shadow-soft"
-                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-center justify-between">
-                                                                    <span>Zufällig (Abwechslung)</span>
-                                                                    {directionMode === "RANDOM" ? (
-                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                            ✓
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                            </button>
-                                                        </div>
+                                                        ) : (
+                                                            <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
+                                        ) : null}
 
-                                            {/* Primary CTA */}
-                                            <button
-                                                className={`mt-4 w-full btn btn-primary py-3 text-base`}
-                                                type="button"
-                                                disabled={startDisabled}
-                                                onClick={() => void startLearningSession({
-                                                    learnMode: selectedSessionConfig.learnMode,
-                                                    trainingMaterial: selectedSessionConfig.trainingMaterial,
-                                                    directionMode: directionMode ?? "RANDOM",
-                                                    skipValidationHighlights: true,
-                                                })}
+                                        <div
+                                            ref={directionRef}
+                                            className="mt-4"
+                                        >
+                                            <div
+                                                className={
+                                                    directionHighlight
+                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                        : ""
+                                                }
                                             >
-                                                Session starten · {selectedQuickStartLabel}
-                                            </button>
+                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
+                                                    <div className="mt-2 grid grid-cols-1 gap-3">
+                                                        <button
+                                                            type="button"
+                                                            aria-pressed={directionMode === "DE_TO_SW"}
+                                                            onClick={() => setDirectionMode("DE_TO_SW")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Deutsch → Swahili</span>
+                                                                {directionMode === "DE_TO_SW" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
 
-                                            {startHint ? (
-                                                <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                                                    {/* Start hint */}
-                                                    {startHint}
+                                                        <button
+                                                            type="button"
+                                                            aria-pressed={directionMode === "SW_TO_DE"}
+                                                            onClick={() => setDirectionMode("SW_TO_DE")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Swahili → Deutsch</span>
+                                                                {directionMode === "SW_TO_DE" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            aria-pressed={directionMode === "RANDOM"}
+                                                            onClick={() => setDirectionMode("RANDOM")}
+                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
+                                                                ? "border-accent bg-surface shadow-soft"
+                                                                : "border-soft bg-surface hover:bg-surface-elevated"
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between">
+                                                                <span>Zufällig (Abwechslung)</span>
+                                                                {directionMode === "RANDOM" ? (
+                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
+                                                                        ✓
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                            ) : null}
-                                        </>) : null}
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            className="mt-4 w-full btn btn-primary py-3 text-base"
+                                            type="button"
+                                            disabled={startDisabled}
+                                            onClick={() => void startLearningSession({
+                                                learnMode: selectedSessionConfig.learnMode,
+                                                trainingMaterial: selectedSessionConfig.trainingMaterial,
+                                                directionMode: directionMode ?? "RANDOM",
+                                                skipValidationHighlights: true,
+                                            })}
+                                        >
+                                            Session starten · {selectedQuickStartLabel}
+                                        </button>
+
+                                        {startHint ? (
+                                            <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
+                                                {startHint}
+                                            </div>
+                                        ) : null}
 
                                         {learnLoadError ? (
                                             <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">
