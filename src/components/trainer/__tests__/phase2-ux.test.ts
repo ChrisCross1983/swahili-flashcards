@@ -91,7 +91,9 @@ describe("phase 2 product UX cleanup", () => {
         expect(overlaysSource).toContain("mobileToolsOpen");
         expect(overlaysSource).toContain("if (focusedTrainerMode)");
         expect(overlaysSource).toContain("{mobileToolsOpen ? (");
-        expect(overlaysSource).not.toContain("!focusedTrainerMode || mobileToolsOpen");
+        expect(overlaysSource).toContain("bottom-[max(0.75rem,env(safe-area-inset-bottom))]");
+        expect(overlaysSource).toContain("right-[max(0.75rem,env(safe-area-inset-right))]");
+        expect(overlaysSource).toContain("border-white/50 bg-accent-secondary text-white");
         expect(overlaysSource).toContain("Schnellaktionen öffnen");
     });
 
@@ -100,24 +102,32 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain('router.push("/import")');
     });
 
-    it("opens quick-start selection from home CTA without auto-starting a session", () => {
-        expect(homeSource).toContain('"/trainer?quickStart=today"');
-        expect(homeSource).toContain('"/trainer?quickStart=all"');
-        expect(homeSource).toContain("Auswahl öffnen");
+    it("keeps home calm and routes learning tile to trainer setup", () => {
+        expect(homeSource).not.toContain('"/trainer?quickStart=today"');
+        expect(homeSource).not.toContain('"/trainer?quickStart=all"');
+        expect(homeSource).not.toContain("Auswahl öffnen");
+        expect(homeSource).toContain('router.push("/trainer")');
         expect(trainerSource).toContain("setEntryQuickStartPreset(quickStart)");
+        expect(trainerSource).toContain("setSelectedQuickStartPreset(quickStart)");
         expect(trainerSource).toContain("setOpenLearn(true)");
         expect(trainerSource).toContain("params.delete(\"quickStart\")");
         expect(trainerSource).toContain("router.replace(query ? `${pathname}?${query}` : pathname)");
         expect(trainerSource).not.toContain("void runQuickStart(quickStart)");
     });
 
-    it("keeps presets first and advanced setup behind explicit disclosure", () => {
+    it("uses selectable quick-start presets with explicit start CTA", () => {
         expect(trainerSource).toContain("highlightedQuickStartPreset");
-        expect(trainerSource).toContain("Mehr Optionen");
-        expect(trainerSource).toContain("Mehr Kontrolle bei Bedarf – Presets oben starten direkt.");
-        expect(trainerSource).toContain('onClick={() => void runQuickStart("today")}');
-        expect(trainerSource).toContain('onClick={() => void runQuickStart("all")}');
-        expect(trainerSource).toContain('onClick={() => void runQuickStart("last-missed")}');
+        expect(trainerSource).toContain("selectedQuickStartPreset");
+        expect(trainerSource).toContain("recommendedQuickStartPreset");
+        expect(trainerSource).toContain("hasAutoOpenedSetupRef");
+        expect(trainerSource).toContain("setOpenLearn(true);");
+        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"today\"}");
+        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"all\"}");
+        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"last-missed\"}");
+        expect(trainerSource).toContain("Session starten ·");
+        expect(trainerSource).toContain("onClick={() => void runQuickStart(highlightedQuickStartPreset)}");
+        expect(trainerSource).toContain("Mehr Kontrolle");
+        expect(trainerSource).toContain("Erweiterte Einstellungen für Gruppen, Richtung und Lernmethode.");
     });
 
     it("simplifies import review row actions and keeps explicit states", () => {
@@ -131,5 +141,21 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).not.toContain("Satz suchen");
         expect(trainerSource).not.toContain("Karte suchen");
         expect(trainerSource).not.toContain("Search Modal");
+    });
+
+    it("keeps advanced setup collapsed by default and still expandable", () => {
+        expect(trainerSource).toContain("const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);");
+        expect(trainerSource).toContain("aria-expanded={advancedSetupOpen}");
+        expect(trainerSource).toContain("setAdvancedSetupOpen((open) => !open)");
+    });
+
+    it("keeps trainer sheet fullscreen on mobile while preserving desktop framing", () => {
+        const sheetSource = fs.readFileSync(path.join(root, "src/components/FullScreenSheet.tsx"), "utf8");
+        expect(sheetSource).toContain("h-[100dvh]");
+        expect(sheetSource).toContain("max-w-none");
+        expect(sheetSource).toContain("border-0");
+        expect(sheetSource).toContain("md:max-w-2xl");
+        expect(sheetSource).toContain("md:rounded-3xl");
+        expect(sheetSource).toContain("md:border");
     });
 });

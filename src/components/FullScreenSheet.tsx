@@ -22,8 +22,8 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-overlay px-3 py-0 md:items-center md:p-4">
-            <div className="flex h-[95dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-soft bg-base-alt shadow-warm md:h-[min(90dvh,860px)] md:rounded-3xl">
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-overlay p-0 md:items-center md:p-4">
+            <div className="flex h-[100dvh] w-full max-w-none flex-col overflow-hidden border-0 bg-base-alt shadow-warm md:h-[min(90dvh,860px)] md:max-w-2xl md:rounded-3xl md:border md:border-soft">
                 <div className="flex items-center justify-between border-b border-soft bg-surface px-4 py-3 shadow-soft">
                     <div className="text-base font-semibold tracking-wide">{title ?? ""}</div>
                     <button
@@ -36,8 +36,8 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
                     </button>
                 </div>
 
-                <div className="flex flex-1 justify-center overflow-auto px-4 py-4">
-                    <div className="w-full max-w-xl pb-8">
+                <div className="flex flex-1 justify-center overflow-auto px-3 py-3 md:px-4 md:py-4">
+                    <div className="w-full max-w-none pb-8 md:max-w-xl">
                         {children}
                     </div>
                 </div>

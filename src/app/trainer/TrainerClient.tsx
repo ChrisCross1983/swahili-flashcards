@@ -206,7 +206,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const quickStartInFlightRef = useRef(false);
+    const hasAutoOpenedSetupRef = useRef(false);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
+    const [selectedQuickStartPreset, setSelectedQuickStartPreset] = useState<QuickStartPreset | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -326,7 +328,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     async function runQuickStart(preset: QuickStartPreset) {
         if (quickStartInFlightRef.current) return;
         quickStartInFlightRef.current = true;
-        setOpenLearn(true);
         setAdvancedSetupOpen(false);
 
         try {
@@ -370,6 +371,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
 
         setEntryQuickStartPreset(quickStart);
+        setSelectedQuickStartPreset(quickStart);
         setOpenLearn(true);
         setAdvancedSetupOpen(false);
 
@@ -378,6 +380,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const query = params.toString();
         router.replace(query ? `${pathname}?${query}` : pathname);
     }, [mode, pathname, router, searchParams]);
+
+    useEffect(() => {
+        if (mode !== "leitner") return;
+        if (hasAutoOpenedSetupRef.current) return;
+        hasAutoOpenedSetupRef.current = true;
+        setOpenLearn(true);
+    }, [mode]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -2101,7 +2110,22 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         : setupCounts.lastMissedCount > 0
             ? `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`
             : `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
-    const highlightedQuickStartPreset = entryQuickStartPreset ?? (setupCounts.todayDue > 0 ? "today" : "all");
+    const recommendedQuickStartPreset: QuickStartPreset = setupCounts.todayDue > 0
+        ? "today"
+        : setupCounts.lastMissedCount > 0
+            ? "last-missed"
+            : "all";
+    const highlightedQuickStartPreset = selectedQuickStartPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
+    const selectedQuickStartLabel = highlightedQuickStartPreset === "today"
+        ? "Heute lernen"
+        : highlightedQuickStartPreset === "last-missed"
+            ? "Zuletzt nicht gewusst"
+            : "Alle Karten üben";
+
+    useEffect(() => {
+        if (selectedQuickStartPreset) return;
+        setSelectedQuickStartPreset(entryQuickStartPreset ?? recommendedQuickStartPreset);
+    }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedQuickStartPreset]);
     const cardGroupsUnchanged = (() => {
         const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
             ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
@@ -2180,7 +2204,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
                                 <button
                                     onClick={() => {
-                                        void runQuickStart("today");
+                                        setOpenLearn(true);
+                                        setAdvancedSetupOpen(false);
                                     }}
                                     className="rounded-[32px] border border-cta bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
                                 >
@@ -2291,7 +2316,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         <div className="mt-3 grid grid-cols-1 gap-3">
                                             <button
                                                 type="button"
-                                                onClick={() => void runQuickStart("today")}
+                                                aria-pressed={highlightedQuickStartPreset === "today"}
+                                                onClick={() => setSelectedQuickStartPreset("today")}
                                                 className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "today"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
@@ -2303,7 +2329,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => void runQuickStart("all")}
+                                                aria-pressed={highlightedQuickStartPreset === "all"}
+                                                onClick={() => setSelectedQuickStartPreset("all")}
                                                 className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "all"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
@@ -2315,7 +2342,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => void runQuickStart("last-missed")}
+                                                aria-pressed={highlightedQuickStartPreset === "last-missed"}
+                                                onClick={() => setSelectedQuickStartPreset("last-missed")}
                                                 className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "last-missed"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
@@ -2326,6 +2354,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
                                             </button>
                                         </div>
+                                        <button
+                                            type="button"
+                                            className="btn btn-primary mt-3 w-full"
+                                            onClick={() => void runQuickStart(highlightedQuickStartPreset)}
+                                        >
+                                            Session starten · {selectedQuickStartLabel}
+                                        </button>
 
                                         <button
                                             type="button"
@@ -2333,9 +2368,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             aria-expanded={advancedSetupOpen}
                                             onClick={() => setAdvancedSetupOpen((open) => !open)}
                                         >
-                                            {advancedSetupOpen ? "Weniger Optionen" : "Mehr Optionen"}
+                                            {advancedSetupOpen ? "Weniger Kontrolle" : "Mehr Kontrolle"}
                                         </button>
-                                        <div className="mt-2 text-xs text-muted">Mehr Kontrolle bei Bedarf – Presets oben starten direkt.</div>
+                                        <div className="mt-2 text-xs text-muted">Erweiterte Einstellungen für Gruppen, Richtung und Lernmethode.</div>
 
                                         {advancedSetupOpen ? (<>
                                             <div

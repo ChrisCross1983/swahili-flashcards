@@ -46,7 +46,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 </button>
             </div>
 
-            <div className="fixed bottom-3 right-3 z-[2147483647] flex flex-col items-end gap-2 md:hidden">
+            <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[2147483647] flex flex-col items-end gap-2 md:hidden">
                 {mobileToolsOpen ? (
                     <>
                         <button
@@ -75,7 +75,10 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 ) : null}
                 <button
                     type="button"
-                    className={`flex h-11 w-11 items-center justify-center rounded-full text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode ? "bg-accent-secondary/90" : "bg-accent-primary"}`}
+                    className={`flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
+                        ? "border-white/50 bg-accent-secondary text-white shadow-soft"
+                        : "border-white/40 bg-accent-primary"
+                        }`}
                     onClick={() => setMobileToolsOpen((open) => !open)}
                     aria-label={mobileToolsOpen ? "Schnellaktionen schließen" : "Schnellaktionen öffnen"}
                 >
