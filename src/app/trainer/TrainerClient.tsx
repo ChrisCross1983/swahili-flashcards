@@ -206,7 +206,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const quickStartInFlightRef = useRef(false);
-    const quickStartHandledRef = useRef(false);
+    const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -366,12 +366,18 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     useEffect(() => {
         const quickStart = searchParams.get("quickStart");
-        if (!quickStart || quickStartHandledRef.current || mode !== "leitner") return;
+        if (!quickStart || mode !== "leitner") return;
         if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
-        quickStartHandledRef.current = true;
-        void runQuickStart(quickStart);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, searchParams]);
+
+        setEntryQuickStartPreset(quickStart);
+        setOpenLearn(true);
+        setAdvancedSetupOpen(false);
+
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("quickStart");
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname);
+    }, [mode, pathname, router, searchParams]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -2095,6 +2101,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         : setupCounts.lastMissedCount > 0
             ? `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`
             : `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
+    const highlightedQuickStartPreset = entryQuickStartPreset ?? (setupCounts.todayDue > 0 ? "today" : "all");
     const cardGroupsUnchanged = (() => {
         const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
             ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
@@ -2285,7 +2292,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <button
                                                 type="button"
                                                 onClick={() => void runQuickStart("today")}
-                                                className="relative rounded-2xl border border-accent bg-accent-cta-soft p-4 text-left transition hover:shadow-soft"
+                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "today"
+                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                    }`}
                                             >
                                                 <div className="font-semibold">Heute lernen</div>
                                                 <div className="mt-1 text-sm text-muted">Leitner-Session mit fälligen Karten.</div>
@@ -2294,7 +2304,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <button
                                                 type="button"
                                                 onClick={() => void runQuickStart("all")}
-                                                className="relative rounded-2xl border border-soft bg-surface p-4 text-left transition hover:bg-surface-elevated"
+                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "all"
+                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                    }`}
                                             >
                                                 <div className="font-semibold">Alle Karten üben</div>
                                                 <div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div>
@@ -2303,7 +2316,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <button
                                                 type="button"
                                                 onClick={() => void runQuickStart("last-missed")}
-                                                className="relative rounded-2xl border border-soft bg-surface p-4 text-left transition hover:bg-surface-elevated"
+                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "last-missed"
+                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
+                                                    : "border-soft bg-surface hover:bg-surface-elevated"
+                                                    }`}
                                             >
                                                 <div className="font-semibold">Zuletzt nicht gewusst</div>
                                                 <div className="mt-1 text-sm text-muted">Gezielte Wiederholung schwieriger Karten.</div>
@@ -2319,6 +2335,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         >
                                             {advancedSetupOpen ? "Weniger Optionen" : "Mehr Optionen"}
                                         </button>
+                                        <div className="mt-2 text-xs text-muted">Mehr Kontrolle bei Bedarf – Presets oben starten direkt.</div>
 
                                         {advancedSetupOpen ? (<>
                                             <div

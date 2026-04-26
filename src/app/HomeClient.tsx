@@ -103,7 +103,7 @@ export default function HomeClient({ ownerKey }: Props) {
           <div className="mt-2 text-2xl font-semibold">{primaryCtaLabel}</div>
           <div className="mt-2 text-sm text-muted">{primaryCtaHint}</div>
           <div className="mt-4 inline-flex rounded-xl bg-accent-cta-soft px-3 py-1.5 text-sm font-medium text-accent-cta">
-            Direkt starten
+            Auswahl öffnen
           </div>
         </button>
 

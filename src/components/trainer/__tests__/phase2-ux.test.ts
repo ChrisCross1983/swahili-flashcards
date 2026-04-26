@@ -100,6 +100,26 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain('router.push("/import")');
     });
 
+    it("opens quick-start selection from home CTA without auto-starting a session", () => {
+        expect(homeSource).toContain('"/trainer?quickStart=today"');
+        expect(homeSource).toContain('"/trainer?quickStart=all"');
+        expect(homeSource).toContain("Auswahl öffnen");
+        expect(trainerSource).toContain("setEntryQuickStartPreset(quickStart)");
+        expect(trainerSource).toContain("setOpenLearn(true)");
+        expect(trainerSource).toContain("params.delete(\"quickStart\")");
+        expect(trainerSource).toContain("router.replace(query ? `${pathname}?${query}` : pathname)");
+        expect(trainerSource).not.toContain("void runQuickStart(quickStart)");
+    });
+
+    it("keeps presets first and advanced setup behind explicit disclosure", () => {
+        expect(trainerSource).toContain("highlightedQuickStartPreset");
+        expect(trainerSource).toContain("Mehr Optionen");
+        expect(trainerSource).toContain("Mehr Kontrolle bei Bedarf – Presets oben starten direkt.");
+        expect(trainerSource).toContain('onClick={() => void runQuickStart("today")}');
+        expect(trainerSource).toContain('onClick={() => void runQuickStart("all")}');
+        expect(trainerSource).toContain('onClick={() => void runQuickStart("last-missed")}');
+    });
+
     it("simplifies import review row actions and keeps explicit states", () => {
         expect(importSource).toContain("Akzeptieren");
         expect(importSource).toContain("Weniger Optionen");
