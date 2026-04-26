@@ -199,16 +199,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const sessionSavedRef = useRef(false);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
-    const learnModeRef = useRef<HTMLDivElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const quickStartInFlightRef = useRef(false);
     const hasAutoOpenedSetupRef = useRef(false);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
-    const [selectedQuickStartPreset, setSelectedQuickStartPreset] = useState<QuickStartPreset | null>(null);
+    const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -229,13 +227,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         audioElRef.current.play().catch(() => { });
     }
 
-    function triggerSetupHighlight(target: "LEARNMODE" | "DIRECTION" | "MATERIAL") {
+    function triggerSetupHighlight(target: "DIRECTION" | "MATERIAL") {
         const targetRef =
-            target === "LEARNMODE"
-                ? learnModeRef
-                : target === "DIRECTION"
-                    ? directionRef
-                    : materialRef;
+            target === "DIRECTION"
+                ? directionRef
+                : materialRef;
 
         targetRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -325,53 +321,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnMode(setupCounts.todayDue > 0 ? "LEITNER_TODAY" : "DRILL");
     }, [learnMode, openLearn, setupCounts.todayDue]);
 
-    async function runQuickStart(preset: QuickStartPreset) {
-        if (quickStartInFlightRef.current) return;
-        quickStartInFlightRef.current = true;
-        setAdvancedSetupOpen(false);
-
-        try {
-            const counts = await fetchSetupCounts(cardType, trainerGroupIds);
-            setSetupCounts(counts);
-
-            if (preset === "today" && counts.todayDue > 0) {
-                await startLearningSession({
-                    learnMode: "LEITNER_TODAY",
-                    trainingMaterial: { kind: "ALL" },
-                    directionMode: directionMode ?? "RANDOM",
-                    skipValidationHighlights: true,
-                });
-                return;
-            }
-
-            if (preset === "last-missed") {
-                await startLearningSession({
-                    learnMode: "DRILL",
-                    trainingMaterial: { kind: "LAST_MISSED" },
-                    directionMode: directionMode ?? "RANDOM",
-                    skipValidationHighlights: true,
-                });
-                return;
-            }
-
-            await startLearningSession({
-                learnMode: "DRILL",
-                trainingMaterial: { kind: "ALL" },
-                directionMode: directionMode ?? "RANDOM",
-                skipValidationHighlights: true,
-            });
-        } finally {
-            quickStartInFlightRef.current = false;
-        }
-    }
-
     useEffect(() => {
         const quickStart = searchParams.get("quickStart");
         if (!quickStart || mode !== "leitner") return;
         if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
 
         setEntryQuickStartPreset(quickStart);
-        setSelectedQuickStartPreset(quickStart);
+        setSelectedTrainingPreset(quickStart);
         setOpenLearn(true);
         setAdvancedSetupOpen(false);
 
@@ -1328,7 +1284,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const skipValidationHighlights = config?.skipValidationHighlights ?? false;
 
         if (!nextLearnMode) {
-            if (!skipValidationHighlights) triggerSetupHighlight("LEARNMODE");
             return;
         }
 
@@ -2025,11 +1980,25 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return { total, todayCount, tomorrowCount, laterCount, nextText };
     })();
 
-    const missingLearnMode = learnMode === null;
     const missingDirection = directionMode === null;
-    const startDisabled = !canStartTraining(learnMode, trainingMaterial, directionMode);
-    const learnModeHighlight = missingLearnMode && startDisabled;
-    const materialHighlight = startDisabled && (trainingMaterial.kind === "GROUP" && !trainingMaterial.groupId);
+    const recommendedQuickStartPreset: QuickStartPreset = setupCounts.todayDue > 0
+        ? "today"
+        : setupCounts.lastMissedCount > 0
+            ? "last-missed"
+            : "all";
+    const selectedPreset = selectedTrainingPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
+    const selectedQuickStartLabel = selectedPreset === "today"
+        ? "Heute lernen"
+        : selectedPreset === "last-missed"
+            ? "Zuletzt nicht gewusst"
+            : "Alle Karten üben";
+    const selectedSessionConfig = selectedPreset === "today"
+        ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
+        : selectedPreset === "last-missed"
+            ? { learnMode: "DRILL" as const, trainingMaterial: { kind: "LAST_MISSED" } as TrainingMaterial }
+            : { learnMode: "DRILL" as const, trainingMaterial: trainingMaterial.kind === "GROUP" ? trainingMaterial : { kind: "ALL" } as TrainingMaterial };
+    const startDisabled = !canStartTraining(selectedSessionConfig.learnMode, selectedSessionConfig.trainingMaterial, directionMode);
+    const materialHighlight = startDisabled && selectedSessionConfig.trainingMaterial.kind === "GROUP" && !selectedSessionConfig.trainingMaterial.groupId;
     const directionHighlight = missingDirection && startDisabled;
     function openCurrentCardGroupsEditor() {
         const item: any = todayItems[currentIndex];
@@ -2096,36 +2065,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    const startHint = missingLearnMode
-        ? "Lernmethode wählen"
-        : trainingMaterial.kind === "GROUP" && !trainingMaterial.groupId
-            ? "Gruppe auswählen"
-            : learnMode === "LEITNER_TODAY" && trainingMaterial.kind === "LAST_MISSED"
-                ? "„Zuletzt nicht gewusst“ ist nur in Freies Üben verfügbar"
-                : missingDirection
-                    ? "Abfragerichtung wählen"
-                    : null;
+    const startHint = selectedSessionConfig.trainingMaterial.kind === "GROUP" && !selectedSessionConfig.trainingMaterial.groupId
+        ? "Gruppe auswählen"
+        : missingDirection
+            ? "Abfragerichtung wählen"
+            : null;
     const recommendation = setupCounts.todayDue > 0
         ? `Heute fällig: ${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"}`
         : setupCounts.lastMissedCount > 0
             ? `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`
             : `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
-    const recommendedQuickStartPreset: QuickStartPreset = setupCounts.todayDue > 0
-        ? "today"
-        : setupCounts.lastMissedCount > 0
-            ? "last-missed"
-            : "all";
-    const highlightedQuickStartPreset = selectedQuickStartPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
-    const selectedQuickStartLabel = highlightedQuickStartPreset === "today"
-        ? "Heute lernen"
-        : highlightedQuickStartPreset === "last-missed"
-            ? "Zuletzt nicht gewusst"
-            : "Alle Karten üben";
-
     useEffect(() => {
-        if (selectedQuickStartPreset) return;
-        setSelectedQuickStartPreset(entryQuickStartPreset ?? recommendedQuickStartPreset);
-    }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedQuickStartPreset]);
+        if (selectedTrainingPreset) return;
+        setSelectedTrainingPreset(entryQuickStartPreset ?? recommendedQuickStartPreset);
+    }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedTrainingPreset]);
     const cardGroupsUnchanged = (() => {
         const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
             ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
@@ -2307,7 +2260,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 {/* === SETUP === */}
                                 {!learnStarted && (
                                     <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                                        <div className="text-sm font-semibold text-primary">Direkt starten</div>
+                                        <div className="text-sm font-semibold text-primary">Trainingsmodus wählen</div>
                                         <div className="mt-2 hint-card border border-soft">
                                             <span className="font-medium text-primary">Empfohlen für dich:</span>{" "}
                                             {setupCountsLoading ? "Lade Empfehlung…" : recommendation}
@@ -2316,9 +2269,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         <div className="mt-3 grid grid-cols-1 gap-3">
                                             <button
                                                 type="button"
-                                                aria-pressed={highlightedQuickStartPreset === "today"}
-                                                onClick={() => setSelectedQuickStartPreset("today")}
-                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "today"
+                                                aria-pressed={selectedPreset === "today"}
+                                                onClick={() => setSelectedTrainingPreset("today")}
+                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "today"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
@@ -2329,9 +2282,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </button>
                                             <button
                                                 type="button"
-                                                aria-pressed={highlightedQuickStartPreset === "all"}
-                                                onClick={() => setSelectedQuickStartPreset("all")}
-                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "all"
+                                                aria-pressed={selectedPreset === "all"}
+                                                onClick={() => setSelectedTrainingPreset("all")}
+                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "all"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
@@ -2342,9 +2295,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             </button>
                                             <button
                                                 type="button"
-                                                aria-pressed={highlightedQuickStartPreset === "last-missed"}
-                                                onClick={() => setSelectedQuickStartPreset("last-missed")}
-                                                className={`relative rounded-2xl border p-4 text-left transition ${highlightedQuickStartPreset === "last-missed"
+                                                aria-pressed={selectedPreset === "last-missed"}
+                                                onClick={() => setSelectedTrainingPreset("last-missed")}
+                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
@@ -2354,13 +2307,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
                                             </button>
                                         </div>
-                                        <button
-                                            type="button"
-                                            className="btn btn-primary mt-3 w-full"
-                                            onClick={() => void runQuickStart(highlightedQuickStartPreset)}
-                                        >
-                                            Session starten · {selectedQuickStartLabel}
-                                        </button>
 
                                         <button
                                             type="button"
@@ -2368,141 +2314,65 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             aria-expanded={advancedSetupOpen}
                                             onClick={() => setAdvancedSetupOpen((open) => !open)}
                                         >
-                                            {advancedSetupOpen ? "Weniger Kontrolle" : "Mehr Kontrolle"}
+                                            {advancedSetupOpen ? "Optionen ausblenden" : "Optionen anpassen"}
                                         </button>
-                                        <div className="mt-2 text-xs text-muted">Erweiterte Einstellungen für Gruppen, Richtung und Lernmethode.</div>
+                                        <div className="mt-2 text-xs text-muted">Optional: Richtung und Gruppe anpassen.</div>
 
                                         {advancedSetupOpen ? (<>
-                                            <div
-                                                ref={learnModeRef}
-                                                className="mt-4"
-                                            >
-                                                <div
-                                                    className={
-                                                        learnModeHighlight
-                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                            : ""
-                                                    }
-                                                >
-                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                        <div className="text-sm font-semibold text-primary">Lernmethode</div>
-                                                        <div className="mt-2 grid grid-cols-1 gap-3">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setLearnMode("LEITNER_TODAY");
-                                                                }}
-                                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isLeitnerSelected
-                                                                    ? "border-accent bg-surface shadow-soft"
-                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-start justify-between gap-3 pr-10">
-                                                                    <div>
-                                                                        <div className="font-semibold">Heute fällig (Leitner - Langzeit)</div>
-                                                                        <div className="mt-1 text-sm text-muted">
-                                                                            Trainiert nur Karten, die heute dran sind – ideal fürs Langzeitgedächtnis.
+                                            {selectedPreset !== "last-missed" ? (
+                                                <div ref={materialRef} className="mt-4">
+                                                    <div
+                                                        className={
+                                                            materialHighlight
+                                                                ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
+                                                                : ""
+                                                        }
+                                                    >
+                                                        <div className="rounded-2xl bg-surface p-4 shadow-soft">
+                                                            <div className="text-sm font-semibold text-primary">Trainingsmaterial</div>
+                                                            <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
+                                                                <select
+                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                    value={selectedSessionConfig.trainingMaterial.kind === "GROUP" ? "GROUP" : "ALL"}
+                                                                    onChange={(event) => {
+                                                                        const next = event.target.value;
+                                                                        if (next === "GROUP") {
+                                                                            setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
+                                                                            return;
+                                                                        }
+                                                                        setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
+                                                                    }}
+                                                                >
+                                                                    <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
+                                                                    <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
+                                                                    <option value="GROUP">Bestimmte Gruppe…</option>
+                                                                </select>
+
+                                                                {trainingMaterial.kind === "GROUP" ? (
+                                                                    <div className="mt-2 space-y-2">
+                                                                        <select
+                                                                            className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                            value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
+                                                                            onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
+                                                                        >
+                                                                            <option value="">Gruppe auswählen…</option>
+                                                                            {groups.map((group) => (
+                                                                                <option key={group.id} value={group.id}>{group.name}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                        <div className="flex items-center justify-between text-xs text-muted">
+                                                                            <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                                            <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
                                                                         </div>
                                                                     </div>
-
-                                                                    {isLeitnerSelected ? (
-                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                            ✓
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                                {/* Count badge */}
-                                                                <div className="count-badge absolute right-4 top-4">
-                                                                    {setupCountsLoading ? "…" : setupCounts.todayDue}
-                                                                </div>
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setLearnMode("DRILL");
-                                                                }}
-                                                                className={`relative rounded-2xl border p-4 text-left transition active:scale-[0.99] ${isDrillSelected
-                                                                    ? "border-accent bg-surface shadow-soft"
-                                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-start justify-between gap-3 pr-10">
-                                                                    <div>
-                                                                        <div className="font-semibold">Alle Vokabeln lernen (ohne Leitner)</div>
-                                                                        <div className="mt-1 text-sm text-muted">
-                                                                            Trainiert Karten ohne Leitner-Update – ideal für Wiederholungen.
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {isDrillSelected ? (
-                                                                        <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                            ✓
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                                {/* Count badge */}
-                                                                <div className="count-badge absolute right-4 top-4">
-                                                                    {setupCountsLoading ? "…" : setupCounts.totalCards}
-                                                                </div>
-                                                            </button>
+                                                                ) : (
+                                                                    <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
-
-                                            <div ref={materialRef} className="mt-4">
-                                                <div
-                                                    className={
-                                                        materialHighlight
-                                                            ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                            : ""
-                                                    }
-                                                >
-                                                    <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                        <div className="text-sm font-semibold text-primary">Was willst du trainieren?</div>
-                                                        <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
-                                                            <select
-                                                                className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                value={trainingMaterial.kind}
-                                                                onChange={(event) => {
-                                                                    const next = event.target.value;
-                                                                    if (next === "GROUP") {
-                                                                        setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
-                                                                        return;
-                                                                    }
-                                                                    setTrainingMaterial({ kind: next as "ALL" | "LAST_MISSED" });
-                                                                }}
-                                                            >
-                                                                <option value="ALL">Alle Karten ({setupCountsLoading ? "…" : setupCounts.totalCards})</option>
-                                                                <option value="LAST_MISSED">Zuletzt nicht gewusst ({setupCountsLoading ? "…" : setupCounts.lastMissedCount})</option>
-                                                                <option value="GROUP">Bestimmte Gruppe…</option>
-                                                            </select>
-
-                                                            {trainingMaterial.kind === "GROUP" ? (
-                                                                <div className="mt-2 space-y-2">
-                                                                    <select
-                                                                        className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                        value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
-                                                                        onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
-                                                                    >
-                                                                        <option value="">Gruppe auswählen…</option>
-                                                                        {groups.map((group) => (
-                                                                            <option key={group.id} value={group.id}>{group.name}</option>
-                                                                        ))}
-                                                                    </select>
-                                                                    <div className="flex items-center justify-between text-xs text-muted">
-                                                                        <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                                        <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            ) : null}
 
                                             <div
                                                 ref={directionRef}
@@ -2581,9 +2451,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 className={`mt-4 w-full btn btn-primary py-3 text-base`}
                                                 type="button"
                                                 disabled={startDisabled}
-                                                onClick={() => void startLearningSession()}
+                                                onClick={() => void startLearningSession({
+                                                    learnMode: selectedSessionConfig.learnMode,
+                                                    trainingMaterial: selectedSessionConfig.trainingMaterial,
+                                                    directionMode: directionMode ?? "RANDOM",
+                                                    skipValidationHighlights: true,
+                                                })}
                                             >
-                                                Start mit diesen Optionen
+                                                Session starten · {selectedQuickStartLabel}
                                             </button>
 
                                             {startHint ? (

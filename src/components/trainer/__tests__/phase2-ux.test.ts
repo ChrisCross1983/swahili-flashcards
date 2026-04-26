@@ -108,26 +108,46 @@ describe("phase 2 product UX cleanup", () => {
         expect(homeSource).not.toContain("Auswahl öffnen");
         expect(homeSource).toContain('router.push("/trainer")');
         expect(trainerSource).toContain("setEntryQuickStartPreset(quickStart)");
-        expect(trainerSource).toContain("setSelectedQuickStartPreset(quickStart)");
+        expect(trainerSource).toContain("setSelectedTrainingPreset(quickStart)");
         expect(trainerSource).toContain("setOpenLearn(true)");
         expect(trainerSource).toContain("params.delete(\"quickStart\")");
         expect(trainerSource).toContain("router.replace(query ? `${pathname}?${query}` : pathname)");
-        expect(trainerSource).not.toContain("void runQuickStart(quickStart)");
     });
 
-    it("uses selectable quick-start presets with explicit start CTA", () => {
-        expect(trainerSource).toContain("highlightedQuickStartPreset");
-        expect(trainerSource).toContain("selectedQuickStartPreset");
+    it("uses selectable training presets with a single unified start CTA", () => {
+        expect(trainerSource).toContain("selectedTrainingPreset");
         expect(trainerSource).toContain("recommendedQuickStartPreset");
         expect(trainerSource).toContain("hasAutoOpenedSetupRef");
         expect(trainerSource).toContain("setOpenLearn(true);");
-        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"today\"}");
-        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"all\"}");
-        expect(trainerSource).toContain("aria-pressed={highlightedQuickStartPreset === \"last-missed\"}");
+        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"today\"}");
+        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"all\"}");
+        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
         expect(trainerSource).toContain("Session starten ·");
-        expect(trainerSource).toContain("onClick={() => void runQuickStart(highlightedQuickStartPreset)}");
-        expect(trainerSource).toContain("Mehr Kontrolle");
-        expect(trainerSource).toContain("Erweiterte Einstellungen für Gruppen, Richtung und Lernmethode.");
+        expect(trainerSource).not.toContain("runQuickStart(");
+        expect(trainerSource).not.toContain("Start mit diesen Optionen");
+        expect(trainerSource).toContain("Optionen anpassen");
+        expect(trainerSource).toContain("Optional: Richtung und Gruppe anpassen.");
+    });
+
+    it("removes redundant advanced learning-method controls and duplicate setup CTA", () => {
+        expect(trainerSource).not.toContain("text-sm font-semibold text-primary\">Lernmethode");
+        expect(trainerSource).toContain("selectedSessionConfig");
+        expect(trainerSource).toContain("learnMode: \"LEITNER_TODAY\"");
+        expect(trainerSource).toContain("learnMode: \"DRILL\"");
+        expect((trainerSource.match(/Session starten ·/g) ?? []).length).toBe(1);
+    });
+
+    it("keeps optional direction and group settings and hides group/material for last missed", () => {
+        expect(trainerSource).toContain("selectedPreset !== \"last-missed\" ? (");
+        expect(trainerSource).toContain("setTrainingMaterial({ kind: \"GROUP\"");
+        expect(trainerSource).toContain("setDirectionMode(\"RANDOM\")");
+    });
+
+    it("updates selected preset on card selection without immediate session start", () => {
+        expect(trainerSource).toContain("onClick={() => setSelectedTrainingPreset(\"today\")}");
+        expect(trainerSource).toContain("onClick={() => setSelectedTrainingPreset(\"all\")}");
+        expect(trainerSource).toContain("onClick={() => setSelectedTrainingPreset(\"last-missed\")}");
+        expect(trainerSource).not.toContain("onClick={() => void startLearningSession({ learnMode: \"LEITNER_TODAY\"");
     });
 
     it("simplifies import review row actions and keeps explicit states", () => {
