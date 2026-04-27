@@ -203,9 +203,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const hasAutoOpenedSetupRef = useRef(false);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
     const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset | null>(null);
+    const [allGroupRefinementOpen, setAllGroupRefinementOpen] = useState(false);
+    const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
 
     function getAudioPublicUrl(path: string) {
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
@@ -280,7 +281,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const trainerGroupIds = useMemo(() => resolveTrainingGroupIds(trainingMaterial), [trainingMaterial]);
     const activeTrainerGroupName = useMemo(
         () => trainingMaterial.kind === "GROUP"
             ? groups.find((group) => group.id === trainingMaterial.groupId)?.name ?? null
@@ -292,7 +292,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setSetupCountsLoading(true);
 
         try {
-            const counts = await fetchSetupCounts(cardType, trainerGroupIds);
+            const counts = await fetchSetupCounts(cardType);
             setSetupCounts(counts);
         } catch {
             setSetupCounts({
@@ -303,7 +303,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         } finally {
             setSetupCountsLoading(false);
         }
-    }, [cardType, trainerGroupIds]);
+    }, [cardType]);
 
     useEffect(() => {
         if (!openLearn) return;
@@ -326,7 +326,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
 
         setEntryQuickStartPreset(quickStart);
-        setSelectedTrainingPreset(quickStart);
+        selectTrainingPreset(quickStart);
         setOpenLearn(true);
 
         const params = new URLSearchParams(searchParams.toString());
@@ -336,11 +336,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }, [mode, pathname, router, searchParams]);
 
     useEffect(() => {
-        if (mode !== "leitner") return;
-        if (hasAutoOpenedSetupRef.current) return;
-        hasAutoOpenedSetupRef.current = true;
-        setOpenLearn(true);
-    }, [mode]);
+        if (!openLearn || selectedTrainingPreset !== "all") {
+            setAllPresetFilteredCount(null);
+            return;
+        }
+
+        const groupId = trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null;
+
+        if (!groupId) {
+            setAllPresetFilteredCount(null);
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const counts = await fetchSetupCounts(cardType, [groupId]);
+                if (!cancelled) setAllPresetFilteredCount(counts.totalCards);
+            } catch {
+                if (!cancelled) setAllPresetFilteredCount(0);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [cardType, openLearn, selectedTrainingPreset, trainingMaterial]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -1148,7 +1169,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnLoadError(null);
 
         try {
-            const items = await fetchTodayItems(cardType, trainerGroupIds)
+            const items = await fetchTodayItems(cardType)
 
             if (DEBUG_LEITNER) {
                 console.log("[LEITNER] session init", {
@@ -1176,13 +1197,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    async function loadAllForDrill() {
+    async function loadAllForDrill(groupIds?: string[]) {
         setStatus("Lade alle Karten...");
         setLastMissedEmpty(false);
         setLearnLoadError(null);
 
         try {
-            const items = await fetchAllCardsForDrill(cardType, trainerGroupIds)
+            const items = await fetchAllCardsForDrill(cardType, groupIds)
 
             setSessionTotal(items.length);
             setTodayItems(shuffleArray(items));
@@ -1208,7 +1229,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnLoadError(null);
 
         try {
-            const items = await fetchLastMissedItems(cardType, trainerGroupIds)
+            const items = await fetchLastMissedItems(cardType)
 
             setSessionTotal(items.length);
             setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
@@ -1278,6 +1299,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }) {
         const nextLearnMode = config?.learnMode ?? learnMode;
         const nextTrainingMaterial = config?.trainingMaterial ?? trainingMaterial;
+        const nextTrainerGroupIds = resolveTrainingGroupIds(nextTrainingMaterial);
         const nextDirectionMode = config?.directionMode ?? directionMode;
         const skipValidationHighlights = config?.skipValidationHighlights ?? false;
 
@@ -1327,7 +1349,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 });
             }
         } else if (nextTrainingMaterial.kind === "ALL" || nextTrainingMaterial.kind === "GROUP") {
-            loadResult = await loadAllForDrill();
+            loadResult = await loadAllForDrill(nextTrainerGroupIds);
         } else {
             loadResult = await loadLastMissed();
         }
@@ -1985,21 +2007,34 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             ? "last-missed"
             : "all";
     const selectedPreset = selectedTrainingPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
-    const selectedQuickStartLabel = selectedPreset === "today"
+    const allCardsCount = trainingMaterial.kind === "GROUP" && trainingMaterial.groupId
+        ? (allPresetFilteredCount ?? 0)
+        : setupCounts.totalCards;
+    const selectedPresetCount = selectedPreset === "today"
+        ? setupCounts.todayDue
+        : selectedPreset === "last-missed"
+            ? setupCounts.lastMissedCount
+            : allCardsCount;
+    const selectedPresetSummary = selectedPreset === "today"
         ? "Heute lernen"
         : selectedPreset === "last-missed"
             ? "Zuletzt nicht gewusst"
-            : trainingMaterial.kind === "GROUP"
-                ? (activeTrainerGroupName ?? "Gruppe wählen")
-                : "Alle Karten";
+            : materialLabel(trainingMaterial, activeTrainerGroupName);
     const selectedSessionConfig = selectedPreset === "today"
         ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
         : selectedPreset === "last-missed"
             ? { learnMode: "DRILL" as const, trainingMaterial: { kind: "LAST_MISSED" } as TrainingMaterial }
             : { learnMode: "DRILL" as const, trainingMaterial: trainingMaterial.kind === "GROUP" ? trainingMaterial : { kind: "ALL" } as TrainingMaterial };
     const startDisabled = !canStartTraining(selectedSessionConfig.learnMode, selectedSessionConfig.trainingMaterial, directionMode);
-    const materialHighlight = startDisabled && selectedSessionConfig.trainingMaterial.kind === "GROUP" && !selectedSessionConfig.trainingMaterial.groupId;
     const directionHighlight = missingDirection && startDisabled;
+    function selectTrainingPreset(nextPreset: QuickStartPreset) {
+        setSelectedTrainingPreset(nextPreset);
+        if (nextPreset === "all") return;
+        setAllGroupRefinementOpen(false);
+        setTrainingMaterial({ kind: "ALL" });
+        setAllPresetFilteredCount(null);
+    }
+
     function openCurrentCardGroupsEditor() {
         const item: any = todayItems[currentIndex];
         if (!item) return;
@@ -2268,7 +2303,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <button
                                                 type="button"
                                                 aria-pressed={selectedPreset === "today"}
-                                                onClick={() => setSelectedTrainingPreset("today")}
+                                                onClick={() => selectTrainingPreset("today")}
                                                 className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "today"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
@@ -2278,23 +2313,66 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 <div className="mt-1 text-sm text-muted">Leitner-Session mit fälligen Karten.</div>
                                                 <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
                                             </button>
-                                            <button
-                                                type="button"
-                                                aria-pressed={selectedPreset === "all"}
-                                                onClick={() => setSelectedTrainingPreset("all")}
+                                            <div
                                                 className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "all"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
                                                     }`}
                                             >
-                                                <div className="font-semibold">Alle Karten üben</div>
-                                                <div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div>
-                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.totalCards}</div>
-                                            </button>
+                                                <button
+                                                    type="button"
+                                                    aria-pressed={selectedPreset === "all"}
+                                                    onClick={() => selectTrainingPreset("all")}
+                                                    className="w-full text-left"
+                                                >
+                                                    <div className="font-semibold">Alle Karten üben</div>
+                                                    <div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div>
+                                                    <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : allCardsCount}</div>
+                                                </button>
+                                                {selectedPreset === "all" ? (
+                                                    <div ref={materialRef} className="mt-3 rounded-xl border border-soft bg-surface p-3">
+                                                        <button
+                                                            type="button"
+                                                            aria-expanded={allGroupRefinementOpen}
+                                                            onClick={() => setAllGroupRefinementOpen((open) => !open)}
+                                                            className="flex w-full items-center justify-between text-sm"
+                                                        >
+                                                            <span>Trainingsmaterial: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                            <span>{allGroupRefinementOpen ? "▾" : "▸"}</span>
+                                                        </button>
+                                                        {allGroupRefinementOpen ? (
+                                                            <div className="mt-2 space-y-2">
+                                                                <select
+                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
+                                                                    value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
+                                                                    onChange={(event) => {
+                                                                        const groupId = event.target.value || null;
+                                                                        if (!groupId) {
+                                                                            setTrainingMaterial({ kind: "ALL" });
+                                                                            setAllPresetFilteredCount(null);
+                                                                            return;
+                                                                        }
+                                                                        setTrainingMaterial({ kind: "GROUP", groupId });
+                                                                    }}
+                                                                >
+                                                                    <option value="">Alle Karten</option>
+                                                                    {groups.map((group) => (
+                                                                        <option key={group.id} value={group.id}>{group.name}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <div className="flex items-center justify-between text-xs text-muted">
+                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
+                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
+                                            </div>
                                             <button
                                                 type="button"
                                                 aria-pressed={selectedPreset === "last-missed"}
-                                                onClick={() => setSelectedTrainingPreset("last-missed")}
+                                                onClick={() => selectTrainingPreset("last-missed")}
                                                 className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed"
                                                     ? "border-accent bg-accent-cta-soft hover:shadow-soft"
                                                     : "border-soft bg-surface hover:bg-surface-elevated"
@@ -2305,54 +2383,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
                                             </button>
                                         </div>
-
-                                        {selectedPreset === "all" ? (
-                                            <div ref={materialRef} className="mt-4 rounded-2xl border border-soft bg-surface p-4 shadow-soft">
-                                                <div className={materialHighlight ? "rounded-xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft" : ""}>
-                                                    <div className="text-sm font-semibold text-primary">Material</div>
-                                                    <div className="mt-2 rounded-xl border border-soft bg-surface-elevated p-3">
-                                                        <label className="text-xs text-muted" htmlFor="all-material-select">Material auswählen</label>
-                                                        <select
-                                                            id="all-material-select"
-                                                            className="mt-1 w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                            value={trainingMaterial.kind === "GROUP" ? "GROUP" : "ALL"}
-                                                            onChange={(event) => {
-                                                                const next = event.target.value;
-                                                                if (next === "GROUP") {
-                                                                    setTrainingMaterial({ kind: "GROUP", groupId: trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null });
-                                                                    return;
-                                                                }
-                                                                setTrainingMaterial({ kind: "ALL" });
-                                                            }}
-                                                        >
-                                                            <option value="ALL">Alle Karten</option>
-                                                            <option value="GROUP">Bestimmte Gruppe…</option>
-                                                        </select>
-
-                                                        {trainingMaterial.kind === "GROUP" ? (
-                                                            <div className="mt-2 space-y-2">
-                                                                <select
-                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                    value={trainingMaterial.groupId ?? ""}
-                                                                    onChange={(event) => setTrainingMaterial({ kind: "GROUP", groupId: event.target.value || null })}
-                                                                >
-                                                                    <option value="">Gruppe auswählen…</option>
-                                                                    {groups.map((group) => (
-                                                                        <option key={group.id} value={group.id}>{group.name}</option>
-                                                                    ))}
-                                                                </select>
-                                                                <div className="flex items-center justify-between text-xs text-muted">
-                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <p className="mt-2 text-xs text-muted">Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
 
                                         <div
                                             ref={directionRef}
@@ -2440,7 +2470,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 skipValidationHighlights: true,
                                             })}
                                         >
-                                            Session starten · {selectedQuickStartLabel}
+                                            Session starten · {selectedPresetSummary} ({selectedPresetCount})
                                         </button>
 
                                         {startHint ? (
