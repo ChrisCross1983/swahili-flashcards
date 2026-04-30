@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 describe("phase 2 product UX cleanup", () => {
     const root = process.cwd();
     const trainerSource = fs.readFileSync(path.join(root, "src/app/trainer/TrainerClient.tsx"), "utf8");
+    const trainerSetupViewSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerSetupView.tsx"), "utf8");
+    const trainerSetupHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerSetup.ts"), "utf8");
     const compactGroupPickerSource = fs.readFileSync(path.join(root, "src/components/groups/CompactGroupPicker.tsx"), "utf8");
     const homeSource = fs.readFileSync(path.join(root, "src/app/HomeClient.tsx"), "utf8");
     const importSource = fs.readFileSync(path.join(root, "src/app/import/ImportClient.tsx"), "utf8");
@@ -115,16 +117,16 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("uses one clear trainer start sequence without advanced options toggles", () => {
-        expect(trainerSource).toContain("selectedTrainingPreset");
-        expect(trainerSource).toContain("recommendedQuickStartPreset");
+        expect(trainerSource).toContain("selectedPreset");
+        expect(trainerSource).toContain("useTrainerSetup");
         expect(trainerSource).not.toContain("hasAutoOpenedSetupRef");
         expect(trainerSource).toContain("onClick={() => {");
         expect(trainerSource).toContain("setOpenLearn(true);");
-        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"today\"}");
-        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"all\"}");
-        expect(trainerSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
-        expect(trainerSource).toContain("Session starten ·");
-        expect(trainerSource).toContain("Empfohlen für dich:");
+        expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"today\"}");
+        expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"all\"}");
+        expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
+        expect(trainerSetupViewSource).toContain("Session starten ·");
+        expect(trainerSetupViewSource).toContain("Empfohlen für dich:");
         expect(trainerSource).not.toContain("runQuickStart(");
         expect(trainerSource).not.toContain("Start mit diesen Optionen");
         expect(trainerSource).not.toContain("Optionen einblenden");
@@ -136,36 +138,35 @@ describe("phase 2 product UX cleanup", () => {
     it("removes redundant advanced learning-method controls and duplicate setup CTA", () => {
         expect(trainerSource).not.toContain("text-sm font-semibold text-primary\">Lernmethode");
         expect(trainerSource).toContain("selectedSessionConfig");
-        expect(trainerSource).toContain("learnMode: \"LEITNER_TODAY\"");
-        expect(trainerSource).toContain("learnMode: \"DRILL\"");
-        expect((trainerSource.match(/Session starten ·/g) ?? []).length).toBe(1);
+        expect(trainerSource).toContain("learnMode: selectedSessionConfig.learnMode");
+        expect((trainerSetupViewSource.match(/Session starten ·/g) ?? []).length).toBe(1);
     });
 
     it("keeps material refinement only for all-cards mode and removes duplicate last-missed material choice", () => {
-        expect(trainerSource).toContain("selectedPreset === \"all\" ? (");
-        expect(trainerSource).toContain("Trainingsmaterial:");
-        expect(trainerSource).toContain("setTrainingMaterial({ kind: \"GROUP\", groupId });");
-        expect(trainerSource).toContain("setTrainingMaterial({ kind: \"ALL\" });");
-        expect(trainerSource).not.toContain("<option value=\"LAST_MISSED\">");
-        expect(trainerSource).toContain("Session starten · {selectedPresetSummary} ({selectedPresetCount})");
+        expect(trainerSetupViewSource).toContain("selectedPreset === \"all\" ? <div");
+        expect(trainerSetupViewSource).toContain("Trainingsmaterial:");
+        expect(trainerSetupViewSource).toContain("{ kind: \"GROUP\", groupId: event.target.value }");
+        expect(trainerSetupViewSource).toContain("{ kind: \"ALL\" }");
+        expect(trainerSetupViewSource).not.toContain("<option value=\"LAST_MISSED\">");
+        expect(trainerSetupViewSource).toContain("Session starten · {selectedPresetSummary} ({selectedPresetCount})");
         expect(trainerSource).not.toContain("text-sm font-semibold text-primary\">Material");
         expect(trainerSource).not.toContain("Material auswählen");
     });
 
     it("keeps direction visible in main start flow with accessible selected states", () => {
-        expect(trainerSource).toContain("text-sm font-semibold text-primary\">Abfragerichtung");
-        expect(trainerSource).toContain("aria-pressed={directionMode === \"DE_TO_SW\"}");
-        expect(trainerSource).toContain("aria-pressed={directionMode === \"SW_TO_DE\"}");
-        expect(trainerSource).toContain("aria-pressed={directionMode === \"RANDOM\"}");
-        expect(trainerSource).toContain("setDirectionMode(\"RANDOM\")");
+        expect(trainerSetupViewSource).toContain("text-sm font-semibold text-primary\">Abfragerichtung");
+        expect(trainerSetupViewSource).toContain("aria-pressed={directionMode === \"DE_TO_SW\"}");
+        expect(trainerSetupViewSource).toContain("aria-pressed={directionMode === \"SW_TO_DE\"}");
+        expect(trainerSetupViewSource).toContain("aria-pressed={directionMode === \"RANDOM\"}");
+        expect(trainerSetupViewSource).toContain("onDirectionModeChange(\"RANDOM\")");
     });
 
     it("updates selected preset on card selection without immediate session start", () => {
-        expect(trainerSource).toContain("onClick={() => selectTrainingPreset(\"today\")}");
-        expect(trainerSource).toContain("onClick={() => selectTrainingPreset(\"all\")}");
-        expect(trainerSource).toContain("onClick={() => selectTrainingPreset(\"last-missed\")}");
-        expect(trainerSource).toContain("if (nextPreset === \"all\") return;");
-        expect(trainerSource).toContain("setTrainingMaterial({ kind: \"ALL\" });");
+        expect(trainerSetupViewSource).toContain("onClick={() => onSelectPreset(\"today\")}");
+        expect(trainerSetupViewSource).toContain("onClick={() => onSelectPreset(\"all\")}");
+        expect(trainerSetupViewSource).toContain("onClick={() => onSelectPreset(\"last-missed\")}");
+        expect(trainerSetupHookSource).toContain("if (nextPreset === \"all\") return;");
+        expect(trainerSetupHookSource).toContain("onTrainingMaterialChange({ kind: \"ALL\" });");
         expect(trainerSource).not.toContain("onClick={() => void startLearningSession({ learnMode: \"LEITNER_TODAY\"");
     });
 
@@ -183,9 +184,9 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("keeps exactly one start CTA and start readiness guard", () => {
-        expect((trainerSource.match(/Session starten ·/g) ?? []).length).toBe(1);
-        expect(trainerSource).toContain("const startDisabled = !canStartTraining");
-        expect(trainerSource).toContain("selectedSessionConfig.trainingMaterial.kind === \"GROUP\" && !selectedSessionConfig.trainingMaterial.groupId");
+        expect((trainerSetupViewSource.match(/Session starten ·/g) ?? []).length).toBe(1);
+        expect(trainerSource).toContain("startDisabled");
+        expect(trainerSource).toContain("startHint");
     });
 
     it("keeps trainer sheet fullscreen on mobile while preserving desktop framing", () => {

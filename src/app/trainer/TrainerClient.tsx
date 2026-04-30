@@ -36,7 +36,10 @@ import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
+import TrainerDashboard from "@/components/trainer/TrainerDashboard";
+import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import { canStartTraining, materialLabel, resolveTrainingGroupIds, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
+import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import GroupBadge from "@/components/groups/GroupBadge";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
@@ -58,7 +61,6 @@ type Props = {
     ownerKey: string;
     cardType?: CardType;
 };
-type QuickStartPreset = "today" | "all" | "last-missed";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -204,8 +206,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
-    const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset | null>(null);
-    const [allGroupRefinementOpen, setAllGroupRefinementOpen] = useState(false);
     const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
 
     function getAudioPublicUrl(path: string) {
@@ -334,34 +334,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const query = params.toString();
         router.replace(query ? `${pathname}?${query}` : pathname);
     }, [mode, pathname, router, searchParams]);
-
-    useEffect(() => {
-        if (!openLearn || selectedTrainingPreset !== "all") {
-            setAllPresetFilteredCount(null);
-            return;
-        }
-
-        const groupId = trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null;
-
-        if (!groupId) {
-            setAllPresetFilteredCount(null);
-            return;
-        }
-
-        let cancelled = false;
-        (async () => {
-            try {
-                const counts = await fetchSetupCounts(cardType, [groupId]);
-                if (!cancelled) setAllPresetFilteredCount(counts.totalCards);
-            } catch {
-                if (!cancelled) setAllPresetFilteredCount(0);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [cardType, openLearn, selectedTrainingPreset, trainingMaterial]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -2000,40 +1972,63 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return { total, todayCount, tomorrowCount, laterCount, nextText };
     })();
 
-    const missingDirection = directionMode === null;
-    const recommendedQuickStartPreset: QuickStartPreset = setupCounts.todayDue > 0
-        ? "today"
-        : setupCounts.lastMissedCount > 0
-            ? "last-missed"
-            : "all";
-    const selectedPreset = selectedTrainingPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
+    const setupState = useTrainerSetup({
+        setupCounts,
+        setupCountsLoading,
+        trainingMaterial,
+        activeTrainerGroupName,
+        directionMode,
+        entryQuickStartPreset,
+        allPresetFilteredCount,
+        isSentenceTrainer,
+        onTrainingMaterialChange: setTrainingMaterial,
+        onAllPresetFilteredCountChange: setAllPresetFilteredCount,
+    });
+    const {
+        selectedPreset,
+        selectedPresetCount,
+        selectedPresetSummary,
+        selectedSessionConfig,
+        startDisabled,
+        startHint,
+        recommendation,
+        directionHighlight,
+        allGroupRefinementOpen,
+        setAllGroupRefinementOpen,
+        selectTrainingPreset,
+    } = setupState;
+
+    useEffect(() => {
+        if (!openLearn || selectedPreset !== "all") {
+            setAllPresetFilteredCount(null);
+            return;
+        }
+
+        const groupId = trainingMaterial.kind === "GROUP" ? trainingMaterial.groupId : null;
+
+        if (!groupId) {
+            setAllPresetFilteredCount(null);
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const counts = await fetchSetupCounts(cardType, [groupId]);
+                if (!cancelled) setAllPresetFilteredCount(counts.totalCards);
+            } catch {
+                if (!cancelled) setAllPresetFilteredCount(0);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [cardType, openLearn, selectedPreset, trainingMaterial]);
+
     const allCardsCount = trainingMaterial.kind === "GROUP" && trainingMaterial.groupId
         ? (allPresetFilteredCount ?? 0)
         : setupCounts.totalCards;
-    const selectedPresetCount = selectedPreset === "today"
-        ? setupCounts.todayDue
-        : selectedPreset === "last-missed"
-            ? setupCounts.lastMissedCount
-            : allCardsCount;
-    const selectedPresetSummary = selectedPreset === "today"
-        ? "Heute lernen"
-        : selectedPreset === "last-missed"
-            ? "Zuletzt nicht gewusst"
-            : materialLabel(trainingMaterial, activeTrainerGroupName);
-    const selectedSessionConfig = selectedPreset === "today"
-        ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
-        : selectedPreset === "last-missed"
-            ? { learnMode: "DRILL" as const, trainingMaterial: { kind: "LAST_MISSED" } as TrainingMaterial }
-            : { learnMode: "DRILL" as const, trainingMaterial: trainingMaterial.kind === "GROUP" ? trainingMaterial : { kind: "ALL" } as TrainingMaterial };
-    const startDisabled = !canStartTraining(selectedSessionConfig.learnMode, selectedSessionConfig.trainingMaterial, directionMode);
-    const directionHighlight = missingDirection && startDisabled;
-    function selectTrainingPreset(nextPreset: QuickStartPreset) {
-        setSelectedTrainingPreset(nextPreset);
-        if (nextPreset === "all") return;
-        setAllGroupRefinementOpen(false);
-        setTrainingMaterial({ kind: "ALL" });
-        setAllPresetFilteredCount(null);
-    }
 
     function openCurrentCardGroupsEditor() {
         const item: any = todayItems[currentIndex];
@@ -2100,20 +2095,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    const startHint = selectedSessionConfig.trainingMaterial.kind === "GROUP" && !selectedSessionConfig.trainingMaterial.groupId
-        ? "Gruppe auswählen"
-        : missingDirection
-            ? "Abfragerichtung wählen"
-            : null;
-    const recommendation = setupCounts.todayDue > 0
-        ? `Heute fällig: ${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"}`
-        : setupCounts.lastMissedCount > 0
-            ? `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`
-            : `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
-    useEffect(() => {
-        if (selectedTrainingPreset) return;
-        setSelectedTrainingPreset(entryQuickStartPreset ?? recommendedQuickStartPreset);
-    }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedTrainingPreset]);
     const cardGroupsUnchanged = (() => {
         const existingCard = cards.find((entry: any) => String(entry.id) === String(cardGroupsCardId))
             ?? todayItems.find((entry: any) => String(entry.cardId ?? entry.id) === String(cardGroupsCardId));
@@ -2188,77 +2169,36 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 </div>
                             ) : null}
 
-                            {/* Bubbles */}
-                            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                <button
-                                    onClick={() => {
-                                        setOpenLearn(true);
-                                    }}
-                                    className="rounded-[32px] border border-cta bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
-                                >
-                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Training</div>
-                                    <div className="mt-2 text-xl font-semibold">{setupCounts.todayDue > 0 ? "Heute lernen" : "Weiterlernen"}</div>
-                                    <div className="mt-2 text-sm text-muted">
-                                        {setupCounts.todayDue > 0
-                                            ? `${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"} warten auf dich.`
-                                            : "Direkt starten mit einer sinnvollen Standard-Session."}
-                                    </div>
-                                </button>
-
-                                <button
-                                    onClick={() => {
-                                        setStatus("");
-                                        setDuplicateHint(null);
-                                        resetImageInputs();
-
-                                        setEditSource("create");
-                                        setEditAudioPath(null);
-                                        setEditingId(null);
-
-                                        setPendingAudioBlob(null);
-                                        setPendingAudioType(null);
-                                        setFormGroupIds([]);
-                                        setOptionalExamplesOpen(false);
-
-                                        setOpenCreate(true);
-                                    }}
-                                    className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
-                                >
-                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-primary-strong">Erstellen</div>
-                                    <div className="mt-2 text-xl font-semibold">{createLabel}</div>
-                                    <div className="mt-2 text-sm text-muted">
-                                        {createHint}
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setStatus("");
-                                        setDuplicateHint(null);
-                                        setDuplicatePreview(null);
-                                        setOpenCards(true);
-                                        loadCards();
-                                    }}
-                                    className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
-                                >
-                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-secondary">Verwalten</div>
-                                    <div className="mt-2 text-xl font-semibold">{cardsLabel}</div>
-                                    <div className="mt-2 text-sm text-muted">
-                                        Durchsuchen, bearbeiten und aufräumen.
-                                    </div>
-                                </button>
-                                {!isSentenceTrainer ? (
-                                    <button
-                                        className="rounded-[32px] border bg-surface p-8 text-left shadow-soft hover:shadow-warm transition"
-                                        onClick={() => router.push("/import")}
-                                    >
-                                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-primary-strong">Import</div>
-                                        <div className="mt-2 text-xl font-semibold">📥 Bulk Import</div>
-                                        <div className="mt-2 text-sm text-muted">
-                                            Vokabelliste einfügen, prüfen und importieren.
-                                        </div>
-                                    </button>
-                                ) : null}
-                            </div>
+                            <TrainerDashboard
+                                todayDue={setupCounts.todayDue}
+                                isSentenceTrainer={isSentenceTrainer}
+                                createLabel={createLabel}
+                                createHint={createHint}
+                                cardsLabel={cardsLabel}
+                                importVisible={!isSentenceTrainer}
+                                onOpenLearn={() => setOpenLearn(true)}
+                                onOpenCreate={() => {
+                                    setStatus("");
+                                    setDuplicateHint(null);
+                                    resetImageInputs();
+                                    setEditSource("create");
+                                    setEditAudioPath(null);
+                                    setEditingId(null);
+                                    setPendingAudioBlob(null);
+                                    setPendingAudioType(null);
+                                    setFormGroupIds([]);
+                                    setOptionalExamplesOpen(false);
+                                    setOpenCreate(true);
+                                }}
+                                onOpenCards={() => {
+                                    setStatus("");
+                                    setDuplicateHint(null);
+                                    setDuplicatePreview(null);
+                                    setOpenCards(true);
+                                    loadCards();
+                                }}
+                                onOpenImport={() => router.push("/import")}
+                            />
 
                             {/* Learn Modal */}
                             <FullScreenSheet
@@ -2293,200 +2233,41 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             >
                                 {/* === SETUP === */}
                                 {!learnStarted && (
-                                    <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-                                        <div className="mt-2 hint-card border border-soft">
-                                            <span className="font-medium text-primary">Empfohlen für dich:</span>{" "}
-                                            {setupCountsLoading ? "Lade Empfehlung…" : recommendation}
-                                        </div>
-
-                                        <div className="mt-3 grid grid-cols-1 gap-3">
-                                            <button
-                                                type="button"
-                                                aria-pressed={selectedPreset === "today"}
-                                                onClick={() => selectTrainingPreset("today")}
-                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "today"
-                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="font-semibold">Heute lernen</div>
-                                                <div className="mt-1 text-sm text-muted">Leitner-Session mit fälligen Karten.</div>
-                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
-                                            </button>
-                                            <div
-                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "all"
-                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <button
-                                                    type="button"
-                                                    aria-pressed={selectedPreset === "all"}
-                                                    onClick={() => selectTrainingPreset("all")}
-                                                    className="w-full text-left"
-                                                >
-                                                    <div className="font-semibold">Alle Karten üben</div>
-                                                    <div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div>
-                                                    <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : allCardsCount}</div>
-                                                </button>
-                                                {selectedPreset === "all" ? (
-                                                    <div ref={materialRef} className="mt-3 rounded-xl border border-soft bg-surface p-3">
-                                                        <button
-                                                            type="button"
-                                                            aria-expanded={allGroupRefinementOpen}
-                                                            onClick={() => setAllGroupRefinementOpen((open) => !open)}
-                                                            className="flex w-full items-center justify-between text-sm"
-                                                        >
-                                                            <span>Trainingsmaterial: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                            <span>{allGroupRefinementOpen ? "▾" : "▸"}</span>
-                                                        </button>
-                                                        {allGroupRefinementOpen ? (
-                                                            <div className="mt-2 space-y-2">
-                                                                <select
-                                                                    className="w-full rounded-lg border border-soft bg-surface px-3 py-2 text-sm text-primary"
-                                                                    value={trainingMaterial.kind === "GROUP" ? (trainingMaterial.groupId ?? "") : ""}
-                                                                    onChange={(event) => {
-                                                                        const groupId = event.target.value || null;
-                                                                        if (!groupId) {
-                                                                            setTrainingMaterial({ kind: "ALL" });
-                                                                            setAllPresetFilteredCount(null);
-                                                                            return;
-                                                                        }
-                                                                        setTrainingMaterial({ kind: "GROUP", groupId });
-                                                                    }}
-                                                                >
-                                                                    <option value="">Alle Karten</option>
-                                                                    {groups.map((group) => (
-                                                                        <option key={group.id} value={group.id}>{group.name}</option>
-                                                                    ))}
-                                                                </select>
-                                                                <div className="flex items-center justify-between text-xs text-muted">
-                                                                    <span>Aktiv: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span>
-                                                                    <button type="button" className="rounded-lg border border-soft px-2 py-1" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                                                </div>
-                                                            </div>
-                                                        ) : null}
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                aria-pressed={selectedPreset === "last-missed"}
-                                                onClick={() => selectTrainingPreset("last-missed")}
-                                                className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed"
-                                                    ? "border-accent bg-accent-cta-soft hover:shadow-soft"
-                                                    : "border-soft bg-surface hover:bg-surface-elevated"
-                                                    }`}
-                                            >
-                                                <div className="font-semibold">Zuletzt nicht gewusst</div>
-                                                <div className="mt-1 text-sm text-muted">Gezielte Wiederholung schwieriger Karten.</div>
-                                                <div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
-                                            </button>
-                                        </div>
-
-                                        <div
-                                            ref={directionRef}
-                                            className="mt-4"
-                                        >
-                                            <div
-                                                className={
-                                                    directionHighlight
-                                                        ? "rounded-3xl p-2 ring-2 ring-[color:var(--accent-cta)] bg-accent-cta-soft"
-                                                        : ""
-                                                }
-                                            >
-                                                <div className="rounded-2xl bg-surface p-4 shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Abfragerichtung</div>
-                                                    <div className="mt-2 grid grid-cols-1 gap-3">
-                                                        <button
-                                                            type="button"
-                                                            aria-pressed={directionMode === "DE_TO_SW"}
-                                                            onClick={() => setDirectionMode("DE_TO_SW")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "DE_TO_SW"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Deutsch → Swahili</span>
-                                                                {directionMode === "DE_TO_SW" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-
-                                                        <button
-                                                            type="button"
-                                                            aria-pressed={directionMode === "SW_TO_DE"}
-                                                            onClick={() => setDirectionMode("SW_TO_DE")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "SW_TO_DE"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Swahili → Deutsch</span>
-                                                                {directionMode === "SW_TO_DE" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-
-                                                        <button
-                                                            type="button"
-                                                            aria-pressed={directionMode === "RANDOM"}
-                                                            onClick={() => setDirectionMode("RANDOM")}
-                                                            className={`rounded-xl border p-3 text-left transition active:scale-[0.99] ${directionMode === "RANDOM"
-                                                                ? "border-accent bg-surface shadow-soft"
-                                                                : "border-soft bg-surface hover:bg-surface-elevated"
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center justify-between">
-                                                                <span>Zufällig (Abwechslung)</span>
-                                                                {directionMode === "RANDOM" ? (
-                                                                    <div className="badge border-accent bg-accent-success-soft text-accent-success-strong">
-                                                                        ✓
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <button
-                                            className="mt-4 w-full btn btn-primary py-3 text-base"
-                                            type="button"
-                                            disabled={startDisabled}
-                                            onClick={() => void startLearningSession({
-                                                learnMode: selectedSessionConfig.learnMode,
-                                                trainingMaterial: selectedSessionConfig.trainingMaterial,
-                                                directionMode: directionMode ?? "RANDOM",
-                                                skipValidationHighlights: true,
-                                            })}
-                                        >
-                                            Session starten · {selectedPresetSummary} ({selectedPresetCount})
-                                        </button>
-
-                                        {startHint ? (
-                                            <div className="mt-3 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                                                {startHint}
-                                            </div>
-                                        ) : null}
-
-                                        {learnLoadError ? (
-                                            <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">
-                                                {learnLoadError}
-                                            </div>
-                                        ) : null}
-                                    </div >
-                                )
-                                }
+                                    <TrainerSetupView
+                                        recommendation={recommendation}
+                                        setupCountsLoading={setupCountsLoading}
+                                        setupCounts={setupCounts}
+                                        selectedPreset={selectedPreset}
+                                        allCardsCount={allCardsCount}
+                                        allGroupRefinementOpen={allGroupRefinementOpen}
+                                        trainingMaterial={trainingMaterial}
+                                        activeTrainerGroupName={activeTrainerGroupName}
+                                        groups={groups}
+                                        directionMode={directionMode}
+                                        directionHighlight={directionHighlight}
+                                        startDisabled={startDisabled}
+                                        selectedPresetSummary={selectedPresetSummary}
+                                        selectedPresetCount={selectedPresetCount}
+                                        startHint={startHint}
+                                        learnLoadError={learnLoadError}
+                                        onSelectPreset={selectTrainingPreset}
+                                        onToggleAllGroupRefinementOpen={() => setAllGroupRefinementOpen((open: boolean) => !open)}
+                                        onTrainingMaterialChange={(nextMaterial: TrainingMaterial) => {
+                                            setTrainingMaterial(nextMaterial);
+                                            if (nextMaterial.kind === "ALL") setAllPresetFilteredCount(null);
+                                        }}
+                                        onOpenManageGroups={() => setManageGroupsOpen(true)}
+                                        onDirectionModeChange={setDirectionMode}
+                                        onStart={() => void startLearningSession({
+                                            learnMode: selectedSessionConfig.learnMode,
+                                            trainingMaterial: selectedSessionConfig.trainingMaterial,
+                                            directionMode: directionMode ?? "RANDOM",
+                                            skipValidationHighlights: true,
+                                        })}
+                                        directionRef={directionRef}
+                                        materialRef={materialRef}
+                                    />
+                                )}
 
                                 {/* === KEINE KARTEN / ENDE === */}
                                 {
