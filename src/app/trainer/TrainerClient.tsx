@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { initFeedbackSounds, playCorrect, playWrong } from "@/lib/audio/sounds";
+import { initFeedbackSounds } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import CompactOverlay from "@/components/CompactOverlay";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -17,18 +17,11 @@ import {
 } from "@/lib/leitner";
 import { setTrainingContext } from "@/lib/aiContext";
 import {
-    fetchAllCardsForDrill,
-    fetchLastMissedItems,
     fetchLeitnerStats,
     fetchSetupCounts,
-    fetchTodayItems,
-    postGrade,
-    postLastMissed,
-    postLearnSession,
 } from "@/lib/trainer/api";
-import { findNextUnansweredIndex, removeDeletedCardsFromSession } from "@/lib/trainer/engine";
-import type { CardType, Direction, LeitnerStats, TodayItem } from "@/lib/trainer/types";
-import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId, shuffleArray } from "@/lib/trainer/utils";
+import type { CardType, LeitnerStats, TodayItem } from "@/lib/trainer/types";
+import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId } from "@/lib/trainer/utils";
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
@@ -38,8 +31,9 @@ import AiCoachPanel from "@/components/trainer/AiCoachPanel";
 import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
 import TrainerDashboard from "@/components/trainer/TrainerDashboard";
 import TrainerSetupView from "@/components/trainer/TrainerSetupView";
-import { canStartTraining, materialLabel, resolveTrainingGroupIds, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
+import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
+import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
 import GroupBadge from "@/components/groups/GroupBadge";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
@@ -86,15 +80,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
-    const [learnLoadError, setLearnLoadError] = useState<string | null>(null);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [cards, setCards] = useState<any[]>([]);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [todayItems, setTodayItems] = useState<TodayItem[]>([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [reveal, setReveal] = useState(false);
-    const [direction, setDirection] = useState<Direction>("DE_TO_SW");
-    const [wrongCounts, setWrongCounts] = useState<Record<string, number>>({});
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
     const [duplicatePreview, setDuplicatePreview] = useState<unknown | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,19 +93,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
-    const [learnStarted, setLearnStarted] = useState(false);
     const [returnToLearn, setReturnToLearn] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>("RANDOM");
-    const [learnDone, setLearnDone] = useState(false);
-    const [sessionCorrect, setSessionCorrect] = useState(0);
-    const [sessionWrongIds, setSessionWrongIds] = useState<Set<string>>(new Set());
-    const [sessionWrongItems, setSessionWrongItems] = useState<Record<string, TodayItem>>({});
-    const [answeredCardIds, setAnsweredCardIds] = useState<Set<string>>(new Set());
-    const [incorrectThisSession, setIncorrectThisSession] = useState<string[]>([]);
-    const [sessionTotal, setSessionTotal] = useState(0);
-    const [showSummary, setShowSummary] = useState(false);
-    const [endedEarly, setEndedEarly] = useState(false);
-    const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [leitnerInfoOpen, setLeitnerInfoOpen] = useState(false);
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
     const [showMigrate, setShowMigrate] = useState(false);
@@ -198,7 +175,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
-    const sessionSavedRef = useRef(false);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
@@ -249,15 +225,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }, []);
 
     useEffect(() => {
-        if (!DEBUG_LEITNER) return;
-        console.log("[LEITNER] queue changed", {
-            len: todayItems.length,
-            head: resolveCardId(todayItems[0]),
-            ids: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
-        });
-    }, [todayItems]);
-
-    useEffect(() => {
         (async () => {
             const supabase = supabaseBrowser();
             const { data } = await supabase.auth.getUser();
@@ -305,10 +272,77 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }, [cardType]);
 
+    const {
+        todayItems,
+        setTodayItems,
+        currentIndex,
+        setCurrentIndex,
+        reveal,
+        setReveal,
+        direction,
+        setDirection,
+        sessionCorrect,
+        sessionWrongIds,
+        sessionWrongItems,
+        answeredCardIds,
+        sessionTotal,
+        showSummary,
+        setShowSummary,
+        endedEarly,
+        setEndedEarly,
+        learnStarted,
+        setLearnStarted,
+        learnDone,
+        setLearnDone,
+        lastMissedEmpty,
+        learnLoadError,
+        startLearningSession,
+        revealCard,
+        gradeCurrent,
+        endSessionEarly: endTrainerSessionEarly,
+        resetSessionTracking,
+        startDrillWithItems,
+        applyDeletedCards: applyDeletedCardsToSession,
+    } = useTrainerSession({
+        cardType,
+        learnMode,
+        setLearnMode,
+        trainingMaterial,
+        setTrainingMaterial,
+        directionMode,
+        setDirectionMode,
+        refreshSetupCounts,
+        loadLeitnerStats,
+        playCardAudioIfExists,
+        isRecording,
+        stopRecording,
+        stopAnyAudio,
+        onStatus: setStatus,
+        onSetupCountsPatch: (patch) => setSetupCounts((prev) => ({ ...prev, ...patch })),
+        onLastMissedRemoved: () => setSetupCounts((prev) => ({
+            ...prev,
+            lastMissedCount: Math.max(0, prev.lastMissedCount - 1),
+        })),
+        onValidationHighlight: triggerSetupHighlight,
+        onDebugSessionReset: () => {
+            loopGuardRef.current = { cardId: null, streak: 0 };
+            setExitConfirmOpen(false);
+        },
+    });
+
     useEffect(() => {
         if (!openLearn) return;
         void refreshSetupCounts();
     }, [openLearn, refreshSetupCounts]);
+
+    useEffect(() => {
+        if (!DEBUG_LEITNER) return;
+        console.log("[LEITNER] queue changed", {
+            len: todayItems.length,
+            head: resolveCardId(todayItems[0]),
+            ids: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
+        });
+    }, [todayItems]);
 
     useEffect(() => {
         void refreshSetupCounts();
@@ -1034,28 +1068,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (deletedIds.length === 0) return;
         const deletedSet = new Set(deletedIds.map(String));
         setCards((prev) => prev.filter((card) => !deletedSet.has(String(card.id))));
-        setSessionWrongItems((prev) => {
-            const next: Record<string, TodayItem> = {};
-            Object.entries(prev).forEach(([cardId, item]) => {
-                if (!deletedSet.has(String(cardId))) next[cardId] = item;
-            });
-            return next;
-        });
-        setAnsweredCardIds((prev) => removeDeletedFromSelection(prev, deletedSet));
-        setSessionWrongIds((prev) => removeDeletedFromSelection(prev, deletedSet));
         setSelectedCardIds((prev) => removeDeletedFromSelection(prev, deletedSet));
-
-        setTodayItems((prev) => {
-            const adjusted = removeDeletedCardsFromSession(prev, currentIndex, reveal, deletedSet);
-            setCurrentIndex(adjusted.index);
-            setReveal(adjusted.reveal);
-            if (adjusted.deletedCurrent) {
-                setNotesSheetOpen(false);
-            }
-            if (adjusted.ended) {
-                setLearnDone(true);
-            }
-            return adjusted.items;
+        applyDeletedCardsToSession(deletedIds, {
+            onDeleteCurrent: () => setNotesSheetOpen(false),
         });
     }
 
@@ -1136,108 +1151,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setOpenCreate(true);
     }
 
-    async function loadToday() {
-        setStatus("Lade fällige Karten...");
-        setLearnLoadError(null);
-
-        try {
-            const items = await fetchTodayItems(cardType)
-
-            if (DEBUG_LEITNER) {
-                console.log("[LEITNER] session init", {
-                    total: items.length,
-                    ids: items.map((card) => resolveCardId(card)).slice(0, 20),
-                });
-            }
-
-            setSessionTotal(items.length);
-            setTodayItems(shuffleArray(items));
-            setSessionCorrect(0);
-            setCurrentIndex(0);
-            setReveal(false);
-
-            setSetupCounts((prev) => ({ ...prev, todayDue: items.length }));
-            await refreshSetupCounts();
-
-            setStatus(`Fällig heute: ${items.length}`);
-            return { ok: true as const, items };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
-            setStatus(message);
-            setLearnLoadError(message);
-            return { ok: false as const, items: [] as TodayItem[] };
-        }
-    }
-
-    async function loadAllForDrill(groupIds?: string[]) {
-        setStatus("Lade alle Karten...");
-        setLastMissedEmpty(false);
-        setLearnLoadError(null);
-
-        try {
-            const items = await fetchAllCardsForDrill(cardType, groupIds)
-
-            setSessionTotal(items.length);
-            setTodayItems(shuffleArray(items));
-            setCurrentIndex(0);
-            setReveal(false);
-
-            setSetupCounts((prev) => ({ ...prev, totalCards: items.length }));
-            await refreshSetupCounts();
-
-            setStatus(`Alle Karten: ${items.length}`);
-            return { ok: true as const, items };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
-            setStatus(message);
-            setLearnLoadError(message);
-            return { ok: false as const, items: [] as TodayItem[] };
-        }
-    }
-
-    async function loadLastMissed() {
-        setStatus("Lade zuletzt nicht gewusste Karten...");
-        setLastMissedEmpty(false);
-        setLearnLoadError(null);
-
-        try {
-            const items = await fetchLastMissedItems(cardType)
-
-            setSessionTotal(items.length);
-            setSetupCounts((prev) => ({ ...prev, lastMissedCount: items.length }));
-            await refreshSetupCounts();
-
-            if (items.length === 0) {
-                setTodayItems([]);
-                setCurrentIndex(0);
-                setReveal(false);
-                setLastMissedEmpty(true);
-                setStatus("Keine zuletzt nicht gewussten Karten.");
-                return { ok: true as const, items };
-            }
-
-            setTodayItems(shuffleArray(items));
-            setCurrentIndex(0);
-            setReveal(false);
-
-            setStatus(`Zuletzt nicht gewusst: ${items.length}`);
-            return { ok: true as const, items };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
-            setStatus(message);
-            setLearnLoadError(message);
-            return { ok: false as const, items: [] as TodayItem[] };
-        }
-    }
-
-    function startDrillWithItems(items: TodayItem[]) {
-        setLastMissedEmpty(false);
-        setSessionTotal(items.length);
-        setTodayItems(shuffleArray(items));
-        setCurrentIndex(0);
-        setReveal(false);
-    }
-
     async function loadLeitnerStats() {
         try {
             const stats = await fetchLeitnerStats(cardType);
@@ -1247,165 +1160,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    function resetSessionTracking() {
-        setSessionCorrect(0);
-        setSessionTotal(0);
-        setSessionWrongIds(new Set());
-        setSessionWrongItems({});
-        setAnsweredCardIds(new Set());
-        setIncorrectThisSession([]);
-        setShowSummary(false);
-        setLearnDone(false);
-        setLastMissedEmpty(false);
-        setEndedEarly(false);
-        setExitConfirmOpen(false);
-        sessionSavedRef.current = false;
-        loopGuardRef.current = { cardId: null, streak: 0 };
-    }
-
-    async function startLearningSession(config?: {
-        learnMode?: "LEITNER_TODAY" | "DRILL";
-        trainingMaterial?: TrainingMaterial;
-        directionMode?: "DE_TO_SW" | "SW_TO_DE" | "RANDOM";
-        skipValidationHighlights?: boolean;
-    }) {
-        const nextLearnMode = config?.learnMode ?? learnMode;
-        const nextTrainingMaterial = config?.trainingMaterial ?? trainingMaterial;
-        const nextTrainerGroupIds = resolveTrainingGroupIds(nextTrainingMaterial);
-        const nextDirectionMode = config?.directionMode ?? directionMode;
-        const skipValidationHighlights = config?.skipValidationHighlights ?? false;
-
-        if (!nextLearnMode) {
-            return;
-        }
-
-        if (!nextDirectionMode) {
-            if (!skipValidationHighlights) triggerSetupHighlight("DIRECTION");
-            return;
-        }
-
-        if (!canStartTraining(nextLearnMode, nextTrainingMaterial, nextDirectionMode)) {
-            if (!skipValidationHighlights) triggerSetupHighlight("MATERIAL");
-            return;
-        }
-
-        setLearnMode(nextLearnMode);
-        setTrainingMaterial(nextTrainingMaterial);
-        setDirectionMode(nextDirectionMode);
-        resetSessionTracking();
-        setLearnLoadError(null);
-        setTodayItems([]);
-
-        const chosen =
-            nextDirectionMode === "RANDOM"
-                ? Math.random() < 0.5
-                    ? "DE_TO_SW"
-                    : "SW_TO_DE"
-                : nextDirectionMode;
-
-        setDirection(chosen);
-        setReveal(false);
-        setCurrentIndex(0);
-
-        let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
-
-        if (nextLearnMode === "LEITNER_TODAY") {
-            loadResult = await loadToday();
-            await loadLeitnerStats();
-            if (loadResult.ok && loadResult.items.length === 0) {
-                await persistLearnSession({
-                    mode: "LEITNER",
-                    totalCount: 0,
-                    correctCount: 0,
-                    wrongCardIds: [],
-                });
-            }
-        } else if (nextTrainingMaterial.kind === "ALL" || nextTrainingMaterial.kind === "GROUP") {
-            loadResult = await loadAllForDrill(nextTrainerGroupIds);
-        } else {
-            loadResult = await loadLastMissed();
-        }
-
-        if (!loadResult.ok) {
-            setLearnStarted(false);
-            return;
-        }
-
-        setLearnStarted(true);
-    }
-
-    async function persistLearnSession(params: {
-        mode: "LEITNER" | "DRILL";
-        totalCount: number;
-        correctCount: number;
-        wrongCardIds: string[];
-    }) {
-        if (sessionSavedRef.current) return;
-        sessionSavedRef.current = true;
-
-        try {
-            await postLearnSession({
-                mode: params.mode,
-                totalCount: params.totalCount,
-                correctCount: params.correctCount,
-                wrongCardIds: params.wrongCardIds,
-            });
-        } catch (e) {
-            console.error("Failed to persist learn session", e);
-        }
-    }
-
     async function endSessionEarly() {
         setExitConfirmOpen(false);
-        stopAnyAudio();
-
-        if (isRecording) {
-            stopRecording();
-        }
-
-        const answeredCount = answeredCardIds.size;
-        const correctCount = sessionCorrect;
-        const wrongIds = Array.from(sessionWrongIds);
-
-        if (wrongIds.length > 0) {
-            await Promise.all(wrongIds.map((id) => updateLastMissed("add", id)));
-        }
-
-        await persistLearnSession({
-            mode: learnMode === "DRILL" ? "DRILL" : "LEITNER",
-            totalCount: answeredCount,
-            correctCount,
-            wrongCardIds: wrongIds,
-        });
-        await refreshSetupCounts();
-
-        setSessionTotal(answeredCount);
-        setReveal(false);
-        setTodayItems([]);
-        setLearnDone(false);
-        setShowSummary(true);
-        setEndedEarly(true);
-    }
-
-    async function updateLastMissed(action: "add" | "remove", cardId: string) {
-        if (!cardId) return false;
-        try {
-            await postLastMissed(action, cardId);
-            return true;
-        } catch (e) {
-            console.error("Failed to update last missed", e);
-            if (process.env.NODE_ENV === "development") {
-                setStatus(e instanceof Error ? e.message : "Last-Missed Update fehlgeschlagen.");
-            }
-            return false;
-        }
-    }
-
-    function revealCard() {
-        setReveal(true);
-
-        const card = todayItems[currentIndex];
-        playCardAudioIfExists(card);
+        await endTrainerSessionEarly();
     }
 
     async function openLearningHelp() {
@@ -1467,192 +1224,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const handleNotesOverlayClose = useCallback(() => {
         void closeNotesSheet();
     }, [closeNotesSheet]);
-
-    async function gradeCurrent(correct: boolean) {
-        if (isRecording) {
-            stopRecording();
-            return;
-        }
-
-        const item = todayItems[currentIndex];
-        if (!item) return;
-
-        const resolved = resolveCardId(item);
-
-        console.log("[LEITNER] gradeCurrent()", {
-            correct,
-            index: currentIndex,
-            queueLen: todayItems.length,
-            resolved,
-            itemKeys: Object.keys(item ?? {}),
-            rawCardId: item?.cardId,
-            raw_card_id: item?.card_id,
-            raw_id: item?.id,
-        });
-
-
-        console.log("[LEITNER] gradeCurrent()", {
-            index: currentIndex,
-            resolved,
-            rawKeys: Object.keys(item ?? {}),
-            sample: item,
-        });
-
-        if (DEBUG_LEITNER) {
-            console.log("[LEITNER] answer", {
-                result: correct ? "known" : "wrong",
-                cardId: resolveCardId(item),
-                beforeQueueLen: todayItems.length,
-                beforeIds: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
-            });
-        }
-
-        if (correct) playCorrect();
-        else playWrong();
-
-        const cardId = resolveCardId(item);
-        const nextAnswered = new Set(answeredCardIds);
-        if (cardId) nextAnswered.add(cardId);
-        setAnsweredCardIds(nextAnswered);
-
-        const nextCorrect = correct ? sessionCorrect + 1 : sessionCorrect;
-
-        // Session-Statistik
-        if (correct) setSessionCorrect(nextCorrect);
-
-        const nextWrongIds = (() => {
-            if (correct || !cardId) return new Set(sessionWrongIds);
-            const updated = new Set(sessionWrongIds);
-            updated.add(cardId);
-            return updated;
-        })();
-
-        const nextIncorrect =
-            !correct && cardId
-                ? incorrectThisSession.includes(cardId)
-                    ? incorrectThisSession
-                    : [...incorrectThisSession, cardId]
-                : incorrectThisSession;
-
-        if (DEBUG_LEITNER) {
-            console.log("[LEITNER] answer after", {
-                result: correct ? "known" : "wrong",
-                cardId,
-                afterQueueLen: todayItems.length,
-                afterIds: todayItems.map((card: any) => resolveCardId(card)).slice(0, 20),
-                answeredSize: nextAnswered.size,
-            });
-        }
-
-        if (!correct && cardId) {
-            setSessionWrongIds(nextWrongIds);
-            setSessionWrongItems((prev) => (prev[cardId] ? prev : { ...prev, [cardId]: item }));
-            setIncorrectThisSession(nextIncorrect);
-            await updateLastMissed("add", cardId);
-        }
-
-        const nextIndex = findNextUnansweredIndex(todayItems, nextAnswered, currentIndex + 1);
-        const fallbackIndex =
-            nextIndex === -1
-                ? findNextUnansweredIndex(todayItems, nextAnswered, 0)
-                : nextIndex;
-        if (process.env.NODE_ENV === "development" && learnMode === "LEITNER_TODAY") {
-            console.debug(
-                `[dev] Leitner progress: ${nextAnswered.size}/${sessionTotal} answered, ${nextIncorrect.length} incorrect.`
-            );
-        }
-
-        // === DRILL MODUS: NUR EINMAL DURCHLAUFEN (KEINE DB-ÄNDERUNG, KEIN WIEDERHOLEN) ===
-        if (learnMode === "DRILL") {
-            // Wenn Drill auf "LAST_MISSED" läuft und Karte richtig war: last-missed in DB löschen
-            if (trainingMaterial.kind === "LAST_MISSED" && correct) {
-                const cardId = resolveCardId(item);
-                if (cardId) {
-                    const removed = await updateLastMissed("remove", cardId);
-                    if (removed) {
-                        setSetupCounts((prev) => ({
-                            ...prev,
-                            lastMissedCount: Math.max(0, prev.lastMissedCount - 1),
-                        }));
-                        void refreshSetupCounts();
-                    }
-                }
-            }
-
-            if (fallbackIndex === -1) {
-                await persistLearnSession({
-                    mode: "DRILL",
-                    totalCount: sessionTotal,
-                    correctCount: nextCorrect,
-                    wrongCardIds: Array.from(nextWrongIds),
-                });
-                await refreshSetupCounts();
-                // Session beendet → Summary anzeigen
-                setReveal(false);
-                setTodayItems([]);
-                setShowSummary(true);
-                if (process.env.NODE_ENV === "development") {
-                    console.debug(
-                        `[dev] Leitner/Drill session ended after ${nextAnswered.size} answers.`
-                    );
-                }
-                console.log("[LEITNER] SESSION END", {
-                    answered: Array.from(nextAnswered),
-                    wrong: Array.from(nextWrongIds),
-                    sessionTotal,
-                });
-                return;
-            }
-
-            setCurrentIndex(fallbackIndex);
-            setReveal(false);
-
-            // Richtung ggf. neu würfeln
-            if (directionMode === "RANDOM") {
-                setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
-            }
-            return;
-        }
-
-        // === LEITNER MODUS: DB UPDATE ===
-        try {
-            await postGrade({
-                cardId: resolveCardId(item),
-                correct,
-                currentLevel: Number.isFinite(item?.level) ? item.level : 0,
-            });
-        } catch (e) {
-            console.error(e);
-        }
-
-        if (fallbackIndex === -1) {
-            await persistLearnSession({
-                mode: "LEITNER",
-                totalCount: sessionTotal,
-                correctCount: nextCorrect,
-                wrongCardIds: Array.from(nextWrongIds),
-            });
-            await loadLeitnerStats();
-            await refreshSetupCounts();
-            setReveal(false);
-            setTodayItems([]);      // triggert "Erledigt"-UI
-            setLearnDone(true);     // zeigt "Heute erledigt"
-            if (process.env.NODE_ENV === "development") {
-                console.debug(
-                    `[dev] Leitner session ended after ${nextAnswered.size} answers.`
-                );
-            }
-            return;
-        }
-
-        // nächste Karte
-        setCurrentIndex(fallbackIndex);
-        setReveal(false);
-
-        if (directionMode === "RANDOM") {
-            setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
-        }
-    }
 
     async function logout() {
         const supabase = supabaseBrowser();
