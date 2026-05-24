@@ -3,7 +3,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("trainer create/edit notes integration", () => {
-    const source = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
+    const clientSource = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
+    const source = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
 
     it("renders optional own notes in the create/edit card flow", () => {
         expect(source).toContain("Eigene Notizen (optional)");
@@ -15,7 +16,7 @@ describe("trainer create/edit notes integration", () => {
         expect(source).toContain("async function loadFormNotes");
         expect(source).toContain("/api/cards/notes?cardId=");
         expect(source).toContain("void loadFormNotes(String(card.id))");
-        expect(source).toContain("void loadFormNotes(String(item.cardId ?? item.id))");
+        expect(source).toContain("void loadFormNotes(cardId)");
         expect(source).toContain("setFormNoteOpen(Boolean(mainNotes.trim()))");
     });
 
@@ -36,9 +37,16 @@ describe("trainer create/edit notes integration", () => {
     });
 
     it("keeps training-mode notes on the separate learning notes flow", () => {
-        expect(source).toContain("async function openLearningHelp");
-        expect(source).toContain("setCardNoteCardId(cardId)");
-        expect(source).toContain("setCardNoteDraft({ mainNotes:");
-        expect(source).toContain("handleNotesOverlayClose");
+        expect(clientSource).toContain("async function openLearningHelp");
+        expect(clientSource).toContain("setCardNoteCardId(cardId)");
+        expect(clientSource).toContain("setCardNoteDraft({");
+        expect(clientSource).toContain("handleNotesOverlayClose");
+    });
+
+    it("wires edit entry points through the extracted card form sheet", () => {
+        expect(clientSource).toContain("<TrainerCardFormSheet");
+        expect(clientSource).toContain("cardFormRef.current?.openCreate()");
+        expect(clientSource).toContain("cardFormRef.current?.openEdit(c, \"cards\")");
+        expect(clientSource).toContain("cardFormRef.current?.openEditFromLearn({");
     });
 });

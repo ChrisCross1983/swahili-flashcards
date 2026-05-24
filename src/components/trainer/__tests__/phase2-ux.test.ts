@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("phase 2 product UX cleanup", () => {
     const root = process.cwd();
     const trainerSource = fs.readFileSync(path.join(root, "src/app/trainer/TrainerClient.tsx"), "utf8");
+    const trainerCardFormSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
     const trainerSetupViewSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerSetupView.tsx"), "utf8");
     const trainerSetupHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerSetup.ts"), "utf8");
     const compactGroupPickerSource = fs.readFileSync(path.join(root, "src/components/groups/CompactGroupPicker.tsx"), "utf8");
@@ -19,12 +20,13 @@ describe("phase 2 product UX cleanup", () => {
 
     it("uses compact group selection in the learning-card and card-edit flows", () => {
         expect(trainerSource).toContain("import CompactGroupPicker from \"@/components/groups/CompactGroupPicker\";");
+        expect(trainerSource).toContain("import TrainerCardFormSheet");
         expect(trainerSource).not.toContain("const [formGroupSelectorOpen, setFormGroupSelectorOpen] = useState(false);");
-        expect(trainerSource).toContain("formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);");
-        expect(trainerSource).toContain("<CompactGroupPicker");
+        expect(trainerCardFormSource).toContain("formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);");
+        expect(trainerCardFormSource).toContain("<CompactGroupPicker");
         expect(compactGroupPickerSource).toContain("aria-multiselectable=\"true\"");
         expect(compactGroupPickerSource).toContain("aria-selected={isSelected}");
-        expect(trainerSource).toContain("{formSelectedGroups.length > 0 ? \"Gruppen bearbeiten\" : \"➕ Gruppe\"}");
+        expect(trainerCardFormSource).toContain("{formSelectedGroups.length > 0 ? \"Gruppen bearbeiten\" : \"➕ Gruppe\"}");
         expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
         expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
     });
@@ -53,14 +55,14 @@ describe("phase 2 product UX cleanup", () => {
     });
 
     it("keeps create/edit flow progressive with optional examples collapsed behind disclosure", () => {
-        expect(trainerSource).toContain("Schritt 1 · Kartenpaar");
-        expect(trainerSource).toContain("Schritt 2 · Optionaler Kontext");
-        expect(trainerSource).toContain("Optional: Beispielsätze hinzufügen");
-        expect(trainerSource).toContain("setOptionalExamplesOpen((open) => !open)");
-        expect(trainerSource).toContain("aria-expanded={optionalExamplesOpen}");
-        expect(trainerSource).toContain("data-testid=\"optional-examples-section\"");
-        expect(trainerSource).toContain("Beispielsatz Deutsch (optional)");
-        expect(trainerSource).toContain("Beispielsatz Swahili (optional)");
+        expect(trainerCardFormSource).toContain("Schritt 1 · Kartenpaar");
+        expect(trainerCardFormSource).toContain("Schritt 2 · Optionaler Kontext");
+        expect(trainerCardFormSource).toContain("Optional: Beispielsätze hinzufügen");
+        expect(trainerCardFormSource).toContain("setOptionalExamplesOpen((isOpen) => !isOpen)");
+        expect(trainerCardFormSource).toContain("aria-expanded={optionalExamplesOpen}");
+        expect(trainerCardFormSource).toContain("data-testid=\"optional-examples-section\"");
+        expect(trainerCardFormSource).toContain("Beispielsatz Deutsch (optional)");
+        expect(trainerCardFormSource).toContain("Beispielsatz Swahili (optional)");
     });
 
     it("keeps emphasis tools available but visually secondary", () => {

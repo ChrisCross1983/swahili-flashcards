@@ -30,9 +30,9 @@ describe("mobile overlay viewport stability", () => {
 
     it("keeps mobile text inputs at 16px-equivalent sizing", () => {
         const quickSearch = fs.readFileSync(path.join(process.cwd(), "src/components/GlobalQuickSearch.tsx"), "utf8");
-        const trainer = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
+        const trainerCardForm = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
 
         expect(quickSearch).toContain("text-base md:text-sm");
-        expect(trainer).toContain("text-base text-primary md:text-sm");
+        expect(trainerCardForm).toContain("text-base text-primary md:text-sm");
     });
 });
