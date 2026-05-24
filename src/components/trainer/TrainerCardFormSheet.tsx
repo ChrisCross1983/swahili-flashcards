@@ -8,9 +8,15 @@ import GroupBadge from "@/components/groups/GroupBadge";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import { assignCardsToGroup, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
-import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 import { visibleBadgeSummary } from "@/lib/trainer/setup";
 import type { CardType } from "@/lib/trainer/types";
+import {
+    buildCreateCardPayload,
+    buildUpdateCardPayload,
+    diffGroupAssignments,
+    shouldOpenNotesSection,
+    shouldSaveCreateNote,
+} from "@/lib/trainer/cardFormBehavior";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -82,6 +88,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     },
     ref
 ) {
+    // Owns the card create/edit workflow; parent only reacts to created/updated/deleted records.
     const [open, setOpen] = useState(false);
     const [german, setGerman] = useState("");
     const [swahili, setSwahili] = useState("");
@@ -233,7 +240,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             const mainNotes = json.note?.main_notes ?? "";
             setFormNoteDraft({ mainNotes });
             savedFormNoteRef.current = mainNotes;
-            setFormNoteOpen(Boolean(mainNotes.trim()));
+            setFormNoteOpen(shouldOpenNotesSection(mainNotes));
         } catch (error) {
             setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
             setFormNoteOpen(false);
@@ -393,8 +400,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         try {
             const trimmedGerman = german.trim();
             const trimmedSwahili = swahili.trim();
-            const trimmedGermanExample = sanitizeExampleMarkup(germanExample);
-            const trimmedSwahiliExample = sanitizeExampleMarkup(swahiliExample);
 
             if (!skipWarning) {
                 const exists = await checkExistingGerman(trimmedGerman, trimmedSwahili);
@@ -416,14 +421,14 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             const res = await fetch("/api/cards", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    german: trimmedGerman,
-                    swahili: trimmedSwahili,
-                    germanExample: trimmedGermanExample || null,
-                    swahiliExample: trimmedSwahiliExample || null,
+                body: JSON.stringify(buildCreateCardPayload({
+                    german,
+                    swahili,
+                    germanExample,
+                    swahiliExample,
                     imagePath,
                     type: cardType,
-                }),
+                })),
             });
 
             const json = await res.json();
@@ -469,7 +474,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 }
             }
 
-            if (createdCardId && formNoteDraft.mainNotes.trim()) {
+            if (shouldSaveCreateNote(createdCardId, formNoteDraft.mainNotes)) {
                 const notesSaved = await saveFormNotes(createdCardId, formNoteDraft.mainNotes);
                 if (!notesSaved) {
                     setEditingId(createdCardId);
@@ -524,8 +529,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             const trimmedGerman = german.trim();
             const trimmedSwahili = swahili.trim();
-            const trimmedGermanExample = sanitizeExampleMarkup(germanExample);
-            const trimmedSwahiliExample = sanitizeExampleMarkup(swahiliExample);
             if (!trimmedGerman || !trimmedSwahili) {
                 setStatus("Bitte Deutsch und Swahili ausfüllen.");
                 return;
@@ -540,15 +543,14 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 imagePath = (await uploadImage()) ?? null;
             }
 
-            const body: any = {
+            const body = buildUpdateCardPayload({
                 id: editingId,
-                german: trimmedGerman,
-                swahili: trimmedSwahili,
-                germanExample: trimmedGermanExample || null,
-                swahiliExample: trimmedSwahiliExample || null,
-            };
-
-            if (imagePath !== undefined) body.imagePath = imagePath;
+                german,
+                swahili,
+                germanExample,
+                swahiliExample,
+                ...(imagePath !== undefined ? { imagePath } : {}),
+            });
 
             const res = await fetch("/api/cards", {
                 method: "PATCH",
@@ -570,19 +572,15 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             const updated = json.card;
             const updatedCardId = String(updated.id);
-            const existingGroupIds = new Set<string>(editingOriginalGroupIds.map(String));
-            const nextGroupIds = new Set<string>(formGroupIds.map(String));
+            const groupChanges = diffGroupAssignments(editingOriginalGroupIds, formGroupIds);
 
-            for (const groupId of nextGroupIds) {
-                if (!existingGroupIds.has(groupId)) {
-                    await assignCardsToGroup(cardType, groupId, [updatedCardId]);
-                }
+            for (const groupId of groupChanges.add) {
+                await assignCardsToGroup(cardType, groupId, [updatedCardId]);
             }
-            for (const groupId of existingGroupIds) {
-                if (!nextGroupIds.has(groupId)) {
-                    await removeCardFromGroup(groupId, updatedCardId);
-                }
+            for (const groupId of groupChanges.remove) {
+                await removeCardFromGroup(groupId, updatedCardId);
             }
+            const nextGroupIds = new Set<string>(formGroupIds.map(String));
             const nextGroups = groups.filter((group) => nextGroupIds.has(group.id));
             await onUpdated(updated, nextGroups);
             setEditingOriginalGroupIds(Array.from(nextGroupIds));
@@ -763,7 +761,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             setOptionalExamplesOpen(Boolean(createDraft.germanExample.trim() || createDraft.swahiliExample.trim()));
             setFormNoteDraft({ mainNotes: createDraft.note });
             savedFormNoteRef.current = "";
-            setFormNoteOpen(Boolean(createDraft.note.trim()));
+            setFormNoteOpen(shouldOpenNotesSection(createDraft.note));
             setCreateDraft(null);
             setFormGroupIds([]);
             setEditingOriginalGroupIds([]);

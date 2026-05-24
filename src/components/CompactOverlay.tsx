@@ -35,7 +35,9 @@ export default function CompactOverlay({
         if (!open) return;
 
         lockBodyScroll();
-        closeRef.current?.focus();
+        if (!window.matchMedia("(pointer: coarse)").matches) {
+            closeRef.current?.focus();
+        }
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {

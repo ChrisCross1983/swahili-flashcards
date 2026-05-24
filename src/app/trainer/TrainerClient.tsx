@@ -53,6 +53,7 @@ const IMAGE_BASE_URL =
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
+    // Route-level orchestrator: setup/session/library state lives here, while detailed card form state lives in TrainerCardFormSheet.
     const isSentenceTrainer = cardType === "sentence";
     const trainerTitle = isSentenceTrainer ? "Satztrainer" : "Swahili Flashcards (MVP)";
     const createLabel = isSentenceTrainer ? "Neue Sätze anlegen" : "Neue Wörter anlegen";

@@ -17,14 +17,14 @@ describe("trainer create/edit notes integration", () => {
         expect(source).toContain("/api/cards/notes?cardId=");
         expect(source).toContain("void loadFormNotes(String(card.id))");
         expect(source).toContain("void loadFormNotes(cardId)");
-        expect(source).toContain("setFormNoteOpen(Boolean(mainNotes.trim()))");
+        expect(source).toContain("setFormNoteOpen(shouldOpenNotesSection(mainNotes))");
     });
 
     it("saves create/edit notes through the existing card notes API", () => {
         expect(source).toContain("async function saveFormNotes");
         expect(source).toContain('method: "PATCH"');
         expect(source).toContain('fetch("/api/cards/notes"');
-        expect(source).toContain("if (createdCardId && formNoteDraft.mainNotes.trim())");
+        expect(source).toContain("if (shouldSaveCreateNote(createdCardId, formNoteDraft.mainNotes))");
         expect(source).toContain("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)");
         expect(source).toContain("await saveFormNotes(updatedCardId)");
     });

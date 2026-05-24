@@ -54,6 +54,7 @@ describe("trainer card form extraction", () => {
 
     it("keeps edit ordering: PATCH card, update groups/session callback, then save notes", () => {
         expect(formSource).toContain('method: "PATCH"');
+        expect(formSource).toContain("const groupChanges = diffGroupAssignments(editingOriginalGroupIds, formGroupIds)");
         expect(formSource).toContain("await removeCardFromGroup(groupId, updatedCardId)");
         expect(formSource).toContain("await onUpdated(updated, nextGroups)");
         expect(formSource).toContain("const notesSaved = await saveFormNotes(updatedCardId)");

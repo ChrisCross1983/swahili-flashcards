@@ -19,16 +19,18 @@ describe("trainer session runtime regression guards", () => {
     });
 
     it("starts today sessions via today loader", () => {
-        expect(sessionSource).toContain("if (nextLearnMode === \"LEITNER_TODAY\")");
+        expect(sessionSource).toContain("const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial)");
+        expect(sessionSource).toContain('if (loadPlan?.kind === "today")');
         expect(sessionSource).toContain("loadResult = await loadToday()");
     });
 
     it("starts all/group drill via all-cards loader", () => {
-        expect(sessionSource).toContain("nextTrainingMaterial.kind === \"ALL\" || nextTrainingMaterial.kind === \"GROUP\"");
-        expect(sessionSource).toContain("loadResult = await loadAllForDrill(resolveTrainingGroupIds(nextTrainingMaterial))");
+        expect(sessionSource).toContain('} else if (loadPlan?.kind === "all")');
+        expect(sessionSource).toContain("loadResult = await loadAllForDrill(loadPlan.groupIds)");
     });
 
     it("starts last-missed drill via last-missed loader", () => {
+        expect(sessionSource).toContain('} else if (loadPlan?.kind === "last-missed")');
         expect(sessionSource).toContain("loadResult = await loadLastMissed()");
     });
 

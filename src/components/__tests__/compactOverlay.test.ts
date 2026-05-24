@@ -10,6 +10,7 @@ describe("compact overlay focus stability", () => {
         expect(source).toContain("onCloseRef.current = onClose;");
         expect(source).toContain("onCloseRef.current();");
         expect(source).toContain("blurActiveOverlayElement();");
+        expect(source).toContain('if (!window.matchMedia("(pointer: coarse)").matches)');
         expect(source).toContain("}, [open]);");
     });
 });
