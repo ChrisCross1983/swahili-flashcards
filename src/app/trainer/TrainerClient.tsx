@@ -691,23 +691,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
             const created = json.card;
 
-            if (created?.id) {
-                const createdCardId = String(created.id);
+            const createdCardId = created?.id ? String(created.id) : null;
+
+            if (createdCardId) {
                 for (const groupId of formGroupIds) {
                     await assignCardsToGroup(cardType, groupId, [createdCardId]);
                 }
-                if (formNoteDraft.mainNotes.trim()) {
-                    await saveFormNotes(createdCardId, formNoteDraft.mainNotes);
-                }
             }
 
-            if (created?.id && pendingAudioBlob) {
+            if (createdCardId && pendingAudioBlob) {
                 const fd = new FormData();
                 fd.append(
                     "file",
                     new File([pendingAudioBlob], "recording", { type: pendingAudioType ?? "audio/mp4" })
                 );
-                fd.append("cardId", String(created.id));
+                fd.append("cardId", createdCardId);
 
                 const up = await fetch("/api/upload-audio", { method: "POST", body: fd });
                 const upJson = await up.json();
@@ -717,6 +715,17 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     setPendingAudioType(null);
                 } else {
                     setStatus(upJson?.error ?? "Audio-Upload fehlgeschlagen");
+                }
+            }
+
+            if (createdCardId && formNoteDraft.mainNotes.trim()) {
+                const notesSaved = await saveFormNotes(createdCardId, formNoteDraft.mainNotes);
+                if (!notesSaved) {
+                    setEditingId(createdCardId);
+                    setEditSource("create");
+                    setStatus("Karte gespeichert, aber Notizen konnten nicht gespeichert werden. Bitte erneut speichern, damit die Notiz nicht verloren geht.");
+                    await loadCards(undefined, { silent: true });
+                    return;
                 }
             }
 
@@ -829,10 +838,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     await removeCardFromGroup(groupId, updatedCardId);
                 }
             }
-            await saveFormNotes(updatedCardId);
-
-            showToast("Karte aktualisiert ✅");
-
             const nextGroups = groups.filter((group) => nextGroupIds.has(group.id));
             setCards((prev) =>
                 prev.map((c) => (c.id === updated.id ? { ...c, ...updated, groups: nextGroups } : c))
@@ -857,6 +862,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     };
                 })
             );
+
+            const notesSaved = await saveFormNotes(updatedCardId);
+            if (!notesSaved) {
+                setStatus("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden. Bitte erneut speichern, damit die Notiz nicht verloren geht.");
+                return;
+            }
+
+            showToast("Karte aktualisiert ✅");
 
             // ✅ Edit-Inputs resetten
             setGerman("");
@@ -1646,6 +1659,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         allGroupRefinementOpen,
         setAllGroupRefinementOpen,
         selectTrainingPreset,
+        resetTrainingPreset,
     } = setupState;
 
     useEffect(() => {
@@ -1826,7 +1840,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 createHint={createHint}
                                 cardsLabel={cardsLabel}
                                 importVisible={!isSentenceTrainer}
-                                onOpenLearn={() => setOpenLearn(true)}
+                                onOpenLearn={() => {
+                                    setEntryQuickStartPreset(null);
+                                    resetTrainingPreset("today");
+                                    setLearnMode(null);
+                                    setTrainingMaterial({ kind: "ALL" });
+                                    setOpenLearn(true);
+                                }}
                                 onOpenCreate={() => {
                                     setStatus("");
                                     setDuplicateHint(null);

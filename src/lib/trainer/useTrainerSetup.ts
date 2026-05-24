@@ -103,6 +103,15 @@ export function useTrainerSetup({
         onAllPresetFilteredCountChange(null);
     };
 
+    const resetTrainingPreset = (nextPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET) => {
+        setSelectedTrainingPreset(nextPreset);
+        if (nextPreset !== "all") {
+            setAllGroupRefinementOpen(false);
+            onTrainingMaterialChange({ kind: "ALL" });
+            onAllPresetFilteredCountChange(null);
+        }
+    };
+
     useEffect(() => {
         if (selectedTrainingPreset) return;
         setSelectedTrainingPreset(entryQuickStartPreset ?? DEFAULT_TRAINING_PRESET);
@@ -121,5 +130,6 @@ export function useTrainerSetup({
         directionHighlight,
         setAllGroupRefinementOpen,
         selectTrainingPreset,
+        resetTrainingPreset,
     };
 }

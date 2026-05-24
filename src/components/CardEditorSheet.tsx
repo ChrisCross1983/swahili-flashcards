@@ -56,10 +56,16 @@ export default function CardEditorSheet({
     const [suggestError, setSuggestError] = useState<string | null>(null);
     const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+    const [formNoteOpen, setFormNoteOpen] = useState(false);
+    const [formNoteDraft, setFormNoteDraft] = useState({ mainNotes: "" });
+    const [formNoteLoading, setFormNoteLoading] = useState(false);
+    const [formNoteSaving, setFormNoteSaving] = useState(false);
+    const [formNoteStatus, setFormNoteStatus] = useState<string | null>(null);
 
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
+    const savedFormNoteRef = useRef("");
 
     const editingImagePath = selectedImagePath ?? null;
 
@@ -81,6 +87,12 @@ export default function CardEditorSheet({
         setSuggestError(null);
         setSuggestedImagePath(null);
         setIsRecording(false);
+        setFormNoteOpen(false);
+        setFormNoteDraft({ mainNotes: "" });
+        setFormNoteLoading(false);
+        setFormNoteSaving(false);
+        setFormNoteStatus(null);
+        savedFormNoteRef.current = "";
     }, []);
 
     useEffect(() => {
@@ -97,6 +109,57 @@ export default function CardEditorSheet({
         setPreviewUrl(url);
         return () => URL.revokeObjectURL(url);
     }, [imageFile]);
+
+    const loadFormNotes = useCallback(async (nextCardId: string) => {
+        setFormNoteLoading(true);
+        setFormNoteStatus(null);
+
+        try {
+            const res = await fetch(`/api/cards/notes?cardId=${encodeURIComponent(nextCardId)}`, { cache: "no-store" });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht geladen werden.");
+
+            const mainNotes = json.note?.main_notes ?? "";
+            setFormNoteDraft({ mainNotes });
+            savedFormNoteRef.current = mainNotes;
+            setFormNoteOpen(Boolean(mainNotes.trim()));
+        } catch (error) {
+            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
+            setFormNoteOpen(false);
+            setFormNoteDraft({ mainNotes: "" });
+            savedFormNoteRef.current = "";
+        } finally {
+            setFormNoteLoading(false);
+        }
+    }, []);
+
+    async function saveFormNotes(nextCardId: string, noteText = formNoteDraft.mainNotes) {
+        if (noteText === savedFormNoteRef.current) return true;
+        setFormNoteSaving(true);
+        setFormNoteStatus(null);
+
+        try {
+            const res = await fetch("/api/cards/notes", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    cardId: nextCardId,
+                    mainNotes: noteText,
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
+
+            savedFormNoteRef.current = noteText;
+            setFormNoteStatus("Notizen gespeichert.");
+            return true;
+        } catch (error) {
+            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
+            return false;
+        } finally {
+            setFormNoteSaving(false);
+        }
+    }
 
     const loadCard = useCallback(async () => {
         if (!open || !cardId) return;
@@ -138,10 +201,12 @@ export default function CardEditorSheet({
             } else {
                 setPreviewUrl(null);
             }
+
+            await loadFormNotes(String(card.id));
         } finally {
             setLoading(false);
         }
-    }, [cardId, open, ownerKey]);
+    }, [cardId, loadFormNotes, open]);
 
     useEffect(() => {
         if (!open) return;
@@ -374,8 +439,13 @@ export default function CardEditorSheet({
             }
 
             const updated = json.card as CardEditorCard;
-            setStatus("Karte aktualisiert ✅");
+            const notesSaved = await saveFormNotes(cardId);
+            if (!notesSaved) {
+                setStatus("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden. Bitte erneut speichern, damit die Notiz nicht verloren geht.");
+                return;
+            }
 
+            setStatus("Karte aktualisiert ✅");
             onSaved?.(updated);
             onClose();
         } catch (e: any) {
@@ -459,6 +529,45 @@ export default function CardEditorSheet({
                                         onChange={setSwahiliExample}
                                         placeholder="z.B. Ninasoma ==kitabu== jioni."
                                     />
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
+                            <button
+                                type="button"
+                                className="flex w-full items-start justify-between gap-3 text-left"
+                                onClick={() => setFormNoteOpen((open) => !open)}
+                                aria-expanded={formNoteOpen}
+                            >
+                                <span>
+                                    <span className="block text-xs font-semibold uppercase tracking-wide text-muted">Optional</span>
+                                    <span className="mt-1 block text-sm font-medium text-primary">Eigene Notizen (optional)</span>
+                                    <span className="mt-1 block text-xs text-muted">Card-spezifische Merkhilfe oder Stolperstelle.</span>
+                                </span>
+                                <span className="pt-0.5 text-sm text-muted" aria-hidden="true">{formNoteOpen ? "▾" : "▸"}</span>
+                            </button>
+
+                            {formNoteOpen ? (
+                                <div className="mt-3">
+                                    {formNoteLoading ? (
+                                        <div className="text-sm text-muted">Notizen werden geladen…</div>
+                                    ) : (
+                                        <>
+                                            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Notiz</label>
+                                            <textarea
+                                                className="min-h-[220px] w-full resize-y rounded-xl border border-soft bg-surface p-3 text-base text-primary md:text-sm"
+                                                placeholder="Kurze Merkhilfe, Stolperstein oder Eselsbrücke…"
+                                                value={formNoteDraft.mainNotes}
+                                                onChange={(event) => {
+                                                    setFormNoteStatus("Ungespeicherte Änderung…");
+                                                    setFormNoteDraft({ mainNotes: event.target.value });
+                                                }}
+                                            />
+                                            {formNoteSaving ? <p className="mt-2 text-xs text-muted">Speichert…</p> : null}
+                                            {formNoteStatus ? <p className="mt-2 text-xs text-muted">{formNoteStatus}</p> : null}
+                                        </>
+                                    )}
                                 </div>
                             ) : null}
                         </div>

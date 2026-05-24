@@ -15,6 +15,7 @@ describe("trainer create/edit notes integration", () => {
         expect(source).toContain("async function loadFormNotes");
         expect(source).toContain("/api/cards/notes?cardId=");
         expect(source).toContain("void loadFormNotes(String(card.id))");
+        expect(source).toContain("void loadFormNotes(String(item.cardId ?? item.id))");
         expect(source).toContain("setFormNoteOpen(Boolean(mainNotes.trim()))");
     });
 
@@ -22,8 +23,22 @@ describe("trainer create/edit notes integration", () => {
         expect(source).toContain("async function saveFormNotes");
         expect(source).toContain('method: "PATCH"');
         expect(source).toContain('fetch("/api/cards/notes"');
-        expect(source).toContain("if (formNoteDraft.mainNotes.trim())");
+        expect(source).toContain("if (createdCardId && formNoteDraft.mainNotes.trim())");
         expect(source).toContain("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)");
         expect(source).toContain("await saveFormNotes(updatedCardId)");
+    });
+
+    it("keeps the form open and visible when card save succeeds but notes save fails", () => {
+        expect(source).toContain("Karte gespeichert, aber Notizen konnten nicht gespeichert werden");
+        expect(source).toContain("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden");
+        expect(source).toContain("setEditingId(createdCardId)");
+        expect(source).toContain("return;");
+    });
+
+    it("keeps training-mode notes on the separate learning notes flow", () => {
+        expect(source).toContain("async function openLearningHelp");
+        expect(source).toContain("setCardNoteCardId(cardId)");
+        expect(source).toContain("setCardNoteDraft({ mainNotes:");
+        expect(source).toContain("handleNotesOverlayClose");
     });
 });

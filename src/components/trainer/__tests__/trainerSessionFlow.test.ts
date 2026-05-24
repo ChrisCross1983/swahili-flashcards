@@ -12,6 +12,12 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).not.toContain("async function gradeCurrent");
     });
 
+    it("resets setup preset to today on dashboard open while preserving quickStart path separately", () => {
+        expect(clientSource).toContain('resetTrainingPreset("today")');
+        expect(clientSource).toContain("setEntryQuickStartPreset(null)");
+        expect(clientSource).toContain("selectTrainingPreset(quickStart)");
+    });
+
     it("starts today sessions via today loader", () => {
         expect(sessionSource).toContain("if (nextLearnMode === \"LEITNER_TODAY\")");
         expect(sessionSource).toContain("loadResult = await loadToday()");
