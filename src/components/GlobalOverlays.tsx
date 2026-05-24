@@ -46,12 +46,18 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 </button>
             </div>
 
-            <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[2147483647] flex flex-col items-end gap-2 md:hidden">
+            <div
+                className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[2147483647] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
+                    ? "top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]"
+                    : "bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
+                    }`}
+                data-focused-trainer-tools={focusedTrainerMode ? "top-right" : "bottom-right"}
+            >
                 {mobileToolsOpen ? (
                     <>
                         <button
                             type="button"
-                            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-secondary text-on-accent shadow-soft transition active:scale-95"
+                            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-secondary text-on-accent shadow-soft transition active:scale-95"
                             onClick={() => {
                                 setOpenAi(true);
                                 setMobileToolsOpen(false);
@@ -62,7 +68,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                         </button>
                         <button
                             type="button"
-                            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-primary text-on-accent shadow-soft transition active:scale-95"
+                            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-primary text-on-accent shadow-soft transition active:scale-95"
                             onClick={() => {
                                 setOpenSearch(true);
                                 setMobileToolsOpen(false);
@@ -75,7 +81,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 ) : null}
                 <button
                     type="button"
-                    className={`flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
+                    className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
                         ? "border-white/50 bg-accent-secondary text-white shadow-soft"
                         : "border-white/40 bg-accent-primary"
                         }`}

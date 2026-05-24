@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect } from "react";
-import { lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 
 type Props = {
     open: boolean;
@@ -11,6 +11,11 @@ type Props = {
 };
 
 export default function FullScreenSheet({ open, title, onClose, children }: Props) {
+    const handleClose = () => {
+        blurActiveOverlayElement();
+        onClose();
+    };
+
     useEffect(() => {
         if (!open) return;
         lockBodyScroll();
@@ -28,7 +33,7 @@ export default function FullScreenSheet({ open, title, onClose, children }: Prop
                     <div className="text-base font-semibold tracking-wide">{title ?? ""}</div>
                     <button
                         type="button"
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="btn btn-utility rounded-full border border-soft bg-surface-elevated px-3 py-1 text-sm"
                         aria-label="Schließen"
                     >

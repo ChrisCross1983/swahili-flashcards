@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useId, useRef } from "react";
-import { lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 
 type Props = {
     open: boolean;
@@ -26,6 +26,11 @@ export default function CompactOverlay({
         onCloseRef.current = onClose;
     }, [onClose]);
 
+    const handleClose = () => {
+        blurActiveOverlayElement();
+        onClose();
+    };
+
     useEffect(() => {
         if (!open) return;
 
@@ -35,6 +40,7 @@ export default function CompactOverlay({
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
+                blurActiveOverlayElement();
                 onCloseRef.current();
             }
         };
@@ -51,7 +57,7 @@ export default function CompactOverlay({
     return (
         <div
             className="fixed inset-0 z-[130] flex items-center justify-center bg-overlay px-4"
-            onClick={onClose}
+            onClick={handleClose}
             role="presentation"
             data-testid="compact-overlay-backdrop"
         >
@@ -69,13 +75,13 @@ export default function CompactOverlay({
                         ref={closeRef}
                         type="button"
                         className="btn btn-utility rounded-full border border-soft bg-surface-elevated px-3 py-1 text-sm"
-                        onClick={onClose}
+                        onClick={handleClose}
                         aria-label="Schließen"
                     >
                         ✕
                     </button>
                 </div>
-                <div className="mt-3">{children}</div>
+                <div className="mt-3 max-h-[calc(100dvh-9rem)] overflow-auto overscroll-contain">{children}</div>
             </div>
         </div>
     );

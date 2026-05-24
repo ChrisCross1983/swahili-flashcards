@@ -9,6 +9,8 @@ export type SetupCounts = {
     lastMissedCount: number;
 };
 
+export const DEFAULT_TRAINING_PRESET: QuickStartPreset = "today";
+
 type Params = {
     setupCounts: SetupCounts;
     setupCountsLoading: boolean;
@@ -50,11 +52,7 @@ export function useTrainerSetup({
     const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset | null>(null);
     const [allGroupRefinementOpen, setAllGroupRefinementOpen] = useState(false);
 
-    const recommendedQuickStartPreset: QuickStartPreset = setupCounts.todayDue > 0
-        ? "today"
-        : setupCounts.lastMissedCount > 0
-            ? "last-missed"
-            : "all";
+    const recommendedQuickStartPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET;
 
     const selectedPreset = selectedTrainingPreset ?? entryQuickStartPreset ?? recommendedQuickStartPreset;
 
@@ -107,7 +105,7 @@ export function useTrainerSetup({
 
     useEffect(() => {
         if (selectedTrainingPreset) return;
-        setSelectedTrainingPreset(entryQuickStartPreset ?? recommendedQuickStartPreset);
+        setSelectedTrainingPreset(entryQuickStartPreset ?? DEFAULT_TRAINING_PRESET);
     }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedTrainingPreset]);
 
     return {

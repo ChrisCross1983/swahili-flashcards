@@ -26,7 +26,7 @@ export default function LearningHelpPanel({
             <p className="text-xs text-muted">Bleibt im Lernfluss und wird automatisch gespeichert.</p>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Notiz</label>
             <textarea
-                className="min-h-28 w-full rounded-xl border border-soft bg-surface-elevated p-3 text-sm text-primary"
+                className="min-h-[220px] max-h-[min(58dvh,520px)] w-full resize-y rounded-xl border border-soft bg-surface-elevated p-3 text-base text-primary md:text-sm"
                 placeholder="Kurze Merkhilfe, Stolperstein oder Eselsbrücke…"
                 value={draft.mainNotes}
                 onChange={(event) => onChange(event.target.value)}

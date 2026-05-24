@@ -9,6 +9,7 @@ describe("compact overlay focus stability", () => {
         expect(source).toContain("const onCloseRef = useRef(onClose);");
         expect(source).toContain("onCloseRef.current = onClose;");
         expect(source).toContain("onCloseRef.current();");
+        expect(source).toContain("blurActiveOverlayElement();");
         expect(source).toContain("}, [open]);");
     });
 });

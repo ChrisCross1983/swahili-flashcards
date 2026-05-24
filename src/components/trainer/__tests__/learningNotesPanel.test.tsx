@@ -17,7 +17,8 @@ describe("learning notes panel", () => {
         expect(html).toContain("textarea");
         expect(html).toContain("automatisch gespeichert");
         expect(html).toContain("Notiz");
-        expect(html).toContain("min-h-28");
+        expect(html).toContain("min-h-[220px]");
+        expect(html).toContain("text-base");
         expect(html).not.toContain("Beispielsatz");
         expect(html).not.toContain("Verwechslungswort");
     });

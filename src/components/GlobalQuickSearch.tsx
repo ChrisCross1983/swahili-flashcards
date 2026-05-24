@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
 import { createPortal } from "react-dom";
 import CardText from "@/components/ui/CardText";
-import { lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -40,11 +40,11 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     const [isLoading, setIsLoading] = useState(false);
     const [mounted, setMounted] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const inputRef = useRef<HTMLInputElement | null>(null);
     const [editingCardId, setEditingCardId] = useState<string | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
 
     const closeOverlay = useCallback(() => {
+        blurActiveOverlayElement();
         setQuery("");
         setResults([]);
         setSelected(null);
@@ -81,11 +81,6 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         document.addEventListener("keydown", handleHotkey);
         return () => document.removeEventListener("keydown", handleHotkey);
     }, []);
-
-    useEffect(() => {
-        if (!open) return;
-        inputRef.current?.focus();
-    }, [open]);
 
     useEffect(() => {
         if (!open) return;
@@ -217,7 +212,6 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
 
                         <div className="flex flex-col gap-3">
                             <input
-                                ref={inputRef}
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
                                 placeholder="Deutsch oder Swahili suchen..."

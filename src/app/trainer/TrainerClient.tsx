@@ -109,7 +109,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
-    const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string; germanExample: string; swahiliExample: string } | null>(null);
+    const [createDraft, setCreateDraft] = useState<{ german: string; swahili: string; germanExample: string; swahiliExample: string; note: string } | null>(null);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
     const [setupCounts, setSetupCounts] = useState({
         todayDue: 0,
@@ -134,6 +134,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardNoteLoading, setCardNoteLoading] = useState(false);
     const [cardNoteSaving, setCardNoteSaving] = useState(false);
     const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
+    const [formNoteOpen, setFormNoteOpen] = useState(false);
+    const [formNoteDraft, setFormNoteDraft] = useState({ mainNotes: "" });
+    const [formNoteLoading, setFormNoteLoading] = useState(false);
+    const [formNoteSaving, setFormNoteSaving] = useState(false);
+    const [formNoteStatus, setFormNoteStatus] = useState<string | null>(null);
     const [cardSelectionMode, setCardSelectionMode] = useState(false);
     const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
 
@@ -180,6 +185,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
+    const savedFormNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
     const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
@@ -574,6 +580,62 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setIsRecording(false);
     }
 
+    function resetFormNotes() {
+        setFormNoteOpen(false);
+        setFormNoteDraft({ mainNotes: "" });
+        setFormNoteLoading(false);
+        setFormNoteSaving(false);
+        setFormNoteStatus(null);
+        savedFormNoteRef.current = "";
+    }
+
+    async function loadFormNotes(cardId: string) {
+        setFormNoteLoading(true);
+        setFormNoteStatus(null);
+        try {
+            const res = await fetch(`/api/cards/notes?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store" });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht geladen werden.");
+            const mainNotes = json.note?.main_notes ?? "";
+            setFormNoteDraft({ mainNotes });
+            savedFormNoteRef.current = mainNotes;
+            setFormNoteOpen(Boolean(mainNotes.trim()));
+        } catch (error) {
+            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
+            setFormNoteOpen(false);
+            setFormNoteDraft({ mainNotes: "" });
+            savedFormNoteRef.current = "";
+        } finally {
+            setFormNoteLoading(false);
+        }
+    }
+
+    async function saveFormNotes(cardId: string, noteText = formNoteDraft.mainNotes) {
+        if (noteText === savedFormNoteRef.current) return true;
+        setFormNoteSaving(true);
+        setFormNoteStatus(null);
+        try {
+            const res = await fetch("/api/cards/notes", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    cardId,
+                    mainNotes: noteText,
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
+            savedFormNoteRef.current = noteText;
+            setFormNoteStatus("Notizen gespeichert.");
+            return true;
+        } catch (error) {
+            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
+            return false;
+        } finally {
+            setFormNoteSaving(false);
+        }
+    }
+
     async function createCard(skipWarning = false) {
         try {
             const trimmedGerman = german.trim();
@@ -634,6 +696,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 for (const groupId of formGroupIds) {
                     await assignCardsToGroup(cardType, groupId, [createdCardId]);
                 }
+                if (formNoteDraft.mainNotes.trim()) {
+                    await saveFormNotes(createdCardId, formNoteDraft.mainNotes);
+                }
             }
 
             if (created?.id && pendingAudioBlob) {
@@ -679,6 +744,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setEditAudioPath(null);
             setEditingId(null);
             setFormGroupIds([]);
+            resetFormNotes();
 
             setDuplicateHint(null);
             setDuplicatePreview(null);
@@ -763,6 +829,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     await removeCardFromGroup(groupId, updatedCardId);
                 }
             }
+            await saveFormNotes(updatedCardId);
 
             showToast("Karte aktualisiert ✅");
 
@@ -813,6 +880,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 setEditAudioPath(null);
                 setPendingAudioBlob(null);
                 setPendingAudioType(null);
+                resetFormNotes();
 
                 setReturnToLearn(false);
                 setStatus("");
@@ -830,6 +898,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                 setEditingId(null);
                 setEditAudioPath(null);
                 setFormGroupIds([]);
+                resetFormNotes();
 
                 setGerman("");
                 setSwahili("");
@@ -852,6 +921,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setOpenCreate(false);
             setOpenCards(true);
             setFormGroupIds([]);
+            resetFormNotes();
 
         } catch (e: any) {
             setStatus(e?.message ?? "Aktualisieren fehlgeschlagen.");
@@ -923,6 +993,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditAudioPath(card.audio_path ?? null);
         setFormGroupIds(Array.isArray(card.groups) ? card.groups.map((group: any) => String(group.id)) : []);
         setStatus("");
+        resetFormNotes();
+        if (card.id) void loadFormNotes(String(card.id));
 
         const existingPath = card.image_path ?? null;
 
@@ -1134,6 +1206,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setEditAudioPath(item.audio_path ?? null);
         setDuplicateHint(null);
         setDuplicatePreview(null);
+        resetFormNotes();
+        void loadFormNotes(String(item.cardId ?? item.id));
 
         const existingPath =
             item?.image_path ?? item?.imagePath ?? item?.image ?? null;
@@ -1302,6 +1376,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setGermanExample(createDraft.germanExample);
             setSwahiliExample(createDraft.swahiliExample);
             setOptionalExamplesOpen(Boolean(createDraft.germanExample.trim() || createDraft.swahiliExample.trim()));
+            setFormNoteDraft({ mainNotes: createDraft.note });
+            savedFormNoteRef.current = "";
+            setFormNoteOpen(Boolean(createDraft.note.trim()));
 
             setCreateDraft(null);
             setFormGroupIds([]);
@@ -1326,6 +1403,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setSwahiliExample("");
             setOptionalExamplesOpen(false);
             setFormGroupIds([]);
+            resetFormNotes();
             resetImageInputs();
 
             setDuplicateHint(null);
@@ -1344,6 +1422,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
         cancelEdit();
         resetImageInputs();
+        resetFormNotes();
 
         setEditAudioPath(null);
         setPendingAudioBlob(null);
@@ -1759,6 +1838,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     setPendingAudioType(null);
                                     setFormGroupIds([]);
                                     setOptionalExamplesOpen(false);
+                                    resetFormNotes();
                                     setOpenCreate(true);
                                 }}
                                 onOpenCards={() => {
@@ -2430,6 +2510,45 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         ) : null}
                                     </div>
 
+                                    <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
+                                        <button
+                                            type="button"
+                                            className="flex w-full items-start justify-between gap-3 text-left"
+                                            onClick={() => setFormNoteOpen((open) => !open)}
+                                            aria-expanded={formNoteOpen}
+                                        >
+                                            <span>
+                                                <span className="block text-xs font-semibold uppercase tracking-wide text-muted">Optional</span>
+                                                <span className="mt-1 block text-sm font-medium text-primary">Eigene Notizen (optional)</span>
+                                                <span className="mt-1 block text-xs text-muted">Card-spezifische Merkhilfe oder Stolperstelle.</span>
+                                            </span>
+                                            <span className="pt-0.5 text-sm text-muted" aria-hidden="true">{formNoteOpen ? "▾" : "▸"}</span>
+                                        </button>
+
+                                        {formNoteOpen ? (
+                                            <div className="mt-3">
+                                                {formNoteLoading ? (
+                                                    <div className="text-sm text-muted">Notizen werden geladen…</div>
+                                                ) : (
+                                                    <>
+                                                        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Notiz</label>
+                                                        <textarea
+                                                            className="min-h-[220px] w-full resize-y rounded-xl border border-soft bg-surface p-3 text-base text-primary md:text-sm"
+                                                            placeholder="Kurze Merkhilfe, Stolperstein oder Eselsbrücke…"
+                                                            value={formNoteDraft.mainNotes}
+                                                            onChange={(event) => {
+                                                                setFormNoteStatus(editingId ? "Ungespeicherte Änderung…" : null);
+                                                                setFormNoteDraft({ mainNotes: event.target.value });
+                                                            }}
+                                                        />
+                                                        {formNoteSaving ? <p className="mt-2 text-xs text-muted">Speichert…</p> : null}
+                                                        {formNoteStatus ? <p className="mt-2 text-xs text-muted">{formNoteStatus}</p> : null}
+                                                    </>
+                                                )}
+                                            </div>
+                                        ) : null}
+                                    </div>
+
                                     <div className="mt-4 rounded-xl border p-3">
                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                             <div className="space-y-2">
@@ -2677,7 +2796,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
                                                             onClick={() => {
                                                                 // Duplikat direkt bearbeiten
-                                                                setCreateDraft({ german, swahili, germanExample, swahiliExample });
+                                                                setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes });
                                                                 const full = cards.find((x) => String(x.id) === String(c.id)) ?? c;
                                                                 startEdit(full, "create");
                                                                 setDuplicateHint(null);
@@ -2762,6 +2881,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 setOpenCreate(false);
                                                 cancelEdit();
                                                 resetImageInputs();
+                                                resetFormNotes();
                                             }}
                                         >
                                             🗑️ Löschen
