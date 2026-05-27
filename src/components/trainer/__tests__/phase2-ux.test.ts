@@ -127,6 +127,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"today\"}");
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"all\"}");
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
+        expect(trainerSetupViewSource).toContain("Fehlerpool der letzten 7 Tage.");
         expect(trainerSetupViewSource).toContain("Session starten ·");
         expect(trainerSetupViewSource).toContain("Empfohlen für dich:");
         expect(trainerSource).not.toContain("runQuickStart(");

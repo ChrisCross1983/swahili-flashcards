@@ -6,6 +6,7 @@ describe("trainer session runtime regression guards", () => {
     const clientSource = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
     const sessionSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerSession.ts"), "utf8");
     const controlsSource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerControls.tsx"), "utf8");
+    const lastMissedSummarySource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerLastMissedSummary.tsx"), "utf8");
 
     it("wires TrainerClient to useTrainerSession", () => {
         expect(clientSource).toContain("useTrainerSession({");
@@ -35,6 +36,17 @@ describe("trainer session runtime regression guards", () => {
     it("starts last-missed drill via last-missed loader", () => {
         expect(sessionSource).toContain('} else if (loadPlan?.kind === "last-missed")');
         expect(sessionSource).toContain("loadResult = await loadLastMissed()");
+    });
+
+    it("clarifies last-missed summaries as the current round, not the whole pool", () => {
+        expect(clientSource).toContain("const isLastMissedSession = learnMode === \"DRILL\" && trainingMaterial.kind === \"LAST_MISSED\"");
+        expect(clientSource).toContain("Wiederholung beendet");
+        expect(clientSource).toContain("TrainerLastMissedSummary");
+        expect(clientSource).toContain("remainingPoolCount={setupCounts.lastMissedCount}");
+        expect(clientSource).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
+        expect(lastMissedSummarySource).toContain("In dieser Runde:");
+        expect(lastMissedSummarySource).toContain("Nochmal üben");
+        expect(lastMissedSummarySource).toContain("im Fehlerpool");
     });
 
     it("keeps grading progression and reveal reset", () => {

@@ -36,6 +36,7 @@ describe("TrainerSetupView", () => {
         expect(html).toContain("Heute lernen");
         expect(html).toContain("Alle Karten üben");
         expect(html).toContain("Zuletzt nicht gewusst");
+        expect(html).toContain("Fehlerpool der letzten 7 Tage.");
         expect((html.match(/Session starten ·/g) ?? []).length).toBe(1);
         expect(html).toContain("Abfragerichtung");
     });

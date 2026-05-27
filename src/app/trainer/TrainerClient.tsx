@@ -30,6 +30,7 @@ import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
 import TrainerDashboard from "@/components/trainer/TrainerDashboard";
 import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
+import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -762,6 +763,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const isLeitnerSelected = learnMode === "LEITNER_TODAY";
     const isDrillSelected = learnMode === "DRILL";
+    const isLastMissedSession = learnMode === "DRILL" && trainingMaterial.kind === "LAST_MISSED";
 
     const isSessionRunning =
         learnStarted &&
@@ -1107,9 +1109,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         <>
                                             {endedEarly ? (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface">
-                                                    <div className="text-lg font-semibold">Session beendet</div>
+                                                    <div className="text-lg font-semibold">
+                                                        {isLastMissedSession ? "Wiederholung beendet" : "Session beendet"}
+                                                    </div>
                                                     <div className="mt-2 text-sm text-muted">
-                                                        Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis.
+                                                        {isLastMissedSession
+                                                            ? "Du hast vorzeitig beendet. Gezählt werden nur Karten, die du in dieser Runde beantwortet hast."
+                                                            : "Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis."}
                                                     </div>
 
                                                     {(() => {
@@ -1119,6 +1125,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             answeredCount > 0
                                                                 ? Math.round((sessionCorrect / answeredCount) * 100)
                                                                 : 0;
+
+                                                        if (isLastMissedSession) {
+                                                            return (
+                                                                <TrainerLastMissedSummary
+                                                                    correctCount={sessionCorrect}
+                                                                    practiceAgainCount={wrongCount}
+                                                                    remainingPoolCount={setupCounts.lastMissedCount}
+                                                                />
+                                                            );
+                                                        }
 
                                                         return (
                                                             <div className="mt-4 space-y-2 text-sm text-muted">
@@ -1341,6 +1357,40 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     >
                                                         Fertig
                                                     </button>
+                                                </div>
+                                            ) : isLastMissedSession ? (
+                                                <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
+                                                    <div className="text-sm font-semibold text-primary">Wiederholung beendet</div>
+
+                                                    <TrainerLastMissedSummary
+                                                        correctCount={sessionCorrect}
+                                                        practiceAgainCount={sessionWrongIds.size}
+                                                        remainingPoolCount={setupCounts.lastMissedCount}
+                                                    />
+
+                                                    <div className="mt-6 flex justify-center w-full">
+                                                        <button
+                                                            className="btn btn-primary px-10 py-3 text-base"
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLearnStarted(false);
+                                                                setLearnDone(false);
+                                                                setShowSummary(false);
+
+                                                                setTodayItems([]);
+                                                                setCurrentIndex(0);
+                                                                setReveal(false);
+                                                                setStatus("");
+
+                                                                setLearnMode(null);
+                                                                setDirectionMode("RANDOM");
+                                                                setTrainingMaterial({ kind: "ALL" });
+                                                                resetSessionTracking();
+                                                            }}
+                                                        >
+                                                            Fertig
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ) : (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">

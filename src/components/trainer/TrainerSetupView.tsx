@@ -60,7 +60,7 @@ export default function TrainerSetupView(props: Props) {
                     </div> : null}
                 </div>
                 <button type="button" aria-pressed={selectedPreset === "last-missed"} onClick={() => onSelectPreset("last-missed")} className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
-                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Gezielte Wiederholung schwieriger Karten.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
+                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Fehlerpool der letzten 7 Tage.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
                 </button>
             </div>
             <div ref={directionRef} className="mt-4">
