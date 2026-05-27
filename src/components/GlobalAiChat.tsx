@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ChatProposal from "@/components/ChatProposal";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
-import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import { blurActiveOverlayElement, canAutoFocusOverlayControl, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 import type { CardProposal, ExplainedConcept } from "@/lib/cards/proposals";
 import {
     detectSaveIntent,
@@ -142,6 +142,12 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
         setError(null);
         onClose();
     }, [onClose]);
+
+    const focusInputIfStable = useCallback(() => {
+        if (canAutoFocusOverlayControl()) {
+            inputRef.current?.focus();
+        }
+    }, []);
 
     useEffect(() => {
         if (!open) return;
@@ -511,7 +517,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
             if (isSaveIntent) {
                 await handleSaveIntentAskFallback(text);
                 setIsSending(false);
-                inputRef.current?.focus();
+                focusInputIfStable();
                 return;
             }
             interpretResult = { kind: "ask" };
@@ -520,7 +526,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
         if (interpretResult.kind === "clarify") {
             addAssistantMessage(interpretResult.question);
             setIsSending(false);
-            inputRef.current?.focus();
+            focusInputIfStable();
             return;
         }
 
@@ -532,14 +538,14 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
             }
 
             setIsSending(false);
-            inputRef.current?.focus();
+            focusInputIfStable();
             return;
         }
 
         if (isSaveIntent) {
             await handleSaveIntentAskFallback(text);
             setIsSending(false);
-            inputRef.current?.focus();
+            focusInputIfStable();
             return;
         }
 
@@ -581,7 +587,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
             setError("KI-Anfrage fehlgeschlagen.");
         } finally {
             setIsSending(false);
-            inputRef.current?.focus();
+            focusInputIfStable();
         }
     }, [
         input,
@@ -595,6 +601,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
         conceptBuffer,
         appendConceptsToBuffer,
         handleSaveIntentAskFallback,
+        focusInputIfStable,
     ]);
 
     if (!mounted || !document?.body) return null;

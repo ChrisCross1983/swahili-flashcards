@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("trainer session runtime regression guards", () => {
     const clientSource = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
     const sessionSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerSession.ts"), "utf8");
+    const controlsSource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerControls.tsx"), "utf8");
 
     it("wires TrainerClient to useTrainerSession", () => {
         expect(clientSource).toContain("useTrainerSession({");
@@ -13,6 +14,8 @@ describe("trainer session runtime regression guards", () => {
     });
 
     it("resets setup preset to today on dashboard open while preserving quickStart path separately", () => {
+        expect(clientSource).toContain("function openSetupFromDashboard()");
+        expect(clientSource).toContain("function openSetupFromQuickStart(quickStart: QuickStartPreset)");
         expect(clientSource).toContain('resetTrainingPreset("today")');
         expect(clientSource).toContain("setEntryQuickStartPreset(null)");
         expect(clientSource).toContain("selectTrainingPreset(quickStart)");
@@ -37,5 +40,16 @@ describe("trainer session runtime regression guards", () => {
     it("keeps grading progression and reveal reset", () => {
         expect(sessionSource).toContain("setCurrentIndex(fallbackIndex);");
         expect(sessionSource).toContain("setReveal(false);");
+    });
+
+    it("exposes in-flight grading state and disables answer controls during persistence", () => {
+        expect(sessionSource).toContain("const [gradingInFlight, setGradingInFlight] = useState(false)");
+        expect(sessionSource).toContain("gradingInFlightRef.current = true");
+        expect(sessionSource).toContain("canAcceptGradeTap({ gradingInFlight: gradingInFlightRef.current");
+        expect(sessionSource).toContain("gradingInFlight, startLearningSession");
+        expect(clientSource).toContain("gradingInFlight={gradingInFlight}");
+        expect(controlsSource).toContain("disabled={gradingInFlight}");
+        expect(controlsSource).toContain("data-grading-in-flight");
+        expect(controlsSource).toContain("aria-busy={gradingInFlight}");
     });
 });

@@ -11,7 +11,10 @@ describe("mobile overlay viewport stability", () => {
 
         expect(overlayLock).toContain("blurActiveOverlayElement");
         expect(overlayLock).toContain("active.blur()");
+        expect(overlayLock).toContain("canAutoFocusOverlayControl");
+        expect(overlayLock).toContain("(pointer: coarse)");
         expect(compact).toContain("blurActiveOverlayElement();");
+        expect(compact).toContain("canAutoFocusOverlayControl()");
         expect(quickSearch).toContain("blurActiveOverlayElement();");
         expect(globalAi).toContain("blurActiveOverlayElement();");
 
@@ -25,6 +28,8 @@ describe("mobile overlay viewport stability", () => {
     it("does not focus the GlobalAiChat textarea unconditionally on open", () => {
         const globalAi = fs.readFileSync(path.join(process.cwd(), "src/components/GlobalAiChat.tsx"), "utf8");
         expect(globalAi).not.toContain("if (!open) return;\n        inputRef.current?.focus();");
+        expect(globalAi).toContain("focusInputIfStable");
+        expect(globalAi).toContain("canAutoFocusOverlayControl()");
         expect(globalAi).toContain("blurActiveOverlayElement();");
     });
 

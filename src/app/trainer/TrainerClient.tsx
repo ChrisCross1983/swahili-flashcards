@@ -250,6 +250,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnDone,
         lastMissedEmpty,
         learnLoadError,
+        gradingInFlight,
         startLearningSession,
         revealCard,
         gradeCurrent,
@@ -313,9 +314,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (!quickStart || mode !== "leitner") return;
         if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
 
-        setEntryQuickStartPreset(quickStart);
-        selectTrainingPreset(quickStart);
-        setOpenLearn(true);
+        openSetupFromQuickStart(quickStart);
 
         const params = new URLSearchParams(searchParams.toString());
         params.delete("quickStart");
@@ -829,6 +828,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         resetTrainingPreset,
     } = setupState;
 
+    function openSetupFromDashboard() {
+        setEntryQuickStartPreset(null);
+        resetTrainingPreset("today");
+        setLearnMode(null);
+        setTrainingMaterial({ kind: "ALL" });
+        setOpenLearn(true);
+    }
+
+    function openSetupFromQuickStart(quickStart: QuickStartPreset) {
+        setEntryQuickStartPreset(quickStart);
+        selectTrainingPreset(quickStart);
+        setOpenLearn(true);
+    }
+
     useEffect(() => {
         if (!openLearn || selectedPreset !== "all") {
             setAllPresetFilteredCount(null);
@@ -1007,13 +1020,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 createHint={createHint}
                                 cardsLabel={cardsLabel}
                                 importVisible={!isSentenceTrainer}
-                                onOpenLearn={() => {
-                                    setEntryQuickStartPreset(null);
-                                    resetTrainingPreset("today");
-                                    setLearnMode(null);
-                                    setTrainingMaterial({ kind: "ALL" });
-                                    setOpenLearn(true);
-                                }}
+                                onOpenLearn={openSetupFromDashboard}
                                 onOpenCreate={() => {
                                     cardFormRef.current?.openCreate();
                                 }}
@@ -1533,6 +1540,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
                                                         onWrong={() => gradeCurrent(false)}
                                                         onCorrect={() => gradeCurrent(true)}
+                                                        gradingInFlight={gradingInFlight}
                                                     />
 
                                                     {isLeitnerSelected ? (

@@ -39,6 +39,14 @@ export function shouldRemoveLastMissed(params: {
         && Boolean(params.cardId);
 }
 
+export function canAcceptGradeTap(params: {
+    gradingInFlight: boolean;
+    isRecording: boolean;
+    hasItem: boolean;
+}): boolean {
+    return !params.gradingInFlight && !params.isRecording && params.hasItem;
+}
+
 export function sessionSummaryMode(learnMode: LearnMode): "LEITNER" | "DRILL" {
     return learnMode === "DRILL" ? "DRILL" : "LEITNER";
 }

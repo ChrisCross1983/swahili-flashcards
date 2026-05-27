@@ -26,7 +26,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
 
     return (
         <>
-            <div className="fixed bottom-6 right-4 z-[2147483647] hidden flex-col gap-3 md:right-6 md:flex">
+            <div className="fixed bottom-6 right-4 z-[125] hidden flex-col gap-3 md:right-6 md:flex">
                 <button
                     type="button"
                     className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-secondary text-on-accent shadow-warm transition hover:scale-105 active:scale-95"
@@ -47,7 +47,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
             </div>
 
             <div
-                className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[2147483647] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
+                className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[125] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
                     ? "top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]"
                     : "bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
                     }`}

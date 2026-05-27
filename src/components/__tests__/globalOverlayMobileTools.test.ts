@@ -16,4 +16,9 @@ describe("global mobile tools placement", () => {
         expect(source).toContain("pointer-events-auto");
         expect(source).toContain("w-11");
     });
+
+    it("keeps floating tools below modal overlays while above the trainer sheet", () => {
+        expect(source).toContain("z-[125]");
+        expect(source).not.toContain("z-[2147483647]");
+    });
 });

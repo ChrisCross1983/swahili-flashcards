@@ -15,6 +15,11 @@ export function blurActiveOverlayElement() {
     }
 }
 
+export function canAutoFocusOverlayControl() {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    return !window.matchMedia("(pointer: coarse)").matches;
+}
+
 export function lockBodyScroll() {
     const body = document.body;
     if (lockCount === 0) {

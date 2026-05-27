@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useId, useRef } from "react";
-import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import { blurActiveOverlayElement, canAutoFocusOverlayControl, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 
 type Props = {
     open: boolean;
@@ -35,7 +35,7 @@ export default function CompactOverlay({
         if (!open) return;
 
         lockBodyScroll();
-        if (!window.matchMedia("(pointer: coarse)").matches) {
+        if (canAutoFocusOverlayControl()) {
             closeRef.current?.focus();
         }
 

@@ -6,6 +6,7 @@ import { canStartTraining, type TrainingMaterial } from "@/lib/trainer/setup";
 import type { CardType, Direction, TodayItem } from "@/lib/trainer/types";
 import { resolveCardId, shuffleArray } from "@/lib/trainer/utils";
 import {
+    canAcceptGradeTap,
     chooseDirection,
     getSessionLoadPlan,
     sessionSummaryMode,
@@ -56,7 +57,9 @@ export function useTrainerSession({
     const [learnDone, setLearnDone] = useState(false);
     const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [learnLoadError, setLearnLoadError] = useState<string | null>(null);
+    const [gradingInFlight, setGradingInFlight] = useState(false);
     const sessionSavedRef = useRef(false);
+    const gradingInFlightRef = useRef(false);
 
     function resetSessionTracking() {
         setSessionCorrect(0);
@@ -70,6 +73,8 @@ export function useTrainerSession({
         setLastMissedEmpty(false);
         setEndedEarly(false);
         sessionSavedRef.current = false;
+        gradingInFlightRef.current = false;
+        setGradingInFlight(false);
         onDebugSessionReset?.();
     }
 
@@ -232,7 +237,11 @@ export function useTrainerSession({
         }
         setLearnStarted(true);
     }
-    function revealCard() { setReveal(true); playCardAudioIfExists(todayItems[currentIndex]); }
+    function revealCard() {
+        if (gradingInFlightRef.current) return;
+        setReveal(true);
+        playCardAudioIfExists(todayItems[currentIndex]);
+    }
     async function endSessionEarly() {
         stopAnyAudio?.();
         if (isRecording) stopRecording();
@@ -249,24 +258,84 @@ export function useTrainerSession({
         setEndedEarly(true);
     }
     async function gradeCurrent(correct: boolean) {
-        if (isRecording) { stopRecording(); return; } const item = todayItems[currentIndex]; if (!item) return; if (correct) playCorrect(); else playWrong(); const cardId = resolveCardId(item); const nextAnswered = new Set(answeredCardIds); if (cardId) nextAnswered.add(cardId); setAnsweredCardIds(nextAnswered); const nextCorrect = correct ? sessionCorrect + 1 : sessionCorrect; if (correct) setSessionCorrect(nextCorrect); const nextWrongIds = shouldAddLastMissed(correct, cardId) ? new Set([...Array.from(sessionWrongIds), cardId as string]) : new Set(sessionWrongIds); if (shouldAddLastMissed(correct, cardId)) { setSessionWrongIds(nextWrongIds); setSessionWrongItems((prev) => (prev[cardId as string] ? prev : { ...prev, [cardId as string]: item })); setIncorrectThisSession(incorrectThisSession.includes(cardId as string) ? incorrectThisSession : [...incorrectThisSession, cardId as string]); await updateLastMissed("add", cardId as string); }
-        const nextIndex = findNextUnansweredIndex(todayItems, nextAnswered, currentIndex + 1); const fallbackIndex = nextIndex === -1 ? findNextUnansweredIndex(todayItems, nextAnswered, 0) : nextIndex;
-        if (learnMode === "DRILL") {
-            if (shouldRemoveLastMissed({ learnMode, trainingMaterial, correct, cardId })) {
-                const removed = await updateLastMissed("remove", cardId);
-                if (removed) {
-                    onLastMissedRemoved?.();
-                    void refreshSetupCounts();
-                }
-            }
-            if (fallbackIndex === -1) { await persistLearnSession({ mode: "DRILL", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }); await refreshSetupCounts(); setReveal(false); setTodayItems([]); setShowSummary(true); return; }
-            setCurrentIndex(fallbackIndex); setReveal(false); if (directionMode === "RANDOM") setDirection(chooseDirection("RANDOM")); return;
+        const item = todayItems[currentIndex];
+        if (!canAcceptGradeTap({ gradingInFlight: gradingInFlightRef.current, isRecording, hasItem: Boolean(item) })) {
+            if (isRecording && !gradingInFlightRef.current) stopRecording();
+            return;
         }
-        try { await postGrade({ cardId: resolveCardId(item), correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 }); } catch { }
-        if (fallbackIndex === -1) { await persistLearnSession({ mode: "LEITNER", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }); await loadLeitnerStats(); await refreshSetupCounts(); setReveal(false); setTodayItems([]); setLearnDone(true); return; }
-        setCurrentIndex(fallbackIndex); setReveal(false); if (directionMode === "RANDOM") setDirection(chooseDirection("RANDOM"));
+        if (!item) return;
+
+        gradingInFlightRef.current = true;
+        setGradingInFlight(true);
+
+        const cardId = resolveCardId(item);
+        if (correct) playCorrect();
+        else playWrong();
+
+        const nextAnswered = new Set(answeredCardIds);
+        if (cardId) nextAnswered.add(cardId);
+        setAnsweredCardIds(nextAnswered);
+
+        const nextCorrect = correct ? sessionCorrect + 1 : sessionCorrect;
+        if (correct) setSessionCorrect(nextCorrect);
+
+        const addLastMissed = shouldAddLastMissed(correct, cardId);
+        const nextWrongIds = addLastMissed ? new Set([...Array.from(sessionWrongIds), cardId as string]) : new Set(sessionWrongIds);
+        if (addLastMissed) {
+            setSessionWrongIds(nextWrongIds);
+            setSessionWrongItems((prev) => (prev[cardId as string] ? prev : { ...prev, [cardId as string]: item }));
+            setIncorrectThisSession(incorrectThisSession.includes(cardId as string) ? incorrectThisSession : [...incorrectThisSession, cardId as string]);
+        }
+
+        const nextIndex = findNextUnansweredIndex(todayItems, nextAnswered, currentIndex + 1);
+        const fallbackIndex = nextIndex === -1 ? findNextUnansweredIndex(todayItems, nextAnswered, 0) : nextIndex;
+        const sessionComplete = fallbackIndex === -1;
+
+        setReveal(false);
+        if (sessionComplete) {
+            setTodayItems([]);
+            if (learnMode === "DRILL") setShowSummary(true);
+            else setLearnDone(true);
+        } else {
+            setCurrentIndex(fallbackIndex);
+            if (directionMode === "RANDOM") setDirection(chooseDirection("RANDOM"));
+        }
+
+        try {
+            if (addLastMissed) {
+                await updateLastMissed("add", cardId as string);
+            }
+
+            if (learnMode === "DRILL") {
+                if (shouldRemoveLastMissed({ learnMode, trainingMaterial, correct, cardId })) {
+                    const removed = await updateLastMissed("remove", cardId);
+                    if (removed) {
+                        onLastMissedRemoved?.();
+                        void refreshSetupCounts();
+                    }
+                }
+                if (sessionComplete) {
+                    await persistLearnSession({ mode: "DRILL", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) });
+                    await refreshSetupCounts();
+                }
+                return;
+            }
+
+            try {
+                await postGrade({ cardId, correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 });
+            } catch { }
+
+            if (sessionComplete) {
+                await persistLearnSession({ mode: "LEITNER", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) });
+                await loadLeitnerStats();
+                await refreshSetupCounts();
+            }
+        } finally {
+            gradingInFlightRef.current = false;
+            setGradingInFlight(false);
+        }
     }
     function applyDeletedCards(deletedIds: string[], opts?: { onDeleteCurrent?: () => void }) { const deletedSet = new Set(deletedIds.map(String)); setSessionWrongItems((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !deletedSet.has(String(id))))); setAnsweredCardIds((prev) => new Set(Array.from(prev).filter((id) => !deletedSet.has(String(id))))); setSessionWrongIds((prev) => new Set(Array.from(prev).filter((id) => !deletedSet.has(String(id))))); setTodayItems((prev) => { const adjusted = removeDeletedCardsFromSession(prev, currentIndex, reveal, deletedSet); setCurrentIndex(adjusted.index); setReveal(adjusted.reveal); if (adjusted.deletedCurrent) opts?.onDeleteCurrent?.(); if (adjusted.ended) setLearnDone(true); return adjusted.items; }); }
 
-    return { todayItems, setTodayItems, currentIndex, setCurrentIndex, reveal, setReveal, direction, setDirection, sessionCorrect, sessionWrongIds, sessionWrongItems, answeredCardIds, sessionTotal, setSessionTotal, showSummary, setShowSummary, endedEarly, setEndedEarly, learnStarted, setLearnStarted, learnDone, setLearnDone, lastMissedEmpty, learnLoadError, incorrectThisSession, startLearningSession, revealCard, gradeCurrent, endSessionEarly, resetSessionTracking, startDrillWithItems, applyDeletedCards };
+    return { todayItems, setTodayItems, currentIndex, setCurrentIndex, reveal, setReveal, direction, setDirection, sessionCorrect, sessionWrongIds, sessionWrongItems, answeredCardIds, sessionTotal, setSessionTotal, showSummary, setShowSummary, endedEarly, setEndedEarly, learnStarted, setLearnStarted, learnDone, setLearnDone, lastMissedEmpty, learnLoadError, incorrectThisSession, gradingInFlight, startLearningSession, revealCard, gradeCurrent, endSessionEarly, resetSessionTracking, startDrillWithItems, applyDeletedCards };
 }

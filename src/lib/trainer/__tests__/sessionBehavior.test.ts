@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    canAcceptGradeTap,
     chooseDirection,
     getSessionLoadPlan,
     repeatWrongItems,
@@ -49,6 +50,13 @@ describe("trainer session behavior", () => {
             correct: true,
             cardId: "a",
         })).toBe(false);
+    });
+
+    it("rejects duplicate or unsafe grade taps while preserving normal taps", () => {
+        expect(canAcceptGradeTap({ gradingInFlight: false, isRecording: false, hasItem: true })).toBe(true);
+        expect(canAcceptGradeTap({ gradingInFlight: true, isRecording: false, hasItem: true })).toBe(false);
+        expect(canAcceptGradeTap({ gradingInFlight: false, isRecording: true, hasItem: true })).toBe(false);
+        expect(canAcceptGradeTap({ gradingInFlight: false, isRecording: false, hasItem: false })).toBe(false);
     });
 
     it("builds end-session and repeat-wrong behavior contracts", () => {
