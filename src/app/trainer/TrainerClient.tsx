@@ -32,6 +32,13 @@ import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
 import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
+import {
+    CARD_LIBRARY_PAGE_SIZE,
+    getLibraryCountLabel,
+    getVisibleCards,
+    nextVisibleCount,
+    shouldShowLoadMore,
+} from "@/lib/trainer/cardLibraryBehavior";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
 import GroupBadge from "@/components/groups/GroupBadge";
@@ -63,6 +70,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         : "Neue Karte anlegen (Deutsch ↔ Swahili).";
     const cardsLabel = isSentenceTrainer ? "Meine Sätze" : "Meine Karten";
     const cardsCountLabel = isSentenceTrainer ? "Sätze insgesamt" : "Karten insgesamt";
+    const cardItemLabel = isSentenceTrainer ? "Sätze" : "Karten";
     const editTitle = isSentenceTrainer ? "Satz bearbeiten" : "Karte bearbeiten";
     const createTitle = isSentenceTrainer ? "Neue Sätze" : "Neue Wörter";
     const saveCardLabel = isSentenceTrainer ? "Satz speichern" : "Karte speichern";
@@ -105,6 +113,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
     const [cardSelectionMode, setCardSelectionMode] = useState(false);
     const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
+    const [cardLibraryVisibleCount, setCardLibraryVisibleCount] = useState(CARD_LIBRARY_PAGE_SIZE);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -621,11 +630,26 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         else startRecording();
     }
 
-    const filteredCards = cards.filter((c) => {
+    const hasActiveGroupFilter = selectedGroupIds.length > 0;
+    const filteredCards = useMemo(() => cards.filter((c) => {
         if (selectedGroupIds.length === 0) return true;
         const cardGroupIds = new Set((c.groups ?? []).map((group: any) => String(group.id)));
         return selectedGroupIds.some((id) => cardGroupIds.has(String(id)));
-    });
+    }), [cards, selectedGroupIds]);
+    const visibleCards = useMemo(
+        () => getVisibleCards(filteredCards, cardLibraryVisibleCount),
+        [filteredCards, cardLibraryVisibleCount]
+    );
+    const libraryCountLabel = useMemo(() => getLibraryCountLabel({
+        visible: visibleCards.length,
+        total: filteredCards.length,
+        filtered: hasActiveGroupFilter,
+        itemLabel: cardItemLabel,
+    }), [cardItemLabel, filteredCards.length, hasActiveGroupFilter, visibleCards.length]);
+    const libraryCanLoadMore = useMemo(
+        () => shouldShowLoadMore(filteredCards.length, cardLibraryVisibleCount),
+        [filteredCards.length, cardLibraryVisibleCount]
+    );
     const groupCardCounts = useMemo(() => {
         const counts: Record<string, number> = {};
         for (const card of cards) {
@@ -645,7 +669,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         [groups, cardGroupsDraft]
     );
     const cardGroupsSummary = useMemo(() => visibleBadgeSummary(cardGroupsSelected, 2), [cardGroupsSelected]);
-    const hasActiveGroupFilter = selectedGroupIds.length > 0;
 
     const currentGerman = readGerman(currentItem);
 
@@ -1028,6 +1051,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                                 onOpenCards={() => {
                                     setStatus("");
+                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
                                     setOpenCards(true);
                                     loadCards();
                                 }}
@@ -1748,6 +1772,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     setOpenCards(false);
                                     setCardSelectionMode(false);
                                     setSelectedCardIds(clearSelection());
+                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
                                 }}
                             >
                                 <div className="rounded-2xl border p-4 bg-surface">
@@ -1776,7 +1801,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                     <div className="mt-3 text-sm text-muted">
                                         {cardsLoadState === "loaded" ? (
-                                            `${filteredCards.length} von ${cards.length} ${cardsCountLabel}.`
+                                            libraryCountLabel
                                         ) : cardsLoadState === "error" ? (
                                             "Laden fehlgeschlagen."
                                         ) : (
@@ -1801,8 +1826,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         <button
                                                             type="button"
                                                             className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={() => setSelectedCardIds(selectAllVisible(filteredCards.map((card) => String(card.id))))}
-                                                            disabled={filteredCards.length === 0}
+                                                            onClick={() => setSelectedCardIds(selectAllVisible(visibleCards.map((card) => String(card.id))))}
+                                                            disabled={visibleCards.length === 0}
                                                         >
                                                             Sichtbare auswählen
                                                         </button>
@@ -1841,7 +1866,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             <select
                                                 className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent text-sm"
                                                 value={selectedGroupIds[0] ?? ""}
-                                                onChange={(event) => setSelectedGroupIds(event.target.value ? [event.target.value] : [])}
+                                                onChange={(event) => {
+                                                    setSelectedGroupIds(event.target.value ? [event.target.value] : []);
+                                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+                                                    setSelectedCardIds(clearSelection());
+                                                }}
                                             >
                                                 <option value="">Alle Karten</option>
                                                 {groups.map((group) => (
@@ -1868,7 +1897,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                     {/* Liste */}
                                     <div className="mt-4 space-y-3">
-                                        {filteredCards.map((c) => (
+                                        {visibleCards.map((c) => (
                                             <div key={c.id} className="rounded-xl border p-3">
                                                 <div className="flex items-start gap-3">
                                                     {cardSelectionMode ? (
@@ -1968,6 +1997,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 {hasActiveGroupFilter ? "Keine Karten in den gewählten Gruppen. Wähle „Alle Karten“ oder passe den Filter an." : "Keine Treffer."}
                                             </p>
                                         ) : null}
+                                        {libraryCanLoadMore ? (
+                                            <button
+                                                type="button"
+                                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm font-medium text-primary hover:bg-surface-elevated"
+                                                onClick={() => setCardLibraryVisibleCount((current) => nextVisibleCount(current, CARD_LIBRARY_PAGE_SIZE, filteredCards.length))}
+                                            >
+                                                Mehr laden
+                                            </button>
+                                        ) : null}
                                     </div>
                                 </div>
                             </FullScreenSheet >
@@ -1981,6 +2019,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onUpdated={setGroups}
                                 onOpenGroup={(groupId) => {
                                     setSelectedGroupIds([groupId]);
+                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+                                    setSelectedCardIds(clearSelection());
                                     setManageGroupsOpen(false);
                                     setOpenCards(true);
                                 }}
