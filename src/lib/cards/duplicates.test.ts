@@ -4,6 +4,7 @@ import {
     normalizeForDuplicateComparison,
     recommendKeepCard,
     validateClusterDeletionSelection,
+    validateClusterDeletionSelections,
     type DuplicateCard,
 } from "./duplicates";
 
@@ -69,13 +70,31 @@ describe("duplicate detection", () => {
 
     it("keeps suspicious phrase extension in review mode", () => {
         const clusters = detectDuplicateClusters([
-            card({ id: "1", german_text: "together", swahili_text: "pamoja" }),
-            card({ id: "2", german_text: "together", swahili_text: "pamoja na" }),
+            card({ id: "1", german_text: "auf sie aufpassen", swahili_text: "waangalie vizuri" }),
+            card({ id: "2", german_text: "auf sie aufpassen heute", swahili_text: "waangalie vizuri sana" }),
         ], "review");
 
         expect(clusters).toHaveLength(1);
         expect(clusters[0].kind).toBe("suspicious");
         expect(clusters[0].mode).toBe("review");
+    });
+
+    it("does not flag one-word prefix matches against phrase cards", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "bitte", swahili_text: "tafadhali" }),
+            card({ id: "2", german_text: "bitte pass auf sie auf", swahili_text: "tafadhali watunze" }),
+        ], "all");
+
+        expect(clusters).toHaveLength(0);
+    });
+
+    it("does not flag large prefix length-ratio mismatches", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "pass gut", swahili_text: "angalia vizuri" }),
+            card({ id: "2", german_text: "pass gut auf sie alle morgen auf", swahili_text: "angalia vizuri watoto wote kesho" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(0);
     });
 
     it("does not flag unrelated pairs", () => {
@@ -121,5 +140,21 @@ describe("recommendation and deletion safety", () => {
             .toBe("Mindestens eine Karte muss pro Cluster behalten werden.");
         expect(validateClusterDeletionSelection(cluster, ["2"]))
             .toBeNull();
+    });
+
+    it("validates only clusters with selected delete ids", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "und", swahili_text: "na" }),
+            card({ id: "2", german_text: "und", swahili_text: "na" }),
+            card({ id: "3", german_text: "Haus", swahili_text: "nyumba" }),
+            card({ id: "4", german_text: "Haus", swahili_text: "nyumba" }),
+        ], "strict");
+
+        expect(validateClusterDeletionSelections(clusters, {
+            [clusters[0].clusterId]: ["2"],
+        })).toBeNull();
+        expect(validateClusterDeletionSelections(clusters, {
+            [clusters[0].clusterId]: ["1", "2"],
+        })).toContain("Mindestens eine Karte muss pro Cluster behalten werden.");
     });
 });

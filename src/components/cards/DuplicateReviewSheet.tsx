@@ -5,7 +5,7 @@ import FullScreenSheet from "@/components/FullScreenSheet";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import CardText from "@/components/ui/CardText";
 import type { CardType } from "@/lib/trainer/types";
-import { validateClusterDeletionSelection, type DuplicateCluster } from "@/lib/cards/duplicates";
+import { validateClusterDeletionSelections, type DuplicateCluster } from "@/lib/cards/duplicates";
 
 type ScanResponse = {
     clusters: DuplicateCluster[];
@@ -67,13 +67,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
 
             const foundClusters = Array.isArray(json.clusters) ? json.clusters : [];
             setClusters(foundClusters);
-
-            const defaults: Record<string, Set<string>> = {};
-            for (const cluster of foundClusters) {
-                const keepId = cluster.recommendation?.keepCardId ?? cluster.cards[0]?.id;
-                defaults[cluster.clusterId] = new Set(cluster.cards.map((card) => card.id).filter((id) => id !== keepId));
-            }
-            setSelectedDeleteIds(defaults);
+            setSelectedDeleteIds({});
         } catch {
             setStatus("Duplikat-Scan fehlgeschlagen.");
         } finally {
@@ -98,12 +92,12 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
     }
 
     function validateBeforeDelete(): string | null {
-        for (const cluster of clusters) {
-            const selected = Array.from(selectedDeleteIds[cluster.clusterId] ?? []);
-            const validation = validateClusterDeletionSelection(cluster, selected);
-            if (validation) return `${validation} (Cluster ${cluster.clusterId})`;
-        }
-        return null;
+        return validateClusterDeletionSelections(
+            clusters,
+            Object.fromEntries(
+                Object.entries(selectedDeleteIds).map(([clusterId, selected]) => [clusterId, Array.from(selected)])
+            )
+        );
     }
 
     async function deleteSelected() {
@@ -115,7 +109,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
         );
 
         if (!selectedIds.length) {
-            setStatus("Keine Karten zum Löschen ausgewählt.");
+            setStatus("Bitte Karten zum Löschen auswählen.");
             return;
         }
 
@@ -162,7 +156,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                             Strikte Dubletten (inkl. didaktischer Varianten): <strong>{strictClusters.length}</strong> · Verdächtige Kandidaten: <strong>{reviewClusters.length}</strong>
                         </p>
                         <p className="mt-1 text-xs text-muted">
-                            Verdächtige Treffer sind nur Review-Kandidaten und werden nie automatisch gelöscht.
+                            Verdächtige Treffer sind nur Review-Kandidaten. Karten werden nur gelöscht, wenn du sie manuell auswählst.
                         </p>
                     </div>
 
@@ -210,6 +204,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                                                         type="checkbox"
                                                         className="mt-1"
                                                         checked={checked}
+                                                        aria-label={`Zum Löschen auswählen: ${card.german_text}`}
                                                         onChange={() => toggleDelete(cluster.clusterId, card.id)}
                                                     />
                                                     <div className="min-w-0">
@@ -251,6 +246,7 @@ export default function DuplicateReviewSheet({ open, cardType, onClose, onDelete
                                                         type="checkbox"
                                                         className="mt-1"
                                                         checked={checked}
+                                                        aria-label={`Zum Löschen auswählen: ${card.german_text}`}
                                                         onChange={() => toggleDelete(cluster.clusterId, card.id)}
                                                     />
                                                     <div className="min-w-0">

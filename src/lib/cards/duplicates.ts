@@ -67,6 +67,10 @@ function tokenize(value: string): string[] {
         .filter(Boolean);
 }
 
+function tokenCount(value: string): number {
+    return tokenize(value).length;
+}
+
 function tokenOverlap(left: string, right: string): number {
     const leftTokens = new Set(tokenize(left));
     const rightTokens = new Set(tokenize(right));
@@ -83,6 +87,14 @@ function tokenOverlap(left: string, right: string): number {
 function isStrictPrefixPair(a: string, b: string): boolean {
     if (!a || !b || a === b) return false;
     return a.startsWith(`${b} `) || b.startsWith(`${a} `);
+}
+
+function isClosePrefixPair(a: string, b: string): boolean {
+    if (!isStrictPrefixPair(a, b)) return false;
+    const shorterTokenCount = Math.min(tokenCount(a), tokenCount(b));
+    const longerTokenCount = Math.max(tokenCount(a), tokenCount(b));
+    if (shorterTokenCount < 2 || longerTokenCount === 0) return false;
+    return shorterTokenCount / longerTokenCount >= 0.65;
 }
 
 type PairMatch = {
@@ -155,8 +167,8 @@ function classifyPair(a: DuplicateCard, b: DuplicateCard): PairMatch | null {
         };
     }
 
-    const germanPrefix = isStrictPrefixPair(aGermanNormalized, bGermanNormalized);
-    const swPrefix = isStrictPrefixPair(aSwNormalized, bSwNormalized);
+    const germanPrefix = isClosePrefixPair(aGermanNormalized, bGermanNormalized);
+    const swPrefix = isClosePrefixPair(aSwNormalized, bSwNormalized);
 
     if (aGermanNormalized === bGermanNormalized && swPrefix) {
         return {
@@ -356,5 +368,18 @@ export function validateClusterDeletionSelection(cluster: DuplicateCluster, dele
     const selectedCount = deleteCardIds.filter((id) => ids.has(id)).length;
     if (selectedCount === 0) return "Keine Karte ausgewählt.";
     if (selectedCount >= cluster.cards.length) return "Mindestens eine Karte muss pro Cluster behalten werden.";
+    return null;
+}
+
+export function validateClusterDeletionSelections(
+    clusters: DuplicateCluster[],
+    selectedByCluster: Record<string, string[]>,
+): string | null {
+    for (const cluster of clusters) {
+        const selected = selectedByCluster[cluster.clusterId] ?? [];
+        if (selected.length === 0) continue;
+        const validation = validateClusterDeletionSelection(cluster, selected);
+        if (validation) return `${validation} (Cluster ${cluster.clusterId})`;
+    }
     return null;
 }
