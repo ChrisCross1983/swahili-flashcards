@@ -29,6 +29,7 @@ type SuggestItem = {
 };
 
 type EditSource = "cards" | "create";
+type DuplicateCheckKind = "strict" | "similar" | "failure" | null;
 
 type CreateDraft = {
     german: string;
@@ -98,7 +99,9 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
-    const [duplicatePreview, setDuplicatePreview] = useState<unknown | null>(null);
+    const [duplicatePreview, setDuplicatePreview] = useState<any[] | null>(null);
+    const [duplicateCheckKind, setDuplicateCheckKind] = useState<DuplicateCheckKind>(null);
+    const [duplicateCheckLoading, setDuplicateCheckLoading] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSource, setEditSource] = useState<EditSource>("create");
     const [returnToLearn, setReturnToLearn] = useState(false);
@@ -364,36 +367,68 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     async function checkExistingGerman(
         germanText: string = german,
-        swahiliText: string = swahili
+        swahiliText: string = swahili,
+        excludeId: string | null = editingId,
     ): Promise<boolean> {
         const resolvedGerman = germanText.trim();
         const resolvedSwahili = swahiliText.trim();
-        const res = await fetch("/api/cards/check-existing", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                german: resolvedGerman,
-                swahili: resolvedSwahili,
-                type: cardType,
-            }),
-        });
+        setDuplicateCheckLoading(true);
+        setStatus("Prüfe auf ähnliche Karten …");
 
-        const json = await res.json();
+        try {
+            const res = await fetch("/api/cards/check-existing", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    german: resolvedGerman,
+                    swahili: resolvedSwahili,
+                    type: cardType,
+                    excludeId,
+                }),
+            });
 
-        if (!res.ok) {
-            console.error(json.error);
+            const json = await res.json();
+
+            if (!res.ok) {
+                console.error(json.error);
+                setDuplicateCheckKind("failure");
+                setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+                setDuplicatePreview(null);
+                setStatus("");
+                return true;
+            }
+
+            if (json.exists) {
+                setDuplicateCheckKind("strict");
+                setDuplicateHint("Mögliche Dublette gefunden");
+                setDuplicatePreview(Array.isArray(json.strictCards) ? json.strictCards : json.cards ?? null);
+                setStatus("");
+                return true;
+            }
+
+            if (json.hasSimilar) {
+                setDuplicateCheckKind("similar");
+                setDuplicateHint("Ähnliche Karten gefunden");
+                setDuplicatePreview(Array.isArray(json.similarCards) ? json.similarCards : json.cards ?? null);
+                setStatus("");
+                return true;
+            }
+
+            setDuplicateCheckKind(null);
+            setDuplicateHint(null);
+            setDuplicatePreview(null);
+            setStatus("");
             return false;
-        }
-
-        if (json.exists) {
-            setDuplicateHint(
-                `Hinweis: Für „${resolvedGerman}“ gibt es bereits Karten. Prüfe kurz, ob es eine Variante oder ein Tippfehler ist.`
-            );
-            setDuplicatePreview(json.cards ?? null);
+        } catch (error) {
+            console.error(error);
+            setDuplicateCheckKind("failure");
+            setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+            setDuplicatePreview(null);
+            setStatus("");
             return true;
+        } finally {
+            setDuplicateCheckLoading(false);
         }
-
-        return false;
     }
 
     async function createCard(skipWarning = false) {
@@ -402,8 +437,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             const trimmedSwahili = swahili.trim();
 
             if (!skipWarning) {
-                const exists = await checkExistingGerman(trimmedGerman, trimmedSwahili);
-                if (exists) {
+                const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili, null);
+                if (shouldReview) {
                     setStatus("");
                     return;
                 }
@@ -437,6 +472,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 console.error(json.error);
 
                 if (res.status === 409) {
+                    setDuplicateCheckKind("strict");
                     setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
                     setStatus("");
                     return;
@@ -494,6 +530,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             setSuggestedImagePath(null);
             setDuplicateHint(null);
             setDuplicatePreview(null);
+            setDuplicateCheckKind(null);
             await onCreated(created);
 
             setGerman("");
@@ -511,15 +548,18 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             resetFormNotes();
             setDuplicateHint(null);
             setDuplicatePreview(null);
+            setDuplicateCheckKind(null);
             setStatus("Karte gespeichert ✅");
         } catch (e: any) {
             setStatus(`Fehler: ${e.message}`);
         }
     }
 
-    async function updateCard() {
+    async function updateCard(skipWarning = false) {
         try {
             setDuplicateHint(null);
+            setDuplicatePreview(null);
+            setDuplicateCheckKind(null);
             setStatus("Speichere...");
 
             if (!editingId) {
@@ -532,6 +572,15 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             if (!trimmedGerman || !trimmedSwahili) {
                 setStatus("Bitte Deutsch und Swahili ausfüllen.");
                 return;
+            }
+
+            if (!skipWarning) {
+                const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili, editingId);
+                if (shouldReview) {
+                    setStatus("");
+                    return;
+                }
+                setStatus("Speichere...");
             }
 
             let imagePath: string | null | undefined = undefined;
@@ -562,6 +611,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             if (!res.ok) {
                 if (res.status === 409) {
+                    setDuplicateCheckKind("strict");
                     setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
                     setStatus("");
                     return;
@@ -592,6 +642,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             }
 
             showToast("Karte aktualisiert ✅");
+            setStatus("Karte aktualisiert ✅");
+            setDuplicateHint(null);
+            setDuplicatePreview(null);
+            setDuplicateCheckKind(null);
 
             setGerman("");
             setSwahili("");
@@ -1257,13 +1311,27 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     ) : null}
 
+                    {duplicateCheckLoading ? (
+                        <div className="mt-4 rounded-xl border p-4 bg-surface text-sm text-muted">
+                            Prüfe auf ähnliche Karten …
+                        </div>
+                    ) : null}
+
                     {duplicateHint && (
-                        <div className="mt-4 rounded-xl border p-4 bg-yellow-50 space-y-3">
+                        <div className={`mt-4 rounded-xl border p-4 space-y-3 ${duplicateCheckKind === "strict" ? "bg-yellow-50" : "bg-surface"}`}>
                             <p className="text-sm font-medium">{duplicateHint}</p>
+                            {duplicateCheckKind === "similar" ? (
+                                <p className="text-xs text-muted">Nicht zwingend eine Dublette – bitte kurz prüfen.</p>
+                            ) : null}
+                            {duplicateCheckKind === "failure" ? (
+                                <p className="text-xs text-muted">Du kannst trotzdem speichern, aber die Prüfung wurde nicht vollständig ausgeführt.</p>
+                            ) : null}
 
                             {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
                                 <div className="space-y-2">
-                                    <p className="text-xs text-muted">Bereits vorhandene Karten:</p>
+                                    <p className="text-xs text-muted">
+                                        {duplicateCheckKind === "similar" ? "Ähnliche vorhandene Karten:" : "Bereits vorhandene Karten:"}
+                                    </p>
 
                                     {duplicatePreview.slice(0, 5).map((card: any) => (
                                         <button
@@ -1306,6 +1374,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                     onClick={() => {
                                         setDuplicateHint(null);
                                         setDuplicatePreview(null);
+                                        setDuplicateCheckKind(null);
                                     }}
                                 >
                                     Korrigieren
@@ -1313,7 +1382,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
                                 <button
                                     className="btn btn-primary flex-1 text-sm"
-                                    onClick={() => createCard(true)}
+                                    onClick={() => editingId ? updateCard(true) : createCard(true)}
                                 >
                                     Trotzdem speichern
                                 </button>

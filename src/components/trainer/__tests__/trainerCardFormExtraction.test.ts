@@ -62,12 +62,23 @@ describe("trainer card form extraction", () => {
     });
 
     it("preserves duplicate review, edit-from-learn, cancel, delete, and audio callbacks", () => {
-        expect(formSource).toContain("const exists = await checkExistingGerman(trimmedGerman, trimmedSwahili)");
+        expect(formSource).toContain("const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili");
         expect(formSource).toContain("Trotzdem speichern");
         expect(formSource).toContain("setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes })");
         expect(formSource).toContain("openEditFromLearn(input)");
         expect(formSource).toContain("onReturnToLearn()");
         expect(formSource).toContain("onDeleted(deletedId)");
         expect(formSource).toContain("onAudioUpdated(resolvedCardId, newPath)");
+    });
+
+    it("surfaces strict duplicates, near matches, check loading, and check failure", () => {
+        expect(formSource).toContain("Prüfe auf ähnliche Karten …");
+        expect(formSource).toContain("Mögliche Dublette gefunden");
+        expect(formSource).toContain("Ähnliche Karten gefunden");
+        expect(formSource).toContain("Nicht zwingend eine Dublette");
+        expect(formSource).toContain("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+        expect(formSource).toContain("onClick={() => editingId ? updateCard(true) : createCard(true)}");
+        expect(formSource).toContain("setStatus(\"Karte aktualisiert ✅\")");
+        expect(formSource).toContain("setStatus(\"Karte gespeichert ✅\")");
     });
 });

@@ -97,6 +97,36 @@ describe("duplicate detection", () => {
         expect(clusters).toHaveLength(0);
     });
 
+    it("flags close phrase variants as review candidates", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "Ich suche dich", swahili_text: "ninakutafuta" }),
+            card({ id: "2", german_text: "Ich such dich", swahili_text: "ninakutafuta" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0].mode).toBe("review");
+        expect(clusters[0].kind).toBe("suspicious");
+    });
+
+    it("flags meaningful phrase extensions as review candidates when both sides are close", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "ich suche", swahili_text: "ninatafuta" }),
+            card({ id: "2", german_text: "ich suche dich", swahili_text: "ninakutafuta" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0].mode).toBe("review");
+    });
+
+    it("requires both sides to be close for review candidates", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "ich suche dich", swahili_text: "ninakutafuta" }),
+            card({ id: "2", german_text: "ich such dich", swahili_text: "asante sana" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(0);
+    });
+
     it("does not flag unrelated pairs", () => {
         const clusters = detectDuplicateClusters([
             card({ id: "1", german_text: "Hund", swahili_text: "mbwa" }),

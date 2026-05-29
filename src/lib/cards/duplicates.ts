@@ -84,6 +84,42 @@ function tokenOverlap(left: string, right: string): number {
     return shared / Math.max(leftTokens.size, rightTokens.size);
 }
 
+function levenshteinDistance(left: string, right: string): number {
+    if (left === right) return 0;
+    if (!left) return right.length;
+    if (!right) return left.length;
+
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    const current = Array.from({ length: right.length + 1 }, () => 0);
+
+    for (let i = 1; i <= left.length; i += 1) {
+        current[0] = i;
+        for (let j = 1; j <= right.length; j += 1) {
+            const substitutionCost = left[i - 1] === right[j - 1] ? 0 : 1;
+            current[j] = Math.min(
+                current[j - 1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + substitutionCost,
+            );
+        }
+        for (let j = 0; j <= right.length; j += 1) {
+            previous[j] = current[j];
+        }
+    }
+
+    return previous[right.length] ?? 0;
+}
+
+export function normalizedTextSimilarity(left: string, right: string): number {
+    const leftNormalized = normalizeForDuplicateComparison(left);
+    const rightNormalized = normalizeForDuplicateComparison(right);
+    if (!leftNormalized && !rightNormalized) return 1;
+    if (!leftNormalized || !rightNormalized) return 0;
+    const maxLength = Math.max(leftNormalized.length, rightNormalized.length);
+    if (maxLength === 0) return 1;
+    return 1 - (levenshteinDistance(leftNormalized, rightNormalized) / maxLength);
+}
+
 function isStrictPrefixPair(a: string, b: string): boolean {
     if (!a || !b || a === b) return false;
     return a.startsWith(`${b} `) || b.startsWith(`${a} `);
@@ -95,6 +131,42 @@ function isClosePrefixPair(a: string, b: string): boolean {
     const longerTokenCount = Math.max(tokenCount(a), tokenCount(b));
     if (shorterTokenCount < 2 || longerTokenCount === 0) return false;
     return shorterTokenCount / longerTokenCount >= 0.65;
+}
+
+function isNearPrefixPair(a: string, b: string): boolean {
+    if (!isStrictPrefixPair(a, b)) return false;
+    const shorterTokenCount = Math.min(tokenCount(a), tokenCount(b));
+    const longerTokenCount = Math.max(tokenCount(a), tokenCount(b));
+    if (shorterTokenCount < 2 || longerTokenCount === 0) return false;
+    return shorterTokenCount / longerTokenCount >= 0.5;
+}
+
+function isSingleTokenPhrasePrefix(a: string, b: string): boolean {
+    if (!isStrictPrefixPair(a, b)) return false;
+    return Math.min(tokenCount(a), tokenCount(b)) <= 1 && Math.max(tokenCount(a), tokenCount(b)) >= 2;
+}
+
+function hasReviewSimilarity(left: string, right: string): boolean {
+    const leftNormalized = normalizeForDuplicateComparison(left);
+    const rightNormalized = normalizeForDuplicateComparison(right);
+    if (!leftNormalized || !rightNormalized) return false;
+    if (leftNormalized === rightNormalized) return true;
+    if (isSingleTokenPhrasePrefix(leftNormalized, rightNormalized)) return false;
+    if (isNearPrefixPair(leftNormalized, rightNormalized)) return true;
+
+    const leftTokenCount = tokenCount(left);
+    const rightTokenCount = tokenCount(right);
+    const shorterTokenCount = Math.min(leftTokenCount, rightTokenCount);
+    const longerTokenCount = Math.max(leftTokenCount, rightTokenCount);
+    const tokenRatio = longerTokenCount === 0 ? 0 : shorterTokenCount / longerTokenCount;
+    const overlap = tokenOverlap(left, right);
+    const similarity = normalizedTextSimilarity(left, right);
+
+    if (similarity >= 0.86 && tokenRatio >= 0.5) return true;
+    if (similarity >= 0.78 && leftTokenCount === 1 && rightTokenCount === 1) return true;
+    if (overlap >= 0.67 && tokenRatio >= 0.5 && shorterTokenCount >= 2) return true;
+
+    return false;
 }
 
 type PairMatch = {
@@ -202,6 +274,17 @@ function classifyPair(a: DuplicateCard, b: DuplicateCard): PairMatch | null {
             mode: "review",
             kind: "suspicious",
             reason: "Verdächtig ähnlich: starker Token-Overlap auf einer Seite.",
+        };
+    }
+
+    if (
+        hasReviewSimilarity(a.german_text, b.german_text)
+        && hasReviewSimilarity(a.swahili_text, b.swahili_text)
+    ) {
+        return {
+            mode: "review",
+            kind: "suspicious",
+            reason: "Verdächtig ähnlich: beide Seiten sind nah verwandt.",
         };
     }
 
@@ -361,6 +444,30 @@ export function detectDuplicateClusters(cards: DuplicateCard[], mode: DuplicateM
     const strictClusters = mode === "review" ? [] : buildClusters(cards, "strict", 1);
     const reviewClusters = mode === "strict" ? [] : buildClusters(cards, "review", strictClusters.length + 1);
     return [...strictClusters, ...reviewClusters];
+}
+
+export function findDuplicateCandidatesForCard(
+    input: Pick<DuplicateCard, "german_text" | "swahili_text"> & { id?: string | null },
+    cards: DuplicateCard[],
+    options: { excludeId?: string | null } = {},
+): { strict: DuplicateCard[]; similar: DuplicateCard[] } {
+    const inputCard: DuplicateCard = {
+        id: String(input.id ?? "__input__"),
+        german_text: input.german_text,
+        swahili_text: input.swahili_text,
+    };
+    const strict: DuplicateCard[] = [];
+    const similar: DuplicateCard[] = [];
+
+    for (const card of cards) {
+        if (options.excludeId && String(card.id) === String(options.excludeId)) continue;
+        const match = classifyPair(inputCard, { ...card, id: String(card.id) });
+        if (!match) continue;
+        if (match.mode === "strict") strict.push(card);
+        else similar.push(card);
+    }
+
+    return { strict, similar };
 }
 
 export function validateClusterDeletionSelection(cluster: DuplicateCluster, deleteCardIds: string[]): string | null {
