@@ -45,8 +45,9 @@ describe("trainer create/edit notes integration", () => {
 
     it("wires edit entry points through the extracted card form sheet", () => {
         expect(clientSource).toContain("<TrainerCardFormSheet");
+        expect(clientSource).toContain("<TrainerCardLibrarySheet");
         expect(clientSource).toContain("cardFormRef.current?.openCreate()");
-        expect(clientSource).toContain("cardFormRef.current?.openEdit(c, \"cards\")");
+        expect(clientSource).toContain("cardFormRef.current?.openEdit(card, \"cards\")");
         expect(clientSource).toContain("cardFormRef.current?.openEditFromLearn({");
     });
 });

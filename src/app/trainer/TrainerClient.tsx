@@ -7,7 +7,6 @@ import { initFeedbackSounds } from "@/lib/audio/sounds";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import CompactOverlay from "@/components/CompactOverlay";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import CardText from "@/components/ui/CardText";
 import {
     formatDays,
     getIntervalDays,
@@ -30,15 +29,9 @@ import LearningHelpPanel from "@/components/trainer/LearningHelpPanel";
 import TrainerDashboard from "@/components/trainer/TrainerDashboard";
 import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
+import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
 import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
-import {
-    CARD_LIBRARY_PAGE_SIZE,
-    getLibraryCountLabel,
-    getVisibleCards,
-    nextVisibleCount,
-    shouldShowLoadMore,
-} from "@/lib/trainer/cardLibraryBehavior";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
 import GroupBadge from "@/components/groups/GroupBadge";
@@ -47,7 +40,7 @@ import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
 import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
-import { clearSelection, removeDeletedFromSelection, selectAllVisible, toggleSelection } from "@/lib/cards/selection";
+import { useTrainerCardLibrary } from "@/lib/trainer/useTrainerCardLibrary";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -61,7 +54,7 @@ const IMAGE_BASE_URL =
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
-    // Route-level orchestrator: setup/session/library state lives here, while detailed card form state lives in TrainerCardFormSheet.
+    // Route-level orchestrator: setup, session, card form, and library domains own their detailed state behind focused boundaries.
     const isSentenceTrainer = cardType === "sentence";
     const trainerTitle = isSentenceTrainer ? "Satztrainer" : "Swahili Flashcards (MVP)";
     const createLabel = isSentenceTrainer ? "Neue Sätze anlegen" : "Neue Wörter anlegen";
@@ -78,7 +71,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
-    const [cards, setCards] = useState<any[]>([]);
+    const cardLibrary = useTrainerCardLibrary({ itemLabel: cardItemLabel });
+    const { cards, setCards } = cardLibrary;
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
@@ -97,9 +91,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
     const [groups, setGroups] = useState<Group[]>([]);
-    const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
-    const [duplicateReviewOpen, setDuplicateReviewOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
     const [cardGroupsCardId, setCardGroupsCardId] = useState<string | null>(null);
@@ -111,9 +103,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [cardNoteLoading, setCardNoteLoading] = useState(false);
     const [cardNoteSaving, setCardNoteSaving] = useState(false);
     const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
-    const [cardSelectionMode, setCardSelectionMode] = useState(false);
-    const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
-    const [cardLibraryVisibleCount, setCardLibraryVisibleCount] = useState(CARD_LIBRARY_PAGE_SIZE);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -416,8 +405,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             if (q && q.trim().length > 0) {
                 searchParams.set("q", q);
             }
-            if (selectedGroupIds.length > 0) {
-                searchParams.set("groupIds", selectedGroupIds.join(","));
+            if (cardLibrary.groupFilter.length > 0) {
+                searchParams.set("groupIds", cardLibrary.groupFilter.join(","));
             }
             const url = `/api/cards?${searchParams.toString()}`;
 
@@ -448,9 +437,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     function applyDeletedCards(deletedIds: string[]) {
         if (deletedIds.length === 0) return;
-        const deletedSet = new Set(deletedIds.map(String));
-        setCards((prev) => prev.filter((card) => !deletedSet.has(String(card.id))));
-        setSelectedCardIds((prev) => removeDeletedFromSelection(prev, deletedSet));
+        cardLibrary.removeDeletedCards(deletedIds);
         applyDeletedCardsToSession(deletedIds, {
             onDeleteCurrent: () => setNotesSheetOpen(false),
         });
@@ -478,7 +465,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }
 
     async function deleteSelectedCards() {
-        const selectedIds = Array.from(selectedCardIds);
+        const selectedIds = Array.from(cardLibrary.selectedIds);
         if (selectedIds.length === 0) return;
         const yes = confirm(`${selectedIds.length} Karte(n) wirklich löschen?`);
         if (!yes) return;
@@ -495,8 +482,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
         const deletedIds = Array.isArray(json?.deletedIds) ? json.deletedIds.map(String) : selectedIds;
         applyDeletedCards(deletedIds);
-        setSelectedCardIds(clearSelection());
-        setCardSelectionMode(false);
+        cardLibrary.clearSelection();
+        cardLibrary.setSelectionMode(false);
         await loadCards(undefined, { silent: true });
         showToast(`${deletedIds.length} Karte(n) gelöscht ✅`);
     }
@@ -630,26 +617,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         else startRecording();
     }
 
-    const hasActiveGroupFilter = selectedGroupIds.length > 0;
-    const filteredCards = useMemo(() => cards.filter((c) => {
-        if (selectedGroupIds.length === 0) return true;
-        const cardGroupIds = new Set((c.groups ?? []).map((group: any) => String(group.id)));
-        return selectedGroupIds.some((id) => cardGroupIds.has(String(id)));
-    }), [cards, selectedGroupIds]);
-    const visibleCards = useMemo(
-        () => getVisibleCards(filteredCards, cardLibraryVisibleCount),
-        [filteredCards, cardLibraryVisibleCount]
-    );
-    const libraryCountLabel = useMemo(() => getLibraryCountLabel({
-        visible: visibleCards.length,
-        total: filteredCards.length,
-        filtered: hasActiveGroupFilter,
-        itemLabel: cardItemLabel,
-    }), [cardItemLabel, filteredCards.length, hasActiveGroupFilter, visibleCards.length]);
-    const libraryCanLoadMore = useMemo(
-        () => shouldShowLoadMore(filteredCards.length, cardLibraryVisibleCount),
-        [filteredCards.length, cardLibraryVisibleCount]
-    );
     const groupCardCounts = useMemo(() => {
         const counts: Record<string, number> = {};
         for (const card of cards) {
@@ -1051,7 +1018,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                                 onOpenCards={() => {
                                     setStatus("");
-                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+                                    cardLibrary.resetVisibleWindow();
                                     setOpenCards(true);
                                     loadCards();
                                 }}
@@ -1764,251 +1731,48 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onStatus={showToast}
                             />
 
-                            {/* My Cards Modal */}
-                            < FullScreenSheet
+                            <TrainerCardLibrarySheet
                                 open={openCards}
                                 title={cardsLabel}
+                                cardsLoadState={cardsLoadState}
+                                cardsLoadError={cardsLoadError}
+                                status={status}
+                                groups={groups}
+                                isSentenceTrainer={isSentenceTrainer}
+                                imageBaseUrl={IMAGE_BASE_URL}
+                                selectionMode={cardLibrary.selectionMode}
+                                selectedIds={cardLibrary.selectedIds}
+                                selectedTotalCount={cardLibrary.selectedTotalCount}
+                                countLabel={cardLibrary.countLabel}
+                                groupFilter={cardLibrary.groupFilter}
+                                hasActiveGroupFilter={cardLibrary.hasActiveGroupFilter}
+                                visibleCards={cardLibrary.visibleCards}
+                                filteredCardsCount={cardLibrary.filteredCards.length}
+                                canLoadMore={cardLibrary.canLoadMore}
                                 onClose={() => {
                                     setOpenCards(false);
-                                    setCardSelectionMode(false);
-                                    setSelectedCardIds(clearSelection());
-                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+                                    cardLibrary.resetForClose();
                                 }}
-                            >
-                                <div className="rounded-2xl border p-4 bg-surface">
-                                    {cardsLoadState === "loading" ? (
-                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">Lade Karten…</div>
-                                    ) : null}
-
-                                    {cardsLoadState === "error" && cardsLoadError ? (
-                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
-                                            <div>{cardsLoadError}</div>
-                                            <button
-                                                type="button"
-                                                className="mt-2 rounded-lg border px-3 py-1.5 text-xs"
-                                                onClick={() => void loadCards(undefined, { silent: true })}
-                                            >
-                                                Erneut laden
-                                            </button>
-                                        </div>
-                                    ) : null}
-
-                                    {status ? (
-                                        <div className="mt-3 rounded-xl border p-3 text-sm bg-surface">
-                                            {status}
-                                        </div>
-                                    ) : null}
-
-                                    <div className="mt-3 text-sm text-muted">
-                                        {cardsLoadState === "loaded" ? (
-                                            libraryCountLabel
-                                        ) : cardsLoadState === "error" ? (
-                                            "Laden fehlgeschlagen."
-                                        ) : (
-                                            "Lade…"
-                                        )}
-                                    </div>
-
-                                    <div className="mt-3 rounded-xl border p-3">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="text-sm font-medium text-primary">
-                                                {cardSelectionMode
-                                                    ? `${selectedCardIds.size} Karte(n) ausgewählt`
-                                                    : "Mehrfachauswahl"}
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                {!cardSelectionMode ? (
-                                                    <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setCardSelectionMode(true)}>
-                                                        Auswählen
-                                                    </button>
-                                                ) : (
-                                                    <>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={() => setSelectedCardIds(selectAllVisible(visibleCards.map((card) => String(card.id))))}
-                                                            disabled={visibleCards.length === 0}
-                                                        >
-                                                            Sichtbare auswählen
-                                                        </button>
-                                                        <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setSelectedCardIds(clearSelection())}>
-                                                            Auswahl leeren
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700"
-                                                            disabled={selectedCardIds.size === 0}
-                                                            onClick={() => {
-                                                                void deleteSelectedCards();
-                                                            }}
-                                                        >
-                                                            Ausgewählte löschen
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border px-3 py-2 text-sm"
-                                                            onClick={() => {
-                                                                setCardSelectionMode(false);
-                                                                setSelectedCardIds(clearSelection());
-                                                            }}
-                                                        >
-                                                            Fertig
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="mt-3 rounded-xl border p-3 space-y-3">
-                                        <div>
-                                            <label className="text-sm font-medium">Nach Gruppen filtern</label>
-                                            <select
-                                                className="mt-2 w-full rounded-xl border px-3 py-2 bg-transparent text-sm"
-                                                value={selectedGroupIds[0] ?? ""}
-                                                onChange={(event) => {
-                                                    setSelectedGroupIds(event.target.value ? [event.target.value] : []);
-                                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
-                                                    setSelectedCardIds(clearSelection());
-                                                }}
-                                            >
-                                                <option value="">Alle Karten</option>
-                                                {groups.map((group) => (
-                                                    <option key={group.id} value={group.id}>
-                                                        {group.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-2">
-                                            {hasActiveGroupFilter ? (
-                                                <p className="text-xs text-muted">
-                                                    Filter: {groups.find((group) => group.id === selectedGroupIds[0])?.name ?? "1 Gruppe"}
-                                                </p>
-                                            ) : (
-                                                <p className="text-xs text-muted">Alle Karten werden angezeigt.</p>
-                                            )}
-                                            <div className="flex items-center gap-2">
-                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setDuplicateReviewOpen(true)}>Dubletten prüfen</button>
-                                                <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setManageGroupsOpen(true)}>Gruppen verwalten</button>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Liste */}
-                                    <div className="mt-4 space-y-3">
-                                        {visibleCards.map((c) => (
-                                            <div key={c.id} className="rounded-xl border p-3">
-                                                <div className="flex items-start gap-3">
-                                                    {cardSelectionMode ? (
-                                                        <input
-                                                            type="checkbox"
-                                                            className="mt-1 h-4 w-4"
-                                                            checked={selectedCardIds.has(String(c.id))}
-                                                            onChange={() => setSelectedCardIds((prev) => toggleSelection(prev, String(c.id)))}
-                                                            aria-label="Karte auswählen"
-                                                        />
-                                                    ) : null}
-                                                    <div className="flex-1 min-w-0">
-                                                        {isSentenceTrainer ? (
-                                                            <div className="space-y-1 text-sm font-medium min-w-0">
-                                                                <CardText>{c.german_text}</CardText>
-                                                                <CardText className="text-muted">{c.swahili_text}</CardText>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-sm font-medium min-w-0">
-                                                                <CardText>{c.german_text} — {c.swahili_text}</CardText>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {(c.groups ?? []).length > 0 ? (
-                                                    (() => {
-                                                        const badgeSummary = visibleBadgeSummary(c.groups ?? [], 2);
-                                                        return (
-                                                            <div className="mt-2 flex flex-wrap items-center gap-1">
-                                                                {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
-                                                                {badgeSummary.overflow > 0 ? (
-                                                                    <span className="rounded-full border border-soft px-2 py-1 text-[11px] text-muted">
-                                                                        +{badgeSummary.overflow}
-                                                                    </span>
-                                                                ) : null}
-                                                            </div>
-                                                        );
-                                                    })()
-                                                ) : <p className="mt-2 text-xs text-muted">Keine Gruppe</p>}
-
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    {c.image_path ? (
-                                                        <img
-                                                            src={`${IMAGE_BASE_URL}/${c.image_path}`}
-                                                            alt="Bild"
-                                                            className="w-12 h-12 object-cover rounded-lg border"
-                                                        />
-                                                    ) : (
-                                                        <div className="w-12 h-12 rounded-lg border bg-surface" />
-                                                    )}
-
-                                                    {c.audio_path ? (
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border p-2 text-sm"
-                                                            onClick={() => playCardAudioIfExists(c)}
-                                                            aria-label="Audio abspielen"
-                                                            title="Audio abspielen"
-                                                        >
-                                                            🔊
-                                                        </button>
-                                                    ) : null}
-                                                </div>
-
-                                                <div className="mt-3 flex gap-2">
-                                                    <button
-                                                        className="rounded-xl border px-3 py-2 text-sm"
-                                                        onClick={() => {
-                                                            cardFormRef.current?.openEdit(c, "cards");
-                                                            setOpenCards(false);
-                                                        }}
-                                                    >
-                                                        Bearbeiten
-                                                    </button>
-
-                                                    <button
-                                                        className="rounded-xl border px-3 py-2 text-sm"
-                                                        onClick={() => deleteCard(c.id)}
-                                                        disabled={cardSelectionMode}
-                                                    >
-                                                        Löschen
-                                                    </button>
-                                                    <button
-                                                        className="rounded-xl border px-3 py-2 text-sm"
-                                                        onClick={() => openCardGroupsEditorForCard(c)}
-                                                        disabled={cardSelectionMode}
-                                                    >
-                                                        Gruppen bearbeiten
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-
-                                        {filteredCards.length === 0 ? (
-                                            <p className="text-sm text-muted">
-                                                {hasActiveGroupFilter ? "Keine Karten in den gewählten Gruppen. Wähle „Alle Karten“ oder passe den Filter an." : "Keine Treffer."}
-                                            </p>
-                                        ) : null}
-                                        {libraryCanLoadMore ? (
-                                            <button
-                                                type="button"
-                                                className="w-full rounded-xl border border-soft px-4 py-3 text-sm font-medium text-primary hover:bg-surface-elevated"
-                                                onClick={() => setCardLibraryVisibleCount((current) => nextVisibleCount(current, CARD_LIBRARY_PAGE_SIZE, filteredCards.length))}
-                                            >
-                                                Mehr laden
-                                            </button>
-                                        ) : null}
-                                    </div>
-                                </div>
-                            </FullScreenSheet >
+                                onRetryLoad={() => void loadCards(undefined, { silent: true })}
+                                onSelectionModeChange={cardLibrary.setSelectionMode}
+                                onSelectVisible={cardLibrary.selectVisible}
+                                onClearSelection={cardLibrary.clearSelection}
+                                onDeleteSelected={() => {
+                                    void deleteSelectedCards();
+                                }}
+                                onGroupFilterChange={cardLibrary.setGroupFilter}
+                                onOpenDuplicateReview={cardLibrary.openDuplicateReview}
+                                onOpenManageGroups={() => setManageGroupsOpen(true)}
+                                onLoadMore={cardLibrary.loadMore}
+                                onToggleSelected={cardLibrary.toggleSelected}
+                                onPlayAudio={playCardAudioIfExists}
+                                onEditCard={(card) => {
+                                    cardFormRef.current?.openEdit(card, "cards");
+                                    setOpenCards(false);
+                                }}
+                                onDeleteCard={(cardId) => void deleteCard(cardId)}
+                                onOpenCardGroupsEditor={openCardGroupsEditorForCard}
+                            />
 
                             <ManageGroupsSheet
                                 open={manageGroupsOpen}
@@ -2018,17 +1782,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onClose={() => setManageGroupsOpen(false)}
                                 onUpdated={setGroups}
                                 onOpenGroup={(groupId) => {
-                                    setSelectedGroupIds([groupId]);
-                                    setCardLibraryVisibleCount(CARD_LIBRARY_PAGE_SIZE);
-                                    setSelectedCardIds(clearSelection());
+                                    cardLibrary.setGroupFilter([groupId]);
                                     setManageGroupsOpen(false);
                                     setOpenCards(true);
                                 }}
                             />
                             <DuplicateReviewSheet
-                                open={duplicateReviewOpen}
+                                open={cardLibrary.duplicateReviewOpen}
                                 cardType={cardType}
-                                onClose={() => setDuplicateReviewOpen(false)}
+                                onClose={cardLibrary.closeDuplicateReview}
                                 onDeleted={async () => {
                                     await loadCards(undefined, { silent: true });
                                     await refreshSetupCounts();

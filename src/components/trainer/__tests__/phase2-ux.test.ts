@@ -6,6 +6,7 @@ describe("phase 2 product UX cleanup", () => {
     const root = process.cwd();
     const trainerSource = fs.readFileSync(path.join(root, "src/app/trainer/TrainerClient.tsx"), "utf8");
     const trainerCardFormSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
+    const trainerCardLibrarySource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardLibrarySheet.tsx"), "utf8");
     const trainerSetupViewSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerSetupView.tsx"), "utf8");
     const trainerSetupHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerSetup.ts"), "utf8");
     const compactGroupPickerSource = fs.readFileSync(path.join(root, "src/components/groups/CompactGroupPicker.tsx"), "utf8");
@@ -13,9 +14,9 @@ describe("phase 2 product UX cleanup", () => {
     const importSource = fs.readFileSync(path.join(root, "src/app/import/ImportClient.tsx"), "utf8");
 
     it("uses compact group filtering and inline group editing in list rows", () => {
-        expect(trainerSource).toContain("<option value=\"\">Alle Karten</option>");
-        expect(trainerSource).toContain("Gruppen bearbeiten");
-        expect(trainerSource).toContain("visibleBadgeSummary(c.groups ?? [], 2)");
+        expect(trainerCardLibrarySource).toContain("<option value=\"\">Alle Karten</option>");
+        expect(trainerCardLibrarySource).toContain("Gruppen bearbeiten");
+        expect(trainerCardLibrarySource).toContain("visibleBadgeSummary(card.groups ?? [], 2)");
     });
 
     it("uses compact group selection in the learning-card and card-edit flows", () => {
