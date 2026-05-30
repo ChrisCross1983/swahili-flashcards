@@ -17,6 +17,8 @@ describe("DuplicateReviewSheet safety wiring", () => {
         expect(source).toContain("Bitte Karten zum Löschen auswählen.");
         expect(source).toContain("Zum Löschen auswählen:");
         expect(source).toContain("Karten werden nur gelöscht, wenn du sie manuell auswählst.");
+        expect(source).toContain("Verdächtige ähnliche Karten");
+        expect(source).toContain("Bitte manuell prüfen, bevor du löschst.");
     });
 
     it("validates only selected clusters and posts selected ids to the duplicate delete route", () => {

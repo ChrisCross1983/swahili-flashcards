@@ -119,13 +119,50 @@ describe("duplicate detection", () => {
         expect(clusters[0].mode).toBe("review");
     });
 
-    it("requires both sides to be close for review candidates", () => {
+    it("flags strong German-side phrase variants as review candidates even when Swahili differs", () => {
         const clusters = detectDuplicateClusters([
             card({ id: "1", german_text: "ich suche dich", swahili_text: "ninakutafuta" }),
             card({ id: "2", german_text: "ich such dich", swahili_text: "asante sana" }),
         ], "review");
 
-        expect(clusters).toHaveLength(0);
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0].mode).toBe("review");
+        expect(clusters[0].kind).toBe("suspicious");
+        expect(clusters[0].reason).toContain("Deutsch");
+    });
+
+    it("flags German conjugation variants as review candidates", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "ich suche dich", swahili_text: "ninakutafuta" }),
+            card({ id: "2", german_text: "ich suchen dich", swahili_text: "nimepotea" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0].mode).toBe("review");
+    });
+
+    it("flags safe German phrase extensions as review candidates even when Swahili differs", () => {
+        const clusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "ich suche", swahili_text: "ninatafuta" }),
+            card({ id: "2", german_text: "ich suche dich", swahili_text: "asante sana" }),
+        ], "review");
+
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0].mode).toBe("review");
+    });
+
+    it("does not flag common one-word prefixes as review candidates", () => {
+        const bitteClusters = detectDuplicateClusters([
+            card({ id: "1", german_text: "bitte", swahili_text: "tafadhali" }),
+            card({ id: "2", german_text: "bitte pass auf sie auf", swahili_text: "tafadhali watunze" }),
+        ], "review");
+        expect(bitteClusters).toHaveLength(0);
+
+        const jaClusters = detectDuplicateClusters([
+            card({ id: "3", german_text: "ja", swahili_text: "ndiyo" }),
+            card({ id: "4", german_text: "ja ich komme morgen", swahili_text: "ndiyo nitakuja kesho" }),
+        ], "review");
+        expect(jaClusters).toHaveLength(0);
     });
 
     it("returns broader create/edit similar candidates when German is very close", () => {

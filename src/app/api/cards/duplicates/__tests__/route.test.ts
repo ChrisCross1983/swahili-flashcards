@@ -14,4 +14,9 @@ describe("/api/cards/duplicates route", () => {
     it("keeps sentence filtering delegated to shared type filtering", () => {
         expect(source).toContain("query = applyCardTypeFilter(query, cardType)");
     });
+
+    it("feeds the shared duplicate detector used for suspicious phrase-variant clusters", () => {
+        expect(source).toContain("detectDuplicateClusters(enrichedCards, mode)");
+        expect(source).toContain("review: clusters.filter((cluster) => cluster.mode === \"review\").length");
+    });
 });

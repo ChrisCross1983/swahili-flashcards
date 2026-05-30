@@ -169,6 +169,31 @@ function hasReviewSimilarity(left: string, right: string): boolean {
     return false;
 }
 
+function hasStrongSameSideReviewSimilarity(left: string, right: string): boolean {
+    const leftNormalized = normalizeForDuplicateComparison(left);
+    const rightNormalized = normalizeForDuplicateComparison(right);
+    if (!leftNormalized || !rightNormalized) return false;
+    if (isSingleTokenPhrasePrefix(leftNormalized, rightNormalized)) return false;
+
+    const leftTokenCount = tokenCount(left);
+    const rightTokenCount = tokenCount(right);
+    const shorterTokenCount = Math.min(leftTokenCount, rightTokenCount);
+    const longerTokenCount = Math.max(leftTokenCount, rightTokenCount);
+    if (shorterTokenCount < 2 || longerTokenCount === 0) return false;
+
+    const tokenRatio = shorterTokenCount / longerTokenCount;
+    const charRatio = Math.min(leftNormalized.length, rightNormalized.length) / Math.max(leftNormalized.length, rightNormalized.length);
+    if (tokenRatio < 0.5 || charRatio < 0.55) return false;
+
+    if (leftNormalized === rightNormalized) return true;
+    if (isNearPrefixPair(leftNormalized, rightNormalized)) return true;
+
+    const overlap = tokenOverlap(left, right);
+    const similarity = normalizedTextSimilarity(left, right);
+
+    return similarity >= 0.82 || overlap >= 0.67;
+}
+
 function hasCreateFormSimilarity(input: DuplicateCard, existing: DuplicateCard): boolean {
     const inputGerman = normalizeForDuplicateComparison(input.german_text);
     const existingGerman = normalizeForDuplicateComparison(existing.german_text);
@@ -315,6 +340,22 @@ function classifyPair(a: DuplicateCard, b: DuplicateCard): PairMatch | null {
             mode: "review",
             kind: "suspicious",
             reason: "Verdächtig ähnlich: beide Seiten sind nah verwandt.",
+        };
+    }
+
+    if (hasStrongSameSideReviewSimilarity(a.german_text, b.german_text)) {
+        return {
+            mode: "review",
+            kind: "suspicious",
+            reason: "Verdächtig ähnlich: Deutsch ist sehr nah verwandt.",
+        };
+    }
+
+    if (hasStrongSameSideReviewSimilarity(a.swahili_text, b.swahili_text)) {
+        return {
+            mode: "review",
+            kind: "suspicious",
+            reason: "Verdächtig ähnlich: Swahili ist sehr nah verwandt.",
         };
     }
 
