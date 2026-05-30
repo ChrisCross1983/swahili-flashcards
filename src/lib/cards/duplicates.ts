@@ -169,6 +169,36 @@ function hasReviewSimilarity(left: string, right: string): boolean {
     return false;
 }
 
+function hasCreateFormSimilarity(input: DuplicateCard, existing: DuplicateCard): boolean {
+    const inputGerman = normalizeForDuplicateComparison(input.german_text);
+    const existingGerman = normalizeForDuplicateComparison(existing.german_text);
+    if (!inputGerman || !existingGerman) return false;
+    if (isSingleTokenPhrasePrefix(inputGerman, existingGerman)) return false;
+
+    const germanSimilarity = normalizedTextSimilarity(input.german_text, existing.german_text);
+    const germanOverlap = tokenOverlap(input.german_text, existing.german_text);
+    const germanTokenRatio = Math.min(tokenCount(input.german_text), tokenCount(existing.german_text)) / Math.max(1, Math.max(tokenCount(input.german_text), tokenCount(existing.german_text)));
+    const germanVeryClose =
+        inputGerman === existingGerman
+        || isNearPrefixPair(inputGerman, existingGerman)
+        || (germanSimilarity >= 0.82 && germanTokenRatio >= 0.5)
+        || (germanOverlap >= 0.67 && germanTokenRatio >= 0.5 && Math.min(tokenCount(input.german_text), tokenCount(existing.german_text)) >= 2);
+
+    if (!germanVeryClose) return false;
+
+    const inputSwahili = normalizeForDuplicateComparison(input.swahili_text);
+    const existingSwahili = normalizeForDuplicateComparison(existing.swahili_text);
+    if (!inputSwahili || !existingSwahili) return false;
+    if (isSingleTokenPhrasePrefix(inputSwahili, existingSwahili)) return false;
+
+    const swahiliSimilarity = normalizedTextSimilarity(input.swahili_text, existing.swahili_text);
+    const swahiliOverlap = tokenOverlap(input.swahili_text, existing.swahili_text);
+
+    return inputSwahili === existingSwahili
+        || swahiliSimilarity >= 0.5
+        || swahiliOverlap >= 0.5;
+}
+
 type PairMatch = {
     mode: "strict" | "review";
     kind: DuplicateKind;
@@ -449,7 +479,7 @@ export function detectDuplicateClusters(cards: DuplicateCard[], mode: DuplicateM
 export function findDuplicateCandidatesForCard(
     input: Pick<DuplicateCard, "german_text" | "swahili_text"> & { id?: string | null },
     cards: DuplicateCard[],
-    options: { excludeId?: string | null } = {},
+    options: { excludeId?: string | null; includeSoftSimilar?: boolean } = {},
 ): { strict: DuplicateCard[]; similar: DuplicateCard[] } {
     const inputCard: DuplicateCard = {
         id: String(input.id ?? "__input__"),
@@ -461,8 +491,14 @@ export function findDuplicateCandidatesForCard(
 
     for (const card of cards) {
         if (options.excludeId && String(card.id) === String(options.excludeId)) continue;
-        const match = classifyPair(inputCard, { ...card, id: String(card.id) });
-        if (!match) continue;
+        const candidate = { ...card, id: String(card.id) };
+        const match = classifyPair(inputCard, candidate);
+        if (!match) {
+            if (options.includeSoftSimilar && hasCreateFormSimilarity(inputCard, candidate)) {
+                similar.push(card);
+            }
+            continue;
+        }
         if (match.mode === "strict") strict.push(card);
         else similar.push(card);
     }

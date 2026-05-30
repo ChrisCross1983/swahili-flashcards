@@ -986,6 +986,95 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
     }
 
+    const topStatusText = duplicateCheckLoading ? "Prüfe auf ähnliche Karten …" : status;
+    const topStatusTone = duplicateCheckKind === "failure"
+        ? "border-red-200 bg-red-50 text-red-800"
+        : status.includes("✅")
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-soft bg-surface-elevated text-primary";
+    const duplicatePanelTone = duplicateCheckKind === "strict"
+        ? "border-yellow-300 bg-yellow-50"
+        : duplicateCheckKind === "failure"
+            ? "border-red-200 bg-red-50"
+            : "border-soft bg-surface-elevated";
+
+    const duplicateFeedbackPanel = duplicateHint ? (
+        <div
+            className={`mt-4 rounded-xl border p-4 space-y-3 ${duplicatePanelTone}`}
+            aria-live={duplicateCheckKind === "strict" ? "assertive" : "polite"}
+        >
+            <p className="text-sm font-medium">{duplicateHint}</p>
+            {duplicateCheckKind === "similar" ? (
+                <p className="text-xs text-muted">Nicht zwingend eine Dublette – bitte kurz prüfen.</p>
+            ) : null}
+            {duplicateCheckKind === "failure" ? (
+                <p className="text-xs text-muted">Du kannst trotzdem speichern, aber die Prüfung wurde nicht vollständig ausgeführt.</p>
+            ) : null}
+
+            {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-xs text-muted">
+                        {duplicateCheckKind === "similar" ? "Ähnliche vorhandene Karten:" : "Bereits vorhandene Karten:"}
+                    </p>
+
+                    {duplicatePreview.slice(0, 5).map((card: any) => (
+                        <button
+                            key={card.id}
+                            type="button"
+                            className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
+                            onClick={() => {
+                                setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes });
+                                const full = cards.find((entry) => String(entry.id) === String(card.id)) ?? card;
+                                startEdit(full, "create");
+                                setDuplicateHint(null);
+                                setDuplicatePreview(null);
+                                setDuplicateCheckKind(null);
+                                setOpen(true);
+                            }}
+                        >
+                            {card.image_path ? (
+                                <img
+                                    src={`${IMAGE_BASE_URL}/${card.image_path}`}
+                                    alt="Bild"
+                                    className="w-10 h-10 rounded-md object-cover border"
+                                />
+                            ) : (
+                                <div className="w-10 h-10 rounded-md border bg-surface flex items-center justify-center text-xs text-muted">
+                                    –
+                                </div>
+                            )}
+
+                            <div className="text-sm min-w-0" >
+                                <CardText className="font-medium">{card.german_text}</CardText>
+                                <CardText className="text-muted">{card.swahili_text}</CardText>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+                <button
+                    className="btn btn-ghost flex-1 text-sm"
+                    onClick={() => {
+                        setDuplicateHint(null);
+                        setDuplicatePreview(null);
+                        setDuplicateCheckKind(null);
+                    }}
+                >
+                    Korrigieren
+                </button>
+
+                <button
+                    className="btn btn-primary flex-1 text-sm"
+                    onClick={() => editingId ? updateCard(true) : createCard(true)}
+                >
+                    Trotzdem speichern
+                </button>
+            </div>
+        </div>
+    ) : null;
+
     return (
         <>
             <FullScreenSheet
@@ -1012,6 +1101,17 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         placeholder="z.B. Habari za asubuhi"
                         rows={3}
                     />
+
+                    {topStatusText ? (
+                        <div className={`mt-4 rounded-xl border p-3 text-sm ${topStatusTone}`} aria-live="polite">
+                            <div>{topStatusText}</div>
+                            {status === "Karte gespeichert ✅" ? (
+                                <div className="mt-1 text-xs opacity-80">Du kannst direkt die nächste Karte anlegen.</div>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {duplicateFeedbackPanel}
 
                     <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
                         <button
@@ -1311,85 +1411,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     ) : null}
 
-                    {duplicateCheckLoading ? (
-                        <div className="mt-4 rounded-xl border p-4 bg-surface text-sm text-muted">
-                            Prüfe auf ähnliche Karten …
-                        </div>
-                    ) : null}
-
-                    {duplicateHint && (
-                        <div className={`mt-4 rounded-xl border p-4 space-y-3 ${duplicateCheckKind === "strict" ? "bg-yellow-50" : "bg-surface"}`}>
-                            <p className="text-sm font-medium">{duplicateHint}</p>
-                            {duplicateCheckKind === "similar" ? (
-                                <p className="text-xs text-muted">Nicht zwingend eine Dublette – bitte kurz prüfen.</p>
-                            ) : null}
-                            {duplicateCheckKind === "failure" ? (
-                                <p className="text-xs text-muted">Du kannst trotzdem speichern, aber die Prüfung wurde nicht vollständig ausgeführt.</p>
-                            ) : null}
-
-                            {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
-                                <div className="space-y-2">
-                                    <p className="text-xs text-muted">
-                                        {duplicateCheckKind === "similar" ? "Ähnliche vorhandene Karten:" : "Bereits vorhandene Karten:"}
-                                    </p>
-
-                                    {duplicatePreview.slice(0, 5).map((card: any) => (
-                                        <button
-                                            key={card.id}
-                                            type="button"
-                                            className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
-                                            onClick={() => {
-                                                setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes });
-                                                const full = cards.find((entry) => String(entry.id) === String(card.id)) ?? card;
-                                                startEdit(full, "create");
-                                                setDuplicateHint(null);
-                                                setDuplicatePreview(null);
-                                                setOpen(true);
-                                            }}
-                                        >
-                                            {card.image_path ? (
-                                                <img
-                                                    src={`${IMAGE_BASE_URL}/${card.image_path}`}
-                                                    alt="Bild"
-                                                    className="w-10 h-10 rounded-md object-cover border"
-                                                />
-                                            ) : (
-                                                <div className="w-10 h-10 rounded-md border bg-surface flex items-center justify-center text-xs text-muted">
-                                                    –
-                                                </div>
-                                            )}
-
-                                            <div className="text-sm min-w-0" >
-                                                <CardText className="font-medium">{card.german_text}</CardText>
-                                                <CardText className="text-muted">{card.swahili_text}</CardText>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            <div className="flex gap-2 pt-2">
-                                <button
-                                    className="btn btn-ghost flex-1 text-sm"
-                                    onClick={() => {
-                                        setDuplicateHint(null);
-                                        setDuplicatePreview(null);
-                                        setDuplicateCheckKind(null);
-                                    }}
-                                >
-                                    Korrigieren
-                                </button>
-
-                                <button
-                                    className="btn btn-primary flex-1 text-sm"
-                                    onClick={() => editingId ? updateCard(true) : createCard(true)}
-                                >
-                                    Trotzdem speichern
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
                     <div className="mt-6 grid grid-cols-2 gap-4">
                         <button
                             className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
@@ -1419,12 +1440,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </button>
                     )}
                 </div>
-
-                {status ? (
-                    <div className="mt-4 rounded-xl border bg-surface p-3 text-sm">
-                        {status}
-                    </div>
-                ) : null}
             </FullScreenSheet>
 
             <FullScreenSheet

@@ -5,6 +5,7 @@ import {
     recommendKeepCard,
     validateClusterDeletionSelection,
     validateClusterDeletionSelections,
+    findDuplicateCandidatesForCard,
     type DuplicateCard,
 } from "./duplicates";
 
@@ -125,6 +126,41 @@ describe("duplicate detection", () => {
         ], "review");
 
         expect(clusters).toHaveLength(0);
+    });
+
+    it("returns broader create/edit similar candidates when German is very close", () => {
+        const candidates = findDuplicateCandidatesForCard(
+            { german_text: "Ich suche dich", swahili_text: "ninakutafuta" },
+            [
+                card({ id: "1", german_text: "Ich such dich", swahili_text: "nakutafuta" }),
+                card({ id: "2", german_text: "bitte pass auf sie auf", swahili_text: "tafadhali watunze" }),
+            ],
+            { includeSoftSimilar: true },
+        );
+
+        expect(candidates.strict).toEqual([]);
+        expect(candidates.similar.map((item) => item.id)).toEqual(["1"]);
+    });
+
+    it("returns create/edit phrase-extension similar candidates without accepting one-token long-phrase prefixes", () => {
+        const candidates = findDuplicateCandidatesForCard(
+            { german_text: "ich suche", swahili_text: "ninatafuta" },
+            [
+                card({ id: "1", german_text: "ich suche dich", swahili_text: "ninakutafuta" }),
+                card({ id: "2", german_text: "bitte pass auf sie auf", swahili_text: "tafadhali watunze" }),
+            ],
+            { includeSoftSimilar: true },
+        );
+
+        expect(candidates.similar.map((item) => item.id)).toEqual(["1"]);
+
+        const bitteCandidates = findDuplicateCandidatesForCard(
+            { german_text: "bitte", swahili_text: "tafadhali" },
+            [card({ id: "3", german_text: "bitte pass auf sie auf", swahili_text: "tafadhali watunze" })],
+            { includeSoftSimilar: true },
+        );
+        expect(bitteCandidates.strict).toEqual([]);
+        expect(bitteCandidates.similar).toEqual([]);
     });
 
     it("does not flag unrelated pairs", () => {

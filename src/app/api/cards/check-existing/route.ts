@@ -54,7 +54,10 @@ export async function POST(req: Request) {
       ...card,
       id: String(card.id),
     })),
-    { excludeId: typeof excludeId === "string" ? excludeId : null },
+    {
+      excludeId: typeof excludeId === "string" ? excludeId : null,
+      includeSoftSimilar: true,
+    },
   );
 
   return NextResponse.json({

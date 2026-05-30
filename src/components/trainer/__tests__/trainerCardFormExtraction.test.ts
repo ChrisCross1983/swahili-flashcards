@@ -81,4 +81,18 @@ describe("trainer card form extraction", () => {
         expect(formSource).toContain("setStatus(\"Karte aktualisiert ✅\")");
         expect(formSource).toContain("setStatus(\"Karte gespeichert ✅\")");
     });
+
+    it("renders form feedback near the primary card fields instead of bottom-only", () => {
+        const swahiliFieldIndex = formSource.indexOf("placeholder=\"z.B. Habari za asubuhi\"");
+        const topStatusIndex = formSource.indexOf("topStatusText ? (");
+        const optionalContextIndex = formSource.indexOf("Optional: Beispielsätze hinzufügen");
+        const mediaIndex = formSource.indexOf("<div className=\"mt-6 text-sm font-medium\">Medien</div>");
+
+        expect(topStatusIndex).toBeGreaterThan(swahiliFieldIndex);
+        expect(topStatusIndex).toBeLessThan(optionalContextIndex);
+        expect(formSource.indexOf("{duplicateFeedbackPanel}")).toBeLessThan(optionalContextIndex);
+        expect(formSource.indexOf("{duplicateFeedbackPanel}")).toBeLessThan(mediaIndex);
+        expect(formSource).toContain("aria-live=\"polite\"");
+        expect(formSource).toContain("Du kannst direkt die nächste Karte anlegen.");
+    });
 });

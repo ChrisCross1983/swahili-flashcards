@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { detectDuplicateClusters, type DuplicateMode } from "@/lib/cards/duplicates";
+import { applyCardTypeFilter, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 export async function GET(req: Request) {
     const { user, response } = await requireUser();
@@ -10,14 +11,16 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const modeParam = searchParams.get("mode");
     const mode: DuplicateMode = modeParam === "strict" || modeParam === "review" ? modeParam : "all";
-    const typeParam = searchParams.get("type");
-    const cardType = typeParam === "sentence" ? "sentence" : "vocab";
+    const cardType = resolveCardTypeFilter(searchParams.get("type")) ?? "vocab";
 
-    const { data: cards, error } = await supabaseServer
+    let query = supabaseServer
         .from("cards")
         .select("id,german_text,swahili_text,created_at,image_path,audio_path,type")
-        .eq("owner_key", user.id)
-        .eq("type", cardType);
+        .eq("owner_key", user.id);
+
+    query = applyCardTypeFilter(query, cardType);
+
+    const { data: cards, error } = await query;
 
     if (error) {
         console.error(error);
