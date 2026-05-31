@@ -6,6 +6,9 @@ describe("trainer card form extraction", () => {
     const root = process.cwd();
     const clientSource = fs.readFileSync(path.join(root, "src/app/trainer/TrainerClient.tsx"), "utf8");
     const formSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
+    const duplicateHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardDuplicateCheck.ts"), "utf8");
+    const mediaHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardMedia.ts"), "utf8");
+    const notesHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardFormNotes.ts"), "utf8");
 
     it("moves detailed create/edit form state out of TrainerClient", () => {
         expect(clientSource).toContain("<TrainerCardFormSheet");
@@ -64,22 +67,31 @@ describe("trainer card form extraction", () => {
     it("preserves duplicate review, edit-from-learn, cancel, delete, and audio callbacks", () => {
         expect(formSource).toContain("const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili");
         expect(formSource).toContain("Trotzdem speichern");
-        expect(formSource).toContain("setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes })");
+        expect(formSource).toContain("setCreateDraft(createDraftFromTextState({ german, swahili, germanExample, swahiliExample }, formNoteDraft.mainNotes))");
         expect(formSource).toContain("openEditFromLearn(input)");
         expect(formSource).toContain("onReturnToLearn()");
         expect(formSource).toContain("onDeleted(deletedId)");
-        expect(formSource).toContain("onAudioUpdated(resolvedCardId, newPath)");
+        expect(mediaHookSource).toContain("onAudioUpdated(resolvedCardId, newPath)");
     });
 
     it("surfaces strict duplicates, near matches, check loading, and check failure", () => {
-        expect(formSource).toContain("Prüfe auf ähnliche Karten …");
-        expect(formSource).toContain("Mögliche Dublette gefunden");
-        expect(formSource).toContain("Ähnliche Karten gefunden");
+        expect(duplicateHookSource).toContain("Prüfe auf ähnliche Karten …");
+        expect(duplicateHookSource).toContain("Mögliche Dublette gefunden");
+        expect(duplicateHookSource).toContain("Ähnliche Karten gefunden");
         expect(formSource).toContain("Nicht zwingend eine Dublette");
-        expect(formSource).toContain("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+        expect(duplicateHookSource).toContain("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
         expect(formSource).toContain("onClick={() => editingId ? updateCard(true) : createCard(true)}");
         expect(formSource).toContain("setStatus(\"Karte aktualisiert ✅\")");
         expect(formSource).toContain("setStatus(\"Karte gespeichert ✅\")");
+    });
+
+    it("extracts notes, duplicate, and media domains out of the sheet", () => {
+        expect(formSource).toContain("useTrainerCardFormNotes()");
+        expect(formSource).toContain("useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus })");
+        expect(formSource).toContain("useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated })");
+        expect(notesHookSource).toContain("restoreDraftNote");
+        expect(duplicateHookSource).toContain("clearDuplicateCheck");
+        expect(mediaHookSource).toContain("resetMediaInputs");
     });
 
     it("renders form feedback near the primary card fields instead of bottom-only", () => {

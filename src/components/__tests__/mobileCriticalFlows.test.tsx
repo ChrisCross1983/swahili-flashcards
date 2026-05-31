@@ -132,6 +132,7 @@ describe("mobile critical-flow regression coverage", () => {
 
     it("keeps card-form duplicate feedback visible near primary fields and persistent after create reset", () => {
         const form = readSource("src/components/trainer/TrainerCardFormSheet.tsx");
+        const duplicateHook = readSource("src/lib/trainer/useTrainerCardDuplicateCheck.ts");
         const germanIndex = form.indexOf("placeholder=\"z.B. Guten Morgen\"");
         const swahiliIndex = form.indexOf("placeholder=\"z.B. Habari za asubuhi\"");
         const topStatusIndex = form.indexOf("topStatusText ? (");
@@ -145,9 +146,9 @@ describe("mobile critical-flow regression coverage", () => {
         expect(duplicatePanelIndex).toBeGreaterThan(swahiliIndex);
         expect(duplicatePanelIndex).toBeLessThan(optionalExamplesIndex);
 
-        expect(form).toContain("Prüfe auf ähnliche Karten …");
-        expect(form).toContain("Mögliche Dublette gefunden");
-        expect(form).toContain("Ähnliche Karten gefunden");
+        expect(duplicateHook).toContain("Prüfe auf ähnliche Karten …");
+        expect(duplicateHook).toContain("Mögliche Dublette gefunden");
+        expect(duplicateHook).toContain("Ähnliche Karten gefunden");
         expect(form).toContain("Nicht zwingend eine Dublette");
         expect(form).toContain("Karte gespeichert ✅");
         expect(form).toContain("Du kannst direkt die nächste Karte anlegen.");
@@ -172,6 +173,7 @@ describe("mobile critical-flow regression coverage", () => {
         const quickSearch = readSource("src/components/GlobalQuickSearch.tsx");
         const editor = readSource("src/components/CardEditorSheet.tsx");
         const trainerForm = readSource("src/components/trainer/TrainerCardFormSheet.tsx");
+        const duplicateHook = readSource("src/lib/trainer/useTrainerCardDuplicateCheck.ts");
 
         expect(quickSearch).toContain("<CardEditorSheet");
         expect(quickSearch).toContain("handleEdit");
@@ -182,7 +184,8 @@ describe("mobile critical-flow regression coverage", () => {
 
         // Known parity gap: search edits have notes/media parity, but not the trainer form's
         // duplicate-check and group-assignment flow yet. This guard makes the gap explicit.
-        expect(trainerForm).toContain('fetch("/api/cards/check-existing"');
+        expect(trainerForm).toContain("useTrainerCardDuplicateCheck");
+        expect(duplicateHook).toContain('fetch("/api/cards/check-existing"');
         expect(trainerForm).toContain("<CompactGroupPicker");
         expect(editor).not.toContain('fetch("/api/cards/check-existing"');
         expect(editor).not.toContain("<CompactGroupPicker");

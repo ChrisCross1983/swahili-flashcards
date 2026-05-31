@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import CardText from "@/components/ui/CardText";
 import ExampleField from "@/components/ExampleField";
@@ -14,30 +14,25 @@ import {
     buildCreateCardPayload,
     buildUpdateCardPayload,
     diffGroupAssignments,
-    shouldOpenNotesSection,
     shouldSaveCreateNote,
 } from "@/lib/trainer/cardFormBehavior";
+import {
+    createDraftFromTextState,
+    extractCardGroupIds,
+    hasOptionalExamples,
+    hydrateTextStateFromCard,
+    hydrateTextStateFromLearn,
+    resolveExistingImagePath,
+    type CardFormDraft,
+} from "@/lib/trainer/cardFormState";
+import { useTrainerCardDuplicateCheck } from "@/lib/trainer/useTrainerCardDuplicateCheck";
+import { useTrainerCardFormNotes } from "@/lib/trainer/useTrainerCardFormNotes";
+import { useTrainerCardMedia } from "@/lib/trainer/useTrainerCardMedia";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
 
-type SuggestItem = {
-    pageId: string;
-    importUrl: string;
-    thumb: string;
-    title: string;
-};
-
 type EditSource = "cards" | "create";
-type DuplicateCheckKind = "strict" | "similar" | "failure" | null;
-
-type CreateDraft = {
-    german: string;
-    swahili: string;
-    germanExample: string;
-    swahiliExample: string;
-    note: string;
-};
 
 type EditFromLearnInput = {
     item: any;
@@ -96,58 +91,48 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     const [germanExample, setGermanExample] = useState("");
     const [swahiliExample, setSwahiliExample] = useState("");
     const [status, setStatus] = useState("");
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
-    const [duplicatePreview, setDuplicatePreview] = useState<any[] | null>(null);
-    const [duplicateCheckKind, setDuplicateCheckKind] = useState<DuplicateCheckKind>(null);
-    const [duplicateCheckLoading, setDuplicateCheckLoading] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSource, setEditSource] = useState<EditSource>("create");
     const [returnToLearn, setReturnToLearn] = useState(false);
-    const [suggestOpen, setSuggestOpen] = useState(false);
-    const [suggestLoading, setSuggestLoading] = useState(false);
-    const [selectedSuggestUrl, setSelectedSuggestUrl] = useState<string | null>(null);
-    const [selectedSuggestPath, setSelectedSuggestPath] = useState<string | null>(null);
-    const [suggestItems, setSuggestItems] = useState<SuggestItem[]>([]);
-    const [suggestError, setSuggestError] = useState<string | null>(null);
-    const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
-    const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
-    const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
-    const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
-    const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
+    const [createDraft, setCreateDraft] = useState<CardFormDraft | null>(null);
     const [formGroupIds, setFormGroupIds] = useState<string[]>([]);
     const [editingOriginalGroupIds, setEditingOriginalGroupIds] = useState<string[]>([]);
     const [optionalExamplesOpen, setOptionalExamplesOpen] = useState(false);
-    const [formNoteOpen, setFormNoteOpen] = useState(false);
-    const [formNoteDraft, setFormNoteDraft] = useState({ mainNotes: "" });
-    const [formNoteLoading, setFormNoteLoading] = useState(false);
-    const [formNoteSaving, setFormNoteSaving] = useState(false);
-    const [formNoteStatus, setFormNoteStatus] = useState<string | null>(null);
-    const [isRecording, setIsRecording] = useState(false);
 
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const chunksRef = useRef<BlobPart[]>([]);
-    const audioElRef = useRef<HTMLAudioElement | null>(null);
-    const savedFormNoteRef = useRef("");
+    const {
+        formNoteOpen,
+        setFormNoteOpen,
+        formNoteDraft,
+        setFormNoteDraft,
+        formNoteLoading,
+        formNoteSaving,
+        formNoteStatus,
+        setFormNoteStatus,
+        resetFormNotes,
+        restoreDraftNote,
+        loadFormNotes,
+        saveFormNotes,
+    } = useTrainerCardFormNotes();
+    const {
+        duplicateHint,
+        duplicatePreview,
+        duplicateCheckKind,
+        duplicateCheckLoading,
+        clearDuplicateCheck,
+        setDuplicateHint,
+        setDuplicatePreview,
+        setDuplicateCheckKind,
+        checkExistingGerman,
+    } = useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus });
+    const media = useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated });
 
     const editingCard = cards.find((card) => String(card.id) === String(editingId)) ?? null;
-    const editingImagePath = selectedSuggestPath ?? (editingCard?.image_path ?? null);
+    const editingImagePath = media.selectedSuggestPath ?? (editingCard?.image_path ?? null);
     const formSelectedGroups = useMemo(
         () => groups.filter((group) => formGroupIds.includes(group.id)),
         [groups, formGroupIds]
     );
     const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
-
-    useEffect(() => {
-        if (!imageFile) {
-            setPreviewUrl(null);
-            return;
-        }
-        const url = URL.createObjectURL(imageFile);
-        setPreviewUrl(url);
-        return () => URL.revokeObjectURL(url);
-    }, [imageFile]);
 
     useImperativeHandle(ref, () => ({
         openCreate() {
@@ -168,267 +153,17 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         window.setTimeout(() => setStatus(""), 2500);
     }
 
-    function getAudioPublicUrl(path: string) {
-        return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
-    }
-
-    function stopAnyAudio() {
-        if (audioElRef.current) {
-            audioElRef.current.pause();
-            audioElRef.current.currentTime = 0;
-        }
-    }
-
-    function playCardAudioIfExists(card: any) {
-        if (!card?.audio_path) return;
-        const url = getAudioPublicUrl(card.audio_path);
-        stopAnyAudio();
-        audioElRef.current = new Audio(url);
-        audioElRef.current.play().catch(() => { });
-    }
-
-    function playPendingAudio() {
-        if (!pendingAudioBlob) return;
-        const url = URL.createObjectURL(pendingAudioBlob);
-        stopAnyAudio();
-        audioElRef.current = new Audio(url);
-        audioElRef.current.play().catch(() => { });
-    }
-
-    function resetImageInputs() {
-        setImageFile(null);
-        setPreviewUrl(null);
-        setSuggestOpen(false);
-        setSuggestLoading(false);
-        setSuggestItems([]);
-        setSuggestError(null);
-        setSelectedSuggestUrl(null);
-        setSelectedSuggestPath(null);
-        setSuggestedImagePath(null);
-    }
-
-    function resetFormNotes() {
-        setFormNoteOpen(false);
-        setFormNoteDraft({ mainNotes: "" });
-        setFormNoteLoading(false);
-        setFormNoteSaving(false);
-        setFormNoteStatus(null);
-        savedFormNoteRef.current = "";
-    }
-
     function resetForCreate() {
         setStatus("");
-        setDuplicateHint(null);
-        setDuplicatePreview(null);
-        resetImageInputs();
+        clearDuplicateCheck();
+        media.resetMediaInputs();
         setEditSource("create");
-        setEditAudioPath(null);
         setEditingId(null);
         setReturnToLearn(false);
-        setPendingAudioBlob(null);
-        setPendingAudioType(null);
         setFormGroupIds([]);
         setEditingOriginalGroupIds([]);
         setOptionalExamplesOpen(false);
         resetFormNotes();
-    }
-
-    async function loadFormNotes(cardId: string) {
-        setFormNoteLoading(true);
-        setFormNoteStatus(null);
-        try {
-            const res = await fetch(`/api/cards/notes?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store" });
-            const json = await res.json();
-            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht geladen werden.");
-            const mainNotes = json.note?.main_notes ?? "";
-            setFormNoteDraft({ mainNotes });
-            savedFormNoteRef.current = mainNotes;
-            setFormNoteOpen(shouldOpenNotesSection(mainNotes));
-        } catch (error) {
-            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
-            setFormNoteOpen(false);
-            setFormNoteDraft({ mainNotes: "" });
-            savedFormNoteRef.current = "";
-        } finally {
-            setFormNoteLoading(false);
-        }
-    }
-
-    async function saveFormNotes(cardId: string, noteText = formNoteDraft.mainNotes) {
-        if (noteText === savedFormNoteRef.current) return true;
-        setFormNoteSaving(true);
-        setFormNoteStatus(null);
-        try {
-            const res = await fetch("/api/cards/notes", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    cardId,
-                    mainNotes: noteText,
-                }),
-            });
-            const json = await res.json();
-            if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
-            savedFormNoteRef.current = noteText;
-            setFormNoteStatus("Notizen gespeichert.");
-            return true;
-        } catch (error) {
-            setFormNoteStatus(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
-            return false;
-        } finally {
-            setFormNoteSaving(false);
-        }
-    }
-
-    async function uploadImage(): Promise<string | null> {
-        if (!imageFile) return null;
-
-        const formData = new FormData();
-        formData.append("file", imageFile);
-
-        const res = await fetch("/api/upload-image", {
-            method: "POST",
-            body: formData,
-        });
-
-        const json = await res.json();
-        if (!res.ok) {
-            throw new Error(json.error ?? "Upload failed");
-        }
-
-        return json.path as string;
-    }
-
-    async function openImageSuggestions() {
-        setSuggestError(null);
-        setSuggestItems([]);
-        setSuggestLoading(true);
-        setSuggestOpen(true);
-
-        const trimmedGerman = german.trim();
-        const trimmedSwahili = swahili.trim();
-        const query = trimmedGerman || trimmedSwahili;
-        if (!query) {
-            setSuggestLoading(false);
-            setSuggestError("Bitte zuerst Deutsch oder Swahili ausfüllen.");
-            return;
-        }
-
-        const params = new URLSearchParams();
-        if (trimmedGerman) params.set("german", trimmedGerman);
-        if (trimmedSwahili) params.set("swahili", trimmedSwahili);
-        params.set("q", query);
-
-        const res = await fetch(`/api/images/suggest?${params.toString()}`);
-        const json = await res.json();
-
-        setSuggestLoading(false);
-
-        if (!res.ok) {
-            setSuggestError(json.error ?? "Bildvorschläge konnten nicht geladen werden.");
-            return;
-        }
-
-        setSuggestItems(json.items ?? []);
-    }
-
-    async function chooseSuggestedImage(imageUrl: string, thumbUrl?: string) {
-        try {
-            setStatus("Übernehme Bild...");
-            setSuggestError(null);
-
-            const res = await fetch("/api/images/import", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ imageUrl }),
-            });
-            const json = await res.json();
-
-            if (!res.ok) {
-                setStatus("");
-                setSuggestError(json.error ?? "Bild konnte nicht übernommen werden.");
-                return;
-            }
-
-            setSelectedSuggestUrl(imageUrl);
-            setSelectedSuggestPath(json.path);
-            setSuggestedImagePath(json.path);
-            if (thumbUrl) setPreviewUrl(thumbUrl);
-            setImageFile(null);
-            setStatus("Bild übernommen ✅");
-            setSuggestOpen(false);
-        } catch (e) {
-            console.error(e);
-            setStatus("Bildübernahme fehlgeschlagen.");
-        } finally {
-            setSuggestLoading(false);
-        }
-    }
-
-    async function checkExistingGerman(
-        germanText: string = german,
-        swahiliText: string = swahili,
-        excludeId: string | null = editingId,
-    ): Promise<boolean> {
-        const resolvedGerman = germanText.trim();
-        const resolvedSwahili = swahiliText.trim();
-        setDuplicateCheckLoading(true);
-        setStatus("Prüfe auf ähnliche Karten …");
-
-        try {
-            const res = await fetch("/api/cards/check-existing", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    german: resolvedGerman,
-                    swahili: resolvedSwahili,
-                    type: cardType,
-                    excludeId,
-                }),
-            });
-
-            const json = await res.json();
-
-            if (!res.ok) {
-                console.error(json.error);
-                setDuplicateCheckKind("failure");
-                setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
-                setDuplicatePreview(null);
-                setStatus("");
-                return true;
-            }
-
-            if (json.exists) {
-                setDuplicateCheckKind("strict");
-                setDuplicateHint("Mögliche Dublette gefunden");
-                setDuplicatePreview(Array.isArray(json.strictCards) ? json.strictCards : json.cards ?? null);
-                setStatus("");
-                return true;
-            }
-
-            if (json.hasSimilar) {
-                setDuplicateCheckKind("similar");
-                setDuplicateHint("Ähnliche Karten gefunden");
-                setDuplicatePreview(Array.isArray(json.similarCards) ? json.similarCards : json.cards ?? null);
-                setStatus("");
-                return true;
-            }
-
-            setDuplicateCheckKind(null);
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setStatus("");
-            return false;
-        } catch (error) {
-            console.error(error);
-            setDuplicateCheckKind("failure");
-            setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
-            setDuplicatePreview(null);
-            setStatus("");
-            return true;
-        } finally {
-            setDuplicateCheckLoading(false);
-        }
     }
 
     async function createCard(skipWarning = false) {
@@ -451,7 +186,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             setStatus("Speichere...");
 
-            const imagePath = suggestedImagePath ?? (await uploadImage());
+            const imagePath = media.suggestedImagePath ?? (await media.uploadImage());
 
             const res = await fetch("/api/cards", {
                 method: "POST",
@@ -491,11 +226,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 }
             }
 
-            if (createdCardId && pendingAudioBlob) {
+            if (createdCardId && media.pendingAudioBlob) {
                 const fd = new FormData();
                 fd.append(
                     "file",
-                    new File([pendingAudioBlob], "recording", { type: pendingAudioType ?? "audio/mp4" })
+                    new File([media.pendingAudioBlob], "recording", { type: media.pendingAudioType ?? "audio/mp4" })
                 );
                 fd.append("cardId", createdCardId);
 
@@ -503,8 +238,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 const upJson = await up.json();
 
                 if (up.ok) {
-                    setPendingAudioBlob(null);
-                    setPendingAudioType(null);
+                    media.setPendingAudioBlob(null);
+                    media.setPendingAudioType(null);
                 } else {
                     setStatus(upJson?.error ?? "Audio-Upload fehlgeschlagen");
                 }
@@ -522,15 +257,13 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             }
 
             showToast("Karte gespeichert ✅");
-            setSelectedSuggestUrl(null);
-            setSelectedSuggestPath(null);
-            setSuggestItems([]);
+            media.setSelectedSuggestUrl(null);
+            media.setSelectedSuggestPath(null);
+            media.setSuggestItems([]);
             setStatus("Karte gespeichert ✅");
-            setImageFile(null);
-            setSuggestedImagePath(null);
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setDuplicateCheckKind(null);
+            media.setImageFile(null);
+            media.setSuggestedImagePath(null);
+            clearDuplicateCheck();
             await onCreated(created);
 
             setGerman("");
@@ -538,17 +271,12 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             setGermanExample("");
             setSwahiliExample("");
             setOptionalExamplesOpen(false);
-            resetImageInputs();
-            setPendingAudioBlob(null);
-            setPendingAudioType(null);
-            setEditAudioPath(null);
+            media.resetMediaInputs();
             setEditingId(null);
             setFormGroupIds([]);
             setEditingOriginalGroupIds([]);
             resetFormNotes();
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setDuplicateCheckKind(null);
+            clearDuplicateCheck();
             setStatus("Karte gespeichert ✅");
         } catch (e: any) {
             setStatus(`Fehler: ${e.message}`);
@@ -557,9 +285,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     async function updateCard(skipWarning = false) {
         try {
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setDuplicateCheckKind(null);
+            clearDuplicateCheck();
             setStatus("Speichere...");
 
             if (!editingId) {
@@ -585,11 +311,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             let imagePath: string | null | undefined = undefined;
 
-            if (suggestedImagePath) {
-                imagePath = suggestedImagePath;
+            if (media.suggestedImagePath) {
+                imagePath = media.suggestedImagePath;
             }
-            else if (imageFile) {
-                imagePath = (await uploadImage()) ?? null;
+            else if (media.imageFile) {
+                imagePath = (await media.uploadImage()) ?? null;
             }
 
             const body = buildUpdateCardPayload({
@@ -643,29 +369,24 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
             showToast("Karte aktualisiert ✅");
             setStatus("Karte aktualisiert ✅");
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setDuplicateCheckKind(null);
+            clearDuplicateCheck();
 
             setGerman("");
             setSwahili("");
             setGermanExample("");
             setSwahiliExample("");
             setOptionalExamplesOpen(false);
-            setImageFile(null);
-            setSuggestedImagePath(null);
-            setSelectedSuggestUrl(null);
-            setSelectedSuggestPath(null);
-            setSuggestItems([]);
-            setSuggestError(null);
+            media.setImageFile(null);
+            media.setSuggestedImagePath(null);
+            media.setSelectedSuggestUrl(null);
+            media.setSelectedSuggestPath(null);
+            media.setSuggestItems([]);
+            media.setSuggestError(null);
 
             if (returnToLearn) {
                 setOpen(false);
                 cancelEdit();
-                resetImageInputs();
-                setEditAudioPath(null);
-                setPendingAudioBlob(null);
-                setPendingAudioType(null);
+                media.resetMediaInputs();
                 resetFormNotes();
                 setReturnToLearn(false);
                 setStatus("");
@@ -677,7 +398,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 setOpen(true);
                 setCreateDraft(null);
                 setEditingId(null);
-                setEditAudioPath(null);
+                media.setEditAudioPath(null);
                 setFormGroupIds([]);
                 setEditingOriginalGroupIds([]);
                 resetFormNotes();
@@ -686,11 +407,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 setGermanExample("");
                 setSwahiliExample("");
                 setOptionalExamplesOpen(false);
-                resetImageInputs();
-                setDuplicateHint(null);
-                setDuplicatePreview(null);
-                setPendingAudioBlob(null);
-                setPendingAudioType(null);
+                media.resetImageInputs();
+                clearDuplicateCheck();
+                media.setPendingAudioBlob(null);
+                media.setPendingAudioType(null);
                 setStatus("Duplikat aktualisiert ✅");
                 return;
             }
@@ -714,67 +434,67 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }
 
     function startEdit(card: any, source: EditSource = "cards") {
-        const nextGroupIds = Array.isArray(card.groups) ? card.groups.map((group: any) => String(group.id)) : [];
+        const nextGroupIds = extractCardGroupIds(card);
+        const textState = hydrateTextStateFromCard(card);
         setEditSource(source);
         setEditingId(String(card.id));
-        setGerman(card.german_text ?? "");
-        setSwahili(card.swahili_text ?? "");
-        setGermanExample(card.german_example ?? "");
-        setSwahiliExample(card.swahili_example ?? "");
-        setOptionalExamplesOpen(Boolean((card.german_example ?? "").trim() || (card.swahili_example ?? "").trim()));
-        setDuplicateHint(null);
-        setImageFile(null);
-        setEditAudioPath(card.audio_path ?? null);
+        setGerman(textState.german);
+        setSwahili(textState.swahili);
+        setGermanExample(textState.germanExample);
+        setSwahiliExample(textState.swahiliExample);
+        setOptionalExamplesOpen(hasOptionalExamples(textState.germanExample, textState.swahiliExample));
+        clearDuplicateCheck();
+        media.setImageFile(null);
+        media.setEditAudioPath(card.audio_path ?? null);
         setFormGroupIds(nextGroupIds);
         setEditingOriginalGroupIds(nextGroupIds);
         setStatus("");
         resetFormNotes();
         if (card.id) void loadFormNotes(String(card.id));
 
-        const existingPath = card.image_path ?? null;
+        const existingPath = resolveExistingImagePath(card);
 
-        setSelectedSuggestPath(existingPath);
-        setSelectedSuggestUrl(null);
+        media.setSelectedSuggestPath(existingPath);
+        media.setSelectedSuggestUrl(null);
 
         if (existingPath) {
-            setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
+            media.setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
         } else {
-            setPreviewUrl(null);
+            media.setPreviewUrl(null);
         }
     }
 
     function startEditFromLearn({ item, german, swahili, germanExample, swahiliExample }: EditFromLearnInput) {
         if (!item) return;
         const cardId = String(item.cardId ?? item.id);
-        const nextGroupIds = Array.isArray(item.groups) ? item.groups.map((group: any) => String(group.id)) : [];
+        const nextGroupIds = extractCardGroupIds(item);
+        const textState = hydrateTextStateFromLearn({ german, swahili, germanExample, swahiliExample });
 
         setReturnToLearn(true);
         setEditingId(cardId);
-        setGerman(german ?? "");
-        setSwahili(swahili ?? "");
-        setGermanExample(germanExample ?? "");
-        setSwahiliExample(swahiliExample ?? "");
-        setOptionalExamplesOpen(Boolean((germanExample ?? "").trim() || (swahiliExample ?? "").trim()));
-        setEditAudioPath(item.audio_path ?? null);
+        setGerman(textState.german);
+        setSwahili(textState.swahili);
+        setGermanExample(textState.germanExample);
+        setSwahiliExample(textState.swahiliExample);
+        setOptionalExamplesOpen(hasOptionalExamples(textState.germanExample, textState.swahiliExample));
+        media.setEditAudioPath(item.audio_path ?? null);
         setFormGroupIds(nextGroupIds);
         setEditingOriginalGroupIds(nextGroupIds);
-        setDuplicateHint(null);
-        setDuplicatePreview(null);
+        clearDuplicateCheck();
         resetFormNotes();
         void loadFormNotes(cardId);
 
-        const existingPath =
-            item?.image_path ?? item?.imagePath ?? item?.image ?? null;
+        const existingPath = resolveExistingImagePath(item);
 
         if (existingPath) {
-            setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
+            media.setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
         } else {
-            setPreviewUrl(null);
+            media.setPreviewUrl(null);
         }
 
-        setSuggestedImagePath(null);
-        setSelectedSuggestUrl(null);
-        setSelectedSuggestPath(existingPath);
+        media.setSuggestedImagePath(null);
+        media.setSelectedSuggestUrl(null);
+        media.setSelectedSuggestPath(existingPath);
         setOpen(true);
     }
 
@@ -786,9 +506,9 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setSwahiliExample("");
         setFormGroupIds([]);
         setEditingOriginalGroupIds([]);
-        setImageFile(null);
-        setDuplicateHint(null);
-        setEditAudioPath(null);
+        media.setImageFile(null);
+        clearDuplicateCheck();
+        media.setEditAudioPath(null);
         setStatus("");
     }
 
@@ -797,33 +517,27 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             setReturnToLearn(false);
             setOpen(false);
             cancelEdit();
-            resetImageInputs();
-            setEditAudioPath(null);
-            setPendingAudioBlob(null);
-            setPendingAudioType(null);
+            media.resetMediaInputs();
             onReturnToLearn();
             return;
         }
 
         if (editSource === "create" && editingId && createDraft) {
             setEditingId(null);
-            setEditAudioPath(null);
+            media.setEditAudioPath(null);
             setGerman(createDraft.german);
             setSwahili(createDraft.swahili);
             setGermanExample(createDraft.germanExample);
             setSwahiliExample(createDraft.swahiliExample);
-            setOptionalExamplesOpen(Boolean(createDraft.germanExample.trim() || createDraft.swahiliExample.trim()));
-            setFormNoteDraft({ mainNotes: createDraft.note });
-            savedFormNoteRef.current = "";
-            setFormNoteOpen(shouldOpenNotesSection(createDraft.note));
+            setOptionalExamplesOpen(hasOptionalExamples(createDraft.germanExample, createDraft.swahiliExample));
+            restoreDraftNote(createDraft.note);
             setCreateDraft(null);
             setFormGroupIds([]);
             setEditingOriginalGroupIds([]);
-            resetImageInputs();
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setPendingAudioBlob(null);
-            setPendingAudioType(null);
+            media.resetImageInputs();
+            clearDuplicateCheck();
+            media.setPendingAudioBlob(null);
+            media.setPendingAudioType(null);
             setStatus("");
             return;
         }
@@ -838,128 +552,18 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             setFormGroupIds([]);
             setEditingOriginalGroupIds([]);
             resetFormNotes();
-            resetImageInputs();
-            setDuplicateHint(null);
-            setDuplicatePreview(null);
-            setPendingAudioBlob(null);
-            setPendingAudioType(null);
-            setEditAudioPath(null);
+            media.resetMediaInputs();
+            clearDuplicateCheck();
             setStatus("");
             return;
         }
 
         setOpen(false);
         cancelEdit();
-        resetImageInputs();
+        media.resetImageInputs();
         resetFormNotes();
-        setEditAudioPath(null);
-        setPendingAudioBlob(null);
-        setPendingAudioType(null);
+        media.resetAudioInputs();
         onOpenCards();
-    }
-
-    async function startRecordingForCreate() {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        const candidates = [
-            "audio/mp4",
-            "audio/webm;codecs=opus",
-            "audio/webm",
-            "audio/ogg;codecs=opus",
-            "audio/ogg",
-        ];
-        const mimeType =
-            candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) ?? "";
-
-        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-        mediaRecorderRef.current = recorder;
-        chunksRef.current = [];
-
-        recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-        };
-
-        recorder.onstop = () => {
-            stream.getTracks().forEach((t) => t.stop());
-            const rawType = recorder.mimeType || "audio/mp4";
-            const baseType = rawType.split(";")[0];
-            const blob = new Blob(chunksRef.current, { type: baseType });
-            setPendingAudioBlob(blob);
-            setPendingAudioType(baseType);
-            setStatus("Audio bereit ✅ (wird beim Speichern hochgeladen)");
-        };
-
-        recorder.start();
-        setIsRecording(true);
-    }
-
-    function stopRecordingForCreate() {
-        const recorder = mediaRecorderRef.current;
-        if (!recorder) return;
-        recorder.stop();
-        setIsRecording(false);
-    }
-
-    async function startRecordingForEdit() {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        const candidates = [
-            "audio/mp4",
-            "audio/webm;codecs=opus",
-            "audio/webm",
-            "audio/ogg;codecs=opus",
-            "audio/ogg",
-        ];
-        const mimeType =
-            candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) ?? "";
-
-        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-        mediaRecorderRef.current = recorder;
-        chunksRef.current = [];
-
-        recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-        };
-
-        recorder.onstop = async () => {
-            stream.getTracks().forEach((t) => t.stop());
-            const rawType = recorder.mimeType || "audio/mp4";
-            const baseType = rawType.split(";")[0];
-            const blob = new Blob(chunksRef.current, { type: baseType });
-            const resolvedCardId = String(editingId ?? "").trim();
-            if (!resolvedCardId) {
-                console.error("No editingId for audio upload");
-                return;
-            }
-
-            const fd = new FormData();
-            fd.append("file", new File([blob], "recording", { type: blob.type }));
-            fd.append("cardId", resolvedCardId);
-
-            const res = await fetch("/api/upload-audio", { method: "POST", body: fd });
-            const json = await res.json();
-
-            if (!res.ok) {
-                console.error(json?.error || "Upload failed");
-                setStatus(json?.error || "Upload fehlgeschlagen");
-                return;
-            }
-
-            const newPath = json.audio_path ?? null;
-            setEditAudioPath(newPath);
-            onAudioUpdated(resolvedCardId, newPath);
-            setStatus("Audio gespeichert ✅");
-        };
-
-        recorder.start();
-        setIsRecording(true);
-    }
-
-    function stopRecordingForEdit() {
-        const recorder = mediaRecorderRef.current;
-        if (!recorder) return;
-        recorder.stop();
-        setIsRecording(false);
     }
 
     async function deleteEditingCard() {
@@ -982,7 +586,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         await onDeleted(deletedId);
         setOpen(false);
         cancelEdit();
-        resetImageInputs();
+        media.resetImageInputs();
         resetFormNotes();
     }
 
@@ -1023,12 +627,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             type="button"
                             className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
                             onClick={() => {
-                                setCreateDraft({ german, swahili, germanExample, swahiliExample, note: formNoteDraft.mainNotes });
+                                setCreateDraft(createDraftFromTextState({ german, swahili, germanExample, swahiliExample }, formNoteDraft.mainNotes));
                                 const full = cards.find((entry) => String(entry.id) === String(card.id)) ?? card;
                                 startEdit(full, "create");
-                                setDuplicateHint(null);
-                                setDuplicatePreview(null);
-                                setDuplicateCheckKind(null);
+                                clearDuplicateCheck();
                                 setOpen(true);
                             }}
                         >
@@ -1057,9 +659,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 <button
                     className="btn btn-ghost flex-1 text-sm"
                     onClick={() => {
-                        setDuplicateHint(null);
-                        setDuplicatePreview(null);
-                        setDuplicateCheckKind(null);
+                        clearDuplicateCheck();
                     }}
                 >
                     Korrigieren
@@ -1220,21 +820,21 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             <div className="text-sm font-medium">Aussprache</div>
 
                             <div className="mt-3 flex items-center gap-4">
-                                {pendingAudioBlob ? (
+                                {media.pendingAudioBlob ? (
                                     <>
                                         <button
                                             type="button"
                                             className="rounded-xl border px-3 py-2"
-                                            onClick={playPendingAudio}
+                                            onClick={media.playPendingAudio}
                                         >
                                             🔊 Abspielen
                                         </button>
 
-                                        {!isRecording ? (
+                                        {!media.isRecording ? (
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={startRecordingForCreate}
+                                                onClick={media.startRecordingForCreate}
                                             >
                                                 🎙️ Neu aufnehmen
                                             </button>
@@ -1242,7 +842,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={stopRecordingForCreate}
+                                                onClick={media.stopRecordingForCreate}
                                             >
                                                 ⏹️ Stop
                                             </button>
@@ -1250,11 +850,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                     </>
                                 ) : (
                                     <>
-                                        {!isRecording ? (
+                                        {!media.isRecording ? (
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={startRecordingForCreate}
+                                                onClick={media.startRecordingForCreate}
                                             >
                                                 🎙️ Aufnahme starten
                                             </button>
@@ -1262,7 +862,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={stopRecordingForCreate}
+                                                onClick={media.stopRecordingForCreate}
                                             >
                                                 ⏹️ Stop
                                             </button>
@@ -1282,7 +882,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         accept="image/*"
                         id="trainer-card-image-upload"
                         className="hidden"
-                        onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+                        onChange={(e) => media.setImageFile(e.target.files?.[0] ?? null)}
                     />
 
                     {editingId && (
@@ -1290,21 +890,21 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             <div className="text-sm font-medium">Aussprache</div>
 
                             <div className="mt-4 flex items-center gap-3">
-                                {editAudioPath ? (
+                                {media.editAudioPath ? (
                                     <>
                                         <button
                                             type="button"
                                             className="rounded-xl border px-3 py-2"
-                                            onClick={() => playCardAudioIfExists({ audio_path: editAudioPath })}
+                                            onClick={() => media.playAudioPath(media.editAudioPath)}
                                         >
                                             🔊 Abspielen
                                         </button>
 
-                                        {!isRecording ? (
+                                        {!media.isRecording ? (
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={startRecordingForEdit}
+                                                onClick={() => void media.startRecordingForEdit(editingId)}
                                             >
                                                 🎙️ Neu aufnehmen
                                             </button>
@@ -1312,7 +912,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={stopRecordingForEdit}
+                                                onClick={media.stopRecordingForEdit}
                                             >
                                                 ⏹️ Stop & Speichern
                                             </button>
@@ -1320,11 +920,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                     </>
                                 ) : (
                                     <>
-                                        {!isRecording ? (
+                                        {!media.isRecording ? (
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={startRecordingForEdit}
+                                                onClick={() => void media.startRecordingForEdit(editingId)}
                                             >
                                                 🎙️ Aufnahme starten
                                             </button>
@@ -1332,7 +932,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                             <button
                                                 type="button"
                                                 className="rounded-xl border px-3 py-2"
-                                                onClick={stopRecordingForEdit}
+                                                onClick={media.stopRecordingForEdit}
                                             >
                                                 ⏹️ Stop & Speichern
                                             </button>
@@ -1359,10 +959,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             hover:bg-surface hover:border-accent
                         "
                     >
-                        {previewUrl ? (
+                        {media.previewUrl ? (
                             <>
                                 <img
-                                    src={previewUrl}
+                                    src={media.previewUrl}
                                     alt="Vorschau"
                                     className="w-16 h-16 object-cover rounded-xl border"
                                 />
@@ -1389,12 +989,12 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     <button
                         type="button"
                         className="mt-6 w-full rounded-xl border p-3"
-                        onClick={openImageSuggestions}
+                        onClick={() => void media.openImageSuggestions(german, swahili)}
                     >
                         ✨ Bild vorschlagen
                     </button>
 
-                    {suggestedImagePath ? (
+                    {media.suggestedImagePath ? (
                         <div className="mt-2 text-xs text-muted">
                             Vorschlagsbild ausgewählt ✅
                         </div>
@@ -1443,28 +1043,28 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             </FullScreenSheet>
 
             <FullScreenSheet
-                open={suggestOpen}
+                open={media.suggestOpen}
                 title="Bildvorschläge"
-                onClose={() => setSuggestOpen(false)}
+                onClose={() => media.setSuggestOpen(false)}
             >
-                {suggestLoading ? (
+                {media.suggestLoading ? (
                     <div className="mt-4 text-sm text-muted" > Lade Vorschläge…</div>
-                ) : suggestError ? (
+                ) : media.suggestError ? (
                     <div className="mt-4 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                        {suggestError}
+                        {media.suggestError}
                     </div>
-                ) : suggestItems.length === 0 ? (
+                ) : media.suggestItems.length === 0 ? (
                     <div className="mt-4 text-sm text-muted">
                         Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
                     </div>
                 ) : (
                     <div className="mt-6 grid grid-cols-2 gap-4">
-                        {suggestItems.map((item) => (
+                        {media.suggestItems.map((item) => (
                             <button
                                 key={item.pageId}
                                 type="button"
                                 className="rounded-xl border overflow-hidden hover:shadow-soft transition"
-                                onClick={() => chooseSuggestedImage(item.importUrl, item.thumb)}
+                                onClick={() => media.chooseSuggestedImage(item.importUrl, item.thumb)}
                             >
                                 <img src={item.thumb} alt={item.title} className="w-full h-28 object-cover" />
                                 <div className="p-2 text-xs text-muted line-clamp-2">{item.title}</div>

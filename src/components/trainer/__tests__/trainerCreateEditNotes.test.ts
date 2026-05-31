@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("trainer create/edit notes integration", () => {
     const clientSource = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
     const source = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
+    const notesHookSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardFormNotes.ts"), "utf8");
 
     it("renders optional own notes in the create/edit card flow", () => {
         expect(source).toContain("Eigene Notizen (optional)");
@@ -13,17 +14,17 @@ describe("trainer create/edit notes integration", () => {
     });
 
     it("loads existing card notes when editing an existing card", () => {
-        expect(source).toContain("async function loadFormNotes");
-        expect(source).toContain("/api/cards/notes?cardId=");
+        expect(notesHookSource).toContain("async function loadFormNotes");
+        expect(notesHookSource).toContain("/api/cards/notes?cardId=");
         expect(source).toContain("void loadFormNotes(String(card.id))");
         expect(source).toContain("void loadFormNotes(cardId)");
-        expect(source).toContain("setFormNoteOpen(shouldOpenNotesSection(mainNotes))");
+        expect(notesHookSource).toContain("setFormNoteOpen(shouldOpenNotesSection(mainNotes))");
     });
 
     it("saves create/edit notes through the existing card notes API", () => {
-        expect(source).toContain("async function saveFormNotes");
-        expect(source).toContain('method: "PATCH"');
-        expect(source).toContain('fetch("/api/cards/notes"');
+        expect(notesHookSource).toContain("async function saveFormNotes");
+        expect(notesHookSource).toContain('method: "PATCH"');
+        expect(notesHookSource).toContain('fetch("/api/cards/notes"');
         expect(source).toContain("if (shouldSaveCreateNote(createdCardId, formNoteDraft.mainNotes))");
         expect(source).toContain("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)");
         expect(source).toContain("await saveFormNotes(updatedCardId)");
