@@ -169,25 +169,21 @@ describe("mobile critical-flow regression coverage", () => {
         expect(confirm).toContain("z-[160]");
     });
 
-    it("documents quick-search edit parity baseline and the remaining parity gap", () => {
+    it("keeps quick-search edit on the shared trainer card form path", () => {
         const quickSearch = readSource("src/components/GlobalQuickSearch.tsx");
-        const editor = readSource("src/components/CardEditorSheet.tsx");
         const trainerForm = readSource("src/components/trainer/TrainerCardFormSheet.tsx");
         const duplicateHook = readSource("src/lib/trainer/useTrainerCardDuplicateCheck.ts");
 
-        expect(quickSearch).toContain("<CardEditorSheet");
+        expect(quickSearch).toContain("<TrainerCardFormSheet");
+        expect(quickSearch).toContain("cardFormRef.current?.openEdit");
+        expect(quickSearch).toContain("fetchGroups(\"vocab\")");
+        expect(quickSearch).toContain("groups={groups}");
+        expect(quickSearch).toContain("onUpdated={(card, nextGroups) => handleSaved(card, nextGroups)}");
+        expect(quickSearch).toContain("onAudioUpdated");
         expect(quickSearch).toContain("handleEdit");
-        expect(editor).toContain("Eigene Notizen (optional)");
-        expect(editor).toContain("/api/cards/notes?cardId=");
-        expect(editor).toContain('fetch("/api/cards/notes"');
-        expect(editor).toContain("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden");
-
-        // Known parity gap: search edits have notes/media parity, but not the trainer form's
-        // duplicate-check and group-assignment flow yet. This guard makes the gap explicit.
         expect(trainerForm).toContain("useTrainerCardDuplicateCheck");
         expect(duplicateHook).toContain('fetch("/api/cards/check-existing"');
         expect(trainerForm).toContain("<CompactGroupPicker");
-        expect(editor).not.toContain('fetch("/api/cards/check-existing"');
-        expect(editor).not.toContain("<CompactGroupPicker");
+        expect(quickSearch).not.toContain("<CardEditorSheet");
     });
 });

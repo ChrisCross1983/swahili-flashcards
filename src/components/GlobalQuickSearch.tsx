@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import CardEditorSheet, { CardEditorCard } from "@/components/CardEditorSheet";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CardText from "@/components/ui/CardText";
+import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
+import { fetchGroups } from "@/lib/groups/api";
 import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
+import type { Group } from "@/lib/groups/types";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -15,8 +17,12 @@ type CardResult = {
     id: string | number;
     german_text: string;
     swahili_text: string;
+    german_example?: string | null;
+    swahili_example?: string | null;
     image_path: string | null;
     audio_path: string | null;
+    groups?: Group[];
+    type?: "vocab" | "sentence" | null;
 };
 
 type Props = {
@@ -37,17 +43,33 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<CardResult[]>([]);
     const [selected, setSelected] = useState<CardResult | null>(null);
+    const [knownCards, setKnownCards] = useState<CardResult[]>([]);
+    const [groups, setGroups] = useState<Group[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [mounted, setMounted] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [editingCardId, setEditingCardId] = useState<string | null>(null);
-    const [editorOpen, setEditorOpen] = useState(false);
+    const [editStatus, setEditStatus] = useState<string | null>(null);
+    const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
+
+    const mergeKnownCard = useCallback((card: CardResult) => {
+        setKnownCards((prev) => {
+            const withoutExisting = prev.filter((entry) => String(entry.id) !== String(card.id));
+            return [card, ...withoutExisting].slice(0, 30);
+        });
+    }, []);
 
     const closeOverlay = useCallback(() => {
         blurActiveOverlayElement();
         setQuery("");
         setResults([]);
         setSelected(null);
+        setError(null);
+        setEditStatus(null);
+        onClose();
+    }, [onClose]);
+
+    const hideSearchForEdit = useCallback(() => {
+        blurActiveOverlayElement();
         setError(null);
         onClose();
     }, [onClose]);
@@ -58,18 +80,13 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                if (editorOpen) {
-                    setEditorOpen(false);
-                    setEditingCardId(null);
-                } else {
-                    closeOverlay();
-                }
+                closeOverlay();
             }
         };
 
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [open, closeOverlay, editorOpen]);
+    }, [open, closeOverlay]);
 
     useEffect(() => {
         const handleHotkey = (event: KeyboardEvent) => {
@@ -123,6 +140,12 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                 const data = (await response.json()) as { cards?: CardResult[] };
                 const cards = Array.isArray(data.cards) ? data.cards : [];
                 setResults(cards.slice(0, 10));
+                setKnownCards((prev) => {
+                    const merged = new Map<string, CardResult>();
+                    for (const card of prev) merged.set(String(card.id), card);
+                    for (const card of cards.slice(0, 10)) merged.set(String(card.id), card);
+                    return Array.from(merged.values()).slice(0, 30);
+                });
                 setError(null);
             } catch (err) {
                 if (controller.signal.aborted) return;
@@ -140,44 +163,88 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         };
     }, [query, ownerKey, open]);
 
-    const handleEdit = useCallback((card: CardResult) => {
-        closeOverlay();
+    const ensureGroupsLoaded = useCallback(async () => {
+        if (groups.length > 0) return groups;
+        const nextGroups = await fetchGroups("vocab");
+        setGroups(nextGroups);
+        return nextGroups;
+    }, [groups]);
 
-        setEditingCardId(String(card.id));
-        setEditorOpen(true);
-    }, [closeOverlay]);
+    useEffect(() => {
+        let ignore = false;
+        async function loadGroups() {
+            try {
+                const nextGroups = await ensureGroupsLoaded();
+                if (!ignore) setGroups(nextGroups);
+            } catch {
+                if (!ignore) setEditStatus("Gruppen konnten nicht geladen werden.");
+            }
+        }
 
+        if (mounted && open) void loadGroups();
+        return () => {
+            ignore = true;
+        };
+    }, [ensureGroupsLoaded, mounted, open]);
 
-    const handleSaved = useCallback((updated: CardEditorCard) => {
+    const handleEdit = useCallback(async (card: CardResult) => {
+        setEditStatus(null);
+        hideSearchForEdit();
+
+        try {
+            await ensureGroupsLoaded();
+            const response = await fetch(`/api/cards?id=${encodeURIComponent(String(card.id))}&type=vocab`, { cache: "no-store" });
+            const json = await response.json();
+            if (!response.ok) throw new Error(json?.error ?? "Karte konnte nicht geladen werden.");
+            const loadedCard = json.card ?? card;
+            mergeKnownCard(loadedCard);
+            cardFormRef.current?.openEdit(loadedCard, "cards");
+        } catch (error) {
+            setEditStatus(error instanceof Error ? error.message : "Karte konnte nicht geladen werden.");
+            mergeKnownCard(card);
+            cardFormRef.current?.openEdit(card, "cards");
+        }
+    }, [ensureGroupsLoaded, hideSearchForEdit, mergeKnownCard]);
+
+    const handleSaved = useCallback((updated: CardResult, nextGroups?: Group[]) => {
+        const updatedWithGroups = nextGroups ? { ...updated, groups: nextGroups } : updated;
         setResults((prev) =>
             prev.map((card) =>
-                String(card.id) === String(updated.id)
+                String(card.id) === String(updatedWithGroups.id)
                     ? {
                         ...card,
-                        german_text: updated.german_text,
-                        swahili_text: updated.swahili_text,
-                        image_path: updated.image_path,
-                        audio_path: updated.audio_path,
+                        german_text: updatedWithGroups.german_text,
+                        swahili_text: updatedWithGroups.swahili_text,
+                        german_example: updatedWithGroups.german_example,
+                        swahili_example: updatedWithGroups.swahili_example,
+                        image_path: updatedWithGroups.image_path,
+                        audio_path: updatedWithGroups.audio_path,
+                        groups: updatedWithGroups.groups ?? card.groups,
                     }
                     : card
             )
         );
         setSelected((prev) =>
-            prev && String(prev.id) === String(updated.id)
+            prev && String(prev.id) === String(updatedWithGroups.id)
                 ? {
                     ...prev,
-                    german_text: updated.german_text,
-                    swahili_text: updated.swahili_text,
-                    image_path: updated.image_path,
-                    audio_path: updated.audio_path,
+                    german_text: updatedWithGroups.german_text,
+                    swahili_text: updatedWithGroups.swahili_text,
+                    german_example: updatedWithGroups.german_example,
+                    swahili_example: updatedWithGroups.swahili_example,
+                    image_path: updatedWithGroups.image_path,
+                    audio_path: updatedWithGroups.audio_path,
+                    groups: updatedWithGroups.groups ?? prev.groups,
                 }
                 : prev
         );
-    }, []);
+        mergeKnownCard(updatedWithGroups);
+    }, [mergeKnownCard]);
 
     const handleDeleted = useCallback((id: string) => {
         setResults((prev) => prev.filter((card) => String(card.id) !== String(id)));
         setSelected((prev) => (prev && String(prev.id) === String(id) ? null : prev));
+        setKnownCards((prev) => prev.filter((card) => String(card.id) !== String(id)));
     }, []);
 
     if (!mounted || !document?.body) {
@@ -217,6 +284,12 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                 placeholder="Deutsch oder Swahili suchen..."
                                 className="w-full rounded-xl border border-soft px-4 py-3 text-base md:text-sm shadow-soft focus:border-accent focus:outline-none"
                             />
+
+                            {editStatus ? (
+                                <div className="rounded-xl border border-soft bg-surface p-3 text-sm text-muted" aria-live="polite">
+                                    {editStatus}
+                                </div>
+                            ) : null}
 
                             <div className="max-h-72 overflow-auto rounded-xl border border-soft bg-surface">
                                 {isLoading ? (
@@ -305,31 +378,28 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                 </div>
             ) : null}
 
-            {editorOpen ? (
-                <CardEditorSheet
-                    ownerKey={ownerKey}
-                    open={editorOpen}
-                    cardId={editingCardId}
-                    initialCard={
-                        selected
-                            ? {
-                                id: String(selected.id),
-                                german_text: selected.german_text,
-                                swahili_text: selected.swahili_text,
-                                image_path: selected.image_path,
-                                audio_path: selected.audio_path,
-                            }
-                            : null
-                    }
-                    onClose={() => {
-                        setEditorOpen(false);
-                        setEditingCardId(null);
-                    }}
-
-                    onSaved={handleSaved}
-                    onDeleted={handleDeleted}
-                />
-            ) : null}
+            <TrainerCardFormSheet
+                ref={cardFormRef}
+                cardType="vocab"
+                editTitle="Karte bearbeiten"
+                createTitle="Neue Karte"
+                saveCardLabel="Speichern"
+                groups={groups}
+                cards={knownCards}
+                onGroupsChange={setGroups}
+                onCreated={(card) => mergeKnownCard(card)}
+                onUpdated={(card, nextGroups) => handleSaved(card, nextGroups)}
+                onDeleted={(cardId) => handleDeleted(cardId)}
+                onAudioUpdated={(cardId, audioPath) => {
+                    const applyAudio = (card: CardResult) => String(card.id) === String(cardId) ? { ...card, audio_path: audioPath } : card;
+                    setResults((prev) => prev.map(applyAudio));
+                    setKnownCards((prev) => prev.map(applyAudio));
+                    setSelected((prev) => prev ? applyAudio(prev) : prev);
+                }}
+                onOpenCards={() => { }}
+                onReturnToLearn={() => { }}
+                onStatus={setEditStatus}
+            />
         </>,
         document.body
     );
