@@ -11,12 +11,13 @@ describe("TrainerLastMissedSummary", () => {
 
         expect(html).toContain("In dieser Runde:");
         expect(html).toContain("Gewusst");
-        expect(html).toContain("Nochmal üben");
+        expect(html).toContain("Nicht gewusst");
         expect(html).toContain("1/7");
+        expect(html).toContain("6/7");
         expect(html).toContain("Trefferquote");
         expect(html).toContain("14%");
-        expect(html).toContain("Noch 140 Karten im Fehlerpool");
-        expect(html).not.toContain("Nicht gewusst");
+        expect(html).toContain("Im Fehlerpool verbleiben noch 140 Karten.");
+        expect(html).not.toContain("Nochmal üben");
     });
 
     it("omits the pool line when no reliable pool count is provided", () => {
@@ -40,10 +41,32 @@ describe("TrainerLastMissedSummary", () => {
         );
 
         expect(html).toContain("2/3");
+        expect(html).toContain("1/3");
         expect(html).toContain("67%");
-        expect(html).toContain("Nur beantwortete Karten werden gezählt");
-        expect(html).toContain("offene Karten bleiben im Fehlerpool");
+        expect(html).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
+        expect(html).toContain("Im Fehlerpool verbleiben noch 140 Karten.");
         expect(html).not.toContain("2/140");
         expect(html).not.toContain("138");
+    });
+
+    it("keeps completed rounds concise without early-end wording", () => {
+        const html = renderToStaticMarkup(
+            <TrainerLastMissedSummary
+                correctCount={3}
+                practiceAgainCount={0}
+                attemptedCount={3}
+                remainingPoolCount={0}
+            />,
+        );
+
+        expect(html).toContain("In dieser Runde:");
+        expect(html).toContain("Gewusst");
+        expect(html).toContain("3/3");
+        expect(html).toContain("Nicht gewusst");
+        expect(html).toContain("0/3");
+        expect(html).toContain("Trefferquote");
+        expect(html).toContain("100%");
+        expect(html).toContain("Im Fehlerpool verbleiben keine Karten mehr.");
+        expect(html).not.toContain("Gezählt werden nur Karten");
     });
 });

@@ -7,8 +7,8 @@ type Props = {
 };
 
 function remainingPoolText(count: number) {
-    if (count <= 0) return "Keine Karten mehr im Fehlerpool.";
-    return `Noch ${count} ${count === 1 ? "Karte" : "Karten"} im Fehlerpool`;
+    if (count <= 0) return "Im Fehlerpool verbleiben keine Karten mehr.";
+    return `Im Fehlerpool verbleiben noch ${count} ${count === 1 ? "Karte" : "Karten"}.`;
 }
 
 export default function TrainerLastMissedSummary({
@@ -33,8 +33,8 @@ export default function TrainerLastMissedSummary({
                 <span className="font-medium">{safeCorrect}/{safeTotal}</span>
             </div>
             <div className="flex items-center justify-between gap-4">
-                <span>Nochmal üben</span>
-                <span className="font-medium">{practiceAgainCount}</span>
+                <span>Nicht gewusst</span>
+                <span className="font-medium">{practiceAgainCount}/{safeTotal}</span>
             </div>
             <div className="flex items-center justify-between gap-4">
                 <span>Trefferquote</span>
@@ -42,7 +42,7 @@ export default function TrainerLastMissedSummary({
             </div>
             {endedEarly ? (
                 <div className="pt-1 text-xs text-muted">
-                    Nur beantwortete Karten werden gezählt; offene Karten bleiben im Fehlerpool.
+                    Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.
                 </div>
             ) : null}
             {typeof remainingPoolCount === "number" ? (
