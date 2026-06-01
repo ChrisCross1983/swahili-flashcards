@@ -173,6 +173,7 @@ describe("mobile critical-flow regression coverage", () => {
         const quickSearch = readSource("src/components/GlobalQuickSearch.tsx");
         const trainerForm = readSource("src/components/trainer/TrainerCardFormSheet.tsx");
         const duplicateHook = readSource("src/lib/trainer/useTrainerCardDuplicateCheck.ts");
+        const groupPicker = readSource("src/components/groups/CompactGroupPicker.tsx");
 
         expect(quickSearch).toContain("<TrainerCardFormSheet");
         expect(quickSearch).toContain("cardFormRef.current?.openEdit");
@@ -184,6 +185,8 @@ describe("mobile critical-flow regression coverage", () => {
         expect(trainerForm).toContain("useTrainerCardDuplicateCheck");
         expect(duplicateHook).toContain('fetch("/api/cards/check-existing"');
         expect(trainerForm).toContain("<CompactGroupPicker");
+        expect(groupPicker).toContain("data-viewport-safe-group-picker");
+        expect(groupPicker).toContain("z-[135]");
         expect(quickSearch).not.toContain("<CardEditorSheet");
     });
 });

@@ -1122,7 +1122,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                 <TrainerLastMissedSummary
                                                                     correctCount={sessionCorrect}
                                                                     practiceAgainCount={wrongCount}
+                                                                    attemptedCount={answeredCount}
                                                                     remainingPoolCount={setupCounts.lastMissedCount}
+                                                                    endedEarly
                                                                 />
                                                             );
                                                         }
@@ -1356,6 +1358,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     <TrainerLastMissedSummary
                                                         correctCount={sessionCorrect}
                                                         practiceAgainCount={sessionWrongIds.size}
+                                                        attemptedCount={sessionTotal}
                                                         remainingPoolCount={setupCounts.lastMissedCount}
                                                     />
 

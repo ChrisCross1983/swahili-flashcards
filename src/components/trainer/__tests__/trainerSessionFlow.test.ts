@@ -46,6 +46,8 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
         expect(lastMissedSummarySource).toContain("In dieser Runde:");
         expect(lastMissedSummarySource).toContain("Nochmal üben");
+        expect(lastMissedSummarySource).toContain("Trefferquote");
+        expect(lastMissedSummarySource).toContain("Nur beantwortete Karten werden gezählt");
         expect(lastMissedSummarySource).toContain("im Fehlerpool");
     });
 

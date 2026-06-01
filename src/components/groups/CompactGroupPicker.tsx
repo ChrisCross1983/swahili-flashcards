@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Group } from "@/lib/groups/types";
 import { createGroup } from "@/lib/groups/api";
 import type { CardType } from "@/lib/trainer/types";
@@ -31,6 +31,7 @@ export default function CompactGroupPicker({
     autoSelectCreated = true,
 }: Props) {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const panelId = useId();
     const [open, setOpen] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
     const [createStatus, setCreateStatus] = useState<string | null>(null);
@@ -42,13 +43,33 @@ export default function CompactGroupPicker({
 
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as Node;
-            if (containerRef.current && !containerRef.current.contains(target)) {
+            const panel = document.getElementById(panelId);
+            if (
+                containerRef.current &&
+                !containerRef.current.contains(target) &&
+                panel &&
+                !panel.contains(target)
+            ) {
                 setOpen(false);
             }
         }
 
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [open, panelId]);
+
+    useEffect(() => {
+        if (!open) return;
+
+        function handleKeyDown(event: KeyboardEvent) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                setOpen(false);
+            }
+        }
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
     }, [open]);
 
     function toggle(id: string) {
@@ -102,12 +123,17 @@ export default function CompactGroupPicker({
                 onClick={() => setOpen((prev) => !prev)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
+                aria-controls={open ? panelId : undefined}
             >
                 {triggerLabel}
             </button>
 
             {open ? (
-                <div className="absolute right-0 top-full z-30 mt-2 w-[min(24rem,calc(100vw-3rem))] rounded-2xl border border-soft bg-base p-3 shadow-soft">
+                <div
+                    id={panelId}
+                    className="fixed inset-x-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+1rem))] z-[135] max-h-[calc(100dvh-6rem)] overflow-auto rounded-2xl border border-soft bg-base p-3 shadow-warm md:left-auto md:right-[max(1rem,env(safe-area-inset-right))] md:top-[max(5rem,calc(env(safe-area-inset-top)+2rem))] md:w-[min(24rem,calc(100vw-2rem))]"
+                    data-viewport-safe-group-picker
+                >
                     <div className="mb-2 text-sm font-semibold">{title}</div>
                     <div className="max-h-56 space-y-1 overflow-auto pr-1" role="listbox" aria-multiselectable="true">
                         {groups.map((group) => {
