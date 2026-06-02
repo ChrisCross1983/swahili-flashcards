@@ -331,7 +331,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                             </div>
 
                             {selected ? (
-                                <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft">
+                                <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft" data-testid="quick-search-card-preview">
                                     <div className="mb-3 flex items-start justify-between">
                                         <div className="min-w-0">
                                             <CardText className="text-sm font-semibold text-primary">{selected.german_text}</CardText>

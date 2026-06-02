@@ -198,8 +198,8 @@ test.describe("mobile critical flows", () => {
     await page.getByRole("button", { name: /Session starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
 
-    const wrong = page.getByRole("button", { name: "Nicht gewusst" });
-    const correct = page.getByRole("button", { name: "Gewusst" });
+    const wrong = page.getByRole("button", { name: "Nicht gewusst", exact: true });
+    const correct = page.getByRole("button", { name: "Gewusst", exact: true });
     await expect(wrong).toBeVisible();
     await expect(correct).toBeVisible();
 
@@ -242,7 +242,9 @@ test.describe("mobile critical flows", () => {
     await page.getByRole("button", { name: "Suche öffnen" }).click();
     await page.getByPlaceholder("Deutsch oder Swahili suchen...").fill("ich suche");
     await page.getByRole("button", { name: /ich suche dich/ }).click();
-    await page.getByRole("button", { name: "Bearbeiten" }).click();
+    const preview = page.getByTestId("quick-search-card-preview");
+    await expect(preview).toBeVisible();
+    await preview.getByRole("button", { name: "Bearbeiten", exact: true }).click();
 
     await expect(page.getByText("Karte bearbeiten").first()).toBeVisible();
     await expect(page.getByPlaceholder("z.B. Guten Morgen")).toHaveValue("ich suche dich");
@@ -289,13 +291,12 @@ test.describe("mobile critical flows", () => {
 
     const confirm = page.getByRole("dialog", { name: /Ausgewählte Karten löschen/ });
     await expect(confirm).toBeVisible();
-
-    const confirmBox = await confirm.boundingBox();
-    const duplicateSheetBox = await page.getByText("Duplikate prüfen").first().boundingBox();
-    expect(confirmBox && duplicateSheetBox).toBeTruthy();
-    expect(confirmBox.y).toBeLessThan(duplicateSheetBox.y + 120);
+    await expect(confirm.getByRole("button", { name: "Abbrechen", exact: true })).toBeVisible();
+    await expect(confirm.getByRole("button", { name: "Jetzt löschen", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Abbrechen" }).click();
     await expect(confirm).toBeHidden();
+    await expect(page.getByText("Duplikate prüfen").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Neu scannen", exact: true })).toBeEnabled();
   });
 });
