@@ -9,6 +9,7 @@ describe("trainer card form extraction", () => {
     const duplicateHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardDuplicateCheck.ts"), "utf8");
     const mediaHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardMedia.ts"), "utf8");
     const notesHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardFormNotes.ts"), "utf8");
+    const saveFlowSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerCardSaveFlow.ts"), "utf8");
 
     it("moves detailed create/edit form state out of TrainerClient", () => {
         expect(clientSource).toContain("<TrainerCardFormSheet");
@@ -47,25 +48,25 @@ describe("trainer card form extraction", () => {
     });
 
     it("keeps create ordering: POST card, assign groups, upload audio, then save notes", () => {
-        expect(formSource).toContain('method: "POST"');
-        expect(formSource).toContain("await assignCardsToGroup(cardType, groupId, [createdCardId])");
-        expect(formSource).toContain('fetch("/api/upload-audio", { method: "POST"');
-        expect(formSource).toContain("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)");
-        expect(formSource.indexOf('method: "POST"')).toBeLessThan(formSource.indexOf("await assignCardsToGroup(cardType, groupId, [createdCardId])"));
-        expect(formSource.indexOf("await assignCardsToGroup(cardType, groupId, [createdCardId])")).toBeLessThan(formSource.indexOf("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)"));
+        expect(saveFlowSource).toContain('method: "POST"');
+        expect(saveFlowSource).toContain("await assignCardsToGroup(cardType, groupId, [createdCardId])");
+        expect(saveFlowSource).toContain('fetch("/api/upload-audio", { method: "POST"');
+        expect(saveFlowSource).toContain("await saveFormNotes(createdCardId, formNoteText)");
+        expect(saveFlowSource.indexOf('method: "POST"')).toBeLessThan(saveFlowSource.indexOf("await assignCardsToGroup(cardType, groupId, [createdCardId])"));
+        expect(saveFlowSource.indexOf("await assignCardsToGroup(cardType, groupId, [createdCardId])")).toBeLessThan(saveFlowSource.indexOf("await saveFormNotes(createdCardId, formNoteText)"));
     });
 
     it("keeps edit ordering: PATCH card, update groups/session callback, then save notes", () => {
-        expect(formSource).toContain('method: "PATCH"');
-        expect(formSource).toContain("const groupChanges = diffGroupAssignments(editingOriginalGroupIds, formGroupIds)");
-        expect(formSource).toContain("await removeCardFromGroup(groupId, updatedCardId)");
-        expect(formSource).toContain("await onUpdated(updated, nextGroups)");
-        expect(formSource).toContain("const notesSaved = await saveFormNotes(updatedCardId)");
-        expect(formSource.indexOf("await onUpdated(updated, nextGroups)")).toBeLessThan(formSource.indexOf("const notesSaved = await saveFormNotes(updatedCardId)"));
+        expect(saveFlowSource).toContain('method: "PATCH"');
+        expect(saveFlowSource).toContain("const groupChanges = diffGroupAssignments(editingOriginalGroupIds, formGroupIds)");
+        expect(saveFlowSource).toContain("await removeCardFromGroup(groupId, updatedCardId)");
+        expect(saveFlowSource).toContain("await onUpdated(updated, nextGroups)");
+        expect(saveFlowSource).toContain("const notesSaved = await saveFormNotes(updatedCardId)");
+        expect(saveFlowSource.indexOf("await onUpdated(updated, nextGroups)")).toBeLessThan(saveFlowSource.indexOf("const notesSaved = await saveFormNotes(updatedCardId)"));
     });
 
     it("preserves duplicate review, edit-from-learn, cancel, delete, and audio callbacks", () => {
-        expect(formSource).toContain("const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili");
+        expect(saveFlowSource).toContain("const duplicateResult = await checkExistingGerman(text.german.trim(), text.swahili.trim(), excludeId)");
         expect(formSource).toContain("Trotzdem speichern");
         expect(formSource).toContain("setCreateDraft(createDraftFromTextState({ german, swahili, germanExample, swahiliExample }, formNoteDraft.mainNotes))");
         expect(formSource).toContain("openEditFromLearn(input)");
@@ -80,18 +81,20 @@ describe("trainer card form extraction", () => {
         expect(duplicateHookSource).toContain("Ähnliche Karten gefunden");
         expect(formSource).toContain("Nicht zwingend eine Dublette");
         expect(duplicateHookSource).toContain("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
-        expect(formSource).toContain("onClick={() => editingId ? updateCard(true) : createCard(true)}");
+        expect(formSource).toContain("onClick={saveFlow.saveDespiteWarning}");
         expect(formSource).toContain("setStatus(\"Karte aktualisiert ✅\")");
         expect(formSource).toContain("setStatus(\"Karte gespeichert ✅\")");
     });
 
-    it("extracts notes, duplicate, and media domains out of the sheet", () => {
+    it("extracts notes, duplicate, media, and save-flow domains out of the sheet", () => {
         expect(formSource).toContain("useTrainerCardFormNotes()");
         expect(formSource).toContain("useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus })");
         expect(formSource).toContain("useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated })");
+        expect(formSource).toContain("useTrainerCardSaveFlow");
         expect(notesHookSource).toContain("restoreDraftNote");
         expect(duplicateHookSource).toContain("clearDuplicateCheck");
         expect(mediaHookSource).toContain("resetMediaInputs");
+        expect(saveFlowSource).toContain("export type SaveFlowStatus");
     });
 
     it("renders form feedback near the primary card fields instead of bottom-only", () => {

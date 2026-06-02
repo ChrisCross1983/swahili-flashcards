@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { CardType } from "@/lib/trainer/types";
 
 export type DuplicateCheckKind = "strict" | "similar" | "failure" | null;
+export type DuplicateCheckResult = "none" | "strict" | "similar" | "failure";
 
 export function useTrainerCardDuplicateCheck({
     cardType,
@@ -23,11 +24,11 @@ export function useTrainerCardDuplicateCheck({
         setDuplicateCheckKind(null);
     }
 
-    async function checkExistingGerman(
+    async function checkExistingGermanDetailed(
         germanText: string,
         swahiliText: string,
         excludeId: string | null,
-    ): Promise<boolean> {
+    ): Promise<DuplicateCheckResult> {
         const resolvedGerman = germanText.trim();
         const resolvedSwahili = swahiliText.trim();
         setDuplicateCheckLoading(true);
@@ -53,7 +54,7 @@ export function useTrainerCardDuplicateCheck({
                 setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
                 setDuplicatePreview(null);
                 onStatus("");
-                return true;
+                return "failure";
             }
 
             if (json.exists) {
@@ -61,7 +62,7 @@ export function useTrainerCardDuplicateCheck({
                 setDuplicateHint("Mögliche Dublette gefunden");
                 setDuplicatePreview(Array.isArray(json.strictCards) ? json.strictCards : json.cards ?? null);
                 onStatus("");
-                return true;
+                return "strict";
             }
 
             if (json.hasSimilar) {
@@ -69,22 +70,31 @@ export function useTrainerCardDuplicateCheck({
                 setDuplicateHint("Ähnliche Karten gefunden");
                 setDuplicatePreview(Array.isArray(json.similarCards) ? json.similarCards : json.cards ?? null);
                 onStatus("");
-                return true;
+                return "similar";
             }
 
             clearDuplicateCheck();
             onStatus("");
-            return false;
+            return "none";
         } catch (error) {
             console.error(error);
             setDuplicateCheckKind("failure");
             setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
             setDuplicatePreview(null);
             onStatus("");
-            return true;
+            return "failure";
         } finally {
             setDuplicateCheckLoading(false);
         }
+    }
+
+    async function checkExistingGerman(
+        germanText: string,
+        swahiliText: string,
+        excludeId: string | null,
+    ): Promise<boolean> {
+        const result = await checkExistingGermanDetailed(germanText, swahiliText, excludeId);
+        return result !== "none";
     }
 
     return {
@@ -97,5 +107,6 @@ export function useTrainerCardDuplicateCheck({
         setDuplicatePreview,
         setDuplicateCheckKind,
         checkExistingGerman,
+        checkExistingGermanDetailed,
     };
 }

@@ -6,16 +6,9 @@ import CardText from "@/components/ui/CardText";
 import ExampleField from "@/components/ExampleField";
 import GroupBadge from "@/components/groups/GroupBadge";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
-import { assignCardsToGroup, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
 import { visibleBadgeSummary } from "@/lib/trainer/setup";
 import type { CardType } from "@/lib/trainer/types";
-import {
-    buildCreateCardPayload,
-    buildUpdateCardPayload,
-    diffGroupAssignments,
-    shouldSaveCreateNote,
-} from "@/lib/trainer/cardFormBehavior";
 import {
     createDraftFromTextState,
     extractCardGroupIds,
@@ -28,6 +21,7 @@ import {
 import { useTrainerCardDuplicateCheck } from "@/lib/trainer/useTrainerCardDuplicateCheck";
 import { useTrainerCardFormNotes } from "@/lib/trainer/useTrainerCardFormNotes";
 import { useTrainerCardMedia } from "@/lib/trainer/useTrainerCardMedia";
+import { useTrainerCardSaveFlow } from "@/lib/trainer/useTrainerCardSaveFlow";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -122,9 +116,40 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setDuplicateHint,
         setDuplicatePreview,
         setDuplicateCheckKind,
-        checkExistingGerman,
+        checkExistingGermanDetailed,
     } = useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus });
     const media = useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated });
+    const saveFlow = useTrainerCardSaveFlow({
+        cardType,
+        mode: editingId ? "update" : "create",
+        text: { german, swahili, germanExample, swahiliExample },
+        editingId,
+        editingOriginalGroupIds,
+        formGroupIds,
+        groups,
+        formNoteText: formNoteDraft.mainNotes,
+        media: {
+            suggestedImagePath: media.suggestedImagePath,
+            imageFile: media.imageFile,
+            pendingAudioBlob: media.pendingAudioBlob,
+            pendingAudioType: media.pendingAudioType,
+            uploadImage: media.uploadImage,
+            clearCreateAudio: () => {
+                media.setPendingAudioBlob(null);
+                media.setPendingAudioType(null);
+            },
+        },
+        checkExistingGerman: checkExistingGermanDetailed,
+        saveFormNotes,
+        onCreated,
+        onUpdated,
+        onCreateSuccess: handleCreateSuccess,
+        onUpdateSuccess: handleUpdateSuccess,
+        onCreatePartialSuccess: handleCreatePartialSuccess,
+        onUpdatePartialSuccess: handleUpdatePartialSuccess,
+        setDuplicateHint,
+        setDuplicateCheckKind,
+    });
 
     const editingCard = cards.find((card) => String(card.id) === String(editingId)) ?? null;
     const editingImagePath = media.selectedSuggestPath ?? (editingCard?.image_path ?? null);
@@ -155,6 +180,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function resetForCreate() {
         setStatus("");
+        saveFlow.resetSaveFeedback();
         clearDuplicateCheck();
         media.resetMediaInputs();
         setEditSource("create");
@@ -166,271 +192,111 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
     }
 
-    async function createCard(skipWarning = false) {
-        try {
-            const trimmedGerman = german.trim();
-            const trimmedSwahili = swahili.trim();
+    function handleCreateSuccess() {
+        showToast("Karte gespeichert ✅");
+        media.setSelectedSuggestUrl(null);
+        media.setSelectedSuggestPath(null);
+        media.setSuggestItems([]);
+        setStatus("Karte gespeichert ✅");
+        media.setImageFile(null);
+        media.setSuggestedImagePath(null);
+        clearDuplicateCheck();
+        setGerman("");
+        setSwahili("");
+        setGermanExample("");
+        setSwahiliExample("");
+        setOptionalExamplesOpen(false);
+        media.resetMediaInputs();
+        setEditingId(null);
+        setFormGroupIds([]);
+        setEditingOriginalGroupIds([]);
+        resetFormNotes();
+        clearDuplicateCheck();
+        setStatus("Karte gespeichert ✅");
+    }
 
-            if (!skipWarning) {
-                const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili, null);
-                if (shouldReview) {
-                    setStatus("");
-                    return;
-                }
-            }
-
-            if (!trimmedGerman || !trimmedSwahili) {
-                setStatus("Bitte Deutsch und Swahili ausfüllen.");
-                return;
-            }
-
-            setStatus("Speichere...");
-
-            const imagePath = media.suggestedImagePath ?? (await media.uploadImage());
-
-            const res = await fetch("/api/cards", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(buildCreateCardPayload({
-                    german,
-                    swahili,
-                    germanExample,
-                    swahiliExample,
-                    imagePath,
-                    type: cardType,
-                })),
-            });
-
-            const json = await res.json();
-
-            if (!res.ok) {
-                console.error(json.error);
-
-                if (res.status === 409) {
-                    setDuplicateCheckKind("strict");
-                    setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
-                    setStatus("");
-                    return;
-                }
-
-                setStatus(json.error ?? "Speichern fehlgeschlagen");
-                return;
-            }
-
-            const created = json.card;
-            const createdCardId = created?.id ? String(created.id) : null;
-
-            if (createdCardId) {
-                for (const groupId of formGroupIds) {
-                    await assignCardsToGroup(cardType, groupId, [createdCardId]);
-                }
-            }
-
-            if (createdCardId && media.pendingAudioBlob) {
-                const fd = new FormData();
-                fd.append(
-                    "file",
-                    new File([media.pendingAudioBlob], "recording", { type: media.pendingAudioType ?? "audio/mp4" })
-                );
-                fd.append("cardId", createdCardId);
-
-                const up = await fetch("/api/upload-audio", { method: "POST", body: fd });
-                const upJson = await up.json();
-
-                if (up.ok) {
-                    media.setPendingAudioBlob(null);
-                    media.setPendingAudioType(null);
-                } else {
-                    setStatus(upJson?.error ?? "Audio-Upload fehlgeschlagen");
-                }
-            }
-
-            if (shouldSaveCreateNote(createdCardId, formNoteDraft.mainNotes)) {
-                const notesSaved = await saveFormNotes(createdCardId, formNoteDraft.mainNotes);
-                if (!notesSaved) {
-                    setEditingId(createdCardId);
-                    setEditSource("create");
-                    setStatus("Karte gespeichert, aber Notizen konnten nicht gespeichert werden. Bitte erneut speichern, damit die Notiz nicht verloren geht.");
-                    await onCreated(created);
-                    return;
-                }
-            }
-
-            showToast("Karte gespeichert ✅");
-            media.setSelectedSuggestUrl(null);
-            media.setSelectedSuggestPath(null);
-            media.setSuggestItems([]);
-            setStatus("Karte gespeichert ✅");
-            media.setImageFile(null);
-            media.setSuggestedImagePath(null);
-            clearDuplicateCheck();
-            await onCreated(created);
-
-            setGerman("");
-            setSwahili("");
-            setGermanExample("");
-            setSwahiliExample("");
-            setOptionalExamplesOpen(false);
-            media.resetMediaInputs();
-            setEditingId(null);
-            setFormGroupIds([]);
-            setEditingOriginalGroupIds([]);
-            resetFormNotes();
-            clearDuplicateCheck();
-            setStatus("Karte gespeichert ✅");
-        } catch (e: any) {
-            setStatus(`Fehler: ${e.message}`);
+    function handleCreatePartialSuccess(created: any) {
+        const createdCardId = created?.id ? String(created.id) : null;
+        if (createdCardId) {
+            setEditingId(createdCardId);
+            setEditSource("create");
         }
     }
 
-    async function updateCard(skipWarning = false) {
-        try {
-            clearDuplicateCheck();
-            setStatus("Speichere...");
+    function clearUpdatedFormFields() {
+        setGerman("");
+        setSwahili("");
+        setGermanExample("");
+        setSwahiliExample("");
+        setOptionalExamplesOpen(false);
+        media.setImageFile(null);
+        media.setSuggestedImagePath(null);
+        media.setSelectedSuggestUrl(null);
+        media.setSelectedSuggestPath(null);
+        media.setSuggestItems([]);
+        media.setSuggestError(null);
+        clearDuplicateCheck();
+    }
 
-            if (!editingId) {
-                setStatus("Fehler: Keine Karte zum Speichern ausgewählt.");
-                return;
-            }
+    function handleUpdateSuccess(_updated: any, nextGroups: Group[]) {
+        showToast("Karte aktualisiert ✅");
+        setStatus("Karte aktualisiert ✅");
+        setEditingOriginalGroupIds(nextGroups.map((group) => group.id));
+        clearUpdatedFormFields();
 
-            const trimmedGerman = german.trim();
-            const trimmedSwahili = swahili.trim();
-            if (!trimmedGerman || !trimmedSwahili) {
-                setStatus("Bitte Deutsch und Swahili ausfüllen.");
-                return;
-            }
-
-            if (!skipWarning) {
-                const shouldReview = await checkExistingGerman(trimmedGerman, trimmedSwahili, editingId);
-                if (shouldReview) {
-                    setStatus("");
-                    return;
-                }
-                setStatus("Speichere...");
-            }
-
-            let imagePath: string | null | undefined = undefined;
-
-            if (media.suggestedImagePath) {
-                imagePath = media.suggestedImagePath;
-            }
-            else if (media.imageFile) {
-                imagePath = (await media.uploadImage()) ?? null;
-            }
-
-            const body = buildUpdateCardPayload({
-                id: editingId,
-                german,
-                swahili,
-                germanExample,
-                swahiliExample,
-                ...(imagePath !== undefined ? { imagePath } : {}),
-            });
-
-            const res = await fetch("/api/cards", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            });
-
-            const json = await res.json();
-
-            if (!res.ok) {
-                if (res.status === 409) {
-                    setDuplicateCheckKind("strict");
-                    setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
-                    setStatus("");
-                    return;
-                }
-                setStatus(json.error ?? "Aktualisieren fehlgeschlagen.");
-                return;
-            }
-
-            const updated = json.card;
-            const updatedCardId = String(updated.id);
-            const groupChanges = diffGroupAssignments(editingOriginalGroupIds, formGroupIds);
-
-            for (const groupId of groupChanges.add) {
-                await assignCardsToGroup(cardType, groupId, [updatedCardId]);
-            }
-            for (const groupId of groupChanges.remove) {
-                await removeCardFromGroup(groupId, updatedCardId);
-            }
-            const nextGroupIds = new Set<string>(formGroupIds.map(String));
-            const nextGroups = groups.filter((group) => nextGroupIds.has(group.id));
-            await onUpdated(updated, nextGroups);
-            setEditingOriginalGroupIds(Array.from(nextGroupIds));
-
-            const notesSaved = await saveFormNotes(updatedCardId);
-            if (!notesSaved) {
-                setStatus("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden. Bitte erneut speichern, damit die Notiz nicht verloren geht.");
-                return;
-            }
-
-            showToast("Karte aktualisiert ✅");
-            setStatus("Karte aktualisiert ✅");
-            clearDuplicateCheck();
-
-            setGerman("");
-            setSwahili("");
-            setGermanExample("");
-            setSwahiliExample("");
-            setOptionalExamplesOpen(false);
-            media.setImageFile(null);
-            media.setSuggestedImagePath(null);
-            media.setSelectedSuggestUrl(null);
-            media.setSelectedSuggestPath(null);
-            media.setSuggestItems([]);
-            media.setSuggestError(null);
-
-            if (returnToLearn) {
-                setOpen(false);
-                cancelEdit();
-                media.resetMediaInputs();
-                resetFormNotes();
-                setReturnToLearn(false);
-                setStatus("");
-                onReturnToLearn();
-                return;
-            }
-
-            if (editSource === "create") {
-                setOpen(true);
-                setCreateDraft(null);
-                setEditingId(null);
-                media.setEditAudioPath(null);
-                setFormGroupIds([]);
-                setEditingOriginalGroupIds([]);
-                resetFormNotes();
-                setGerman("");
-                setSwahili("");
-                setGermanExample("");
-                setSwahiliExample("");
-                setOptionalExamplesOpen(false);
-                media.resetImageInputs();
-                clearDuplicateCheck();
-                media.setPendingAudioBlob(null);
-                media.setPendingAudioType(null);
-                setStatus("Duplikat aktualisiert ✅");
-                return;
-            }
-
+        if (returnToLearn) {
             setOpen(false);
+            cancelEdit();
+            media.resetMediaInputs();
+            resetFormNotes();
+            setReturnToLearn(false);
+            setStatus("");
+            onReturnToLearn();
+            return;
+        }
+
+        if (editSource === "create") {
+            setOpen(true);
+            setCreateDraft(null);
+            setEditingId(null);
+            media.setEditAudioPath(null);
             setFormGroupIds([]);
             setEditingOriginalGroupIds([]);
             resetFormNotes();
-            onStatus("Karte aktualisiert ✅");
-            onOpenCards();
-        } catch (e: any) {
-            setStatus(e?.message ?? "Aktualisieren fehlgeschlagen.");
+            setGerman("");
+            setSwahili("");
+            setGermanExample("");
+            setSwahiliExample("");
+            setOptionalExamplesOpen(false);
+            media.resetImageInputs();
+            clearDuplicateCheck();
+            media.setPendingAudioBlob(null);
+            media.setPendingAudioType(null);
+            setStatus("Duplikat aktualisiert ✅");
+            return;
         }
+
+        setOpen(false);
+        setFormGroupIds([]);
+        setEditingOriginalGroupIds([]);
+        resetFormNotes();
+        onStatus("Karte aktualisiert ✅");
+        onOpenCards();
     }
 
-    function saveCard() {
-        if (editingId) {
-            return updateCard();
-        }
-        return createCard();
+    function handleUpdatePartialSuccess(_updated: any, nextGroups: Group[]) {
+        setEditingOriginalGroupIds(nextGroups.map((group) => group.id));
+    }
+
+    function handlePrimaryFieldChange(setter: (value: string) => void, value: string) {
+        setter(value);
+        clearDuplicateCheck();
+        saveFlow.clearFeedbackForInputChange();
+    }
+
+    function handleSecondaryFieldChange(setter: (value: string) => void, value: string) {
+        setter(value);
+        saveFlow.clearFeedbackForInputChange();
     }
 
     function startEdit(card: any, source: EditSource = "cards") {
@@ -449,6 +315,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setFormGroupIds(nextGroupIds);
         setEditingOriginalGroupIds(nextGroupIds);
         setStatus("");
+        saveFlow.resetSaveFeedback();
         resetFormNotes();
         if (card.id) void loadFormNotes(String(card.id));
 
@@ -471,6 +338,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         const textState = hydrateTextStateFromLearn({ german, swahili, germanExample, swahiliExample });
 
         setReturnToLearn(true);
+        setEditSource("cards");
         setEditingId(cardId);
         setGerman(textState.german);
         setSwahili(textState.swahili);
@@ -481,6 +349,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setFormGroupIds(nextGroupIds);
         setEditingOriginalGroupIds(nextGroupIds);
         clearDuplicateCheck();
+        saveFlow.resetSaveFeedback();
         resetFormNotes();
         void loadFormNotes(cardId);
 
@@ -510,9 +379,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         clearDuplicateCheck();
         media.setEditAudioPath(null);
         setStatus("");
+        saveFlow.resetSaveFeedback();
     }
 
     function handleCancelEdit() {
+        if (saveFlow.isSaveBusy) return;
         if (returnToLearn) {
             setReturnToLearn(false);
             setOpen(false);
@@ -567,6 +438,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }
 
     async function deleteEditingCard() {
+        if (saveFlow.isSaveBusy) return;
         if (!editingId) return;
         const yes = confirm("Karte wirklich löschen?");
         if (!yes) return;
@@ -590,12 +462,17 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
     }
 
-    const topStatusText = duplicateCheckLoading ? "Prüfe auf ähnliche Karten …" : status;
-    const topStatusTone = duplicateCheckKind === "failure"
+    const topStatusText = saveFlow.saveStatusCopy?.message ?? (duplicateCheckLoading ? "Prüfe auf ähnliche Karten …" : status);
+    const topStatusDetail = saveFlow.saveStatusCopy?.detail ?? (status === "Karte gespeichert ✅" ? "Du kannst direkt die nächste Karte anlegen." : null);
+    const topStatusTone = saveFlow.saveStatus === "error"
         ? "border-red-200 bg-red-50 text-red-800"
-        : status.includes("✅")
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : "border-soft bg-surface-elevated text-primary";
+        : saveFlow.saveStatus === "partial_success"
+            ? "border-yellow-300 bg-yellow-50 text-yellow-900"
+            : duplicateCheckKind === "failure"
+                ? "border-red-200 bg-red-50 text-red-800"
+                : saveFlow.saveStatus === "success" || status.includes("✅")
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-soft bg-surface-elevated text-primary";
     const duplicatePanelTone = duplicateCheckKind === "strict"
         ? "border-yellow-300 bg-yellow-50"
         : duplicateCheckKind === "failure"
@@ -667,7 +544,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
                 <button
                     className="btn btn-primary flex-1 text-sm"
-                    onClick={() => editingId ? updateCard(true) : createCard(true)}
+                    onClick={saveFlow.saveDespiteWarning}
+                    disabled={saveFlow.isSaveBusy}
                 >
                     Trotzdem speichern
                 </button>
@@ -688,7 +566,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     <textarea
                         className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
                         value={german}
-                        onChange={(e) => setGerman(e.target.value)}
+                        onChange={(e) => handlePrimaryFieldChange(setGerman, e.target.value)}
                         placeholder="z.B. Guten Morgen"
                         rows={3}
                     />
@@ -697,7 +575,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     <textarea
                         className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
                         value={swahili}
-                        onChange={(e) => setSwahili(e.target.value)}
+                        onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. Habari za asubuhi"
                         rows={3}
                     />
@@ -705,8 +583,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     {topStatusText ? (
                         <div className={`mt-4 rounded-xl border p-3 text-sm ${topStatusTone}`} aria-live="polite">
                             <div>{topStatusText}</div>
-                            {status === "Karte gespeichert ✅" ? (
-                                <div className="mt-1 text-xs opacity-80">Du kannst direkt die nächste Karte anlegen.</div>
+                            {topStatusDetail ? (
+                                <div className="mt-1 text-xs opacity-80">{topStatusDetail}</div>
                             ) : null}
                         </div>
                     ) : null}
@@ -733,13 +611,13 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                 <ExampleField
                                     label="Beispielsatz Deutsch (optional)"
                                     value={germanExample}
-                                    onChange={setGermanExample}
+                                    onChange={(value) => handleSecondaryFieldChange(setGermanExample, value)}
                                     placeholder="z.B. Ich lese ==das Buch== am Abend."
                                 />
                                 <ExampleField
                                     label="Beispielsatz Swahili (optional)"
                                     value={swahiliExample}
-                                    onChange={setSwahiliExample}
+                                    onChange={(value) => handleSecondaryFieldChange(setSwahiliExample, value)}
                                     placeholder="z.B. Ninasoma ==kitabu== jioni."
                                 />
                             </div>
@@ -1014,8 +892,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     <div className="mt-6 grid grid-cols-2 gap-4">
                         <button
                             className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
-                            onClick={saveCard}
-                            disabled={!german.trim() || !swahili.trim()}
+                            onClick={saveFlow.saveCard}
+                            disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy}
                             type="button"
                         >
                             {editingId ? "Speichern" : saveCardLabel}
@@ -1025,6 +903,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             className="btn btn-ghost py-3 text-base"
                             type="button"
                             onClick={handleCancelEdit}
+                            disabled={saveFlow.isSaveBusy}
                         >
                             Abbrechen
                         </button>
@@ -1035,6 +914,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             type="button"
                             className="mt-3 w-full btn btn-ghost py-3 text-accent-cta"
                             onClick={deleteEditingCard}
+                            disabled={saveFlow.isSaveBusy}
                         >
                             🗑️ Löschen
                         </button>

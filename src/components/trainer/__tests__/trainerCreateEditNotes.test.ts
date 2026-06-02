@@ -6,6 +6,7 @@ describe("trainer create/edit notes integration", () => {
     const clientSource = fs.readFileSync(path.join(process.cwd(), "src/app/trainer/TrainerClient.tsx"), "utf8");
     const source = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
     const notesHookSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardFormNotes.ts"), "utf8");
+    const saveFlowSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardSaveFlow.ts"), "utf8");
 
     it("renders optional own notes in the create/edit card flow", () => {
         expect(source).toContain("Eigene Notizen (optional)");
@@ -25,16 +26,18 @@ describe("trainer create/edit notes integration", () => {
         expect(notesHookSource).toContain("async function saveFormNotes");
         expect(notesHookSource).toContain('method: "PATCH"');
         expect(notesHookSource).toContain('fetch("/api/cards/notes"');
-        expect(source).toContain("if (shouldSaveCreateNote(createdCardId, formNoteDraft.mainNotes))");
-        expect(source).toContain("await saveFormNotes(createdCardId, formNoteDraft.mainNotes)");
-        expect(source).toContain("await saveFormNotes(updatedCardId)");
+        expect(saveFlowSource).toContain("if (shouldSaveCreateNote(createdCardId, formNoteText))");
+        expect(saveFlowSource).toContain("await saveFormNotes(createdCardId, formNoteText)");
+        expect(saveFlowSource).toContain("await saveFormNotes(updatedCardId)");
+        expect(source).toContain("formNoteText: formNoteDraft.mainNotes");
     });
 
     it("keeps the form open and visible when card save succeeds but notes save fails", () => {
-        expect(source).toContain("Karte gespeichert, aber Notizen konnten nicht gespeichert werden");
-        expect(source).toContain("Karte aktualisiert, aber Notizen konnten nicht gespeichert werden");
+        expect(saveFlowSource).toContain("Karte gespeichert, aber nicht alle Zusatzdaten konnten gesichert werden.");
+        expect(saveFlowSource).toContain("Karte aktualisiert, aber nicht alle Zusatzdaten konnten gesichert werden.");
+        expect(saveFlowSource).toContain('partialFailures.push("Notizen")');
         expect(source).toContain("setEditingId(createdCardId)");
-        expect(source).toContain("return;");
+        expect(source).toContain("handleCreatePartialSuccess");
     });
 
     it("keeps training-mode notes on the separate learning notes flow", () => {
