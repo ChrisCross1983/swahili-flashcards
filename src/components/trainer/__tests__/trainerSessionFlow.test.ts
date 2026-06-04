@@ -21,7 +21,23 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("function openSetupFromQuickStart(quickStart: QuickStartPreset)");
         expect(clientSource).toContain('resetTrainingPreset("today")');
         expect(clientSource).toContain("setEntryQuickStartPreset(null)");
-        expect(clientSource).toContain("selectTrainingPreset(quickStart)");
+        expect(clientSource).toContain("resetTrainingPreset(quickStart)");
+        expect(clientSource).toContain("if (quickStart === \"all\") setTrainingMaterial({ kind: \"ALL\" })");
+        expect(clientSource).toContain("if (quickStart === \"last-missed\") setTrainingMaterial({ kind: \"LAST_MISSED\" })");
+    });
+
+    it("supports one-tap dashboard learning without leaking stale setup state", () => {
+        expect(clientSource).toContain("function dashboardStartPreset()");
+        expect(clientSource).toContain("if (setupCounts.todayDue > 0) return \"today\";");
+        expect(clientSource).toContain("if (setupCounts.lastMissedCount > 0) return \"last-missed\";");
+        expect(clientSource).toContain("function startRecommendedLearningFromDashboard()");
+        expect(clientSource).toContain("resetTrainingPreset(quickStart)");
+        expect(clientSource).toContain("setTrainingMaterial(nextConfig.trainingMaterial)");
+        expect(clientSource).toContain("setDirectionMode(\"RANDOM\")");
+        expect(clientSource).toContain("startLearningSession({");
+        expect(clientSource).toContain("directionMode: \"RANDOM\"");
+        expect(clientSource).toContain("onStartLearning={startRecommendedLearningFromDashboard}");
+        expect(clientSource).toContain("onOpenLearn={openSetupFromDashboard}");
     });
 
     it("starts today sessions via today loader", () => {

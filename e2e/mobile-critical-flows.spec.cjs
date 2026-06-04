@@ -194,8 +194,7 @@ test.describe("mobile critical flows", () => {
   test("trainer grading controls stay reachable and lock while grading persists", async ({ page }) => {
     await openTrainer(page, { delayedGradeMs: 1_000 });
 
-    await page.getByRole("button", { name: /Heute lernen|Weiterlernen/ }).first().click();
-    await page.getByRole("button", { name: /Session starten/ }).click();
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
 
     const wrong = page.getByRole("button", { name: "Nicht gewusst", exact: true });

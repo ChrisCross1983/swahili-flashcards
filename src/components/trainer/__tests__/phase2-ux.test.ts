@@ -113,7 +113,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(homeSource).not.toContain("Auswahl öffnen");
         expect(homeSource).toContain('router.push("/trainer")');
         expect(trainerSource).toContain("setEntryQuickStartPreset(quickStart)");
-        expect(trainerSource).toContain("selectTrainingPreset(quickStart)");
+        expect(trainerSource).toContain("resetTrainingPreset(quickStart)");
         expect(trainerSource).toContain("setOpenLearn(true)");
         expect(trainerSource).toContain("params.delete(\"quickStart\")");
         expect(trainerSource).toContain("router.replace(query ? `${pathname}?${query}` : pathname)");

@@ -919,9 +919,40 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setOpenLearn(true);
     }
 
+    function dashboardStartPreset(): QuickStartPreset {
+        if (setupCounts.todayDue > 0) return "today";
+        if (setupCounts.lastMissedCount > 0) return "last-missed";
+        return "all";
+    }
+
+    function startRecommendedLearningFromDashboard() {
+        const quickStart = dashboardStartPreset();
+        const nextConfig = quickStart === "today"
+            ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
+            : quickStart === "last-missed"
+                ? { learnMode: "DRILL" as const, trainingMaterial: { kind: "LAST_MISSED" } as TrainingMaterial }
+                : { learnMode: "DRILL" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial };
+
+        setEntryQuickStartPreset(quickStart);
+        resetTrainingPreset(quickStart);
+        setTrainingMaterial(nextConfig.trainingMaterial);
+        setDirectionMode("RANDOM");
+        setRepairDrillActive(false);
+        setOpenLearn(true);
+        void startLearningSession({
+            learnMode: nextConfig.learnMode,
+            trainingMaterial: nextConfig.trainingMaterial,
+            directionMode: "RANDOM",
+            skipValidationHighlights: true,
+        });
+    }
+
     function openSetupFromQuickStart(quickStart: QuickStartPreset) {
         setEntryQuickStartPreset(quickStart);
-        selectTrainingPreset(quickStart);
+        resetTrainingPreset(quickStart);
+        if (quickStart === "all") setTrainingMaterial({ kind: "ALL" });
+        if (quickStart === "last-missed") setTrainingMaterial({ kind: "LAST_MISSED" });
+        if (quickStart === "today") setTrainingMaterial({ kind: "ALL" });
         setRepairDrillActive(false);
         setOpenLearn(true);
     }
@@ -1099,11 +1130,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                             <TrainerDashboard
                                 todayDue={setupCounts.todayDue}
+                                totalCards={setupCounts.totalCards}
+                                lastMissedCount={setupCounts.lastMissedCount}
                                 isSentenceTrainer={isSentenceTrainer}
                                 createLabel={createLabel}
                                 createHint={createHint}
                                 cardsLabel={cardsLabel}
                                 importVisible={!isSentenceTrainer}
+                                onStartLearning={startRecommendedLearningFromDashboard}
                                 onOpenLearn={openSetupFromDashboard}
                                 onOpenCreate={() => {
                                     cardFormRef.current?.openCreate();
