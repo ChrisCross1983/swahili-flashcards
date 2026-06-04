@@ -8,6 +8,7 @@ describe("trainer session runtime regression guards", () => {
     const controlsSource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerControls.tsx"), "utf8");
     const lastMissedSummarySource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerLastMissedSummary.tsx"), "utf8");
     const nextStepSource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerSummaryNextStep.tsx"), "utf8");
+    const summarySource = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerSessionSummary.tsx"), "utf8");
 
     it("wires TrainerClient to useTrainerSession", () => {
         expect(clientSource).toContain("useTrainerSession({");
@@ -41,12 +42,15 @@ describe("trainer session runtime regression guards", () => {
 
     it("clarifies last-missed summaries as the current round, not the whole pool", () => {
         expect(clientSource).toContain("const isLastMissedSession = learnMode === \"DRILL\" && trainingMaterial.kind === \"LAST_MISSED\"");
-        expect(clientSource).toContain("Wiederholung beendet");
-        expect(clientSource).toContain("TrainerLastMissedSummary");
-        expect(clientSource).toContain("TrainerSummaryNextStep");
-        expect(clientSource).toContain("remainingPoolCount={setupCounts.lastMissedCount}");
-        expect(clientSource).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
-        expect(clientSource).toContain("Wiederholt nur die nicht gewussten Karten aus dieser Runde.");
+        expect(clientSource).toContain("remainingPoolCount: isLastMissedSession || lastMissedEmpty ? setupCounts.lastMissedCount : undefined");
+        expect(clientSource).toContain("TrainerSessionSummary");
+        expect(clientSource).not.toContain("TrainerLastMissedSummary");
+        expect(clientSource).not.toContain("TrainerSummaryNextStep");
+        expect(summarySource).toContain("Wiederholung beendet");
+        expect(summarySource).toContain("TrainerLastMissedSummary");
+        expect(summarySource).toContain("TrainerSummaryNextStep");
+        expect(summarySource).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
+        expect(summarySource).toContain("Wiederholt nur die nicht gewussten Karten aus dieser Runde.");
         expect(lastMissedSummarySource).toContain("In dieser Runde:");
         expect(lastMissedSummarySource).toContain("Nicht gewusst");
         expect(lastMissedSummarySource).not.toContain("Nochmal üben");
@@ -63,12 +67,12 @@ describe("trainer session runtime regression guards", () => {
     it("adds calm next-step guidance to summary states", () => {
         expect(nextStepSource).toContain("Nächster sinnvoller Schritt");
         expect(nextStepSource).toContain("Fertig");
-        expect(clientSource).toContain("Für heute bist du durch");
-        expect(clientSource).toContain("Starke Runde. Du hast heute viele Karten sicher gewusst.");
-        expect(clientSource).toContain("Du hast eine kurze Runde geschafft.");
-        expect(clientSource).toContain("Fehler kurz wiederholt");
-        expect(clientSource).toContain("Die kurze Fehlerwiederholung ist abgeschlossen.");
-        expect(clientSource).toContain("Du kannst später weitermachen oder eine andere kleine Runde starten.");
+        expect(summarySource).toContain("Für heute bist du durch");
+        expect(summarySource).toContain("Starke Runde. Du hast heute viele Karten sicher gewusst.");
+        expect(summarySource).toContain("Du hast eine kurze Runde geschafft.");
+        expect(summarySource).toContain("Fehler kurz wiederholt");
+        expect(summarySource).toContain("Die kurze Fehlerwiederholung ist abgeschlossen.");
+        expect(summarySource).toContain("Du kannst später weitermachen oder eine andere kleine Runde starten.");
     });
 
     it("offers a wrong-answer repair drill without changing learning semantics", () => {
@@ -82,7 +86,7 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("setRepairDrillActive(true)");
         expect(clientSource).toContain("setRepairDrillActive(false)");
         expect(clientSource).toContain("startDrillWithItems(repeatItems)");
-        expect(clientSource).toContain("wrongCount={sessionWrongIds.size}");
+        expect(clientSource).toContain("wrongCount: sessionWrongIds.size");
         expect(clientSource).not.toContain("Nicht gewusste wiederholen");
         expect(sessionSource).toContain("function startDrillWithItems(items: TodayItem[])");
         expect(sessionSource).toContain("setSessionTotal(items.length)");

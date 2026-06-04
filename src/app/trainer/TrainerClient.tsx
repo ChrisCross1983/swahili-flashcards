@@ -30,8 +30,7 @@ import TrainerDashboard from "@/components/trainer/TrainerDashboard";
 import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
 import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
-import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
-import TrainerSummaryNextStep from "@/components/trainer/TrainerSummaryNextStep";
+import TrainerSessionSummary, { buildTrainerSessionSummaryViewModel } from "@/components/trainer/TrainerSessionSummary";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -855,6 +854,35 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return { total, todayCount, tomorrowCount, laterCount, nextText };
     })();
 
+    const sessionSummaryViewModel = buildTrainerSessionSummaryViewModel({
+        learnMode,
+        isLastMissedSession,
+        repairDrillActive,
+        endedEarly,
+        lastMissedEmpty,
+        knownCount: sessionCorrect,
+        wrongCount: sessionWrongIds.size,
+        answeredCount: sessionTotal > 0
+            ? sessionTotal
+            : learnMode === "DRILL" && !isLastMissedSession && !lastMissedEmpty
+                ? Math.max(sessionCorrect, 1)
+                : sessionTotal,
+        remainingPoolCount: isLastMissedSession || lastMissedEmpty ? setupCounts.lastMissedCount : undefined,
+        canRepair: Object.keys(sessionWrongItems).length > 0,
+        todayOverview: learnMode === "LEITNER_TODAY"
+            ? {
+                sessionTotal,
+                sessionCorrect,
+                cardsCountLabel,
+                totalCards: leitnerUi.total,
+                todayCount: leitnerUi.todayCount,
+                tomorrowCount: leitnerUi.tomorrowCount,
+                laterCount: leitnerUi.laterCount,
+                nextText: leitnerUi.nextText,
+            }
+            : undefined,
+    });
+
     const setupState = useTrainerSetup({
         setupCounts,
         setupCountsLoading,
@@ -1165,276 +1193,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 {/* === KEINE KARTEN / ENDE === */}
                                 {
                                     learnStarted && todayItems.length === 0 && (
-                                        <>
-                                            {endedEarly ? (
-                                                <div className="mt-4 rounded-2xl border p-6 bg-surface">
-                                                    <div className="text-lg font-semibold">
-                                                        {isLastMissedSession ? "Wiederholung beendet" : "Session beendet"}
-                                                    </div>
-                                                    <div className="mt-2 text-sm text-muted">
-                                                        {isLastMissedSession
-                                                            ? "Du hast vorzeitig beendet. Gezählt werden nur Karten, die du in dieser Runde beantwortet hast."
-                                                            : "Du hast vorzeitig beendet – hier ist dein aktuelles Ergebnis."}
-                                                    </div>
-
-                                                    {(() => {
-                                                        const answeredCount = sessionTotal;
-                                                        const wrongCount = sessionWrongIds.size;
-                                                        const pct =
-                                                            answeredCount > 0
-                                                                ? Math.round((sessionCorrect / answeredCount) * 100)
-                                                                : 0;
-
-                                                        if (isLastMissedSession) {
-                                                            return (
-                                                                <TrainerLastMissedSummary
-                                                                    correctCount={sessionCorrect}
-                                                                    practiceAgainCount={wrongCount}
-                                                                    attemptedCount={answeredCount}
-                                                                    remainingPoolCount={setupCounts.lastMissedCount}
-                                                                    endedEarly
-                                                                />
-                                                            );
-                                                        }
-
-                                                        return (
-                                                            <div className="mt-4 space-y-2 text-sm text-muted">
-                                                                <div>
-                                                                    Gewusst:{" "}
-                                                                    <span className="font-medium">
-                                                                        {sessionCorrect}/{answeredCount}
-                                                                    </span>
-                                                                </div>
-                                                                <div>
-                                                                    Nicht gewusst:{" "}
-                                                                    <span className="font-medium">
-                                                                        {wrongCount}/{answeredCount}
-                                                                    </span>
-                                                                </div>
-                                                                <div>
-                                                                    Trefferquote:{" "}
-                                                                    <span className="font-medium">{pct}%</span>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })()}
-
-                                                    <TrainerSummaryNextStep
-                                                        wrongCount={sessionWrongIds.size}
-                                                        onRepeat={startWrongAnswerRepairDrill}
-                                                        onFinish={finishSessionSummary}
-                                                        description={
-                                                            sessionWrongIds.size > 0
-                                                                ? "Du hast schon etwas geschafft. Wiederhole nur die Karten, die gerade nicht geklappt haben, oder schließ für jetzt ab."
-                                                                : "Du hast eine kurze Runde geschafft. Für jetzt kannst du ruhig abschließen."
-                                                        }
-                                                        repairHelperText={isLastMissedSession
-                                                            ? "Wiederholt nur die nicht gewussten Karten aus dieser Runde."
-                                                            : undefined}
-                                                    />
-                                                </div>
-                                            ) : learnMode === "LEITNER_TODAY" ? (
-                                                <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
-                                                    <div className="text-lg font-semibold">
-                                                        {learnDone ? "Training abgeschlossen" : "Für heute bist du durch"}
-                                                    </div>
-
-                                                    <div className="mt-2 text-sm text-muted">
-                                                        {learnDone
-                                                            ? "Für heute bist du durch. Morgen geht es entspannt weiter."
-                                                            : "Für heute ist nichts offen. Dein Rhythmus passt."}
-                                                    </div>
-
-                                                    {(() => {
-                                                        const total = sessionTotal;
-                                                        const pct = total > 0 ? Math.round((sessionCorrect / total) * 100) : 0;
-
-                                                        return (
-                                                            <div className="mt-4 w-full space-y-2 text-sm text-muted">
-                                                                <div className="flex items-center justify-between gap-4">
-                                                                    <span>Gewusst</span>
-                                                                    <span className="font-medium">{sessionCorrect}/{total}</span>
-                                                                </div>
-                                                                <div className="flex items-center justify-between gap-4">
-                                                                    <span>Nicht gewusst</span>
-                                                                    <span className="font-medium">{sessionWrongIds.size}/{total}</span>
-                                                                </div>
-                                                                <div className="flex items-center justify-between gap-4">
-                                                                    <span>Trefferquote</span>
-                                                                    <span className="font-medium">{pct}%</span>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })()}
-
-                                                    <TrainerSummaryNextStep
-                                                        wrongCount={sessionWrongIds.size}
-                                                        onRepeat={startWrongAnswerRepairDrill}
-                                                        onFinish={finishSessionSummary}
-                                                        description={
-                                                            sessionWrongIds.size > 0
-                                                                ? "Wiederhole deine Fehler kurz oder schließ die heutige Runde ab."
-                                                                : "Starke Runde. Du hast heute viele Karten sicher gewusst."
-                                                        }
-                                                    />
-
-                                                    {/* Lernstand */}
-                                                    <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
-                                                        {/* 1) Heute */}
-                                                        <div className="text-sm font-semibold text-primary">📊 Heute</div>
-
-                                                        {sessionTotal > 0 ? (
-                                                            <div className="mt-3 rounded-2xl border p-4 bg-surface-elevated">
-                                                                <div className="text-base font-semibold flex items-center justify-between gap-3">
-                                                                    <span>
-                                                                        {sessionCorrect} von {sessionTotal} Karten sicher{" "}
-                                                                        <span className="text-muted font-medium">
-                                                                            ({sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}% gewusst)
-                                                                        </span>
-                                                                    </span>
-                                                                </div>
-                                                                <div className="mt-2 text-sm text-muted">
-                                                                    {sessionTotal - sessionCorrect} Karten üben wir nochmal
-                                                                </div>
-
-                                                                <div className="mt-3 h-2 w-full rounded-full border border-soft">
-                                                                    <div
-                                                                        className="h-2 rounded-full"
-                                                                        style={{
-                                                                            width: `${Math.round((sessionCorrect / sessionTotal) * 100)}%`,
-                                                                            backgroundColor: "var(--accent-success)",
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="mt-2 text-sm text-muted">Keine Session-Daten.</div>
-                                                        )}
-
-                                                        {/* 2) Gesamt */}
-                                                        <div className="mt-6 text-sm font-semibold text-primary">🌱 Dein Lernstand</div>
-
-                                                        <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
-                                                            <div className="flex items-center justify-between">
-                                                                <span className="text-muted">{cardsCountLabel}</span>
-                                                                <span className="font-semibold">{leitnerUi.total}</span>
-                                                            </div>
-
-                                                            <div className="mt-4 space-y-2">
-                                                                <div className="flex items-center justify-between">
-                                                                    <span className="text-muted">📅 Heute fällig</span>
-                                                                    <span className="font-medium">{leitnerUi.todayCount}</span>
-                                                                </div>
-
-                                                                <div className="flex items-center justify-between">
-                                                                    <span className="text-muted">🔁 Morgen dran</span>
-                                                                    <span className="font-medium">{leitnerUi.tomorrowCount}</span>
-                                                                </div>
-
-                                                                <div className="flex items-center justify-between">
-                                                                    <span className="text-muted">✅ Später wiederholen</span>
-                                                                    <span className="font-medium">{leitnerUi.laterCount}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* 3) Nächstes */}
-                                                        <div className="mt-6 text-sm font-semibold text-primary">⏰ Nächstes Training</div>
-                                                        <div className="mt-2 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                                                            Nächste Karten sind {leitnerUi.nextText} dran.
-                                                        </div>
-
-                                                        {/* 4) Tipp */}
-                                                        <div className="mt-4 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                                                            Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
-                                                        </div>
-                                                    </div>
-
-                                                </div>
-                                            ) : learnMode === "DRILL" && trainingMaterial.kind === "LAST_MISSED" && lastMissedEmpty ? (
-                                                <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
-                                                    <div className="text-lg font-semibold">
-                                                        Keine zuletzt nicht gewussten Karten
-                                                    </div>
-                                                    <div className="mt-2 text-sm text-muted">
-                                                        Der Fehlerpool ist leer. Für jetzt gibt es hier nichts zu wiederholen.
-                                                    </div>
-
-                                                    <TrainerSummaryNextStep
-                                                        wrongCount={0}
-                                                        onRepeat={startWrongAnswerRepairDrill}
-                                                        onFinish={finishSessionSummary}
-                                                        description="Du kannst später weitermachen oder eine andere kleine Runde starten."
-                                                    />
-                                                </div>
-                                            ) : isLastMissedSession ? (
-                                                <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">
-                                                        {repairDrillActive ? "Fehler kurz wiederholt" : "Wiederholung beendet"}
-                                                    </div>
-
-                                                    <TrainerLastMissedSummary
-                                                        correctCount={sessionCorrect}
-                                                        practiceAgainCount={sessionWrongIds.size}
-                                                        attemptedCount={sessionTotal}
-                                                        remainingPoolCount={setupCounts.lastMissedCount}
-                                                    />
-
-                                                    <TrainerSummaryNextStep
-                                                        wrongCount={sessionWrongIds.size}
-                                                        onRepeat={startWrongAnswerRepairDrill}
-                                                        onFinish={finishSessionSummary}
-                                                        description={
-                                                            sessionWrongIds.size > 0
-                                                                ? "Bleib bei den Karten aus dieser Runde oder schließ die Wiederholung ab."
-                                                                : repairDrillActive
-                                                                    ? "Die kurze Fehlerwiederholung ist abgeschlossen."
-                                                                    : "Du hast den Fehlerpool für diese Runde ruhig abgearbeitet."
-                                                        }
-                                                        repairHelperText="Wiederholt nur die nicht gewussten Karten aus dieser Runde."
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Session abgeschlossen ✅</div>
-
-                                                    {(() => {
-                                                        const total = sessionTotal > 0 ? sessionTotal : Math.max(sessionCorrect, 1);
-                                                        const pct = Math.round((sessionCorrect / total) * 100);
-
-                                                        return (
-                                                            <>
-                                                                <div className="mt-4 w-full space-y-2 text-sm text-muted">
-                                                                    <div className="flex items-center justify-between gap-4">
-                                                                        <span>Gewusst</span>
-                                                                        <span className="font-medium">{sessionCorrect}/{total}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center justify-between gap-4">
-                                                                        <span>Nicht gewusst</span>
-                                                                        <span className="font-medium">{sessionWrongIds.size}/{total}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center justify-between gap-4">
-                                                                        <span>Trefferquote</span>
-                                                                        <span className="font-medium">{pct}%</span>
-                                                                    </div>
-                                                                </div>
-
-                                                                <TrainerSummaryNextStep
-                                                                    wrongCount={sessionWrongIds.size}
-                                                                    onRepeat={startWrongAnswerRepairDrill}
-                                                                    onFinish={finishSessionSummary}
-                                                                    description={
-                                                                        sessionWrongIds.size > 0
-                                                                            ? "Wiederhole die Fehler kurz oder schließ diese Runde ab."
-                                                                            : "Starke Runde. Du kannst später weitermachen oder jetzt abschließen."
-                                                                    }
-                                                                />
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            )}
-                                        </>
+                                        <TrainerSessionSummary
+                                            summary={sessionSummaryViewModel}
+                                            onRepair={startWrongAnswerRepairDrill}
+                                            onFinish={finishSessionSummary}
+                                        />
                                     )
                                 }
 
