@@ -12,7 +12,7 @@ export default function TrainerRepairAction({
     if (wrongCount <= 0) return null;
 
     return (
-        <div className="mt-5 w-full rounded-2xl border border-soft bg-surface-elevated p-4 text-left">
+        <div className="mt-3 w-full">
             <button
                 className="btn btn-ghost w-full justify-center py-3"
                 type="button"

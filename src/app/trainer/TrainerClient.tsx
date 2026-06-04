@@ -31,7 +31,7 @@ import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
 import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
 import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
-import TrainerRepairAction from "@/components/trainer/TrainerRepairAction";
+import TrainerSummaryNextStep from "@/components/trainer/TrainerSummaryNextStep";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -78,6 +78,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [openCards, setOpenCards] = useState(false);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
+    const [repairDrillActive, setRepairDrillActive] = useState(false);
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>("RANDOM");
     const [leitnerInfoOpen, setLeitnerInfoOpen] = useState(false);
@@ -782,6 +783,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnDone(false);
         setShowSummary(false);
         setEndedEarly(false);
+        setRepairDrillActive(true);
         setStatus("");
 
         startDrillWithItems(repeatItems);
@@ -795,6 +797,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnStarted,
         setShowSummary,
         startDrillWithItems,
+    ]);
+
+    const finishSessionSummary = useCallback(() => {
+        setLearnStarted(false);
+        setLearnDone(false);
+        setShowSummary(false);
+        setEndedEarly(false);
+        setTodayItems([]);
+        setCurrentIndex(0);
+        setReveal(false);
+        setStatus("");
+        setRepairDrillActive(false);
+
+        setLearnMode(null);
+        setDirectionMode("RANDOM");
+        setTrainingMaterial({ kind: "ALL" });
+        resetSessionTracking();
+    }, [
+        resetSessionTracking,
+        setCurrentIndex,
+        setEndedEarly,
+        setLearnDone,
+        setLearnStarted,
+        setReveal,
+        setShowSummary,
+        setTodayItems,
     ]);
 
     const leitnerUi = (() => {
@@ -859,12 +887,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         resetTrainingPreset("today");
         setLearnMode(null);
         setTrainingMaterial({ kind: "ALL" });
+        setRepairDrillActive(false);
         setOpenLearn(true);
     }
 
     function openSetupFromQuickStart(quickStart: QuickStartPreset) {
         setEntryQuickStartPreset(quickStart);
         selectTrainingPreset(quickStart);
+        setRepairDrillActive(false);
         setOpenLearn(true);
     }
 
@@ -1078,6 +1108,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setCurrentIndex(0);
                                         setReveal(false);
                                         setStatus("");
+                                        setRepairDrillActive(false);
 
                                         setLearnMode(null);
                                         setDirectionMode("RANDOM");
@@ -1117,12 +1148,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         }}
                                         onOpenManageGroups={() => setManageGroupsOpen(true)}
                                         onDirectionModeChange={setDirectionMode}
-                                        onStart={() => void startLearningSession({
-                                            learnMode: selectedSessionConfig.learnMode,
-                                            trainingMaterial: selectedSessionConfig.trainingMaterial,
-                                            directionMode: directionMode ?? "RANDOM",
-                                            skipValidationHighlights: true,
-                                        })}
+                                        onStart={() => {
+                                            setRepairDrillActive(false);
+                                            void startLearningSession({
+                                                learnMode: selectedSessionConfig.learnMode,
+                                                trainingMaterial: selectedSessionConfig.trainingMaterial,
+                                                directionMode: directionMode ?? "RANDOM",
+                                                skipValidationHighlights: true,
+                                            });
+                                        }}
                                         directionRef={directionRef}
                                         materialRef={materialRef}
                                     />
@@ -1185,43 +1219,30 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         );
                                                     })()}
 
-                                                    <TrainerRepairAction
+                                                    <TrainerSummaryNextStep
                                                         wrongCount={sessionWrongIds.size}
                                                         onRepeat={startWrongAnswerRepairDrill}
+                                                        onFinish={finishSessionSummary}
+                                                        description={
+                                                            sessionWrongIds.size > 0
+                                                                ? "Du hast schon etwas geschafft. Wiederhole nur die Karten, die gerade nicht geklappt haben, oder schließ für jetzt ab."
+                                                                : "Du hast eine kurze Runde geschafft. Für jetzt kannst du ruhig abschließen."
+                                                        }
+                                                        repairHelperText={isLastMissedSession
+                                                            ? "Wiederholt nur die nicht gewussten Karten aus dieser Runde."
+                                                            : undefined}
                                                     />
-
-                                                    <button
-                                                        className="mt-6 w-full btn btn-primary py-3 text-base"
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setLearnStarted(false);
-                                                            setLearnDone(false);
-                                                            setShowSummary(false);
-
-                                                            setTodayItems([]);
-                                                            setCurrentIndex(0);
-                                                            setReveal(false);
-                                                            setStatus("");
-
-                                                            setLearnMode(null);
-                                                            setDirectionMode("RANDOM");
-                                                            setTrainingMaterial({ kind: "ALL" });
-                                                            resetSessionTracking();
-                                                        }}
-                                                    >
-                                                        Fertig
-                                                    </button>
                                                 </div>
                                             ) : learnMode === "LEITNER_TODAY" ? (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
                                                     <div className="text-lg font-semibold">
-                                                        {learnDone ? "🎉 Training abgeschlossen" : "🎉 Heute ist frei"}
+                                                        {learnDone ? "Training abgeschlossen" : "Für heute bist du durch"}
                                                     </div>
 
                                                     <div className="mt-2 text-sm text-muted">
                                                         {learnDone
-                                                            ? "Für heute bist du fertig. Morgen geht’s entspannt weiter."
-                                                            : "Für heute ist nichts offen — dein Rhythmus passt."}
+                                                            ? "Für heute bist du durch. Morgen geht es entspannt weiter."
+                                                            : "Für heute ist nichts offen. Dein Rhythmus passt."}
                                                     </div>
 
                                                     {(() => {
@@ -1229,19 +1250,32 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         const pct = total > 0 ? Math.round((sessionCorrect / total) * 100) : 0;
 
                                                         return (
-                                                            <div className="mt-3 text-sm text-muted">
-                                                                Ergebnis:{" "}
-                                                                <span className="font-medium">
-                                                                    {sessionCorrect}/{total}
-                                                                </span>{" "}
-                                                                gewusst ({pct}%)
+                                                            <div className="mt-4 w-full space-y-2 text-sm text-muted">
+                                                                <div className="flex items-center justify-between gap-4">
+                                                                    <span>Gewusst</span>
+                                                                    <span className="font-medium">{sessionCorrect}/{total}</span>
+                                                                </div>
+                                                                <div className="flex items-center justify-between gap-4">
+                                                                    <span>Nicht gewusst</span>
+                                                                    <span className="font-medium">{sessionWrongIds.size}/{total}</span>
+                                                                </div>
+                                                                <div className="flex items-center justify-between gap-4">
+                                                                    <span>Trefferquote</span>
+                                                                    <span className="font-medium">{pct}%</span>
+                                                                </div>
                                                             </div>
                                                         );
                                                     })()}
 
-                                                    <TrainerRepairAction
+                                                    <TrainerSummaryNextStep
                                                         wrongCount={sessionWrongIds.size}
                                                         onRepeat={startWrongAnswerRepairDrill}
+                                                        onFinish={finishSessionSummary}
+                                                        description={
+                                                            sessionWrongIds.size > 0
+                                                                ? "Wiederhole deine Fehler kurz oder schließ die heutige Runde ab."
+                                                                : "Starke Runde. Du hast heute viele Karten sicher gewusst."
+                                                        }
                                                     />
 
                                                     {/* Lernstand */}
@@ -1316,62 +1350,28 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         </div>
                                                     </div>
 
-                                                    <button
-                                                        className="mt-4 w-full btn btn-primary py-3 text-base"
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setLearnStarted(false);
-                                                            setLearnDone(false);
-                                                            setShowSummary(false);
-
-                                                            setTodayItems([]);
-                                                            setCurrentIndex(0);
-                                                            setReveal(false);
-                                                            setStatus("");
-
-                                                            setLearnMode(null);
-                                                            setDirectionMode("RANDOM");
-                                                            setTrainingMaterial({ kind: "ALL" });
-                                                            resetSessionTracking();
-                                                        }}
-                                                    >
-                                                        Fertig
-                                                    </button>
                                                 </div>
                                             ) : learnMode === "DRILL" && trainingMaterial.kind === "LAST_MISSED" && lastMissedEmpty ? (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface shadow-soft">
                                                     <div className="text-lg font-semibold">
-                                                        Keine zuletzt nicht gewussten Karten 🎉
+                                                        Keine zuletzt nicht gewussten Karten
                                                     </div>
                                                     <div className="mt-2 text-sm text-muted">
-                                                        Du hast in der letzten Session alle Karten gewusst.
+                                                        Der Fehlerpool ist leer. Für jetzt gibt es hier nichts zu wiederholen.
                                                     </div>
 
-                                                    <button
-                                                        className="mt-4 w-full btn btn-primary py-3 text-base"
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setLearnStarted(false);
-                                                            setLearnDone(false);
-                                                            setShowSummary(false);
-
-                                                            setTodayItems([]);
-                                                            setCurrentIndex(0);
-                                                            setReveal(false);
-                                                            setStatus("");
-
-                                                            setLearnMode(null);
-                                                            setDirectionMode("RANDOM");
-                                                            setTrainingMaterial({ kind: "ALL" });
-                                                            resetSessionTracking();
-                                                        }}
-                                                    >
-                                                        Fertig
-                                                    </button>
+                                                    <TrainerSummaryNextStep
+                                                        wrongCount={0}
+                                                        onRepeat={startWrongAnswerRepairDrill}
+                                                        onFinish={finishSessionSummary}
+                                                        description="Du kannst später weitermachen oder eine andere kleine Runde starten."
+                                                    />
                                                 </div>
                                             ) : isLastMissedSession ? (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
-                                                    <div className="text-sm font-semibold text-primary">Wiederholung beendet</div>
+                                                    <div className="text-sm font-semibold text-primary">
+                                                        {repairDrillActive ? "Fehler kurz wiederholt" : "Wiederholung beendet"}
+                                                    </div>
 
                                                     <TrainerLastMissedSummary
                                                         correctCount={sessionCorrect}
@@ -1380,35 +1380,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         remainingPoolCount={setupCounts.lastMissedCount}
                                                     />
 
-                                                    <TrainerRepairAction
+                                                    <TrainerSummaryNextStep
                                                         wrongCount={sessionWrongIds.size}
                                                         onRepeat={startWrongAnswerRepairDrill}
-                                                        helperText="Wiederholt nur die nicht gewussten Karten aus dieser Runde."
+                                                        onFinish={finishSessionSummary}
+                                                        description={
+                                                            sessionWrongIds.size > 0
+                                                                ? "Bleib bei den Karten aus dieser Runde oder schließ die Wiederholung ab."
+                                                                : repairDrillActive
+                                                                    ? "Die kurze Fehlerwiederholung ist abgeschlossen."
+                                                                    : "Du hast den Fehlerpool für diese Runde ruhig abgearbeitet."
+                                                        }
+                                                        repairHelperText="Wiederholt nur die nicht gewussten Karten aus dieser Runde."
                                                     />
-
-                                                    <div className="mt-6 flex justify-center w-full">
-                                                        <button
-                                                            className="btn btn-primary px-10 py-3 text-base"
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setLearnStarted(false);
-                                                                setLearnDone(false);
-                                                                setShowSummary(false);
-
-                                                                setTodayItems([]);
-                                                                setCurrentIndex(0);
-                                                                setReveal(false);
-                                                                setStatus("");
-
-                                                                setLearnMode(null);
-                                                                setDirectionMode("RANDOM");
-                                                                setTrainingMaterial({ kind: "ALL" });
-                                                                resetSessionTracking();
-                                                            }}
-                                                        >
-                                                            Fertig
-                                                        </button>
-                                                    </div>
                                                 </div>
                                             ) : (
                                                 <div className="mt-4 rounded-2xl border p-6 bg-surface text-center flex flex-col items-center shadow-soft">
@@ -1435,34 +1419,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                     </div>
                                                                 </div>
 
-                                                                <TrainerRepairAction
+                                                                <TrainerSummaryNextStep
                                                                     wrongCount={sessionWrongIds.size}
                                                                     onRepeat={startWrongAnswerRepairDrill}
+                                                                    onFinish={finishSessionSummary}
+                                                                    description={
+                                                                        sessionWrongIds.size > 0
+                                                                            ? "Wiederhole die Fehler kurz oder schließ diese Runde ab."
+                                                                            : "Starke Runde. Du kannst später weitermachen oder jetzt abschließen."
+                                                                    }
                                                                 />
-
-                                                                <div className="mt-6 flex justify-center w-full">
-                                                                    <button
-                                                                        className="btn btn-primary px-10 py-3 text-base"
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setLearnStarted(false);
-                                                                            setLearnDone(false);
-                                                                            setShowSummary(false);
-
-                                                                            setTodayItems([]);
-                                                                            setCurrentIndex(0);
-                                                                            setReveal(false);
-                                                                            setStatus("");
-
-                                                                            setLearnMode(null);
-                                                                            setDirectionMode("RANDOM");
-                                                                            setTrainingMaterial({ kind: "ALL" });
-                                                                            resetSessionTracking();
-                                                                        }}
-                                                                    >
-                                                                        Fertig
-                                                                    </button>
-                                                                </div>
                                                             </>
                                                         );
                                                     })()}
