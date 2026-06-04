@@ -31,6 +31,7 @@ import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
 import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
 import TrainerLastMissedSummary from "@/components/trainer/TrainerLastMissedSummary";
+import TrainerRepairAction from "@/components/trainer/TrainerRepairAction";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -763,6 +764,39 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         !endedEarly &&
         (isLeitnerSelected || isDrillSelected);
 
+    const startWrongAnswerRepairDrill = useCallback(() => {
+        const repeatItems = Object.values(sessionWrongItems);
+        if (repeatItems.length === 0) return;
+
+        resetSessionTracking();
+
+        if (directionMode === "RANDOM") {
+            setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
+        } else if (directionMode) {
+            setDirection(directionMode);
+        }
+
+        setLearnMode("DRILL");
+        setTrainingMaterial({ kind: "LAST_MISSED" });
+        setLearnStarted(true);
+        setLearnDone(false);
+        setShowSummary(false);
+        setEndedEarly(false);
+        setStatus("");
+
+        startDrillWithItems(repeatItems);
+    }, [
+        directionMode,
+        resetSessionTracking,
+        sessionWrongItems,
+        setDirection,
+        setEndedEarly,
+        setLearnDone,
+        setLearnStarted,
+        setShowSummary,
+        startDrillWithItems,
+    ]);
+
     const leitnerUi = (() => {
         if (!leitnerStats) {
             return {
@@ -1151,6 +1185,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         );
                                                     })()}
 
+                                                    <TrainerRepairAction
+                                                        wrongCount={sessionWrongIds.size}
+                                                        onRepeat={startWrongAnswerRepairDrill}
+                                                    />
+
                                                     <button
                                                         className="mt-6 w-full btn btn-primary py-3 text-base"
                                                         type="button"
@@ -1200,31 +1239,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         );
                                                     })()}
 
-                                                    {sessionWrongIds.size > 0 ? (
-                                                        <button
-                                                            className="mt-4 w-full btn btn-ghost py-3"
-                                                            type="button"
-                                                            onClick={() => {
-                                                                const repeatItems = Object.values(sessionWrongItems);
-                                                                if (repeatItems.length === 0) return;
-
-                                                                resetSessionTracking();
-
-                                                                if (directionMode === "RANDOM") {
-                                                                    setDirection(Math.random() < 0.5 ? "DE_TO_SW" : "SW_TO_DE");
-                                                                }
-
-                                                                setLearnMode("DRILL");
-                                                                setTrainingMaterial({ kind: "LAST_MISSED" });
-                                                                setLearnStarted(true);
-                                                                setStatus("");
-
-                                                                startDrillWithItems(repeatItems);
-                                                            }}
-                                                        >
-                                                            Nicht gewusste wiederholen
-                                                        </button>
-                                                    ) : null}
+                                                    <TrainerRepairAction
+                                                        wrongCount={sessionWrongIds.size}
+                                                        onRepeat={startWrongAnswerRepairDrill}
+                                                    />
 
                                                     {/* Lernstand */}
                                                     <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
@@ -1362,6 +1380,12 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         remainingPoolCount={setupCounts.lastMissedCount}
                                                     />
 
+                                                    <TrainerRepairAction
+                                                        wrongCount={sessionWrongIds.size}
+                                                        onRepeat={startWrongAnswerRepairDrill}
+                                                        helperText="Wiederholt nur die nicht gewussten Karten aus dieser Runde."
+                                                    />
+
                                                     <div className="mt-6 flex justify-center w-full">
                                                         <button
                                                             className="btn btn-primary px-10 py-3 text-base"
@@ -1396,13 +1420,25 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                         return (
                                                             <>
-                                                                <div className="mt-2 text-sm text-muted">
-                                                                    Ergebnis:{" "}
-                                                                    <span className="font-medium">
-                                                                        {sessionCorrect}/{total}
-                                                                    </span>{" "}
-                                                                    gewusst ({pct}%)
+                                                                <div className="mt-4 w-full space-y-2 text-sm text-muted">
+                                                                    <div className="flex items-center justify-between gap-4">
+                                                                        <span>Gewusst</span>
+                                                                        <span className="font-medium">{sessionCorrect}/{total}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between gap-4">
+                                                                        <span>Nicht gewusst</span>
+                                                                        <span className="font-medium">{sessionWrongIds.size}/{total}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between gap-4">
+                                                                        <span>Trefferquote</span>
+                                                                        <span className="font-medium">{pct}%</span>
+                                                                    </div>
                                                                 </div>
+
+                                                                <TrainerRepairAction
+                                                                    wrongCount={sessionWrongIds.size}
+                                                                    onRepeat={startWrongAnswerRepairDrill}
+                                                                />
 
                                                                 <div className="mt-6 flex justify-center w-full">
                                                                     <button

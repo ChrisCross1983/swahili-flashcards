@@ -42,8 +42,10 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("const isLastMissedSession = learnMode === \"DRILL\" && trainingMaterial.kind === \"LAST_MISSED\"");
         expect(clientSource).toContain("Wiederholung beendet");
         expect(clientSource).toContain("TrainerLastMissedSummary");
+        expect(clientSource).toContain("TrainerRepairAction");
         expect(clientSource).toContain("remainingPoolCount={setupCounts.lastMissedCount}");
         expect(clientSource).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
+        expect(clientSource).toContain("Wiederholt nur die nicht gewussten Karten aus dieser Runde.");
         expect(lastMissedSummarySource).toContain("In dieser Runde:");
         expect(lastMissedSummarySource).toContain("Nicht gewusst");
         expect(lastMissedSummarySource).not.toContain("Nochmal üben");
@@ -55,6 +57,24 @@ describe("trainer session runtime regression guards", () => {
     it("keeps grading progression and reveal reset", () => {
         expect(sessionSource).toContain("setCurrentIndex(fallbackIndex);");
         expect(sessionSource).toContain("setReveal(false);");
+    });
+
+    it("offers a wrong-answer repair drill without changing learning semantics", () => {
+        expect(clientSource).toContain("function TrainerClient");
+        expect(clientSource).toContain("const startWrongAnswerRepairDrill = useCallback(() => {");
+        expect(clientSource).toContain("const repeatItems = Object.values(sessionWrongItems)");
+        expect(clientSource).toContain("if (repeatItems.length === 0) return;");
+        expect(clientSource).toContain("resetSessionTracking();");
+        expect(clientSource).toContain('setLearnMode("DRILL")');
+        expect(clientSource).toContain('setTrainingMaterial({ kind: "LAST_MISSED" })');
+        expect(clientSource).toContain("startDrillWithItems(repeatItems)");
+        expect(clientSource).toContain("wrongCount={sessionWrongIds.size}");
+        expect(clientSource).not.toContain("Nicht gewusste wiederholen");
+        expect(sessionSource).toContain("function startDrillWithItems(items: TodayItem[])");
+        expect(sessionSource).toContain("setSessionTotal(items.length)");
+        expect(sessionSource).toContain("setCurrentIndex(0)");
+        expect(sessionSource).toContain("setReveal(false)");
+        expect(sessionSource).not.toContain("ALTER TABLE");
     });
 
     it("exposes in-flight grading state and disables answer controls during persistence", () => {
