@@ -45,7 +45,7 @@ describe("TrainerDashboard start flow", () => {
         const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} />);
 
         expect(html).toContain("Heute lernen");
-        expect(html).toContain("4 Karten warten auf dich.");
+        expect(html).toContain("Starte mit den nächsten Karten. 4 sind heute dran.");
         expect(html).toContain("Heute lernen starten");
         expect(html).toContain("Anpassen");
     });
@@ -74,6 +74,6 @@ describe("TrainerDashboard start flow", () => {
         );
 
         expect(html).toContain("Weiterlernen");
-        expect(html).toContain("3 zuletzt nicht gewusste Karten kurz wiederholen.");
+        expect(html).toContain("Kleine Wiederholung: 3 zuletzt nicht gewusste Karten.");
     });
 });

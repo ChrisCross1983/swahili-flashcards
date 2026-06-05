@@ -8,7 +8,7 @@ type Props = {
 
 function remainingPoolText(count: number) {
     if (count <= 0) return "Im Fehlerpool verbleiben keine Karten mehr.";
-    return `Im Fehlerpool verbleiben noch ${count} ${count === 1 ? "Karte" : "Karten"}.`;
+    return `Im Fehlerpool verbleiben noch ${count} ${count === 1 ? "Karte" : "Karten"}. Du kannst später ruhig weitermachen.`;
 }
 
 export default function TrainerLastMissedSummary({

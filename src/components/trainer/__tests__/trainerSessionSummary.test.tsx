@@ -183,7 +183,37 @@ describe("TrainerSessionSummary rendering", () => {
         expect(html).toContain("Wiederholung beendet");
         expect(html).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
         expect(html).toContain("Im Fehlerpool verbleiben noch 9 Karten.");
+        expect(html).toContain("Du kannst später ruhig weitermachen.");
         expect(html).toContain("Wiederholt nur die nicht gewussten Karten aus dieser Runde.");
+    });
+
+    it("frames today completion as a finite round while keeping counts visible", () => {
+        const html = renderSummary({
+            mode: "today_complete",
+            knownCount: 8,
+            wrongCount: 2,
+            answeredCount: 10,
+            accuracy: 80,
+            canRepair: true,
+            todayOverview: {
+                sessionTotal: 10,
+                sessionCorrect: 8,
+                cardsCountLabel: "Karten insgesamt",
+                totalCards: 200,
+                todayCount: 42,
+                tomorrowCount: 5,
+                laterCount: 153,
+                nextText: "morgen",
+            },
+        });
+
+        expect(html).toContain("Diese Runde");
+        expect(html).toContain("8 von 10 Karten sicher");
+        expect(html).toContain("2 Karten kannst du später nochmal ruhig ansehen.");
+        expect(html).toContain("Heute dran");
+        expect(html).toContain("42");
+        expect(html).toContain("Du kannst jederzeit mit einer kleinen Runde weitermachen.");
+        expect(html).toContain("Kurze Runden reichen.");
     });
 
     it("keeps empty last-missed summaries concise", () => {

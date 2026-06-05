@@ -98,7 +98,7 @@ export default function HomeClient({ ownerKey }: Props) {
             <div className="mt-2 text-sm text-muted">Trainiere deine gespeicherten Karten (Leitner).</div>
             <div className="mt-3 text-xs text-muted">
               {leitnerUi.todayCount > 0
-                ? `${leitnerUi.todayCount} Karten heute fällig`
+                ? `${leitnerUi.todayCount} Karten heute dran · kurze Runde starten`
                 : "Keine Karten heute fällig"}
             </div>
           </button>

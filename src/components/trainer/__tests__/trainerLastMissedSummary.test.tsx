@@ -17,6 +17,7 @@ describe("TrainerLastMissedSummary", () => {
         expect(html).toContain("Trefferquote");
         expect(html).toContain("14%");
         expect(html).toContain("Im Fehlerpool verbleiben noch 140 Karten.");
+        expect(html).toContain("Du kannst später ruhig weitermachen.");
         expect(html).not.toContain("Nochmal üben");
     });
 
@@ -45,6 +46,7 @@ describe("TrainerLastMissedSummary", () => {
         expect(html).toContain("67%");
         expect(html).toContain("Gezählt werden nur Karten, die du in dieser Runde beantwortet hast.");
         expect(html).toContain("Im Fehlerpool verbleiben noch 140 Karten.");
+        expect(html).toContain("Du kannst später ruhig weitermachen.");
         expect(html).not.toContain("2/140");
         expect(html).not.toContain("138");
     });

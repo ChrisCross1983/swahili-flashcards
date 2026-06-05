@@ -125,27 +125,27 @@ function completionCopy(summary: TrainerSessionSummaryViewModel) {
 function nextStepDescription(summary: TrainerSessionSummaryViewModel) {
     if (summary.isEarlyEnd) {
         return summary.canRepair
-            ? "Du hast schon etwas geschafft. Wiederhole nur die Karten, die gerade nicht geklappt haben, oder schließ für jetzt ab."
-            : "Du hast eine kurze Runde geschafft. Für jetzt kannst du ruhig abschließen.";
+            ? "Gute kurze Runde. Wiederhole nur die Karten, die gerade nicht geklappt haben, oder mach später weiter."
+            : "Gute kurze Runde geschafft. Du kannst hier ruhig pausieren.";
     }
     if (summary.mode === "today_complete") {
         return summary.canRepair
-            ? "Wiederhole deine Fehler kurz oder schließ die heutige Runde ab."
+            ? "Fehler kurz wiederholen oder die Runde für jetzt abschließen."
             : "Starke Runde. Du hast heute viele Karten sicher gewusst.";
     }
     if (summary.mode === "last_missed") {
         if (summary.answeredCount === 0) return "Du kannst später weitermachen oder eine andere kleine Runde starten.";
         return summary.canRepair
-            ? "Bleib bei den Karten aus dieser Runde oder schließ die Wiederholung ab."
+            ? "Bleib bei den Karten aus dieser Runde oder mach später weiter."
             : "Du hast den Fehlerpool für diese Runde ruhig abgearbeitet.";
     }
     if (summary.mode === "repair_complete") {
         return summary.canRepair
-            ? "Bleib bei den Karten aus dieser Runde oder schließ die Wiederholung ab."
+            ? "Bleib bei den Karten aus dieser Runde oder mach später weiter."
             : "Die kurze Fehlerwiederholung ist abgeschlossen.";
     }
     return summary.canRepair
-        ? "Wiederhole die Fehler kurz oder schließ diese Runde ab."
+        ? "Wiederhole die Fehler kurz oder mach später weiter."
         : "Starke Runde. Du kannst später weitermachen oder jetzt abschließen.";
 }
 
@@ -192,7 +192,7 @@ function SummaryStats({ summary }: { summary: TrainerSessionSummaryViewModel }) 
 function TodayOverview({ overview }: { overview: TrainerTodayOverview }) {
     return (
         <div className="mt-4 rounded-2xl border p-6 shadow-soft bg-surface">
-            <div className="text-sm font-semibold text-primary">📊 Heute</div>
+            <div className="text-sm font-semibold text-primary">Diese Runde</div>
 
             {overview.sessionTotal > 0 ? (
                 <div className="mt-3 rounded-2xl border p-4 bg-surface-elevated">
@@ -205,7 +205,7 @@ function TodayOverview({ overview }: { overview: TrainerTodayOverview }) {
                         </span>
                     </div>
                     <div className="mt-2 text-sm text-muted">
-                        {overview.sessionTotal - overview.sessionCorrect} Karten üben wir nochmal
+                        {overview.sessionTotal - overview.sessionCorrect} Karten kannst du später nochmal ruhig ansehen.
                     </div>
 
                     <div className="mt-3 h-2 w-full rounded-full border border-soft">
@@ -222,7 +222,7 @@ function TodayOverview({ overview }: { overview: TrainerTodayOverview }) {
                 <div className="mt-2 text-sm text-muted">Keine Session-Daten.</div>
             )}
 
-            <div className="mt-6 text-sm font-semibold text-primary">🌱 Dein Lernstand</div>
+            <div className="mt-6 text-sm font-semibold text-primary">Dein Lernstand</div>
 
             <div className="mt-3 rounded-2xl border p-4 text-sm bg-surface-elevated">
                 <div className="flex items-center justify-between">
@@ -232,29 +232,29 @@ function TodayOverview({ overview }: { overview: TrainerTodayOverview }) {
 
                 <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between">
-                        <span className="text-muted">📅 Heute fällig</span>
+                        <span className="text-muted">Heute dran</span>
                         <span className="font-medium">{overview.todayCount}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
-                        <span className="text-muted">🔁 Morgen dran</span>
+                        <span className="text-muted">Morgen dran</span>
                         <span className="font-medium">{overview.tomorrowCount}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
-                        <span className="text-muted">✅ Später wiederholen</span>
+                        <span className="text-muted">Später wiederholen</span>
                         <span className="font-medium">{overview.laterCount}</span>
                     </div>
                 </div>
             </div>
 
-            <div className="mt-6 text-sm font-semibold text-primary">⏰ Nächstes Training</div>
+            <div className="mt-6 text-sm font-semibold text-primary">Nächstes Training</div>
             <div className="mt-2 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                Nächste Karten sind {overview.nextText} dran.
+                Nächste Karten sind {overview.nextText} dran. Du kannst jederzeit mit einer kleinen Runde weitermachen.
             </div>
 
             <div className="mt-4 rounded-2xl border p-4 text-sm text-muted bg-surface-elevated">
-                Tipp: Kurze, regelmäßige Sessions bringen mehr als lange Lernphasen.
+                Kurze Runden reichen. Du musst heute nicht alles auf einmal erledigen.
             </div>
         </div>
     );

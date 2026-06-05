@@ -48,11 +48,11 @@ export default function TrainerDashboard(props: Props) {
     const itemLabel = isSentenceTrainer ? "Sätze" : "Karten";
     const learningTitle = todayDue > 0 ? "Heute lernen" : "Weiterlernen";
     const learningSubtitle = todayDue > 0
-        ? `${todayDue} ${itemLabel} warten auf dich.`
+        ? `Starte mit den nächsten ${itemLabel}. ${todayDue} sind heute dran.`
         : lastMissedCount > 0
-            ? `${lastMissedCount} zuletzt nicht gewusste ${itemLabel} kurz wiederholen.`
+            ? `Kleine Wiederholung: ${lastMissedCount} zuletzt nicht gewusste ${itemLabel}.`
             : totalCards > 0
-                ? "Direkt starten mit einer sinnvollen Standard-Session."
+                ? "Direkt mit einer kleinen Standardrunde starten."
                 : `Lege zuerst ${isSentenceTrainer ? "Sätze" : "Karten"} an.`;
 
     return (

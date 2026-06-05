@@ -87,12 +87,12 @@ export function useTrainerSetup({
     const recommendation = useMemo(() => {
         if (setupCountsLoading) return "Lade Empfehlung…";
         if (setupCounts.todayDue > 0) {
-            return `Heute fällig: ${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"}`;
+            return `Heute dran: ${setupCounts.todayDue} ${isSentenceTrainer ? "Sätze" : "Karten"} · starte mit einer kleinen Runde`;
         }
         if (setupCounts.lastMissedCount > 0) {
-            return `Zuletzt nicht gewusst: ${setupCounts.lastMissedCount}`;
+            return `Kurze Wiederholung möglich: ${setupCounts.lastMissedCount} zuletzt nicht gewusst`;
         }
-        return `Beste nächste Session: ${setupCounts.totalCards > 0 ? "Alle Karten üben" : "Neue Karten anlegen"}`;
+        return `Nächster ruhiger Schritt: ${setupCounts.totalCards > 0 ? "kleine Standardrunde starten" : "Neue Karten anlegen"}`;
     }, [isSentenceTrainer, setupCounts, setupCountsLoading]);
 
     const selectTrainingPreset = (nextPreset: QuickStartPreset) => {

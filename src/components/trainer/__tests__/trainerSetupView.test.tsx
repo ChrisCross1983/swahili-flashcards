@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 
 const baseProps = {
-    recommendation: "Heute fällig: 3 Karten",
+    recommendation: "Heute dran: 3 Karten · starte mit einer kleinen Runde",
     setupCountsLoading: false,
     setupCounts: { todayDue: 3, lastMissedCount: 1 },
     selectedPreset: "today" as const,
@@ -36,7 +36,9 @@ describe("TrainerSetupView", () => {
         expect(html).toContain("Heute lernen");
         expect(html).toContain("Alle Karten üben");
         expect(html).toContain("Zuletzt nicht gewusst");
-        expect(html).toContain("Fehlerpool der letzten 7 Tage.");
+        expect(html).toContain("Leitner-Runde mit den nächsten Karten.");
+        expect(html).toContain("Kurze Runde aus dem Fehlerpool.");
+        expect(html).toContain("Heute dran: 3 Karten · starte mit einer kleinen Runde");
         expect((html.match(/Session starten ·/g) ?? []).length).toBe(1);
         expect(html).toContain("Abfragerichtung");
     });

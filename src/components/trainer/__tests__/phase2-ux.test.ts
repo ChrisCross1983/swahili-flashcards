@@ -112,6 +112,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(homeSource).not.toContain('"/trainer?quickStart=all"');
         expect(homeSource).not.toContain("Auswahl öffnen");
         expect(homeSource).toContain('router.push("/trainer")');
+        expect(homeSource).toContain("kurze Runde starten");
         expect(trainerSource).toContain("setEntryQuickStartPreset(quickStart)");
         expect(trainerSource).toContain("resetTrainingPreset(quickStart)");
         expect(trainerSource).toContain("setOpenLearn(true)");
@@ -128,9 +129,12 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"today\"}");
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"all\"}");
         expect(trainerSetupViewSource).toContain("aria-pressed={selectedPreset === \"last-missed\"}");
-        expect(trainerSetupViewSource).toContain("Fehlerpool der letzten 7 Tage.");
+        expect(trainerSetupViewSource).toContain("Leitner-Runde mit den nächsten Karten.");
+        expect(trainerSetupViewSource).toContain("Kurze Runde aus dem Fehlerpool.");
         expect(trainerSetupViewSource).toContain("Session starten ·");
         expect(trainerSetupViewSource).toContain("Empfohlen für dich:");
+        expect(trainerSetupHookSource).toContain("Heute dran:");
+        expect(trainerSetupHookSource).toContain("starte mit einer kleinen Runde");
         expect(trainerSource).not.toContain("runQuickStart(");
         expect(trainerSource).not.toContain("Start mit diesen Optionen");
         expect(trainerSource).not.toContain("Optionen einblenden");

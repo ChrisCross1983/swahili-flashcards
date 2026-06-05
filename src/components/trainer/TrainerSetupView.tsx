@@ -43,7 +43,7 @@ export default function TrainerSetupView(props: Props) {
             <div className="mt-2 hint-card border border-soft"><span className="font-medium text-primary">Empfohlen für dich:</span> {recommendation}</div>
             <div className="mt-3 grid grid-cols-1 gap-3">
                 <button type="button" aria-pressed={selectedPreset === "today"} onClick={() => onSelectPreset("today")} className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "today" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
-                    <div className="font-semibold">Heute lernen</div><div className="mt-1 text-sm text-muted">Leitner-Session mit fälligen Karten.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
+                    <div className="font-semibold">Heute lernen</div><div className="mt-1 text-sm text-muted">Leitner-Runde mit den nächsten Karten.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
                 </button>
                 <div className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "all" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
                     <button type="button" aria-pressed={selectedPreset === "all"} onClick={() => onSelectPreset("all")} className="w-full text-left">
@@ -60,7 +60,7 @@ export default function TrainerSetupView(props: Props) {
                     </div> : null}
                 </div>
                 <button type="button" aria-pressed={selectedPreset === "last-missed"} onClick={() => onSelectPreset("last-missed")} className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
-                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Fehlerpool der letzten 7 Tage.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
+                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Kurze Runde aus dem Fehlerpool.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
                 </button>
             </div>
             <div ref={directionRef} className="mt-4">

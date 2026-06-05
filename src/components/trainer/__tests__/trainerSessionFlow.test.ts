@@ -100,10 +100,11 @@ describe("trainer session runtime regression guards", () => {
         expect(nextStepSource).toContain("Fertig");
         expect(summarySource).toContain("Für heute bist du durch");
         expect(summarySource).toContain("Starke Runde. Du hast heute viele Karten sicher gewusst.");
-        expect(summarySource).toContain("Du hast eine kurze Runde geschafft.");
+        expect(summarySource).toContain("Gute kurze Runde geschafft.");
         expect(summarySource).toContain("Fehler kurz wiederholt");
         expect(summarySource).toContain("Die kurze Fehlerwiederholung ist abgeschlossen.");
         expect(summarySource).toContain("Du kannst später weitermachen oder eine andere kleine Runde starten.");
+        expect(summarySource).toContain("Du musst heute nicht alles auf einmal erledigen.");
     });
 
     it("offers a wrong-answer repair drill without changing learning semantics", () => {
