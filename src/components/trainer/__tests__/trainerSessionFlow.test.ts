@@ -34,10 +34,25 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("resetTrainingPreset(quickStart)");
         expect(clientSource).toContain("setTrainingMaterial(nextConfig.trainingMaterial)");
         expect(clientSource).toContain("setDirectionMode(\"RANDOM\")");
+        expect(clientSource).toContain("setDirectStartPreparing(true)");
+        expect(clientSource).toContain("setDirectStartPreparing(false)");
+        expect(clientSource).toContain("directStartCancelledRef.current = false");
+        expect(clientSource).toContain("if (directStartCancelledRef.current)");
         expect(clientSource).toContain("startLearningSession({");
         expect(clientSource).toContain("directionMode: \"RANDOM\"");
         expect(clientSource).toContain("onStartLearning={startRecommendedLearningFromDashboard}");
         expect(clientSource).toContain("onOpenLearn={openSetupFromDashboard}");
+    });
+
+    it("gates direct-start rendering with a transition instead of setup", () => {
+        expect(clientSource).toContain("TrainerSessionTransition");
+        expect(clientSource).toContain("if (directStartPreparing) {");
+        expect(clientSource).toContain("directStartCancelledRef.current = true");
+        expect(clientSource).toContain("directStartPreparing && !learnStarted ? (");
+        expect(clientSource).toContain("<TrainerSessionTransition />");
+        expect(clientSource).toContain(": !learnStarted && (");
+        expect(clientSource).toContain("function openSetupFromDashboard()");
+        expect(clientSource).toContain("setDirectStartPreparing(false)");
     });
 
     it("starts today sessions via today loader", () => {

@@ -66,6 +66,7 @@ async function login(page) {
 
 async function mockTrainerApis(page, options = {}) {
   const delayedGradeMs = options.delayedGradeMs ?? 0;
+  const delayedTodayMs = options.delayedTodayMs ?? 0;
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -96,6 +97,9 @@ async function mockTrainerApis(page, options = {}) {
     }
 
     if (path === "/api/learn/today") {
+      if (delayedTodayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayedTodayMs));
+      }
       await route.fulfill(json({ items: todayItems() }));
       return;
     }
@@ -214,6 +218,15 @@ test.describe("mobile critical flows", () => {
 
     await correct.click();
     await expect(page.getByRole("button", { name: "Aufdecken" })).toBeDisabled();
+  });
+
+  test("direct dashboard start shows transition instead of setup while cards load", async ({ page }) => {
+    await openTrainer(page, { delayedTodayMs: 500 });
+
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await expect(page.getByText("Heute lernen wird vorbereitet")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Session starten/ })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
   });
 
   test("global search and AI overlays open and close without leaving the page blocked", async ({ page }) => {

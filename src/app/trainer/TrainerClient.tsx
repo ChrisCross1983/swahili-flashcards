@@ -31,6 +31,7 @@ import TrainerSetupView from "@/components/trainer/TrainerSetupView";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
 import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
 import TrainerSessionSummary, { buildTrainerSessionSummaryViewModel } from "@/components/trainer/TrainerSessionSummary";
+import TrainerSessionTransition from "@/components/trainer/TrainerSessionTransition";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -78,6 +79,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [repairDrillActive, setRepairDrillActive] = useState(false);
+    const [directStartPreparing, setDirectStartPreparing] = useState(false);
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>("RANDOM");
     const [leitnerInfoOpen, setLeitnerInfoOpen] = useState(false);
@@ -140,6 +142,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
+    const directStartCancelledRef = useRef(false);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
@@ -916,6 +919,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setLearnMode(null);
         setTrainingMaterial({ kind: "ALL" });
         setRepairDrillActive(false);
+        setDirectStartPreparing(false);
         setOpenLearn(true);
     }
 
@@ -925,7 +929,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return "all";
     }
 
-    function startRecommendedLearningFromDashboard() {
+    async function startRecommendedLearningFromDashboard() {
         const quickStart = dashboardStartPreset();
         const nextConfig = quickStart === "today"
             ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
@@ -938,13 +942,34 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setTrainingMaterial(nextConfig.trainingMaterial);
         setDirectionMode("RANDOM");
         setRepairDrillActive(false);
+        setDirectStartPreparing(true);
+        directStartCancelledRef.current = false;
         setOpenLearn(true);
-        void startLearningSession({
-            learnMode: nextConfig.learnMode,
-            trainingMaterial: nextConfig.trainingMaterial,
-            directionMode: "RANDOM",
-            skipValidationHighlights: true,
-        });
+        try {
+            await startLearningSession({
+                learnMode: nextConfig.learnMode,
+                trainingMaterial: nextConfig.trainingMaterial,
+                directionMode: "RANDOM",
+                skipValidationHighlights: true,
+            });
+        } finally {
+            setDirectStartPreparing(false);
+            if (directStartCancelledRef.current) {
+                setLearnStarted(false);
+                setLearnDone(false);
+                setShowSummary(false);
+                setEndedEarly(false);
+                setTodayItems([]);
+                setCurrentIndex(0);
+                setReveal(false);
+                setStatus("");
+                setLearnMode(null);
+                setDirectionMode("RANDOM");
+                setTrainingMaterial({ kind: "ALL" });
+                resetSessionTracking();
+                directStartCancelledRef.current = false;
+            }
+        }
     }
 
     function openSetupFromQuickStart(quickStart: QuickStartPreset) {
@@ -954,6 +979,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         if (quickStart === "last-missed") setTrainingMaterial({ kind: "LAST_MISSED" });
         if (quickStart === "today") setTrainingMaterial({ kind: "ALL" });
         setRepairDrillActive(false);
+        setDirectStartPreparing(false);
         setOpenLearn(true);
     }
 
@@ -1156,6 +1182,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 open={openLearn}
                                 title="Vokabeln lernen"
                                 onClose={() => {
+                                    if (directStartPreparing) {
+                                        directStartCancelledRef.current = true;
+                                        setDirectStartPreparing(false);
+                                        setOpenLearn(false);
+                                        return;
+                                    }
+
                                     if (isSessionRunning) {
                                         setExitConfirmOpen(true);
                                         return;
@@ -1171,6 +1204,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         setReveal(false);
                                         setStatus("");
                                         setRepairDrillActive(false);
+                                        setDirectStartPreparing(false);
 
                                         setLearnMode(null);
                                         setDirectionMode("RANDOM");
@@ -1184,7 +1218,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                             >
                                 {/* === SETUP === */}
-                                {!learnStarted && (
+                                {directStartPreparing && !learnStarted ? (
+                                    <TrainerSessionTransition />
+                                ) : !learnStarted && (
                                     <TrainerSetupView
                                         recommendation={recommendation}
                                         setupCountsLoading={setupCountsLoading}
