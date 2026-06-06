@@ -233,6 +233,39 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
   });
 
+  test("wrong answer leads to repair drill and repair completion summary", async ({ page }) => {
+    await openTrainer(page);
+
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByRole("button", { name: "Nicht gewusst", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Nicht gewusst", exact: true }).click();
+
+    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeEnabled();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+
+    await expect(page.getByText("Training abgeschlossen")).toBeVisible();
+    await expect(page.getByText("Fehler kurz wiederholen oder die Runde für jetzt abschließen.")).toBeVisible();
+    const repair = page.getByRole("button", { name: "Fehler kurz wiederholen" });
+    await expect(repair).toBeVisible();
+    await repair.click();
+
+    await expect(page.getByText(/Karte\s+1\s+von\s+1/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+
+    await expect(page.getByText("Fehler kurz wiederholt")).toBeVisible();
+    await expect(page.getByText("Die kurze Fehlerwiederholung ist abgeschlossen.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Fehler kurz wiederholen" })).toBeHidden();
+
+    await page.getByRole("button", { name: "Fertig" }).click();
+    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+  });
+
   test("global search and AI overlays open and close without leaving the page blocked", async ({ page }) => {
     await openTrainer(page);
 
