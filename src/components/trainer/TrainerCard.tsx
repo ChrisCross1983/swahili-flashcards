@@ -68,11 +68,11 @@ export default function TrainerCard({
     const [showAnswerExample, setShowAnswerExample] = useState(false);
 
     return (
-        <div className="rounded-3xl border border-soft bg-surface p-6 shadow-warm" data-testid="trainer-card-shell" data-mode="front">
+        <div className="rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6" data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
             <div className={reveal ? "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
-                <div className="rounded-2xl border border-soft bg-surface-elevated p-4">
+                <div className="rounded-2xl border border-soft bg-surface-elevated p-5">
                     <div className="text-xs font-semibold tracking-wide text-muted uppercase">Übersetze</div>
-                    <div className="mt-2 text-2xl font-semibold text-primary">
+                    <div className="mt-3 text-3xl font-semibold leading-tight text-primary sm:text-4xl">
                         <CardText>{prompt}</CardText>
                     </div>
                     {promptExample?.trim() ? (
@@ -89,7 +89,7 @@ export default function TrainerCard({
                     <div className="space-y-4">
                         <div className="rounded-2xl border border-cta bg-surface p-4 shadow-soft">
                             <div className="text-xs font-semibold tracking-wide text-accent-cta uppercase">Antwort</div>
-                            <div className="mt-1 text-xl font-semibold text-primary">
+                            <div className="mt-2 text-2xl font-semibold leading-tight text-primary sm:text-3xl">
                                 <CardText>{answer}</CardText>
                             </div>
                             {answerExample?.trim() ? (
@@ -109,12 +109,12 @@ export default function TrainerCard({
                         ) : null}
 
                         {onOpenLearningHelp ? (
-                            <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center justify-between gap-3" data-testid="learning-secondary-actions">
                                 {learningTypeLabel ? <span className="badge">{learningTypeLabel}</span> : <span />}
 
                                 <button
                                     type="button"
-                                    className="btn btn-secondary rounded-full px-3 py-1.5 text-sm font-medium"
+                                    className="btn btn-ghost rounded-full px-3 py-1.5 text-sm font-medium"
                                     onClick={onOpenLearningHelp}
                                 >
                                     Eigene Notizen

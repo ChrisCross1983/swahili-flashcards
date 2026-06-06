@@ -21,10 +21,11 @@ export default function TrainerControls({
         return (
             <button
                 type="button"
-                className="btn btn-primary mt-6 w-full py-4 text-base disabled:cursor-wait disabled:opacity-70"
+                className="btn btn-primary mt-6 w-full py-4 text-base shadow-warm disabled:cursor-wait disabled:opacity-70"
                 onClick={onReveal}
                 disabled={gradingInFlight}
                 aria-busy={gradingInFlight}
+                data-focus-role="primary-learning-action"
             >
                 Aufdecken
             </button>
@@ -48,20 +49,22 @@ export default function TrainerControls({
             <div className="mt-10 grid grid-cols-2 gap-6" data-grading-in-flight={gradingInFlight ? "true" : "false"}>
                 <button
                     type="button"
-                    className="btn btn-danger py-4 text-base active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
+                    className="btn btn-danger py-4 text-base shadow-warm active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
                     onClick={onWrong}
                     disabled={gradingInFlight}
                     aria-busy={gradingInFlight}
+                    data-focus-role="primary-learning-action"
                 >
                     Nicht gewusst
                 </button>
 
                 <button
                     type="button"
-                    className="btn btn-success py-4 text-base active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
+                    className="btn btn-success py-4 text-base shadow-warm active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
                     onClick={onCorrect}
                     disabled={gradingInFlight}
                     aria-busy={gradingInFlight}
+                    data-focus-role="primary-learning-action"
                 >
                     Gewusst
                 </button>

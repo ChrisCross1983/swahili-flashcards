@@ -32,6 +32,7 @@ describe("trainer card layout", () => {
         );
 
         expect(compact).toContain('data-layout="compact"');
+        expect(compact).toContain('data-focus-role="recall-card"');
         expect(compact).not.toContain("Antwort");
         expect(compact).toContain("Beispielsatz anzeigen");
         expect(compact).toContain("prompt-example-toggle");
@@ -71,6 +72,7 @@ describe("trainer card layout", () => {
         );
 
         expect(tips).toContain('data-mode="front"');
+        expect(tips).toContain('data-testid="learning-secondary-actions"');
         expect(tips).toContain("Eigene Notizen");
         expect(tips).not.toContain("Zur Vorderseite");
     });
@@ -92,13 +94,32 @@ describe("trainer card example disclosure affordance", () => {
 });
 
 describe("trainer action and group metadata layout", () => {
-    it("keeps tools row separate from group metadata row", () => {
+    it("keeps maintenance controls quieter than recall actions while accessible", () => {
         const root = process.cwd();
         const filePath = path.join(root, "src/app/trainer/TrainerClient.tsx");
         const source = fs.readFileSync(filePath, "utf8");
 
+        expect(source).toContain('data-testid="active-learning-focus"');
+        expect(source).toContain('data-testid="card-maintenance-strip"');
+        expect(source).toContain('data-focus-role="maintenance"');
+        expect(source).toContain("Kartenoptionen");
         expect(source).toContain("Audio vorhanden");
+        expect(source).toContain("Audio aufnehmen");
+        expect(source).toContain("Bearbeiten");
         expect(source).toContain("Keine Gruppe");
-        expect(source).toContain("rounded-xl border border-soft bg-surface-elevated");
+        expect(source).toContain("Gruppen bearbeiten");
+        expect(source).toContain('data-focus-role="technical-context"');
+        expect(source).toContain("Leitner · Stufe");
+    });
+
+    it("marks answer controls as primary learning actions", () => {
+        const root = process.cwd();
+        const filePath = path.join(root, "src/components/trainer/TrainerControls.tsx");
+        const source = fs.readFileSync(filePath, "utf8");
+
+        expect(source).toContain('data-focus-role="primary-learning-action"');
+        expect(source).toContain("Aufdecken");
+        expect(source).toContain("Nicht gewusst");
+        expect(source).toContain("Gewusst");
     });
 });
