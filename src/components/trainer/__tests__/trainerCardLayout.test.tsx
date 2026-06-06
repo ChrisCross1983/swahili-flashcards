@@ -96,11 +96,14 @@ describe("trainer card example disclosure affordance", () => {
 
 describe("trainer action and group metadata layout", () => {
     it("renders active-card group badges as passive non-button information", () => {
-        const html = renderToStaticMarkup(<GroupBadge group={{ name: "Alltag", color: null }} quiet />);
+        const html = renderToStaticMarkup(<GroupBadge group={{ name: "Sehr lange Alltagsgruppe mit vielen Details", color: null }} quiet />);
 
         expect(html).toContain('data-role="group-badge"');
         expect(html).toContain('data-interactive="false"');
-        expect(html).toContain("Alltag");
+        expect(html).toContain("Sehr lange Alltagsgruppe mit vielen Details");
+        expect(html).toContain('title="Sehr lange Alltagsgruppe mit vielen Details"');
+        expect(html).toContain("max-w-[min(12rem,52vw)]");
+        expect(html).toContain("truncate");
         expect(html).not.toContain("<button");
         expect(html).not.toContain("shadow-soft");
     });
@@ -113,10 +116,17 @@ describe("trainer action and group metadata layout", () => {
         expect(source).toContain('data-testid="active-learning-focus"');
         expect(source).toContain('data-testid="card-maintenance-strip"');
         expect(source).toContain('data-focus-role="maintenance"');
+        expect(source).toContain('data-layout="compact-mobile"');
+        expect(source).toContain("grid gap-1.5");
+        expect(source).toContain("sm:flex sm:items-center");
         expect(source).toContain('data-testid="card-passive-groups"');
         expect(source).toContain('data-role="passive-info"');
-        expect(source).toContain("Kartenoptionen");
+        expect(source).toContain("Optionen");
+        expect(source).toContain("overflow-hidden");
         expect(source).toContain("Audio vorhanden");
+        expect(source).toContain('data-audio-state="present"');
+        expect(source).toContain("sr-only");
+        expect(source).toContain('grid-cols-[auto_1fr_1fr]');
         expect(source).toContain('data-card-option-action="audio"');
         expect(source).toContain('aria-label={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}');
         expect(source).toContain('data-card-option-action="edit"');
@@ -125,7 +135,7 @@ describe("trainer action and group metadata layout", () => {
         expect(source).toContain('aria-label="Gruppen bearbeiten"');
         expect(source).toContain("Bearbeiten");
         expect(source).toContain("Keine Gruppe");
-        expect(source).toContain("<span>Gruppen</span>");
+        expect(source).toContain('<span className="truncate">Gruppen</span>');
         expect(source).toContain('data-focus-role="technical-context"');
         expect(source).toContain("Leitner · Stufe");
     });
