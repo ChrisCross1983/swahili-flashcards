@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import TrainerCard from "@/components/trainer/TrainerCard";
+import GroupBadge from "@/components/groups/GroupBadge";
 
 describe("trainer card layout", () => {
     it("renders compact front layout before reveal and expanded layout after reveal", () => {
@@ -94,6 +95,16 @@ describe("trainer card example disclosure affordance", () => {
 });
 
 describe("trainer action and group metadata layout", () => {
+    it("renders active-card group badges as passive non-button information", () => {
+        const html = renderToStaticMarkup(<GroupBadge group={{ name: "Alltag", color: null }} quiet />);
+
+        expect(html).toContain('data-role="group-badge"');
+        expect(html).toContain('data-interactive="false"');
+        expect(html).toContain("Alltag");
+        expect(html).not.toContain("<button");
+        expect(html).not.toContain("shadow-soft");
+    });
+
     it("keeps maintenance controls quieter than recall actions while accessible", () => {
         const root = process.cwd();
         const filePath = path.join(root, "src/app/trainer/TrainerClient.tsx");
@@ -102,12 +113,19 @@ describe("trainer action and group metadata layout", () => {
         expect(source).toContain('data-testid="active-learning-focus"');
         expect(source).toContain('data-testid="card-maintenance-strip"');
         expect(source).toContain('data-focus-role="maintenance"');
+        expect(source).toContain('data-testid="card-passive-groups"');
+        expect(source).toContain('data-role="passive-info"');
         expect(source).toContain("Kartenoptionen");
         expect(source).toContain("Audio vorhanden");
-        expect(source).toContain("Audio aufnehmen");
+        expect(source).toContain('data-card-option-action="audio"');
+        expect(source).toContain('aria-label={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}');
+        expect(source).toContain('data-card-option-action="edit"');
+        expect(source).toContain('aria-label="Karte bearbeiten"');
+        expect(source).toContain('data-card-option-action="groups"');
+        expect(source).toContain('aria-label="Gruppen bearbeiten"');
         expect(source).toContain("Bearbeiten");
         expect(source).toContain("Keine Gruppe");
-        expect(source).toContain("Gruppen bearbeiten");
+        expect(source).toContain("<span>Gruppen</span>");
         expect(source).toContain('data-focus-role="technical-context"');
         expect(source).toContain("Leitner · Stufe");
     });

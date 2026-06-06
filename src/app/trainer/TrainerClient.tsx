@@ -1349,53 +1349,66 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                 {/* ===== Card ===== */}
                                                 <div className="mt-3 rounded-3xl border border-soft bg-surface p-4 shadow-soft sm:p-6" data-testid="active-learning-focus" data-reveal-state={reveal ? "revealed" : "recalling"}>
-                                                    <div className={reveal ? "mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-surface-elevated/80 px-3 py-2.5" : "mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-surface/70 px-3 py-2 text-muted"} data-testid="card-maintenance-strip" data-focus-role="maintenance" data-reveal-state={reveal ? "revealed" : "recalling"}>
-                                                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                                                            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Kartenoptionen</span>
+                                                    <div className={reveal ? "mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-soft bg-surface-elevated/80 px-2.5 py-2" : "mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-soft bg-surface/70 px-2.5 py-1.5 text-muted"} data-testid="card-maintenance-strip" data-focus-role="maintenance" data-reveal-state={reveal ? "revealed" : "recalling"}>
+                                                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" data-testid="card-passive-groups" aria-label="Zugeordnete Gruppen">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Kartenoptionen</span>
                                                             <span className="hidden h-1 w-1 rounded-full bg-[color:var(--border-strong)] sm:inline-block" aria-hidden="true" />
-                                                            <div className="flex min-h-6 flex-wrap items-center gap-1.5 opacity-75" data-testid="active-card-groups">
+                                                            <span className="text-[11px] text-muted">Gruppen</span>
+                                                            <div className="flex min-h-5 flex-wrap items-center gap-1 opacity-80" data-testid="active-card-groups" data-role="passive-info">
                                                                 {currentItemGroups.length > 0 ? (
                                                                     <>
-                                                                        {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} />)}
+                                                                        {badgeSummary.visible.map((group: any) => <GroupBadge key={group.id} group={group} quiet />)}
                                                                         {badgeSummary.overflow > 0 ? (
-                                                                            <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2 text-[11px] font-medium text-muted">+{badgeSummary.overflow}</span>
+                                                                            <span className="inline-flex h-5 items-center rounded-full border border-soft bg-surface/70 px-2 text-[11px] font-medium text-muted" data-role="group-badge" data-interactive="false">+{badgeSummary.overflow}</span>
                                                                         ) : null}
                                                                     </>
                                                                 ) : (
-                                                                    <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
+                                                                    <span className="inline-flex h-5 items-center rounded-full border border-soft bg-surface/70 px-2 text-[11px] font-medium text-muted" data-role="group-badge" data-interactive="false">Keine Gruppe</span>
                                                                 )}
                                                             </div>
                                                         </div>
 
-                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                        <div className="flex flex-wrap items-center gap-1" data-testid="card-option-actions">
                                                             {todayItems[currentIndex]?.audio_path ? (
-                                                                <span className="rounded-full border border-soft bg-surface px-2.5 py-1 text-[11px] text-muted">
+                                                                <span className="rounded-full border border-soft bg-surface/70 px-2 py-1 text-[11px] text-muted" data-role="passive-info">
                                                                     Audio vorhanden
                                                                 </span>
                                                             ) : (
                                                                 <button
                                                                     type="button"
-                                                                    className="btn btn-utility rounded-full border border-soft bg-surface px-2.5 py-1 text-xs"
+                                                                    className="btn btn-utility min-h-8 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs"
                                                                     onClick={toggleLearnRecording}
+                                                                    aria-label={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}
+                                                                    title={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}
+                                                                    data-card-option-action="audio"
                                                                 >
-                                                                    {isRecording ? "Stop & Speichern" : "Audio aufnehmen"}
+                                                                    <span aria-hidden="true">{isRecording ? "■" : "🎙"}</span>
+                                                                    <span>{isRecording ? "Stop" : "Audio"}</span>
                                                                 </button>
                                                             )}
 
                                                             <button
                                                                 type="button"
-                                                                className="btn btn-utility rounded-full border border-soft bg-surface px-2.5 py-1 text-xs whitespace-nowrap"
+                                                                className="btn btn-utility min-h-8 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs whitespace-nowrap"
                                                                 onClick={startEditFromLearn}
+                                                                aria-label="Karte bearbeiten"
+                                                                title="Karte bearbeiten"
+                                                                data-card-option-action="edit"
                                                             >
-                                                                Bearbeiten
+                                                                <span aria-hidden="true">✎</span>
+                                                                <span>Bearbeiten</span>
                                                             </button>
 
                                                             <button
                                                                 type="button"
-                                                                className="btn btn-utility rounded-full border border-soft bg-surface px-2.5 py-1 text-xs whitespace-nowrap"
+                                                                className="btn btn-utility min-h-8 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs whitespace-nowrap"
                                                                 onClick={openCurrentCardGroupsEditor}
+                                                                aria-label="Gruppen bearbeiten"
+                                                                title="Gruppen bearbeiten"
+                                                                data-card-option-action="groups"
                                                             >
-                                                                {currentItemGroups.length > 0 ? "Gruppen bearbeiten" : "Gruppe"}
+                                                                <span aria-hidden="true">#</span>
+                                                                <span>Gruppen</span>
                                                             </button>
                                                         </div>
                                                     </div>
