@@ -238,7 +238,6 @@ export function useTrainerSession({
         setLearnStarted(true);
     }
     function revealCard() {
-        if (gradingInFlightRef.current) return;
         setReveal(true);
         playCardAudioIfExists(todayItems[currentIndex]);
     }

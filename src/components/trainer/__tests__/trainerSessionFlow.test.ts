@@ -95,6 +95,15 @@ describe("trainer session runtime regression guards", () => {
         expect(sessionSource).toContain("setReveal(false);");
     });
 
+    it("keeps reveal responsive while grading persistence is in flight", () => {
+        expect(sessionSource).toContain("function revealCard()");
+        expect(sessionSource).toContain("setReveal(true);");
+        expect(sessionSource).not.toContain("function revealCard() {\n        if (gradingInFlightRef.current) return;");
+        expect(controlsSource).toContain('data-tap-feedback="immediate"');
+        expect(controlsSource).toContain("touch-manipulation");
+        expect(controlsSource).toContain("min-h-14");
+    });
+
     it("adds calm next-step guidance to summary states", () => {
         expect(nextStepSource).toContain("Nächster sinnvoller Schritt");
         expect(nextStepSource).toContain("Fertig");

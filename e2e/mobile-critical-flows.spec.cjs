@@ -217,7 +217,11 @@ test.describe("mobile critical flows", () => {
     expect(boxesOverlap(toolsBox, correctBox)).toBeFalsy();
 
     await correct.click();
-    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeDisabled();
+    const nextReveal = page.getByRole("button", { name: "Aufdecken" });
+    await expect(nextReveal).toBeEnabled();
+    await nextReveal.click();
+    await expect(page.getByRole("button", { name: "Nicht gewusst", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeDisabled();
   });
 
   test("direct dashboard start shows transition instead of setup while cards load", async ({ page }) => {

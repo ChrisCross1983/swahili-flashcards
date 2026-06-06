@@ -15,6 +15,24 @@ function readSource(relativePath: string) {
 
 describe("mobile critical-flow regression coverage", () => {
     it("keeps trainer grading controls reachable and locked during in-flight grading", () => {
+        const revealDuringPersistenceHtml = renderToStaticMarkup(
+            <TrainerControls
+                reveal={false}
+                hasAudio={false}
+                gradingInFlight
+                onReveal={vi.fn()}
+                onPlayAudio={vi.fn()}
+                onWrong={vi.fn()}
+                onCorrect={vi.fn()}
+            />,
+        );
+
+        expect(revealDuringPersistenceHtml).toContain("Aufdecken");
+        expect(revealDuringPersistenceHtml).toContain('data-tap-feedback="immediate"');
+        expect(revealDuringPersistenceHtml).toContain("touch-manipulation");
+        expect(revealDuringPersistenceHtml).toContain("min-h-14");
+        expect(revealDuringPersistenceHtml).not.toContain("disabled=\"\"");
+
         const readyHtml = renderToStaticMarkup(
             <TrainerControls
                 reveal
@@ -30,6 +48,9 @@ describe("mobile critical-flow regression coverage", () => {
         expect(readyHtml).toContain("Nicht gewusst");
         expect(readyHtml).toContain("Gewusst");
         expect(readyHtml).toContain("data-grading-in-flight=\"false\"");
+        expect(readyHtml).toContain('data-tap-feedback="immediate"');
+        expect(readyHtml).toContain("touch-manipulation");
+        expect(readyHtml).toContain("min-h-14");
         expect(readyHtml).not.toContain("disabled=\"\"");
 
         const lockedHtml = renderToStaticMarkup(
