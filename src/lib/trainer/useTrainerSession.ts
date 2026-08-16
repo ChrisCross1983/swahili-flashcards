@@ -102,6 +102,18 @@ export function useTrainerSession({
         }
     }
 
+    function refreshSetupCountsInBackground() {
+        void refreshSetupCounts().catch((error) => {
+            console.error("Failed to refresh setup counts", error);
+        });
+    }
+
+    function loadLeitnerStatsInBackground() {
+        void loadLeitnerStats().catch((error) => {
+            console.error("Failed to load Leitner stats", error);
+        });
+    }
+
     async function loadToday() {
         onStatus("Lade fällige Karten...");
         setLearnLoadError(null);
@@ -113,7 +125,7 @@ export function useTrainerSession({
             setCurrentIndex(0);
             setReveal(false);
             onSetupCountsPatch?.({ todayDue: items.length });
-            await refreshSetupCounts();
+            refreshSetupCountsInBackground();
             onStatus(`Fällig heute: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {
@@ -135,7 +147,7 @@ export function useTrainerSession({
             setCurrentIndex(0);
             setReveal(false);
             onSetupCountsPatch?.({ totalCards: items.length });
-            await refreshSetupCounts();
+            refreshSetupCountsInBackground();
             onStatus(`Alle Karten: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {
@@ -154,7 +166,7 @@ export function useTrainerSession({
             const items = await fetchLastMissedItems(cardType);
             setSessionTotal(items.length);
             onSetupCountsPatch?.({ lastMissedCount: items.length });
-            await refreshSetupCounts();
+            refreshSetupCountsInBackground();
 
             if (items.length === 0) {
                 setTodayItems([]);
@@ -222,9 +234,9 @@ export function useTrainerSession({
         const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial);
         if (loadPlan?.kind === "today") {
             loadResult = await loadToday();
-            await loadLeitnerStats();
+            loadLeitnerStatsInBackground();
             if (loadResult.ok && loadResult.items.length === 0) {
-                await persistLearnSession({ mode: "LEITNER", totalCount: 0, correctCount: 0, wrongCardIds: [] });
+                void persistLearnSession({ mode: "LEITNER", totalCount: 0, correctCount: 0, wrongCardIds: [] });
             }
         } else if (loadPlan?.kind === "all") {
             loadResult = await loadAllForDrill(loadPlan.groupIds);
