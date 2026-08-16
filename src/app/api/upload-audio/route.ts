@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
+const VERSIONED_AUDIO_CACHE_SECONDS = "31536000";
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
             .upload(storagePath, arrayBuffer, {
                 upsert: true,
                 contentType,
-                cacheControl: "0",
+                cacheControl: VERSIONED_AUDIO_CACHE_SECONDS,
             });
 
         if (uploadError) {
