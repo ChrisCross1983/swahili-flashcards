@@ -18,7 +18,7 @@ import {
     fetchLeitnerStats,
     fetchSetupCounts,
 } from "@/lib/trainer/api";
-import type { CardType, LeitnerStats, TodayItem } from "@/lib/trainer/types";
+import type { CardType, LeitnerStats } from "@/lib/trainer/types";
 import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId } from "@/lib/trainer/utils";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
@@ -52,7 +52,49 @@ type Props = {
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
+const AUDIO_BASE_URL =
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
+
+type PreparedCardAudio = {
+    key: string;
+    path: string;
+    audio: HTMLAudioElement;
+};
+
+type CardAudioSource = {
+    audio_path?: string | null;
+    cardId?: string | number | null;
+    card_id?: string | number | null;
+    id?: string | number | null;
+};
+
+function getAudioPublicUrl(path: string) {
+    return `${AUDIO_BASE_URL}/${path}`;
+}
+
+function getCardAudioPath(card: CardAudioSource | null | undefined) {
+    return typeof card?.audio_path === "string" && card.audio_path.trim().length > 0
+        ? card.audio_path
+        : null;
+}
+
+function getCardAudioKey(card: CardAudioSource | null | undefined) {
+    const path = getCardAudioPath(card);
+    if (!path) return null;
+    const rawId = card?.cardId ?? card?.card_id ?? card?.id ?? "card";
+    return `${String(rawId)}:${path}`;
+}
+
+function resetAudioElement(audio: HTMLAudioElement | null | undefined) {
+    if (!audio) return;
+    audio.pause();
+    try {
+        audio.currentTime = 0;
+    } catch {
+        // Some browsers reject seeking before metadata exists; pausing is still enough to prevent playback.
+    }
+}
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     // Route-level orchestrator: setup, session, card form, and library domains own their detailed state behind focused boundaries.
@@ -140,6 +182,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
+    const preparedCardAudioRef = useRef<Map<string, PreparedCardAudio>>(new Map());
+    const playbackTokenRef = useRef(0);
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const directStartCancelledRef = useRef(false);
@@ -151,24 +195,67 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
     const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
 
-    function getAudioPublicUrl(path: string) {
-        return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio/${path}`;
-    }
+    const stopAnyAudio = useCallback(() => {
+        playbackTokenRef.current += 1;
 
-    function stopAnyAudio() {
-        if (audioElRef.current) {
-            audioElRef.current.pause();
-            audioElRef.current.currentTime = 0;
+        const audioElements = new Set<HTMLAudioElement>();
+        if (audioElRef.current) audioElements.add(audioElRef.current);
+        for (const entry of preparedCardAudioRef.current.values()) {
+            audioElements.add(entry.audio);
         }
-    }
 
-    function playCardAudioIfExists(card: any) {
-        if (!card?.audio_path) return;
-        const url = getAudioPublicUrl(card.audio_path);
+        audioElements.forEach(resetAudioElement);
+        audioElRef.current = null;
+    }, []);
+
+    const prepareCardAudio = useCallback((card: CardAudioSource | null | undefined): PreparedCardAudio | null => {
+        const path = getCardAudioPath(card);
+        const key = getCardAudioKey(card);
+        if (!path || !key || typeof Audio === "undefined") return null;
+
+        const existing = preparedCardAudioRef.current.get(key);
+        if (existing) return existing;
+
+        const audio = new Audio(getAudioPublicUrl(path));
+        audio.preload = "auto";
+        try {
+            audio.load();
+        } catch {
+            // Loading can fail transiently; play() will still surface a rejected promise that we intentionally ignore.
+        }
+
+        const prepared = { key, path, audio };
+        preparedCardAudioRef.current.set(key, prepared);
+        return prepared;
+    }, []);
+
+    const playCardAudioIfExists = useCallback((card: CardAudioSource | null | undefined) => {
+        const prepared = prepareCardAudio(card);
+        if (!prepared) return;
+
         stopAnyAudio();
-        audioElRef.current = new Audio(url);
-        audioElRef.current.play().catch(() => { });
-    }
+        const token = playbackTokenRef.current + 1;
+        playbackTokenRef.current = token;
+        audioElRef.current = prepared.audio;
+
+        try {
+            prepared.audio.currentTime = 0;
+        } catch {
+            // If metadata is not ready yet, starting from the current buffered position is preferable to delaying play().
+        }
+
+        void prepared.audio.play()
+            .then(() => {
+                if (playbackTokenRef.current !== token || audioElRef.current !== prepared.audio) {
+                    resetAudioElement(prepared.audio);
+                }
+            })
+            .catch(() => {
+                if (playbackTokenRef.current === token && audioElRef.current === prepared.audio) {
+                    audioElRef.current = null;
+                }
+            });
+    }, [prepareCardAudio, stopAnyAudio]);
 
     function triggerSetupHighlight(target: "DIRECTION" | "MATERIAL") {
         const targetRef =
@@ -648,6 +735,36 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentSwahiliExample = readSwahiliExample(currentItem);
     const currentImagePath =
         currentItem?.image_path ?? currentItem?.imagePath ?? currentItem?.image ?? null;
+    const nextAudioItem = todayItems[currentIndex + 1] ?? null;
+    const currentAudioKey = getCardAudioKey(currentItem);
+    const nextAudioKey = getCardAudioKey(nextAudioItem);
+
+    useEffect(() => {
+        stopAnyAudio();
+    }, [currentAudioKey, stopAnyAudio]);
+
+    useEffect(() => {
+        const keepKeys = new Set<string>();
+
+        for (const item of [currentItem, nextAudioItem]) {
+            const prepared = prepareCardAudio(item);
+            if (prepared) keepKeys.add(prepared.key);
+        }
+
+        for (const [key, entry] of preparedCardAudioRef.current.entries()) {
+            if (keepKeys.has(key)) continue;
+            resetAudioElement(entry.audio);
+            preparedCardAudioRef.current.delete(key);
+        }
+    }, [currentAudioKey, currentItem, nextAudioKey, nextAudioItem, prepareCardAudio]);
+
+    useEffect(() => {
+        const preparedAudioMap = preparedCardAudioRef.current;
+        return () => {
+            stopAnyAudio();
+            preparedAudioMap.clear();
+        };
+    }, [stopAnyAudio]);
 
     const currentLevel = Number.isFinite(currentItem?.level)
         ? Number(currentItem?.level)
@@ -802,6 +919,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     ]);
 
     const finishSessionSummary = useCallback(() => {
+        stopAnyAudio();
         setLearnStarted(false);
         setLearnDone(false);
         setShowSummary(false);
@@ -825,6 +943,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setReveal,
         setShowSummary,
         setTodayItems,
+        stopAnyAudio,
     ]);
 
     const leitnerUi = (() => {
@@ -1195,6 +1314,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     }
 
                                     if (learnStarted || showSummary || todayItems.length > 0 || learnDone || endedEarly) {
+                                        stopAnyAudio();
                                         setLearnStarted(false);
                                         setLearnDone(false);
                                         setShowSummary(false);

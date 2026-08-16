@@ -210,6 +210,7 @@ export function useTrainerSession({
         setLearnMode(nextLearnMode);
         setTrainingMaterial(nextTrainingMaterial);
         setDirectionMode(nextDirectionMode);
+        stopAnyAudio?.();
         resetSessionTracking();
         setLearnLoadError(null);
         setTodayItems([]);
@@ -264,6 +265,7 @@ export function useTrainerSession({
         }
         if (!item) return;
 
+        stopAnyAudio?.();
         gradingInFlightRef.current = true;
         setGradingInFlight(true);
 
