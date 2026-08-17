@@ -13,7 +13,6 @@ import {
     getNextLevelOnWrong,
     MAX_LEVEL,
 } from "@/lib/leitner";
-import { setTrainingContext } from "@/lib/aiContext";
 import {
     fetchLeitnerStats,
     fetchSetupCounts,
@@ -42,6 +41,9 @@ import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
 import { useTrainerCardLibrary } from "@/lib/trainer/useTrainerCardLibrary";
+import { getTrainerCopy } from "@/lib/trainer/trainerCopy";
+import { formatTrainerDueDate, formatTrainerDueStatus } from "@/lib/trainer/trainerDueDate";
+import { useTrainerChatContext } from "@/lib/trainer/useTrainerChatContext";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -212,18 +214,18 @@ function getAudioSnapshot(audio: HTMLAudioElement, source: "prepared" | "created
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     // Route-level orchestrator: setup, session, card form, and library domains own their detailed state behind focused boundaries.
-    const isSentenceTrainer = cardType === "sentence";
-    const trainerTitle = isSentenceTrainer ? "Satztrainer" : "Swahili Flashcards (MVP)";
-    const createLabel = isSentenceTrainer ? "Neue Sätze anlegen" : "Neue Wörter anlegen";
-    const createHint = isSentenceTrainer
-        ? "Neue Sätze anlegen (Deutsch ↔ Swahili)."
-        : "Neue Karte anlegen (Deutsch ↔ Swahili).";
-    const cardsLabel = isSentenceTrainer ? "Meine Sätze" : "Meine Karten";
-    const cardsCountLabel = isSentenceTrainer ? "Sätze insgesamt" : "Karten insgesamt";
-    const cardItemLabel = isSentenceTrainer ? "Sätze" : "Karten";
-    const editTitle = isSentenceTrainer ? "Satz bearbeiten" : "Karte bearbeiten";
-    const createTitle = isSentenceTrainer ? "Neue Sätze" : "Neue Wörter";
-    const saveCardLabel = isSentenceTrainer ? "Satz speichern" : "Karte speichern";
+    const {
+        isSentenceTrainer,
+        trainerTitle,
+        createLabel,
+        createHint,
+        cardsLabel,
+        cardsCountLabel,
+        cardItemLabel,
+        editTitle,
+        createTitle,
+        saveCardLabel,
+    } = getTrainerCopy(cardType);
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -1030,21 +1032,13 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const currentDueDate =
         currentItem?.dueDate ?? currentItem?.due_date ?? null;
 
-    const chatContextPayload = useMemo(
-        () => ({
-            german: currentGerman || undefined,
-            swahili: currentSwahili || undefined,
-            direction,
-            level: Number.isFinite(currentLevel) ? currentLevel : undefined,
-            dueDate: currentDueDate ?? undefined,
-        }),
-        [currentGerman, currentSwahili, direction, currentLevel, currentDueDate]
-    );
-
-    useEffect(() => {
-        setTrainingContext(chatContextPayload);
-        return () => setTrainingContext(null);
-    }, [chatContextPayload]);
+    useTrainerChatContext({
+        currentGerman,
+        currentSwahili,
+        direction,
+        currentLevel,
+        currentDueDate,
+    });
 
     const nextOnCorrectLevel = Math.min(currentLevel + 1, MAX_LEVEL);
     const nextOnCorrectDays = getIntervalDays(nextOnCorrectLevel);
@@ -1053,34 +1047,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     const footerNextDays = nextOnCorrectDays;
 
-    const formattedDueDate = (() => {
-        if (!currentDueDate) return null;
-        const due = new Date(`${currentDueDate}T00:00:00`);
-        if (Number.isNaN(due.getTime())) return currentDueDate;
-        return new Intl.DateTimeFormat("de-DE", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-        }).format(due);
-    })();
-
-    const dueStatusText = (() => {
-        if (!currentDueDate) return null;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const due = new Date(`${currentDueDate}T00:00:00`);
-        if (Number.isNaN(due.getTime())) return null;
-        const diffMs = due.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-        if (diffDays < 0) {
-            const pastDays = Math.abs(diffDays);
-            return pastDays === 1 ? "seit 1 Tag fällig" : `seit ${pastDays} Tagen fällig`;
-        }
-        if (diffDays === 0) {
-            return "heute fällig";
-        }
-        return `fällig ${formatDays(diffDays)}`;
-    })();
+    const formattedDueDate = formatTrainerDueDate(currentDueDate);
+    const dueStatusText = formatTrainerDueStatus(currentDueDate);
 
     useEffect(() => {
         const cardId = currentItem ? resolveCardId(currentItem) : null;
