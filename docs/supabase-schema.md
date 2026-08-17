@@ -376,12 +376,14 @@ Most API routes call `requireUser()` and then use `src/lib/supabaseServer.ts`.
 This is acceptable only when every query is scoped by `owner_key = user.id` or an
 equivalent ownership check.
 
-High-risk route:
+Previously high-risk route, now hardened:
 
-- `src/app/api/migrate/route.ts`: uses service role, does not call `requireUser()`,
-  and updates `cards` and `card_progress` by arbitrary `fromKey`/`toKey` request
-  body values. This should not be exposed in production without admin auth or
-  removal.
+- `src/app/api/migrate/route.ts`: legacy localStorage owner migration. It uses
+  service role, but now calls `requireUser()`, derives the target owner from
+  `user.id`, and rejects a request-supplied `toKey` that does not match the
+  authenticated user. It still accepts `fromKey` for legacy-data takeover and
+  currently updates `cards` and `card_progress`. Remove this route after the
+  legacy localStorage migration window closes.
 
 Routes that are service-role based but have explicit user scoping:
 
