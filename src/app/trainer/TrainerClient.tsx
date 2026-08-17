@@ -55,6 +55,40 @@ const IMAGE_BASE_URL =
 const AUDIO_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
+const DEBUG_AUDIO_PERF = process.env.NODE_ENV === "development";
+
+type AudioPerfEventName =
+    | "card-change"
+    | "card-visible"
+    | "audio-element-created"
+    | "load-called"
+    | "loadstart"
+    | "loadedmetadata"
+    | "loadeddata"
+    | "canplay"
+    | "canplaythrough"
+    | "reveal-click"
+    | "manual-play-click"
+    | "play-called"
+    | "playing"
+    | "waiting"
+    | "stalled"
+    | "error"
+    | "ended";
+
+type AudioPerfEvent = {
+    name: AudioPerfEventName;
+    at: number;
+    detail?: Record<string, unknown>;
+};
+
+type AudioPerfTrace = {
+    key: string;
+    label: string;
+    path: string;
+    visibleAt: number | null;
+    events: AudioPerfEvent[];
+};
 
 type PreparedCardAudio = {
     key: string;
@@ -67,6 +101,12 @@ type CardAudioSource = {
     cardId?: string | number | null;
     card_id?: string | number | null;
     id?: string | number | null;
+    swahili?: string | null;
+    swahili_text?: string | null;
+    sw?: string | null;
+    german?: string | null;
+    german_text?: string | null;
+    de?: string | null;
 };
 
 function getAudioPublicUrl(path: string) {
@@ -94,6 +134,80 @@ function resetAudioElement(audio: HTMLAudioElement | null | undefined) {
     } catch {
         // Some browsers reject seeking before metadata exists; pausing is still enough to prevent playback.
     }
+}
+
+function audioPerfNow() {
+    return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function getCardAudioLabel(card: CardAudioSource | null | undefined) {
+    const label =
+        card?.swahili ??
+        card?.swahili_text ??
+        card?.sw ??
+        card?.german ??
+        card?.german_text ??
+        card?.de ??
+        card?.cardId ??
+        card?.card_id ??
+        card?.id ??
+        "unknown";
+    return String(label).slice(0, 80);
+}
+
+function getReadyStateLabel(value: number) {
+    if (value === 0) return "HAVE_NOTHING";
+    if (value === 1) return "HAVE_METADATA";
+    if (value === 2) return "HAVE_CURRENT_DATA";
+    if (value === 3) return "HAVE_FUTURE_DATA";
+    if (value === 4) return "HAVE_ENOUGH_DATA";
+    return "UNKNOWN";
+}
+
+function getNetworkStateLabel(value: number) {
+    if (value === 0) return "NETWORK_EMPTY";
+    if (value === 1) return "NETWORK_IDLE";
+    if (value === 2) return "NETWORK_LOADING";
+    if (value === 3) return "NETWORK_NO_SOURCE";
+    return "UNKNOWN";
+}
+
+function sanitizeAudioSrc(src: string) {
+    if (!src) return "";
+    const base = `${AUDIO_BASE_URL}/`;
+    if (!src.startsWith(base)) return src;
+    const relative = src.slice(base.length);
+    const parts = relative.split("/");
+    if (parts.length <= 1) return "<owner>";
+    return ["<owner>", ...parts.slice(1)].join("/");
+}
+
+function getBufferedSummary(audio: HTMLAudioElement) {
+    const bufferedLength = audio.buffered.length;
+    let firstBufferedEnd: number | null = null;
+    if (bufferedLength > 0) {
+        try {
+            firstBufferedEnd = audio.buffered.end(0);
+        } catch {
+            firstBufferedEnd = null;
+        }
+    }
+
+    return { bufferedLength, firstBufferedEnd };
+}
+
+function getAudioSnapshot(audio: HTMLAudioElement, source: "prepared" | "created-during-play") {
+    const buffered = getBufferedSummary(audio);
+    return {
+        source,
+        readyState: `${audio.readyState} ${getReadyStateLabel(audio.readyState)}`,
+        networkState: `${audio.networkState} ${getNetworkStateLabel(audio.networkState)}`,
+        currentSrc: sanitizeAudioSrc(audio.currentSrc || audio.src),
+        duration: Number.isFinite(audio.duration) ? audio.duration : null,
+        currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : null,
+        bufferedLength: buffered.bufferedLength,
+        firstBufferedEnd: buffered.firstBufferedEnd,
+    };
 }
 
 export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
@@ -183,6 +297,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const preparedCardAudioRef = useRef<Map<string, PreparedCardAudio>>(new Map());
+    const audioPerfTracesRef = useRef<Map<string, AudioPerfTrace>>(new Map());
+    const previousVisibleAudioKeyRef = useRef<string | null>(null);
     const playbackTokenRef = useRef(0);
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
@@ -208,17 +324,121 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         audioElRef.current = null;
     }, []);
 
+    const ensureAudioPerfTrace = useCallback((card: CardAudioSource | null | undefined, key: string, path: string) => {
+        let trace = audioPerfTracesRef.current.get(key);
+        if (!trace) {
+            trace = {
+                key,
+                label: getCardAudioLabel(card),
+                path,
+                visibleAt: null,
+                events: [],
+            };
+            audioPerfTracesRef.current.set(key, trace);
+        }
+        return trace;
+    }, []);
+
+    const printAudioPerfTimeline = useCallback((trace: AudioPerfTrace, reason: string) => {
+        if (!DEBUG_AUDIO_PERF || trace.visibleAt == null) return;
+
+        const reveal = trace.events.find((event) => event.name === "reveal-click");
+        const playCalled = trace.events.find((event) => event.name === "play-called");
+        const playing = trace.events.find((event) => event.name === "playing");
+        const revealToPlaying = reveal && playing ? Math.round(playing.at - reveal.at) : null;
+        const playCalledToPlaying = playCalled && playing ? Math.round(playing.at - playCalled.at) : null;
+
+        console.info("[AUDIO PERF] timeline", {
+            card: trace.label,
+            reason,
+            revealToPlayingMs: revealToPlaying,
+            playCalledToPlayingMs: playCalledToPlaying,
+        });
+        console.table(trace.events.map((event) => ({
+            event: event.name,
+            t: `${Math.round(event.at - (trace.visibleAt ?? event.at))}ms`,
+            detail: event.detail ? JSON.stringify(event.detail) : "",
+        })));
+    }, []);
+
+    const recordAudioPerfEvent = useCallback((
+        trace: AudioPerfTrace | null | undefined,
+        name: AudioPerfEventName,
+        detail?: Record<string, unknown>,
+    ) => {
+        if (!DEBUG_AUDIO_PERF || !trace) return;
+
+        const event: AudioPerfEvent = { name, at: audioPerfNow(), detail };
+        trace.events.push(event);
+
+        if (trace.visibleAt != null) {
+            console.info(
+                `[AUDIO PERF] card=${trace.label} ${name} +${Math.round(event.at - trace.visibleAt)}ms`,
+                detail ?? ""
+            );
+        }
+
+        if (name === "playing" || name === "error" || name === "stalled") {
+            printAudioPerfTimeline(trace, name);
+        }
+    }, [printAudioPerfTimeline]);
+
+    const attachAudioPerfListeners = useCallback((audio: HTMLAudioElement, key: string) => {
+        if (!DEBUG_AUDIO_PERF) return;
+
+        const events: Array<Exclude<AudioPerfEventName, "card-change" | "card-visible" | "audio-element-created" | "load-called" | "reveal-click" | "manual-play-click" | "play-called">> = [
+            "loadstart",
+            "loadedmetadata",
+            "loadeddata",
+            "canplay",
+            "canplaythrough",
+            "playing",
+            "waiting",
+            "stalled",
+            "error",
+            "ended",
+        ];
+
+        for (const eventName of events) {
+            audio.addEventListener(eventName, () => {
+                const trace = audioPerfTracesRef.current.get(key);
+                const detail = eventName === "error"
+                    ? {
+                        code: audio.error?.code ?? null,
+                        message: audio.error?.message ?? null,
+                        readyState: `${audio.readyState} ${getReadyStateLabel(audio.readyState)}`,
+                        networkState: `${audio.networkState} ${getNetworkStateLabel(audio.networkState)}`,
+                    }
+                    : {
+                        readyState: `${audio.readyState} ${getReadyStateLabel(audio.readyState)}`,
+                        networkState: `${audio.networkState} ${getNetworkStateLabel(audio.networkState)}`,
+                    };
+                recordAudioPerfEvent(trace, eventName, detail);
+            });
+        }
+    }, [recordAudioPerfEvent]);
+
     const prepareCardAudio = useCallback((card: CardAudioSource | null | undefined): PreparedCardAudio | null => {
         const path = getCardAudioPath(card);
         const key = getCardAudioKey(card);
         if (!path || !key || typeof Audio === "undefined") return null;
 
+        const trace = ensureAudioPerfTrace(card, key, path);
         const existing = preparedCardAudioRef.current.get(key);
         if (existing) return existing;
 
         const audio = new Audio(getAudioPublicUrl(path));
         audio.preload = "auto";
+        attachAudioPerfListeners(audio, key);
+        recordAudioPerfEvent(trace, "audio-element-created", {
+            preload: audio.preload,
+            src: sanitizeAudioSrc(audio.src),
+        });
         try {
+            recordAudioPerfEvent(trace, "load-called", {
+                readyState: `${audio.readyState} ${getReadyStateLabel(audio.readyState)}`,
+                networkState: `${audio.networkState} ${getNetworkStateLabel(audio.networkState)}`,
+            });
             audio.load();
         } catch {
             // Loading can fail transiently; play() will still surface a rejected promise that we intentionally ignore.
@@ -227,11 +447,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const prepared = { key, path, audio };
         preparedCardAudioRef.current.set(key, prepared);
         return prepared;
-    }, []);
+    }, [attachAudioPerfListeners, ensureAudioPerfTrace, recordAudioPerfEvent]);
 
-    const playCardAudioIfExists = useCallback((card: CardAudioSource | null | undefined) => {
+    const playCardAudioIfExists = useCallback((card: CardAudioSource | null | undefined, trigger: "reveal" | "manual" = "manual") => {
+        const key = getCardAudioKey(card);
+        const wasPrepared = key ? preparedCardAudioRef.current.has(key) : false;
         const prepared = prepareCardAudio(card);
         if (!prepared) return;
+        const trace = audioPerfTracesRef.current.get(prepared.key);
+        const eventName = trigger === "reveal" ? "reveal-click" : "manual-play-click";
+
+        recordAudioPerfEvent(trace, eventName, {
+            ...getAudioSnapshot(prepared.audio, wasPrepared ? "prepared" : "created-during-play"),
+            hadCanPlay: Boolean(trace?.events.some((event) => event.name === "canplay")),
+            hadCanPlaythrough: Boolean(trace?.events.some((event) => event.name === "canplaythrough")),
+        });
+        if (trigger === "reveal" && trace) {
+            printAudioPerfTimeline(trace, "reveal");
+        }
 
         stopAnyAudio();
         const token = playbackTokenRef.current + 1;
@@ -244,6 +477,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             // If metadata is not ready yet, starting from the current buffered position is preferable to delaying play().
         }
 
+        recordAudioPerfEvent(trace, "play-called", {
+            readyState: `${prepared.audio.readyState} ${getReadyStateLabel(prepared.audio.readyState)}`,
+            networkState: `${prepared.audio.networkState} ${getNetworkStateLabel(prepared.audio.networkState)}`,
+        });
         void prepared.audio.play()
             .then(() => {
                 if (playbackTokenRef.current !== token || audioElRef.current !== prepared.audio) {
@@ -255,7 +492,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     audioElRef.current = null;
                 }
             });
-    }, [prepareCardAudio, stopAnyAudio]);
+    }, [prepareCardAudio, printAudioPerfTimeline, recordAudioPerfEvent, stopAnyAudio]);
 
     function triggerSetupHighlight(target: "DIRECTION" | "MATERIAL") {
         const targetRef =
@@ -727,6 +964,38 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const nextAudioKey = getCardAudioKey(nextAudioItem);
 
     useEffect(() => {
+        if (!DEBUG_AUDIO_PERF) return;
+
+        const path = getCardAudioPath(currentItem);
+        if (!path || !currentAudioKey) {
+            previousVisibleAudioKeyRef.current = null;
+            return;
+        }
+
+        const trace = ensureAudioPerfTrace(currentItem, currentAudioKey, path);
+        if (previousVisibleAudioKeyRef.current === currentAudioKey && trace.visibleAt != null) return;
+
+        if (trace.visibleAt != null) {
+            trace.events = [];
+        }
+        trace.visibleAt = audioPerfNow();
+
+        recordAudioPerfEvent(trace, "card-change", {
+            from: previousVisibleAudioKeyRef.current ? "previous-audio-card" : null,
+            index: currentIndex,
+        });
+
+        const prepared = preparedCardAudioRef.current.get(currentAudioKey);
+        recordAudioPerfEvent(trace, "card-visible", {
+            index: currentIndex,
+            hasPreparedElement: Boolean(prepared),
+            snapshot: prepared ? getAudioSnapshot(prepared.audio, "prepared") : null,
+        });
+
+        previousVisibleAudioKeyRef.current = currentAudioKey;
+    }, [currentAudioKey, currentIndex, currentItem, ensureAudioPerfTrace, recordAudioPerfEvent]);
+
+    useEffect(() => {
         stopAnyAudio();
     }, [currentAudioKey, stopAnyAudio]);
 
@@ -742,6 +1011,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             if (keepKeys.has(key)) continue;
             resetAudioElement(entry.audio);
             preparedCardAudioRef.current.delete(key);
+            audioPerfTracesRef.current.delete(key);
         }
     }, [currentAudioKey, currentItem, nextAudioKey, nextAudioItem, prepareCardAudio]);
 

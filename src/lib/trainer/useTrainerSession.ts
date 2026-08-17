@@ -30,7 +30,7 @@ export function useTrainerSession({
     setDirectionMode: (v: "DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null) => void;
     refreshSetupCounts: () => Promise<void>;
     loadLeitnerStats: () => Promise<void>;
-    playCardAudioIfExists: (card: TodayItem | undefined) => void;
+    playCardAudioIfExists: (card: TodayItem | undefined, trigger?: "reveal" | "manual") => void;
     isRecording: boolean;
     stopRecording: () => void;
     stopAnyAudio?: () => void;
@@ -252,7 +252,7 @@ export function useTrainerSession({
     }
     function revealCard() {
         setReveal(true);
-        playCardAudioIfExists(todayItems[currentIndex]);
+        playCardAudioIfExists(todayItems[currentIndex], "reveal");
     }
     async function endSessionEarly() {
         stopAnyAudio?.();

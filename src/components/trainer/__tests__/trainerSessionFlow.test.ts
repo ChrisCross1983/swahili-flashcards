@@ -18,7 +18,7 @@ describe("trainer session runtime regression guards", () => {
 
     it("resets setup preset to today on dashboard open while preserving quickStart path separately", () => {
         expect(clientSource).toContain("function openSetupFromDashboard()");
-        expect(clientSource).toContain("function openSetupFromQuickStart(quickStart: QuickStartPreset)");
+        expect(clientSource).toContain("const openSetupFromQuickStart = useCallback((quickStart: QuickStartPreset)");
         expect(clientSource).toContain('resetTrainingPreset("today")');
         expect(clientSource).toContain("setEntryQuickStartPreset(null)");
         expect(clientSource).toContain("resetTrainingPreset(quickStart)");
