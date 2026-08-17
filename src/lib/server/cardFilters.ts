@@ -4,6 +4,22 @@ const CARD_GROUPS_BATCH_SIZE = 200;
 
 export type ResolvedCardType = "vocab" | "sentence" | null;
 
+type FilterOptions = { foreignTable?: string };
+
+type FilterableQuery<TSelf> = {
+    eq: (column: string, value: string) => TSelf;
+    or: (filters: string, options?: FilterOptions) => TSelf;
+};
+
+type CardGroupRow = {
+    card_id?: string | number | null;
+    groups?: {
+        id?: string | number | null;
+        name?: string | null;
+        color?: string | null;
+    } | null;
+};
+
 export function resolveCardTypeFilter(typeParam: string | null): ResolvedCardType {
     if (typeParam === "sentence") return "sentence";
     if (typeParam === "vocab") return "vocab";
@@ -26,10 +42,10 @@ export function parseGroupIds(searchParams: URLSearchParams): string[] {
     );
 }
 
-export function applyCardTypeFilter<T extends { eq: Function; or: Function }>(
+export function applyCardTypeFilter<T extends FilterableQuery<T>>(
     query: T,
     resolvedType: ResolvedCardType,
-    options?: { foreignTable?: string }
+    options?: FilterOptions
 ): T {
     if (resolvedType === "sentence") {
         return query.eq(options?.foreignTable ? `${options.foreignTable}.type` : "type", "sentence") as T;
@@ -45,10 +61,10 @@ export function applyCardTypeFilter<T extends { eq: Function; or: Function }>(
     return query;
 }
 
-export function applyGroupTypeScopeFilter<T extends { eq: Function; or: Function }>(
+export function applyGroupTypeScopeFilter<T extends FilterableQuery<T>>(
     query: T,
     resolvedType: ResolvedCardType,
-    options?: { foreignTable?: string }
+    options?: FilterOptions
 ): T {
     const column = options?.foreignTable ? `${options.foreignTable}.type_scope` : "type_scope";
     if (resolvedType === "sentence") {
@@ -85,7 +101,7 @@ export async function getAllowedCardIdsByGroups(ownerKey: string, groupIds: stri
 export async function getCardGroups(ownerKey: string, cardIds: string[], resolvedType: ResolvedCardType) {
     if (cardIds.length === 0) return new Map<string, Array<{ id: string; name: string; color: string | null }>>();
 
-    const rows: any[] = [];
+    const rows: CardGroupRow[] = [];
 
     for (let index = 0; index < cardIds.length; index += CARD_GROUPS_BATCH_SIZE) {
         const chunk = cardIds.slice(index, index + CARD_GROUPS_BATCH_SIZE);
@@ -105,15 +121,15 @@ export async function getCardGroups(ownerKey: string, cardIds: string[], resolve
         }
 
         if (Array.isArray(data) && data.length > 0) {
-            rows.push(...data);
+            rows.push(...(data as CardGroupRow[]));
         }
     }
 
     const map = new Map<string, Array<{ id: string; name: string; color: string | null }>>();
 
     for (const row of rows) {
-        const cardId = String((row as any).card_id);
-        const group = (row as any).groups;
+        const cardId = String(row.card_id);
+        const group = row.groups;
         if (!group) continue;
 
         if (!map.has(cardId)) map.set(cardId, []);

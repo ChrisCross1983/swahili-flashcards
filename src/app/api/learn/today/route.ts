@@ -3,6 +3,27 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
+type DueCardRow = {
+  card_id: string;
+  level: number;
+  due_date: string | null;
+  cards: DueCard | DueCard[];
+};
+
+type DueCard = {
+    german_text: string;
+    swahili_text: string;
+    german_example?: string | null;
+    swahili_example?: string | null;
+    image_path?: string | null;
+    audio_path?: string | null;
+    type?: string | null;
+};
+
+function normalizeDueCard(cards: DueCard | DueCard[]): DueCard | null {
+  return Array.isArray(cards) ? (cards[0] ?? null) : cards;
+}
+
 export async function GET(req: Request) {
   const { user, response } = await requireUser();
   if (response) return response;
@@ -45,22 +66,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const rows = data ?? [];
-  const groupsByCard = await getCardGroups(ownerKey, rows.map((row: any) => String(row.card_id)), resolvedType);
+  const rows = (data ?? []) as DueCardRow[];
+  const groupsByCard = await getCardGroups(ownerKey, rows.map((row) => String(row.card_id)), resolvedType);
 
-  const items = rows.map((row: any) => ({
-    cardId: row.card_id,
-    level: row.level,
-    dueDate: row.due_date,
-    german: row.cards.german_text,
-    swahili: row.cards.swahili_text,
-    german_example: row.cards.german_example ?? null,
-    swahili_example: row.cards.swahili_example ?? null,
-    imagePath: row.cards.image_path ?? null,
-    audio_path: row.cards.audio_path ?? null,
-    type: row.cards.type ?? null,
-    groups: groupsByCard.get(String(row.card_id)) ?? [],
-  }));
+  const items = rows.flatMap((row) => {
+    const card = normalizeDueCard(row.cards);
+    if (!card) return [];
+
+    return [{
+      cardId: row.card_id,
+      level: row.level,
+      dueDate: row.due_date,
+      german: card.german_text,
+      swahili: card.swahili_text,
+      german_example: card.german_example ?? null,
+      swahili_example: card.swahili_example ?? null,
+      imagePath: card.image_path ?? null,
+      audio_path: card.audio_path ?? null,
+      type: card.type ?? null,
+      groups: groupsByCard.get(String(row.card_id)) ?? [],
+    }];
+  });
 
   return NextResponse.json({ items });
 }

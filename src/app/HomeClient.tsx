@@ -54,19 +54,23 @@ export default function HomeClient({ ownerKey }: Props) {
   }, []);
 
   useEffect(() => {
-    loadLeitnerStats();
-  }, []);
+    let cancelled = false;
 
-  async function loadLeitnerStats() {
-    const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
-    const res = await fetch(
-      `/api/learn/stats?type=${typeFilter}`,
-      { cache: "no-store" }
-    );
-    const json = await res.json();
-    if (!res.ok) return;
-    setLeitnerStats(json);
-  }
+    (async () => {
+      const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
+      const res = await fetch(
+        `/api/learn/stats?type=${typeFilter}`,
+        { cache: "no-store" }
+      );
+      const json = await res.json();
+      if (!res.ok || cancelled) return;
+      setLeitnerStats(json);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function logout() {
     const supabase = supabaseBrowser();

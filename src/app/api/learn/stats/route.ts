@@ -3,6 +3,11 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { getIntervalDays } from "@/lib/leitner";
 import { requireUser } from "@/lib/api/auth";
 
+type ProgressStatsRow = {
+  level?: number | null;
+  due_date?: string | null;
+};
+
 function labelForLevel(level: number) {
   const days = getIntervalDays(level);
   if (days === 1) return "Morgen (1 Tag)";
@@ -88,8 +93,8 @@ export async function GET(req: Request) {
 
   // next due date (strictly after today)
   const futureDue = rows
-    .map((r: any) => r.due_date as string)
-    .filter(Boolean)
+    .map((r: ProgressStatsRow) => r.due_date)
+    .filter((d): d is string => Boolean(d))
     .filter((d) => d > today)
     .sort()[0] ?? null;
 

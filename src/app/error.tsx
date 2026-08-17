@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import AppRouteState from "@/components/AppRouteState";
 
 type ErrorProps = {
@@ -22,9 +23,9 @@ export default function Error({ error, reset }: ErrorProps) {
       <button type="button" className="btn btn-primary min-h-12" onClick={reset}>
         Erneut versuchen
       </button>
-      <a className="btn btn-secondary min-h-12" href="/">
+      <Link className="btn btn-secondary min-h-12" href="/">
         Zur Startseite
-      </a>
+      </Link>
     </AppRouteState>
   );
 }

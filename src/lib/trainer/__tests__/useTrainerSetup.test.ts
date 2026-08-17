@@ -17,13 +17,13 @@ describe("useTrainerSetup derivation", () => {
 
     it("keeps manual preset switching intact", () => {
         const source = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerSetup.ts"), "utf8");
-        expect(source).toContain("const selectTrainingPreset = (nextPreset: QuickStartPreset)");
+        expect(source).toContain("const selectTrainingPreset = useCallback((nextPreset: QuickStartPreset)");
         expect(source).toContain("setSelectedTrainingPreset(nextPreset)");
     });
 
     it("exposes an explicit reset for fresh setup opens", () => {
         const source = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerSetup.ts"), "utf8");
-        expect(source).toContain("const resetTrainingPreset = (nextPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET)");
+        expect(source).toContain("const resetTrainingPreset = useCallback((nextPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET)");
         expect(source).toContain("resetTrainingPreset,");
     });
 

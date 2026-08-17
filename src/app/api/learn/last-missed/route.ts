@@ -49,8 +49,9 @@ export async function GET(req: Request) {
         const orderedCards = cardIds.map((id) => cardMap.get(String(id))).filter(Boolean);
 
         return NextResponse.json({ items: orderedCards, cards: orderedCards });
-    } catch (err: any) {
-        return NextResponse.json({ error: err?.message ?? "Unbekannter Fehler" }, { status: 500 });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unbekannter Fehler";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -89,7 +90,8 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json({ error: "Ungültige Aktion." }, { status: 400 });
-    } catch (e: any) {
-        return NextResponse.json({ error: e?.message ?? "Unbekannter Fehler" }, { status: 500 });
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Unbekannter Fehler";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

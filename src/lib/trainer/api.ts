@@ -1,5 +1,18 @@
 import type { CardType, LeitnerStats, SessionSummary, SetupCounts, TodayItem } from "./types";
 
+type CardGroup = NonNullable<TodayItem["groups"]>[number];
+
+type CardListItem = {
+    id?: string;
+    german_text?: string;
+    swahili_text?: string;
+    german_example?: string | null;
+    swahili_example?: string | null;
+    image_path?: string | null;
+    audio_path?: string | null;
+    groups?: CardGroup[];
+};
+
 function withFilterParams(url: string, cardType: CardType, groupIds?: string[]): string {
     const params = new URLSearchParams();
     params.set("type", cardType);
@@ -48,7 +61,7 @@ export async function fetchTodayItems(cardType: CardType, groupIds?: string[]): 
 
 export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
     const res = await fetch(withFilterParams("/api/cards/all", cardType, groupIds), { cache: "no-store" });
-    const json = await parseOrThrow<{ items?: any[]; cards?: any[] }>(res, "Aktion fehlgeschlagen.");
+    const json = await parseOrThrow<{ items?: CardListItem[]; cards?: CardListItem[] }>(res, "Aktion fehlgeschlagen.");
     const source = json.items ?? json.cards ?? [];
     return source
         .filter((c) => c && c.id)
@@ -68,7 +81,7 @@ export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: strin
 
 export async function fetchLastMissedItems(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
     const res = await fetch(withFilterParams("/api/learn/last-missed", cardType, groupIds), { cache: "no-store" });
-    const json = await parseOrThrow<{ items?: any[]; cards?: any[] }>(res, "Aktion fehlgeschlagen.");
+    const json = await parseOrThrow<{ items?: CardListItem[]; cards?: CardListItem[] }>(res, "Aktion fehlgeschlagen.");
     const source = json.items ?? json.cards ?? [];
     return source.map((c) => ({
         cardId: c.id,

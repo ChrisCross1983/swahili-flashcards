@@ -400,19 +400,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     }, [learnMode, openLearn, setupCounts.todayDue]);
 
     useEffect(() => {
-        const quickStart = searchParams.get("quickStart");
-        if (!quickStart || mode !== "leitner") return;
-        if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
-
-        openSetupFromQuickStart(quickStart);
-
-        const params = new URLSearchParams(searchParams.toString());
-        params.delete("quickStart");
-        const query = params.toString();
-        router.replace(query ? `${pathname}?${query}` : pathname);
-    }, [mode, pathname, router, searchParams]);
-
-    useEffect(() => {
         setNotesSheetOpen(false);
     }, [currentIndex, reveal]);
 
@@ -1091,7 +1078,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         }
     }
 
-    function openSetupFromQuickStart(quickStart: QuickStartPreset) {
+    const openSetupFromQuickStart = useCallback((quickStart: QuickStartPreset) => {
         setEntryQuickStartPreset(quickStart);
         resetTrainingPreset(quickStart);
         if (quickStart === "all") setTrainingMaterial({ kind: "ALL" });
@@ -1100,7 +1087,20 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setRepairDrillActive(false);
         setDirectStartPreparing(false);
         setOpenLearn(true);
-    }
+    }, [resetTrainingPreset]);
+
+    useEffect(() => {
+        const quickStart = searchParams.get("quickStart");
+        if (!quickStart || mode !== "leitner") return;
+        if (quickStart !== "today" && quickStart !== "all" && quickStart !== "last-missed") return;
+
+        openSetupFromQuickStart(quickStart);
+
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("quickStart");
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname);
+    }, [mode, openSetupFromQuickStart, pathname, router, searchParams]);
 
     useEffect(() => {
         if (!openLearn || selectedPreset !== "all") {

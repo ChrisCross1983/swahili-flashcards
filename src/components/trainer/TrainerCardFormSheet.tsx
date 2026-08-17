@@ -159,25 +159,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     );
     const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
 
-    useImperativeHandle(ref, () => ({
-        openCreate() {
-            resetForCreate();
-            setOpen(true);
-        },
-        openEdit(card, source = "cards") {
-            startEdit(card, source);
-            setOpen(true);
-        },
-        openEditFromLearn(input) {
-            startEditFromLearn(input);
-        },
-    }));
-
-    function showToast(message: string) {
-        setStatus(message);
-        window.setTimeout(() => setStatus(""), 2500);
-    }
-
     function resetForCreate() {
         setStatus("");
         saveFlow.resetSaveFeedback();
@@ -190,6 +171,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setEditingOriginalGroupIds([]);
         setOptionalExamplesOpen(false);
         resetFormNotes();
+    }
+
+    function showToast(message: string) {
+        setStatus(message);
+        window.setTimeout(() => setStatus(""), 2500);
     }
 
     function handleCreateSuccess() {
@@ -366,6 +352,20 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         media.setSelectedSuggestPath(existingPath);
         setOpen(true);
     }
+
+    useImperativeHandle(ref, () => ({
+        openCreate() {
+            resetForCreate();
+            setOpen(true);
+        },
+        openEdit(card, source = "cards") {
+            startEdit(card, source);
+            setOpen(true);
+        },
+        openEditFromLearn(input) {
+            startEditFromLearn(input);
+        },
+    }));
 
     function cancelEdit() {
         setEditingId(null);

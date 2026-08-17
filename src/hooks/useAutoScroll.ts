@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 export function useAutoScroll<T extends HTMLElement>(
-    deps: ReadonlyArray<unknown>,
+    dependency: unknown,
     enabled = true
 ) {
     const endRef = useRef<T | null>(null);
@@ -12,7 +12,7 @@ export function useAutoScroll<T extends HTMLElement>(
             endRef.current?.scrollIntoView({ behavior: "smooth" });
         });
         return () => cancelAnimationFrame(rafId);
-    }, [enabled, ...deps]);
+    }, [dependency, enabled]);
 
     return endRef;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { canStartTraining, materialLabel, type TrainingMaterial } from "@/lib/trainer/setup";
 
 export type QuickStartPreset = "today" | "all" | "last-missed";
@@ -49,7 +49,9 @@ export function useTrainerSetup({
     onTrainingMaterialChange,
     onAllPresetFilteredCountChange,
 }: Params) {
-    const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset | null>(null);
+    const [selectedTrainingPreset, setSelectedTrainingPreset] = useState<QuickStartPreset>(
+        () => entryQuickStartPreset ?? DEFAULT_TRAINING_PRESET,
+    );
     const [allGroupRefinementOpen, setAllGroupRefinementOpen] = useState(false);
 
     const recommendedQuickStartPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET;
@@ -95,27 +97,22 @@ export function useTrainerSetup({
         return `Nächster ruhiger Schritt: ${setupCounts.totalCards > 0 ? "kleine Standardrunde starten" : "Neue Karten anlegen"}`;
     }, [isSentenceTrainer, setupCounts, setupCountsLoading]);
 
-    const selectTrainingPreset = (nextPreset: QuickStartPreset) => {
+    const selectTrainingPreset = useCallback((nextPreset: QuickStartPreset) => {
         setSelectedTrainingPreset(nextPreset);
         if (nextPreset === "all") return;
         setAllGroupRefinementOpen(false);
         onTrainingMaterialChange({ kind: "ALL" });
         onAllPresetFilteredCountChange(null);
-    };
+    }, [onAllPresetFilteredCountChange, onTrainingMaterialChange]);
 
-    const resetTrainingPreset = (nextPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET) => {
+    const resetTrainingPreset = useCallback((nextPreset: QuickStartPreset = DEFAULT_TRAINING_PRESET) => {
         setSelectedTrainingPreset(nextPreset);
         if (nextPreset !== "all") {
             setAllGroupRefinementOpen(false);
             onTrainingMaterialChange({ kind: "ALL" });
             onAllPresetFilteredCountChange(null);
         }
-    };
-
-    useEffect(() => {
-        if (selectedTrainingPreset) return;
-        setSelectedTrainingPreset(entryQuickStartPreset ?? DEFAULT_TRAINING_PRESET);
-    }, [entryQuickStartPreset, recommendedQuickStartPreset, selectedTrainingPreset]);
+    }, [onAllPresetFilteredCountChange, onTrainingMaterialChange]);
 
     return {
         selectedTrainingPreset,

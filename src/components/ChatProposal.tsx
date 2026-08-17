@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CardProposal, ProposalStatus } from "@/lib/cards/proposals";
 
 type Props = {
@@ -21,13 +21,6 @@ export default function ChatProposal({
     onSwap,
 }: Props) {
     const [editing, setEditing] = useState(false);
-    const [front, setFront] = useState(proposal.front_text);
-    const [back, setBack] = useState(proposal.back_text);
-
-    useEffect(() => {
-        setFront(proposal.front_text);
-        setBack(proposal.back_text);
-    }, [proposal.back_text, proposal.front_text]);
 
     const missingBack =
         Boolean(proposal.missing_back) || proposal.back_text.trim().length === 0;
@@ -54,7 +47,6 @@ export default function ChatProposal({
                                     : null;
 
     function handleFrontChange(value: string) {
-        setFront(value);
         onUpdate({
             front_text: value,
             missing_back: missingBack,
@@ -62,7 +54,6 @@ export default function ChatProposal({
     }
 
     function handleBackChange(value: string) {
-        setBack(value);
         const nextMissing = value.trim().length === 0;
         onUpdate({
             back_text: value,
@@ -95,14 +86,14 @@ export default function ChatProposal({
                     <label className="text-xs text-muted">Swahili (Vorderseite)</label>
                     <input
                         className="rounded-xl border px-3 py-2 text-sm"
-                        value={front}
+                        value={proposal.front_text}
                         onChange={(event) => handleFrontChange(event.target.value)}
                         placeholder="Swahili"
                     />
                     <label className="text-xs text-muted">Deutsch (Rückseite)</label>
                     <input
                         className="rounded-xl border px-3 py-2 text-sm"
-                        value={back}
+                        value={proposal.back_text}
                         onChange={(event) => handleBackChange(event.target.value)}
                         placeholder="Deutsch"
                     />

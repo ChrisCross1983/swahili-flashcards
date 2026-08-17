@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import GlobalQuickSearch from "@/components/GlobalQuickSearch";
 import GlobalAiChat from "@/components/GlobalAiChat";
 import { useTrainingContext } from "@/lib/aiContext";
@@ -10,19 +10,70 @@ type Props = {
     ownerKey: string;
 };
 
+type MobileQuickActionsProps = {
+    focusedTrainerMode: boolean;
+    onOpenAi: () => void;
+    onOpenSearch: () => void;
+};
+
+function MobileQuickActions({ focusedTrainerMode, onOpenAi, onOpenSearch }: MobileQuickActionsProps) {
+    const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+    return (
+        <div
+            className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[125] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
+                ? "top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]"
+                : "bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
+                }`}
+            data-focused-trainer-tools={focusedTrainerMode ? "top-right" : "bottom-right"}
+        >
+            {mobileToolsOpen ? (
+                <>
+                    <button
+                        type="button"
+                        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-secondary text-on-accent shadow-soft transition active:scale-95"
+                        onClick={() => {
+                            onOpenAi();
+                            setMobileToolsOpen(false);
+                        }}
+                        aria-label="KI öffnen"
+                    >
+                        <span className="text-sm">🦁</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-primary text-on-accent shadow-soft transition active:scale-95"
+                        onClick={() => {
+                            onOpenSearch();
+                            setMobileToolsOpen(false);
+                        }}
+                        aria-label="Suche öffnen"
+                    >
+                        <span className="text-sm">🔎</span>
+                    </button>
+                </>
+            ) : null}
+            <button
+                type="button"
+                className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
+                    ? "border-white/50 bg-accent-secondary text-white shadow-soft"
+                    : "border-white/40 bg-accent-primary"
+                    }`}
+                onClick={() => setMobileToolsOpen((open) => !open)}
+                aria-label={mobileToolsOpen ? "Schnellaktionen schließen" : "Schnellaktionen öffnen"}
+            >
+                <span className="text-base">{mobileToolsOpen ? "✕" : "⋯"}</span>
+            </button>
+        </div>
+    );
+}
+
 export default function GlobalOverlays({ ownerKey }: Props) {
     const [openSearch, setOpenSearch] = useState(false);
     const [openAi, setOpenAi] = useState(false);
-    const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
     const trainingContext = useTrainingContext();
     const pathname = usePathname();
     const focusedTrainerMode = pathname?.startsWith("/trainer") && Boolean(trainingContext?.german || trainingContext?.swahili);
-
-    useEffect(() => {
-        if (focusedTrainerMode) {
-            setMobileToolsOpen(false);
-        }
-    }, [focusedTrainerMode]);
 
     return (
         <>
@@ -46,68 +97,23 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 </button>
             </div>
 
-            <div
-                className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[125] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
-                    ? "top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]"
-                    : "bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
-                    }`}
-                data-focused-trainer-tools={focusedTrainerMode ? "top-right" : "bottom-right"}
-            >
-                {mobileToolsOpen ? (
-                    <>
-                        <button
-                            type="button"
-                            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-secondary text-on-accent shadow-soft transition active:scale-95"
-                            onClick={() => {
-                                setOpenAi(true);
-                                setMobileToolsOpen(false);
-                            }}
-                            aria-label="KI öffnen"
-                        >
-                            <span className="text-sm">🦁</span>
-                        </button>
-                        <button
-                            type="button"
-                            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-accent-primary text-on-accent shadow-soft transition active:scale-95"
-                            onClick={() => {
-                                setOpenSearch(true);
-                                setMobileToolsOpen(false);
-                            }}
-                            aria-label="Suche öffnen"
-                        >
-                            <span className="text-sm">🔎</span>
-                        </button>
-                    </>
-                ) : null}
-                <button
-                    type="button"
-                    className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
-                        ? "border-white/50 bg-accent-secondary text-white shadow-soft"
-                        : "border-white/40 bg-accent-primary"
-                        }`}
-                    onClick={() => setMobileToolsOpen((open) => !open)}
-                    aria-label={mobileToolsOpen ? "Schnellaktionen schließen" : "Schnellaktionen öffnen"}
-                >
-                    <span className="text-base">{mobileToolsOpen ? "✕" : "⋯"}</span>
-                </button>
-            </div>
+            <MobileQuickActions
+                key={focusedTrainerMode ? "focused-trainer" : "default"}
+                focusedTrainerMode={focusedTrainerMode}
+                onOpenAi={() => setOpenAi(true)}
+                onOpenSearch={() => setOpenSearch(true)}
+            />
 
             <GlobalAiChat
                 open={openAi}
-                onClose={() => {
-                    setOpenAi(false);
-                    setMobileToolsOpen(false);
-                }}
+                onClose={() => setOpenAi(false)}
                 trainingContext={trainingContext}
             />
 
             <GlobalQuickSearch
                 ownerKey={ownerKey}
                 open={openSearch}
-                onClose={() => {
-                    setOpenSearch(false);
-                    setMobileToolsOpen(false);
-                }}
+                onClose={() => setOpenSearch(false)}
             />
         </>
     );

@@ -122,7 +122,7 @@ export default function GlobalAiChat({ open, onClose, trainingContext }: Props) 
     const [isSavingAll, setIsSavingAll] = useState(false);
 
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
-    const messagesEndRef = useAutoScroll<HTMLDivElement>([messages, open], open);
+    const messagesEndRef = useAutoScroll<HTMLDivElement>(messages.length, open);
     const proposalsRef = useRef<ProposalEntry[]>([]);
 
     useEffect(() => setMounted(true), []);
