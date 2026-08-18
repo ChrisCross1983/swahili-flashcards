@@ -114,7 +114,24 @@ describe("translator state machine", () => {
     });
   });
 
-  it("returns to idle after processing even when auto play is enabled", () => {
+  it("keeps auto play off by default and returns to idle with visible text", () => {
+    const recording = translatorReducer(initialTranslatorState, {
+      type: "START_RECORDING",
+    });
+    const processing = translatorReducer(recording, {
+      type: "STOP_AND_TRANSLATE",
+    });
+    const complete = translatorReducer(processing, {
+      type: "PROCESSING_SUCCEEDED",
+      entry: swToDeEntry,
+    });
+
+    expect(initialTranslatorState.autoPlay).toBe(false);
+    expect(complete.status).toBe("idle");
+    expect(complete.entries).toEqual([swToDeEntry]);
+  });
+
+  it("stores visible text and enters playing when auto play is enabled", () => {
     const autoPlay = translatorReducer(initialTranslatorState, {
       type: "TOGGLE_AUTO_PLAY",
     });
@@ -125,8 +142,15 @@ describe("translator state machine", () => {
       entry: swToDeEntry,
     });
 
-    expect(complete.status).toBe("idle");
+    expect(complete.status).toBe("playing");
     expect(complete.autoPlay).toBe(true);
+    expect(complete.entries).toEqual([swToDeEntry]);
+    expect(translatorReducer(complete, { type: "START_RECORDING" })).toBe(
+      complete,
+    );
+    expect(
+      translatorReducer(complete, { type: "PLAYBACK_FINISHED" }).status,
+    ).toBe("idle");
   });
 
   it("clears the local conversation while idle", () => {

@@ -2,7 +2,8 @@ export type TranslatorPipelineErrorCode =
   | "configuration"
   | "no_speech"
   | "transcription_failed"
-  | "translation_failed";
+  | "translation_failed"
+  | "speech_failed";
 
 export class TranslatorPipelineError extends Error {
   readonly code: TranslatorPipelineErrorCode;
@@ -19,6 +20,7 @@ const PIPELINE_ERROR_CODES = new Set<TranslatorPipelineErrorCode>([
   "no_speech",
   "transcription_failed",
   "translation_failed",
+  "speech_failed",
 ]);
 
 export function getTranslatorPipelineErrorCode(

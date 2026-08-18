@@ -2,10 +2,18 @@ import OpenAI, { toFile } from "openai";
 import type { TranslationDirection } from "@/lib/translator/types";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
+  SPEECH_MODEL,
+  SPEECH_RESPONSE_FORMAT,
+  SPEECH_SPEED,
+  SPEECH_VOICE,
   TRANSCRIPTION_MODEL,
   TRANSLATION_MODEL,
 } from "@/lib/translator/server/models";
 import { buildInterpreterPrompt } from "@/lib/translator/server/prompt";
+import {
+  getSpeechInstructions,
+  type TranslatorSpeechGateway,
+} from "@/lib/translator/server/speech";
 import type { TranslatorAiGateway } from "@/lib/translator/server/translate";
 
 type SafeOpenAIErrorDetails = {
@@ -128,6 +136,43 @@ export function createOpenAITranslatorGateway(
         if (process.env.NODE_ENV === "development") {
           console.error(
             "[translator][openai translation error]",
+            getSafeOpenAIErrorDetails(error),
+          );
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+export function createOpenAISpeechGateway(
+  apiKey = process.env.OPENAI_API_KEY,
+): TranslatorSpeechGateway {
+  if (!apiKey) {
+    throw new TranslatorPipelineError(
+      "configuration",
+      "OPENAI_API_KEY is not configured",
+    );
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  return {
+    async synthesize(text, language) {
+      try {
+        const response = await client.audio.speech.create({
+          model: SPEECH_MODEL,
+          voice: SPEECH_VOICE,
+          input: text,
+          instructions: getSpeechInstructions(language),
+          response_format: SPEECH_RESPONSE_FORMAT,
+          speed: SPEECH_SPEED,
+        });
+        return response.arrayBuffer();
+      } catch (error) {
+        if (process.env.NODE_ENV === "development") {
+          console.error(
+            "[translator][openai speech error]",
             getSafeOpenAIErrorDetails(error),
           );
         }

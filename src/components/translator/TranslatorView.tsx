@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
 import {
@@ -15,11 +15,17 @@ import {
   getTranslatorClientErrorMessage,
   requestAudioTranslation,
 } from "@/lib/translator/client";
+import { isSpeechAbortError } from "@/lib/translator/speechClient";
+import { useTranslatorSpeech } from "@/lib/translator/useTranslatorSpeech";
+import type { TranslationEntry } from "@/lib/translator/types";
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const translationInFlightRef = useRef(false);
+  const playbackInFlightRef = useRef(false);
   const requestAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const {
     status: recorderStatus,
     startRecording,
@@ -27,6 +33,7 @@ export default function TranslatorView() {
     error: recorderError,
     clearError: clearRecorderError,
   } = useAudioRecorder();
+  const { playTranslation, stopPlayback, clearCache } = useTranslatorSpeech();
 
   useEffect(() => {
     if (!recorderError) return;
@@ -34,13 +41,24 @@ export default function TranslatorView() {
   }, [recorderError]);
 
   useEffect(() => () => requestAbortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   const recorderBusy =
     recorderStatus === "starting" || recorderStatus === "stopping";
   const controlsLocked = state.status !== "idle" || recorderBusy;
 
   async function handleStartRecording() {
-    if (state.status !== "idle") return;
+    if (state.status !== "idle" && state.status !== "playing") return;
+    if (state.status === "playing") {
+      stopPlayback();
+      dispatch({ type: "PLAYBACK_FINISHED" });
+    }
+    setSpeechError(null);
     try {
       await startRecording();
       dispatch({ type: "START_RECORDING" });
@@ -49,6 +67,31 @@ export default function TranslatorView() {
         type: "RECORDING_FAILED",
         message: getAudioRecorderErrorMessage(error),
       });
+    }
+  }
+
+  async function handlePlayback(
+    entry: TranslationEntry,
+    automatic: boolean,
+  ) {
+    if (playbackInFlightRef.current) return;
+    playbackInFlightRef.current = true;
+    setSpeechError(null);
+    if (!automatic) dispatch({ type: "START_PLAYBACK" });
+
+    try {
+      await playTranslation(entry);
+    } catch (error) {
+      if (mountedRef.current && !isSpeechAbortError(error)) {
+        setSpeechError(
+          automatic
+            ? "Die Sprachausgabe konnte nicht erstellt werden."
+            : "Die Wiedergabe ist gerade nicht möglich.",
+        );
+      }
+    } finally {
+      playbackInFlightRef.current = false;
+      if (mountedRef.current) dispatch({ type: "PLAYBACK_FINISHED" });
     }
   }
 
@@ -77,10 +120,12 @@ export default function TranslatorView() {
       const result = await requestAudioTranslation(audioBlob, direction, {
         signal: abortController.signal,
       });
+      const entry = createTranslationEntry(result);
       dispatch({
         type: "PROCESSING_SUCCEEDED",
-        entry: createTranslationEntry(result),
+        entry,
       });
+      if (state.autoPlay) void handlePlayback(entry, true);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         dispatch({
@@ -97,6 +142,12 @@ export default function TranslatorView() {
   function handleResetError() {
     clearRecorderError();
     dispatch({ type: "RESET_ERROR" });
+  }
+
+  function handleClearHistory() {
+    clearCache();
+    setSpeechError(null);
+    dispatch({ type: "CLEAR_HISTORY" });
   }
 
   return (
@@ -162,7 +213,16 @@ export default function TranslatorView() {
 
           {state.status === "playing" ? (
             <div className="flex min-h-24 flex-col items-center justify-center text-center">
-              <p className="font-semibold text-accent-success-strong">Wiedergabe läuft …</p>
+              <p className="font-semibold text-accent-success-strong">
+                Sprachausgabe läuft …
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary mt-4 min-h-12 w-full"
+                onClick={() => void handleStartRecording()}
+              >
+                Aufnahme starten
+              </button>
             </div>
           ) : null}
 
@@ -182,6 +242,12 @@ export default function TranslatorView() {
             </div>
           ) : null}
         </section>
+
+        {speechError ? (
+          <div className="status-note status-warning mt-3" role="status">
+            {speechError}
+          </div>
+        ) : null}
 
         <section className="mt-4 flex items-center justify-between gap-4 border-y border-soft py-4">
           <label className="text-sm font-medium text-primary" htmlFor="translator-auto-play">
@@ -217,7 +283,7 @@ export default function TranslatorView() {
               type="button"
               className="btn btn-utility min-h-11 px-3 text-sm text-accent-danger-strong"
               disabled={state.entries.length === 0 || controlsLocked}
-              onClick={() => dispatch({ type: "CLEAR_HISTORY" })}
+              onClick={handleClearHistory}
             >
               Gespräch löschen
             </button>
@@ -234,8 +300,8 @@ export default function TranslatorView() {
                   key={entry.id}
                   entry={entry}
                   isLatest={index === 0}
-                  playbackDisabled
-                  onPlay={() => undefined}
+                  playbackDisabled={controlsLocked}
+                  onPlay={() => void handlePlayback(entry, false)}
                 />
               ))}
             </div>

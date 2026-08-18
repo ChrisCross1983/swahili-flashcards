@@ -79,7 +79,7 @@ export function translatorReducer(
       if (state.status !== "processing") return state;
       return {
         ...state,
-        status: "idle",
+        status: state.autoPlay ? "playing" : "idle",
         entries: [event.entry, ...state.entries],
         errorMessage: null,
       };

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openAiMocks = vi.hoisted(() => ({
   transcriptionCreate: vi.fn(),
+  speechCreate: vi.fn(),
   responseCreate: vi.fn(),
   toFile: vi.fn(
     async (bytes: Uint8Array, name: string, options: { type: string }) => ({
@@ -16,6 +17,7 @@ vi.mock("openai", () => ({
   default: class OpenAIMock {
     audio = {
       transcriptions: { create: openAiMocks.transcriptionCreate },
+      speech: { create: openAiMocks.speechCreate },
     };
 
     responses = { create: openAiMocks.responseCreate };
@@ -25,6 +27,7 @@ vi.mock("openai", () => ({
 
 import {
   createOpenAITranslatorGateway,
+  createOpenAISpeechGateway,
   getSafeOpenAIErrorDetails,
 } from "@/lib/translator/server/openai";
 
@@ -42,6 +45,7 @@ describe("OpenAI translator diagnostics", () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     openAiMocks.transcriptionCreate.mockReset();
+    openAiMocks.speechCreate.mockReset();
     openAiMocks.responseCreate.mockReset();
     openAiMocks.toFile.mockClear();
   });
@@ -181,6 +185,27 @@ describe("OpenAI translator diagnostics", () => {
 
     expect(infoSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("generates calm MP3 speech with the central model and voice", async () => {
+    const audio = new Uint8Array([1, 2, 3]).buffer;
+    openAiMocks.speechCreate.mockResolvedValue({
+      arrayBuffer: vi.fn(async () => audio),
+    });
+
+    const gateway = createOpenAISpeechGateway("configured-secret");
+    await expect(gateway.synthesize("Habari", "sw")).resolves.toBe(audio);
+
+    expect(openAiMocks.speechCreate).toHaveBeenCalledWith({
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      input: "Habari",
+      instructions: expect.stringMatching(
+        /clearly, naturally and calmly in Tanzanian Kiswahili/i,
+      ),
+      response_format: "mp3",
+      speed: 0.92,
+    });
   });
 
   it("does not expose additional SDK error properties", () => {

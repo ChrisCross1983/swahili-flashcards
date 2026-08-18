@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
@@ -42,5 +44,16 @@ describe("translator components", () => {
     expect(html).toContain("Wo ist der nächste Bus?");
     expect(html).toContain("Basi inayofuata iko wapi?");
     expect(html).toContain("Noch einmal abspielen");
+  });
+
+  it("only starts automatic speech when the visible toggle is enabled", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("if (state.autoPlay) void handlePlayback(entry, true)");
+    expect(source).toContain("aria-checked={state.autoPlay}");
+    expect(source).toContain('state.autoPlay ? "AN" : "AUS"');
   });
 });
