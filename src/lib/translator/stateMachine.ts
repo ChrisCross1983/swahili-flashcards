@@ -21,6 +21,7 @@ export type TranslatorEvent =
   | { type: "SET_DIRECTION"; direction: TranslationDirection }
   | { type: "TOGGLE_AUTO_PLAY" }
   | { type: "START_RECORDING" }
+  | { type: "RECORDING_FAILED"; message: string }
   | { type: "STOP_AND_TRANSLATE" }
   | { type: "PROCESSING_SUCCEEDED"; entry: TranslationEntry }
   | { type: "PROCESSING_FAILED"; message: string }
@@ -65,6 +66,10 @@ export function translatorReducer(
     case "START_RECORDING":
       if (state.status !== "idle") return state;
       return { ...state, status: "recording", errorMessage: null };
+
+    case "RECORDING_FAILED":
+      if (state.status !== "idle" && state.status !== "recording") return state;
+      return { ...state, status: "error", errorMessage: event.message };
 
     case "STOP_AND_TRANSLATE":
       if (state.status !== "recording") return state;

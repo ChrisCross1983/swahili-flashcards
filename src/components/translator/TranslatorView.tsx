@@ -9,6 +9,8 @@ import {
   initialTranslatorState,
   translatorReducer,
 } from "@/lib/translator/stateMachine";
+import { getAudioRecorderErrorMessage } from "@/lib/translator/audioRecorder";
+import { useAudioRecorder } from "@/lib/translator/useAudioRecorder";
 
 const PROCESSING_DELAY_MS = 900;
 const PLAYBACK_DELAY_MS = 800;
@@ -16,6 +18,18 @@ const PLAYBACK_DELAY_MS = 800;
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
   const mockIdRef = useRef(0);
+  const {
+    status: recorderStatus,
+    startRecording,
+    stopRecording,
+    error: recorderError,
+    clearError: clearRecorderError,
+  } = useAudioRecorder();
+
+  useEffect(() => {
+    if (!recorderError) return;
+    dispatch({ type: "RECORDING_FAILED", message: recorderError });
+  }, [recorderError]);
 
   useEffect(() => {
     if (state.status !== "processing") return;
@@ -46,7 +60,40 @@ export default function TranslatorView() {
     return () => window.clearTimeout(timer);
   }, [state.status]);
 
-  const controlsLocked = state.status !== "idle";
+  const recorderBusy =
+    recorderStatus === "starting" || recorderStatus === "stopping";
+  const controlsLocked = state.status !== "idle" || recorderBusy;
+
+  async function handleStartRecording() {
+    if (state.status !== "idle") return;
+    try {
+      await startRecording();
+      dispatch({ type: "START_RECORDING" });
+    } catch (error) {
+      dispatch({
+        type: "RECORDING_FAILED",
+        message: getAudioRecorderErrorMessage(error),
+      });
+    }
+  }
+
+  async function handleStopRecording() {
+    if (state.status !== "recording") return;
+    try {
+      await stopRecording();
+      dispatch({ type: "STOP_AND_TRANSLATE" });
+    } catch (error) {
+      dispatch({
+        type: "RECORDING_FAILED",
+        message: getAudioRecorderErrorMessage(error),
+      });
+    }
+  }
+
+  function handleResetError() {
+    clearRecorderError();
+    dispatch({ type: "RESET_ERROR" });
+  }
 
   return (
     <main className="min-h-screen bg-base px-4 pb-[max(5rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:p-6">
@@ -77,9 +124,10 @@ export default function TranslatorView() {
               <button
                 type="button"
                 className="btn btn-primary mt-4 min-h-20 w-full touch-manipulation text-lg active:scale-[0.99]"
-                onClick={() => dispatch({ type: "START_RECORDING" })}
+                disabled={recorderStatus === "starting"}
+                onClick={() => void handleStartRecording()}
               >
-                Aufnahme starten
+                {recorderStatus === "starting" ? "Mikrofon wird geöffnet …" : "Aufnahme starten"}
               </button>
             </>
           ) : null}
@@ -93,9 +141,10 @@ export default function TranslatorView() {
               <button
                 type="button"
                 className="btn btn-danger mt-4 min-h-20 w-full touch-manipulation text-lg active:scale-[0.99]"
-                onClick={() => dispatch({ type: "STOP_AND_TRANSLATE" })}
+                disabled={recorderStatus === "stopping"}
+                onClick={() => void handleStopRecording()}
               >
-                Fertig &amp; übersetzen
+                {recorderStatus === "stopping" ? "Aufnahme wird beendet …" : "Fertig & übersetzen"}
               </button>
             </>
           ) : null}
@@ -115,12 +164,14 @@ export default function TranslatorView() {
 
           {state.status === "error" ? (
             <div className="status-note status-warning">
-              <p className="font-semibold">Übersetzung nicht möglich</p>
+              <p className="font-semibold">
+                {recorderError ? "Aufnahme nicht möglich" : "Übersetzung nicht möglich"}
+              </p>
               <p className="mt-1">{state.errorMessage}</p>
               <button
                 type="button"
                 className="btn btn-secondary mt-4 min-h-12 w-full"
-                onClick={() => dispatch({ type: "RESET_ERROR" })}
+                onClick={handleResetError}
               >
                 Erneut versuchen
               </button>

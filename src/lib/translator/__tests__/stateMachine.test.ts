@@ -35,6 +35,21 @@ describe("translator state machine", () => {
     expect(processing.status).toBe("processing");
   });
 
+  it("moves a microphone failure to error without entering processing", () => {
+    const failed = translatorReducer(initialTranslatorState, {
+      type: "RECORDING_FAILED",
+      message: "Mikrofonzugriff wurde nicht erlaubt.",
+    });
+
+    expect(failed).toMatchObject({
+      status: "error",
+      errorMessage: "Mikrofonzugriff wurde nicht erlaubt.",
+    });
+    expect(
+      translatorReducer(failed, { type: "STOP_AND_TRANSLATE" }),
+    ).toBe(failed);
+  });
+
   it("stores a successful mock result as a TranslationEntry", () => {
     const entry = createMockTranslationEntry(
       TRANSLATION_DIRECTIONS.swToDe,
