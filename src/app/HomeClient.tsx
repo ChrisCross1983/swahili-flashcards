@@ -126,6 +126,15 @@ export default function HomeClient({ ownerKey }: Props) {
           </button>
 
           <button
+            onClick={() => router.push("/translator")}
+            className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
+          >
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-success-strong">Unterwegs</div>
+            <div className="mt-2 text-xl font-semibold">Übersetzer</div>
+            <div className="mt-2 text-sm text-muted">Deutsch und Kiswahili direkt übersetzen.</div>
+          </button>
+
+          <button
             onClick={() => router.push("/stats")}
             className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
