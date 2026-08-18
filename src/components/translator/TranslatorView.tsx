@@ -5,19 +5,21 @@ import { useEffect, useReducer, useRef } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
 import {
-  createMockTranslationEntry,
   initialTranslatorState,
   translatorReducer,
 } from "@/lib/translator/stateMachine";
 import { getAudioRecorderErrorMessage } from "@/lib/translator/audioRecorder";
 import { useAudioRecorder } from "@/lib/translator/useAudioRecorder";
-
-const PROCESSING_DELAY_MS = 900;
-const PLAYBACK_DELAY_MS = 800;
+import {
+  createTranslationEntry,
+  getTranslatorClientErrorMessage,
+  requestAudioTranslation,
+} from "@/lib/translator/client";
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
-  const mockIdRef = useRef(0);
+  const translationInFlightRef = useRef(false);
+  const requestAbortRef = useRef<AbortController | null>(null);
   const {
     status: recorderStatus,
     startRecording,
@@ -31,34 +33,7 @@ export default function TranslatorView() {
     dispatch({ type: "RECORDING_FAILED", message: recorderError });
   }, [recorderError]);
 
-  useEffect(() => {
-    if (state.status !== "processing") return;
-
-    const direction = state.direction;
-    const timer = window.setTimeout(() => {
-      mockIdRef.current += 1;
-      const timestamp = Date.now();
-      dispatch({
-        type: "PROCESSING_SUCCEEDED",
-        entry: createMockTranslationEntry(
-          direction,
-          timestamp,
-          `mock-${timestamp}-${mockIdRef.current}`,
-        ),
-      });
-    }, PROCESSING_DELAY_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [state.direction, state.status]);
-
-  useEffect(() => {
-    if (state.status !== "playing") return;
-    const timer = window.setTimeout(
-      () => dispatch({ type: "PLAYBACK_FINISHED" }),
-      PLAYBACK_DELAY_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [state.status]);
+  useEffect(() => () => requestAbortRef.current?.abort(), []);
 
   const recorderBusy =
     recorderStatus === "starting" || recorderStatus === "stopping";
@@ -78,15 +53,44 @@ export default function TranslatorView() {
   }
 
   async function handleStopRecording() {
-    if (state.status !== "recording") return;
+    if (state.status !== "recording" || translationInFlightRef.current) return;
+    translationInFlightRef.current = true;
+    const direction = state.direction;
+    let audioBlob: Blob;
+
     try {
-      await stopRecording();
-      dispatch({ type: "STOP_AND_TRANSLATE" });
+      audioBlob = await stopRecording();
     } catch (error) {
       dispatch({
         type: "RECORDING_FAILED",
         message: getAudioRecorderErrorMessage(error),
       });
+      translationInFlightRef.current = false;
+      return;
+    }
+
+    dispatch({ type: "STOP_AND_TRANSLATE" });
+    const abortController = new AbortController();
+    requestAbortRef.current = abortController;
+
+    try {
+      const result = await requestAudioTranslation(audioBlob, direction, {
+        signal: abortController.signal,
+      });
+      dispatch({
+        type: "PROCESSING_SUCCEEDED",
+        entry: createTranslationEntry(result),
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        dispatch({
+          type: "PROCESSING_FAILED",
+          message: getTranslatorClientErrorMessage(error),
+        });
+      }
+    } finally {
+      requestAbortRef.current = null;
+      translationInFlightRef.current = false;
     }
   }
 
@@ -158,7 +162,7 @@ export default function TranslatorView() {
 
           {state.status === "playing" ? (
             <div className="flex min-h-24 flex-col items-center justify-center text-center">
-              <p className="font-semibold text-accent-success-strong">Wiedergabe wird simuliert …</p>
+              <p className="font-semibold text-accent-success-strong">Wiedergabe läuft …</p>
             </div>
           ) : null}
 
@@ -230,8 +234,8 @@ export default function TranslatorView() {
                   key={entry.id}
                   entry={entry}
                   isLatest={index === 0}
-                  playbackDisabled={controlsLocked}
-                  onPlay={() => dispatch({ type: "START_PLAYBACK" })}
+                  playbackDisabled
+                  onPlay={() => undefined}
                 />
               ))}
             </div>

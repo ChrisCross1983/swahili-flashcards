@@ -60,3 +60,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 ## Environment
 
 - `PEXELS_API_KEY`: API key for image suggestions via the Pexels Search API. Set this in a local `.env.local` file for development and as a protected environment variable in Vercel for deployment.
+- `OPENAI_API_KEY`: Server-only API key for AI features, including translator transcription and text translation. Never expose it through a `NEXT_PUBLIC_` variable.

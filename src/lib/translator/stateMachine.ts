@@ -79,7 +79,7 @@ export function translatorReducer(
       if (state.status !== "processing") return state;
       return {
         ...state,
-        status: state.autoPlay ? "playing" : "idle",
+        status: "idle",
         entries: [event.entry, ...state.entries],
         errorMessage: null,
       };
@@ -107,30 +107,4 @@ export function translatorReducer(
     default:
       return state;
   }
-}
-
-export function createMockTranslationEntry(
-  direction: TranslationDirection,
-  timestamp: number,
-  id: string,
-): TranslationEntry {
-  if (direction.sourceLanguage === "sw") {
-    return {
-      id,
-      timestamp,
-      sourceLanguage: "sw",
-      targetLanguage: "de",
-      originalText: "Tutakuja kesho asubuhi.",
-      translatedText: "Wir kommen morgen früh.",
-    };
-  }
-
-  return {
-    id,
-    timestamp,
-    sourceLanguage: "de",
-    targetLanguage: "sw",
-    originalText: "Wo ist der nächste Bus?",
-    translatedText: "Basi inayofuata iko wapi?",
-  };
 }

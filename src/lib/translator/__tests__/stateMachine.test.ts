@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  createMockTranslationEntry,
   initialTranslatorState,
   TRANSLATION_DIRECTIONS,
   translatorReducer,
 } from "@/lib/translator/stateMachine";
+import type { TranslationEntry } from "@/lib/translator/types";
+
+const swToDeEntry: TranslationEntry = {
+  id: "translation-1",
+  timestamp: 1_700_000_000_000,
+  sourceLanguage: "sw",
+  targetLanguage: "de",
+  originalText: "Tutakuja kesho asubuhi.",
+  translatedText: "Wir kommen morgen früh.",
+};
 
 describe("translator state machine", () => {
   it("changes translation direction only while idle", () => {
@@ -50,12 +59,7 @@ describe("translator state machine", () => {
     ).toBe(failed);
   });
 
-  it("stores a successful mock result as a TranslationEntry", () => {
-    const entry = createMockTranslationEntry(
-      TRANSLATION_DIRECTIONS.swToDe,
-      1_700_000_000_000,
-      "translation-1",
-    );
+  it("stores a successful API result as a TranslationEntry", () => {
     const recording = translatorReducer(initialTranslatorState, {
       type: "START_RECORDING",
     });
@@ -64,11 +68,11 @@ describe("translator state machine", () => {
     });
     const complete = translatorReducer(processing, {
       type: "PROCESSING_SUCCEEDED",
-      entry,
+      entry: swToDeEntry,
     });
 
     expect(complete.status).toBe("idle");
-    expect(complete.entries).toEqual([entry]);
+    expect(complete.entries).toEqual([swToDeEntry]);
     expect(complete.entries[0]).toMatchObject({
       sourceLanguage: "sw",
       targetLanguage: "de",
@@ -110,34 +114,23 @@ describe("translator state machine", () => {
     });
   });
 
-  it("enters playing after processing when auto play is enabled", () => {
+  it("returns to idle after processing even when auto play is enabled", () => {
     const autoPlay = translatorReducer(initialTranslatorState, {
       type: "TOGGLE_AUTO_PLAY",
     });
     const recording = translatorReducer(autoPlay, { type: "START_RECORDING" });
     const processing = translatorReducer(recording, { type: "STOP_AND_TRANSLATE" });
-    const entry = createMockTranslationEntry(
-      TRANSLATION_DIRECTIONS.swToDe,
-      1_700_000_000_000,
-      "translation-1",
-    );
-    const playing = translatorReducer(processing, {
+    const complete = translatorReducer(processing, {
       type: "PROCESSING_SUCCEEDED",
-      entry,
+      entry: swToDeEntry,
     });
 
-    expect(playing.status).toBe("playing");
-    expect(translatorReducer(playing, { type: "START_RECORDING" })).toBe(playing);
-    expect(translatorReducer(playing, { type: "PLAYBACK_FINISHED" }).status).toBe("idle");
+    expect(complete.status).toBe("idle");
+    expect(complete.autoPlay).toBe(true);
   });
 
   it("clears the local conversation while idle", () => {
-    const entry = createMockTranslationEntry(
-      TRANSLATION_DIRECTIONS.deToSw,
-      1_700_000_000_000,
-      "translation-1",
-    );
-    const withEntry = { ...initialTranslatorState, entries: [entry] };
+    const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
 
     expect(
       translatorReducer(withEntry, { type: "CLEAR_HISTORY" }).entries,

@@ -14,6 +14,23 @@ export type TranslationEntry = {
   translatedText: string;
 };
 
+export type TranslationResult = {
+  originalText: string;
+  translatedText: string;
+  sourceLanguage: TranslationLanguage;
+  targetLanguage: TranslationLanguage;
+};
+
+export type TranslatorApiErrorCode =
+  | "invalid_request"
+  | "invalid_direction"
+  | "invalid_audio_format"
+  | "audio_too_large"
+  | "no_speech"
+  | "transcription_failed"
+  | "translation_failed"
+  | "service_unavailable";
+
 export type TranslatorStatus =
   | "idle"
   | "recording"
