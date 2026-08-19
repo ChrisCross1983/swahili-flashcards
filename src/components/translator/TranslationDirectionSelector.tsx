@@ -1,53 +1,32 @@
-import type { TranslationDirection } from "@/lib/translator/types";
-import { TRANSLATION_DIRECTIONS } from "@/lib/translator/stateMachine";
+import type { TranslationMode } from "@/lib/translator/types";
 
 type Props = {
-  direction: TranslationDirection;
+  mode: TranslationMode;
   disabled: boolean;
-  onChange: (direction: TranslationDirection) => void;
+  onChange: (mode: TranslationMode) => void;
 };
 
-function isSelected(
-  direction: TranslationDirection,
-  sourceLanguage: TranslationDirection["sourceLanguage"],
-) {
-  return direction.sourceLanguage === sourceLanguage;
-}
-
 export default function TranslationDirectionSelector({
-  direction,
+  mode,
   disabled,
   onChange,
 }: Props) {
   return (
-    <fieldset className="grid grid-cols-2 gap-1 rounded-2xl border border-soft bg-surface p-1.5">
-      <legend className="sr-only">Übersetzungsrichtung</legend>
-      <button
-        type="button"
-        className={`min-h-14 rounded-xl border px-2 py-3 text-center text-xs font-semibold uppercase transition sm:text-sm ${
-          isSelected(direction, "sw")
-            ? "border-success-strong bg-accent-success text-on-accent shadow-soft"
-            : "border-transparent text-muted"
-        }`}
-        aria-pressed={isSelected(direction, "sw")}
+    <label className="block" htmlFor="translator-language-mode">
+      <span className="mb-2 block text-xs font-semibold uppercase text-muted">
+        Sprachmodus
+      </span>
+      <select
+        id="translator-language-mode"
+        className="min-h-14 w-full rounded-xl border border-strong bg-surface px-4 text-base font-semibold text-primary shadow-soft outline-none transition focus:border-success-strong focus:ring-2 focus:ring-[color:var(--accent-success)] disabled:opacity-60"
+        value={mode}
         disabled={disabled}
-        onClick={() => onChange(TRANSLATION_DIRECTIONS.swToDe)}
+        onChange={(event) => onChange(event.target.value as TranslationMode)}
       >
-        Kiswahili → Deutsch
-      </button>
-      <button
-        type="button"
-        className={`min-h-14 rounded-xl border px-2 py-3 text-center text-xs font-semibold uppercase transition sm:text-sm ${
-          isSelected(direction, "de")
-            ? "border-success-strong bg-accent-success text-on-accent shadow-soft"
-            : "border-transparent text-muted"
-        }`}
-        aria-pressed={isSelected(direction, "de")}
-        disabled={disabled}
-        onClick={() => onChange(TRANSLATION_DIRECTIONS.deToSw)}
-      >
-        Deutsch → Kiswahili
-      </button>
-    </fieldset>
+        <option value="auto">AUTO · Automatische Spracherkennung</option>
+        <option value="de-to-sw">Deutsch → Kiswahili</option>
+        <option value="sw-to-de">Kiswahili → Deutsch</option>
+      </select>
+    </label>
   );
 }

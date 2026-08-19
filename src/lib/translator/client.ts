@@ -3,8 +3,8 @@ import {
   MAX_TRANSLATION_AUDIO_BYTES,
 } from "@/lib/translator/audioFormats";
 import type {
-  TranslationDirection,
   TranslationEntry,
+  TranslationRequestDirection,
   TranslationResult,
   TranslatorApiErrorCode,
 } from "@/lib/translator/types";
@@ -18,6 +18,8 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   invalid_audio_format: "Dieses Audioformat wird nicht unterstützt.",
   audio_too_large: "Die Aufnahme ist zu groß. Bitte nimm einen kürzeren Abschnitt auf.",
   no_speech: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
+  unsupported_language:
+    "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
   transcription_failed: "Die Aufnahme konnte nicht verarbeitet werden.",
   translation_failed: "Die Übersetzung konnte nicht erstellt werden.",
   service_unavailable: "Die Übersetzung konnte nicht erstellt werden.",
@@ -50,7 +52,7 @@ function isTranslationResult(value: unknown): value is TranslationResult {
 
 export async function requestAudioTranslation(
   audioBlob: Blob,
-  direction: TranslationDirection,
+  direction: TranslationRequestDirection,
   options: RequestOptions = {},
 ): Promise<TranslationResult> {
   if (audioBlob.size > MAX_TRANSLATION_AUDIO_BYTES) {
@@ -101,9 +103,13 @@ export async function requestAudioTranslation(
     throw new TranslatorClientError(NETWORK_ERROR);
   }
   if (
-    body.sourceLanguage !== direction.sourceLanguage ||
-    body.targetLanguage !== direction.targetLanguage
+    direction.sourceLanguage !== "auto" &&
+    (body.sourceLanguage !== direction.sourceLanguage ||
+      body.targetLanguage !== direction.targetLanguage)
   ) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+  if (body.sourceLanguage === body.targetLanguage) {
     throw new TranslatorClientError(NETWORK_ERROR);
   }
 
@@ -112,10 +118,23 @@ export async function requestAudioTranslation(
 
 export function createTranslationEntry(
   result: TranslationResult,
-  timestamp = Date.now(),
-  id = globalThis.crypto?.randomUUID?.() ?? `translation-${timestamp}`,
+  options: {
+    sourceWasDetected?: boolean;
+    timestamp?: number;
+    id?: string;
+  } = {},
 ): TranslationEntry {
-  return { id, timestamp, ...result };
+  const timestamp = options.timestamp ?? Date.now();
+  const id =
+    options.id ??
+    globalThis.crypto?.randomUUID?.() ??
+    `translation-${timestamp}`;
+  return {
+    id,
+    timestamp,
+    sourceWasDetected: options.sourceWasDetected ?? false,
+    ...result,
+  };
 }
 
 export function getTranslatorClientErrorMessage(error: unknown) {

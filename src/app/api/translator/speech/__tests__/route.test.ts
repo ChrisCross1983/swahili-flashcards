@@ -19,7 +19,11 @@ async function post(body: unknown) {
     new Request("http://localhost/api/translator/speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(
+        body && typeof body === "object" && !Array.isArray(body)
+          ? { speed: 1, ...body }
+          : body,
+      ),
     }),
   );
 }
@@ -66,6 +70,14 @@ describe("POST /api/translator/speech", () => {
     });
   });
 
+  it.each([0.75, 1.25, "1"])("rejects invalid speech speed %s", async (speed) => {
+    const response = await post({ text: "Hallo", language: "de", speed });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: "invalid_speed" });
+    expect(createSpeechGatewayMock).not.toHaveBeenCalled();
+  });
+
   it("rejects text above the speech input limit", async () => {
     const response = await post({
       text: "a".repeat(MAX_SPEECH_TEXT_LENGTH + 1),
@@ -85,7 +97,7 @@ describe("POST /api/translator/speech", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       new Uint8Array([1, 2, 3]),
     );
-    expect(synthesizeMock).toHaveBeenCalledWith("Habari", "sw");
+    expect(synthesizeMock).toHaveBeenCalledWith("Habari", "sw", 1);
   });
 
   it("does not leak OpenAI TTS errors", async () => {

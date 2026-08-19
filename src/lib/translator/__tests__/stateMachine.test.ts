@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   initialTranslatorState,
-  TRANSLATION_DIRECTIONS,
+  TRANSLATION_MODES,
   translatorReducer,
 } from "@/lib/translator/stateMachine";
 import type { TranslationEntry } from "@/lib/translator/types";
@@ -13,21 +13,23 @@ const swToDeEntry: TranslationEntry = {
   targetLanguage: "de",
   originalText: "Tutakuja kesho asubuhi.",
   translatedText: "Wir kommen morgen früh.",
+  sourceWasDetected: true,
 };
 
 describe("translator state machine", () => {
-  it("changes translation direction only while idle", () => {
+  it("uses AUTO by default and changes mode only while idle", () => {
+    expect(initialTranslatorState.mode).toBe(TRANSLATION_MODES.auto);
     const changed = translatorReducer(initialTranslatorState, {
-      type: "SET_DIRECTION",
-      direction: TRANSLATION_DIRECTIONS.deToSw,
+      type: "SET_MODE",
+      mode: TRANSLATION_MODES.deToSw,
     });
 
-    expect(changed.direction).toEqual(TRANSLATION_DIRECTIONS.deToSw);
+    expect(changed.mode).toBe(TRANSLATION_MODES.deToSw);
 
     const recording = translatorReducer(changed, { type: "START_RECORDING" });
     const ignored = translatorReducer(recording, {
-      type: "SET_DIRECTION",
-      direction: TRANSLATION_DIRECTIONS.swToDe,
+      type: "SET_MODE",
+      mode: TRANSLATION_MODES.swToDe,
     });
     expect(ignored).toBe(recording);
   });
@@ -143,6 +145,7 @@ describe("translator state machine", () => {
     });
 
     expect(complete.status).toBe("playing");
+    expect(complete.activePlaybackEntryId).toBe(swToDeEntry.id);
     expect(complete.autoPlay).toBe(true);
     expect(complete.entries).toEqual([swToDeEntry]);
     expect(translatorReducer(complete, { type: "START_RECORDING" })).toBe(
@@ -151,6 +154,28 @@ describe("translator state machine", () => {
     expect(
       translatorReducer(complete, { type: "PLAYBACK_FINISHED" }).status,
     ).toBe("idle");
+  });
+
+  it("pauses and resumes only the active playback entry", () => {
+    const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
+    const playing = translatorReducer(withEntry, {
+      type: "START_PLAYBACK",
+      entryId: swToDeEntry.id,
+    });
+    const paused = translatorReducer(playing, { type: "PAUSE_PLAYBACK" });
+    const resumed = translatorReducer(paused, { type: "RESUME_PLAYBACK" });
+    const stopped = translatorReducer(resumed, { type: "PLAYBACK_FINISHED" });
+
+    expect(playing).toMatchObject({
+      status: "playing",
+      activePlaybackEntryId: swToDeEntry.id,
+    });
+    expect(paused.status).toBe("paused");
+    expect(resumed.status).toBe("playing");
+    expect(stopped).toMatchObject({
+      status: "idle",
+      activePlaybackEntryId: null,
+    });
   });
 
   it("clears the local conversation while idle", () => {

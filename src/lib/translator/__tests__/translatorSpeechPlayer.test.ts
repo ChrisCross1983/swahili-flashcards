@@ -9,6 +9,7 @@ const entry: TranslationEntry = {
   targetLanguage: "sw",
   originalText: "Guten Morgen.",
   translatedText: "Habari za asubuhi.",
+  sourceWasDetected: false,
 };
 
 type FakeAudio = HTMLAudioElement & {
@@ -63,27 +64,62 @@ describe("TranslatorSpeechPlayer", () => {
   it("generates audio on first replay and reuses the local cache", async () => {
     const harness = createHarness();
 
-    const firstPlayback = harness.player.play(entry);
+    const firstPlayback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 1);
     finishAudio(harness.audios[0]);
     await firstPlayback;
 
-    const secondPlayback = harness.player.play(entry);
+    const secondPlayback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 2);
     finishAudio(harness.audios[1]);
     await secondPlayback;
 
     expect(harness.requestSpeech).toHaveBeenCalledOnce();
     expect(harness.createObjectUrl).toHaveBeenCalledOnce();
-    expect(harness.player.hasCachedAudio(entry.id)).toBe(true);
+    expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(true);
+  });
+
+  it("caches the same entry separately for different speech speeds", async () => {
+    const harness = createHarness();
+
+    const normalPlayback = harness.player.play(entry, 1);
+    await waitForAudio(harness.audios, 1);
+    finishAudio(harness.audios[0]);
+    await normalPlayback;
+
+    const fasterPlayback = harness.player.play(entry, 1.15);
+    await waitForAudio(harness.audios, 2);
+    finishAudio(harness.audios[1]);
+    await fasterPlayback;
+
+    const fasterReplay = harness.player.play(entry, 1.15);
+    await waitForAudio(harness.audios, 3);
+    finishAudio(harness.audios[2]);
+    await fasterReplay;
+
+    expect(harness.requestSpeech).toHaveBeenCalledTimes(2);
+    expect(harness.requestSpeech).toHaveBeenNthCalledWith(
+      1,
+      entry,
+      1,
+      expect.any(AbortSignal),
+    );
+    expect(harness.requestSpeech).toHaveBeenNthCalledWith(
+      2,
+      entry,
+      1.15,
+      expect.any(AbortSignal),
+    );
+    expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(true);
+    expect(harness.player.hasCachedAudio(entry.id, 1.15)).toBe(true);
   });
 
   it("stops the current audio before another playback starts", async () => {
     const harness = createHarness();
 
-    const firstPlayback = harness.player.play(entry);
+    const firstPlayback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 1);
-    const secondPlayback = harness.player.play(entry);
+    const secondPlayback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 2);
 
     expect(harness.audios[0].pause).toHaveBeenCalledOnce();
@@ -93,22 +129,40 @@ describe("TranslatorSpeechPlayer", () => {
     await secondPlayback;
   });
 
+  it("pauses and resumes the same audio from its current position", async () => {
+    const harness = createHarness();
+    const playback = harness.player.play(entry, 1);
+    await waitForAudio(harness.audios, 1);
+    const audio = harness.audios[0];
+
+    expect(harness.player.pausePlayback()).toBe(true);
+    expect(audio.pause).toHaveBeenCalledOnce();
+    expect(audio.currentTime).toBe(5);
+
+    await harness.player.resumePlayback();
+    expect(audio.play).toHaveBeenCalledTimes(2);
+    expect(audio.currentTime).toBe(5);
+
+    finishAudio(audio);
+    await playback;
+  });
+
   it("stops playback and revokes cached object URLs when history is cleared", async () => {
     const harness = createHarness();
-    const playback = harness.player.play(entry);
+    const playback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 1);
 
     harness.player.clearCache();
 
     expect(harness.audios[0].pause).toHaveBeenCalledOnce();
     expect(harness.revokeObjectUrl).toHaveBeenCalledWith("blob:translation-1");
-    expect(harness.player.hasCachedAudio(entry.id)).toBe(false);
+    expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(false);
     await playback;
   });
 
   it("stops audio and releases URLs when disposed on unmount", async () => {
     const harness = createHarness();
-    const playback = harness.player.play(entry);
+    const playback = harness.player.play(entry, 1);
     await waitForAudio(harness.audios, 1);
 
     harness.player.dispose();
@@ -116,7 +170,7 @@ describe("TranslatorSpeechPlayer", () => {
     expect(harness.audios[0].pause).toHaveBeenCalledOnce();
     expect(harness.revokeObjectUrl).toHaveBeenCalledOnce();
     await playback;
-    await expect(harness.player.play(entry)).rejects.toThrow(
+    await expect(harness.player.play(entry, 1)).rejects.toThrow(
       "Speech player is disposed",
     );
   });
@@ -137,7 +191,7 @@ describe("TranslatorSpeechPlayer", () => {
       createAudio,
     });
 
-    const playback = player.play(entry);
+    const playback = player.play(entry, 1);
     await vi.waitFor(() => expect(requestSpeech).toHaveBeenCalledOnce());
     player.stopPlayback();
     resolveRequest(new Blob(["audio"], { type: "audio/mpeg" }));

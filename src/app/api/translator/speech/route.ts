@@ -7,6 +7,7 @@ import {
   generateTranslatorSpeech,
   MAX_SPEECH_TEXT_LENGTH,
 } from "@/lib/translator/server/speech";
+import { isValidSpeechSpeed } from "@/lib/translator/speechSpeed";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   const payload = body as Record<string, unknown>;
   const text = typeof payload.text === "string" ? payload.text.trim() : "";
   const language = parseLanguage(payload.language);
+  const speed = payload.speed;
 
   if (!text) {
     return errorResponse(400, "invalid_text", "Text für die Sprachausgabe fehlt.");
@@ -43,13 +45,16 @@ export async function POST(request: Request) {
   if (!language) {
     return errorResponse(400, "invalid_language", "Ungültige Sprache.");
   }
+  if (!isValidSpeechSpeed(speed)) {
+    return errorResponse(400, "invalid_speed", "Ungültiges Sprechtempo.");
+  }
   if (text.length > MAX_SPEECH_TEXT_LENGTH) {
     return errorResponse(413, "text_too_long", "Der Text ist zu lang.");
   }
 
   try {
     const gateway = createOpenAISpeechGateway();
-    const audio = await generateTranslatorSpeech(text, language, gateway);
+    const audio = await generateTranslatorSpeech(text, language, speed, gateway);
     return new Response(audio, {
       status: 200,
       headers: {

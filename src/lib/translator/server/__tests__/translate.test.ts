@@ -13,7 +13,11 @@ const input = {
 
 function createGateway(): TranslatorAiGateway {
   return {
-    transcribe: vi.fn(async () => " Tutakuja kesho asubuhi. "),
+    transcribe: vi.fn(async () => ({
+      text: " Tutakuja kesho asubuhi. ",
+      detectedLanguage: "sw" as const,
+    })),
+    classifyLanguage: vi.fn(async () => "sw" as const),
     translate: vi.fn(async () => " Wir kommen morgen früh. "),
   };
 }
@@ -31,8 +35,12 @@ describe("translator server pipeline", () => {
           normalizedMimeType: "audio/webm",
           language: "sw",
         });
-        return " Tutakuja kesho asubuhi. ";
+        return {
+          text: " Tutakuja kesho asubuhi. ",
+          detectedLanguage: "sw" as const,
+        };
       }),
+      classifyLanguage: vi.fn(async () => "sw" as const),
       translate: vi.fn(async (text, direction) => {
         order.push("translation");
         expect(text).toBe("Tutakuja kesho asubuhi.");
@@ -48,16 +56,115 @@ describe("translator server pipeline", () => {
       targetLanguage: "de",
     });
     expect(order).toEqual(["transcription", "translation"]);
+    expect(gateway.classifyLanguage).not.toHaveBeenCalled();
   });
 
   it("does not translate an empty or content-free transcript", async () => {
     const gateway = createGateway();
-    vi.mocked(gateway.transcribe).mockResolvedValue(" ... ");
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text: " ... ",
+      detectedLanguage: "sw",
+    });
 
     await expect(translateRecordedAudio(input, gateway)).rejects.toMatchObject({
       code: "no_speech",
     } satisfies Partial<TranslatorPipelineError>);
     expect(gateway.translate).not.toHaveBeenCalled();
+  });
+
+  it("uses the detected AUTO language and translates to the opposite language", async () => {
+    const gateway = createGateway();
+    const autoInput = {
+      ...input,
+      direction: { sourceLanguage: "auto", targetLanguage: "auto" } as const,
+    };
+
+    await expect(translateRecordedAudio(autoInput, gateway)).resolves.toEqual({
+      originalText: "Tutakuja kesho asubuhi.",
+      translatedText: "Wir kommen morgen früh.",
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+    });
+    expect(gateway.transcribe).toHaveBeenCalledWith(
+      expect.objectContaining({ language: null }),
+    );
+    expect(gateway.translate).toHaveBeenCalledWith(
+      "Tutakuja kesho asubuhi.",
+      { sourceLanguage: "sw", targetLanguage: "de" },
+    );
+  });
+
+  it.each([
+    ["sw", { sourceLanguage: "sw", targetLanguage: "de" }],
+    ["de", { sourceLanguage: "de", targetLanguage: "sw" }],
+  ] as const)(
+    "uses the fallback classifier result %s when Whisper is inconclusive",
+    async (classifiedLanguage, expectedDirection) => {
+      const gateway = createGateway();
+      vi.mocked(gateway.transcribe).mockResolvedValue({
+        text: "Habari yako?",
+        detectedLanguage: null,
+      });
+      vi.mocked(gateway.classifyLanguage).mockResolvedValue(classifiedLanguage);
+
+      await translateRecordedAudio(
+        {
+          ...input,
+          direction: { sourceLanguage: "auto", targetLanguage: "auto" },
+        },
+        gateway,
+      );
+
+      expect(gateway.classifyLanguage).toHaveBeenCalledOnce();
+      expect(gateway.classifyLanguage).toHaveBeenCalledWith("Habari yako?");
+      expect(gateway.translate).toHaveBeenCalledWith(
+        "Habari yako?",
+        expectedDirection,
+      );
+    },
+  );
+
+  it("requires manual selection when the fallback is also inconclusive", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text: "Hello there",
+      detectedLanguage: null,
+    });
+    vi.mocked(gateway.classifyLanguage).mockResolvedValue(null);
+
+    await expect(
+      translateRecordedAudio(
+        {
+          ...input,
+          direction: { sourceLanguage: "auto", targetLanguage: "auto" },
+        },
+        gateway,
+      ),
+    ).rejects.toMatchObject({ code: "unsupported_language" });
+    expect(gateway.classifyLanguage).toHaveBeenCalledWith("Hello there");
+    expect(gateway.translate).not.toHaveBeenCalled();
+  });
+
+  it("does not classify language for a manual direction", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text: "Guten Morgen.",
+      detectedLanguage: null,
+    });
+
+    await translateRecordedAudio(
+      {
+        ...input,
+        direction: { sourceLanguage: "de", targetLanguage: "sw" },
+      },
+      gateway,
+    );
+
+    expect(gateway.classifyLanguage).not.toHaveBeenCalled();
+    expect(gateway.translate).toHaveBeenCalledWith("Guten Morgen.", {
+      sourceLanguage: "de",
+      targetLanguage: "sw",
+    });
   });
 
   it("classifies transcription and translation failures", async () => {

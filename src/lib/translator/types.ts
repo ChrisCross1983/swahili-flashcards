@@ -1,9 +1,15 @@
 export type TranslationLanguage = "de" | "sw";
 
+export type TranslationMode = "auto" | "de-to-sw" | "sw-to-de";
+
 export type TranslationDirection = {
   sourceLanguage: TranslationLanguage;
   targetLanguage: TranslationLanguage;
 };
+
+export type TranslationRequestDirection =
+  | TranslationDirection
+  | { sourceLanguage: "auto"; targetLanguage: "auto" };
 
 export type TranslationEntry = {
   id: string;
@@ -12,6 +18,7 @@ export type TranslationEntry = {
   targetLanguage: TranslationLanguage;
   originalText: string;
   translatedText: string;
+  sourceWasDetected: boolean;
 };
 
 export type TranslationResult = {
@@ -27,6 +34,7 @@ export type TranslatorApiErrorCode =
   | "invalid_audio_format"
   | "audio_too_large"
   | "no_speech"
+  | "unsupported_language"
   | "transcription_failed"
   | "translation_failed"
   | "service_unavailable";
@@ -36,4 +44,5 @@ export type TranslatorStatus =
   | "recording"
   | "processing"
   | "playing"
+  | "paused"
   | "error";

@@ -1,4 +1,5 @@
 import type { TranslationEntry } from "@/lib/translator/types";
+import { getSpeechCacheKey } from "@/lib/translator/speechSpeed";
 
 type AudioElement = Pick<
   HTMLAudioElement,
@@ -8,11 +9,16 @@ type AudioElement = Pick<
 export type TranslatorSpeechPlayerDependencies = {
   requestSpeech: (
     entry: TranslationEntry,
+    speed: number,
     signal: AbortSignal,
   ) => Promise<Blob>;
   createObjectUrl: (blob: Blob) => string;
   revokeObjectUrl: (url: string) => void;
   createAudio: (url: string) => AudioElement;
+};
+
+export type TranslatorSpeechPlaybackOptions = {
+  onPlaybackStarted?: () => void;
 };
 
 function createAbortError() {
@@ -31,22 +37,29 @@ function resetAudio(audio: AudioElement) {
 export class TranslatorSpeechPlayer {
   private readonly cache = new Map<string, string>();
   private activeStop: (() => void) | null = null;
+  private activeFail: ((error: unknown) => void) | null = null;
+  private activeAudio: AudioElement | null = null;
   private requestController: AbortController | null = null;
   private operationId = 0;
   private disposed = false;
 
   constructor(private readonly dependencies: TranslatorSpeechPlayerDependencies) {}
 
-  hasCachedAudio(entryId: string) {
-    return this.cache.has(entryId);
+  hasCachedAudio(entryId: string, speed: number) {
+    return this.cache.has(getSpeechCacheKey(entryId, speed));
   }
 
-  async play(entry: TranslationEntry) {
+  async play(
+    entry: TranslationEntry,
+    speed: number,
+    options: TranslatorSpeechPlaybackOptions = {},
+  ) {
     if (this.disposed) throw new Error("Speech player is disposed");
 
     this.stopPlayback();
     const operationId = this.operationId;
-    let objectUrl = this.cache.get(entry.id);
+    const cacheKey = getSpeechCacheKey(entry.id, speed);
+    let objectUrl = this.cache.get(cacheKey);
 
     if (!objectUrl) {
       const requestController = new AbortController();
@@ -55,6 +68,7 @@ export class TranslatorSpeechPlayer {
       try {
         audioBlob = await this.dependencies.requestSpeech(
           entry,
+          speed,
           requestController.signal,
         );
       } finally {
@@ -67,7 +81,7 @@ export class TranslatorSpeechPlayer {
         throw createAbortError();
       }
       objectUrl = this.dependencies.createObjectUrl(audioBlob);
-      this.cache.set(entry.id, objectUrl);
+      this.cache.set(cacheKey, objectUrl);
     }
 
     if (operationId !== this.operationId || this.disposed) {
@@ -87,6 +101,8 @@ export class TranslatorSpeechPlayer {
         audio.onended = null;
         audio.onerror = null;
         if (this.activeStop === stop) this.activeStop = null;
+        if (this.activeAudio === audio) this.activeAudio = null;
+        if (this.activeFail === finish) this.activeFail = null;
         if (error) reject(error);
         else resolve();
       };
@@ -97,6 +113,8 @@ export class TranslatorSpeechPlayer {
       };
 
       this.activeStop = stop;
+      this.activeFail = finish;
+      this.activeAudio = audio;
       audio.onended = () => finish();
       audio.onerror = () =>
         finish(new Error("The browser could not play the speech audio"));
@@ -112,10 +130,40 @@ export class TranslatorSpeechPlayer {
               playbackStartMs: Math.round(performance.now() - playbackRequestedAt),
             });
           }
+          options.onPlaybackStarted?.();
         },
         (error) => finish(error),
       );
     });
+  }
+
+  pausePlayback() {
+    if (!this.activeAudio) return false;
+    this.activeAudio.pause();
+    return true;
+  }
+
+  async resumePlayback() {
+    const audio = this.activeAudio;
+    if (!audio) throw new Error("No speech audio is paused");
+    const operationId = this.operationId;
+    const playbackRequestedAt = performance.now();
+
+    try {
+      await audio.play();
+      if (operationId !== this.operationId || this.disposed) {
+        resetAudio(audio);
+        return;
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.info("[translator] playback timing", {
+          playbackStartMs: Math.round(performance.now() - playbackRequestedAt),
+        });
+      }
+    } catch (error) {
+      this.activeFail?.(error);
+      throw error;
+    }
   }
 
   stopPlayback() {
@@ -124,6 +172,8 @@ export class TranslatorSpeechPlayer {
     this.requestController = null;
     this.activeStop?.();
     this.activeStop = null;
+    this.activeFail = null;
+    this.activeAudio = null;
   }
 
   clearCache() {

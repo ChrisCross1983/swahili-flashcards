@@ -5,8 +5,8 @@ import {
   MAX_TRANSLATION_AUDIO_BYTES,
 } from "@/lib/translator/audioFormats";
 import type {
-  TranslationDirection,
   TranslationLanguage,
+  TranslationRequestDirection,
   TranslatorApiErrorCode,
 } from "@/lib/translator/types";
 import { getTranslatorPipelineErrorCode } from "@/lib/translator/server/errors";
@@ -27,8 +27,9 @@ function parseLanguage(value: FormDataEntryValue | null): TranslationLanguage | 
   return value === "de" || value === "sw" ? value : null;
 }
 
-function isAllowedDirection(direction: TranslationDirection) {
+function isAllowedDirection(direction: TranslationRequestDirection) {
   return (
+    (direction.sourceLanguage === "auto" && direction.targetLanguage === "auto") ||
     (direction.sourceLanguage === "de" && direction.targetLanguage === "sw") ||
     (direction.sourceLanguage === "sw" && direction.targetLanguage === "de")
   );
@@ -46,17 +47,25 @@ export async function POST(request: Request) {
   }
 
   const audio = formData.get("audio");
-  const sourceLanguage = parseLanguage(formData.get("sourceLanguage"));
-  const targetLanguage = parseLanguage(formData.get("targetLanguage"));
+  const sourceValue = formData.get("sourceLanguage");
+  const targetValue = formData.get("targetLanguage");
+  const autoDirection = sourceValue === "auto" && targetValue === "auto";
+  const sourceLanguage = parseLanguage(sourceValue);
+  const targetLanguage = parseLanguage(targetValue);
 
   if (!(audio instanceof Blob) || audio.size === 0) {
     return errorResponse(400, "invalid_request", "Audioaufnahme fehlt.");
   }
-  if (!sourceLanguage || !targetLanguage) {
+  if (!autoDirection && (!sourceLanguage || !targetLanguage)) {
     return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.");
   }
 
-  const direction = { sourceLanguage, targetLanguage };
+  const direction: TranslationRequestDirection = autoDirection
+    ? { sourceLanguage: "auto", targetLanguage: "auto" }
+    : {
+        sourceLanguage: sourceLanguage as TranslationLanguage,
+        targetLanguage: targetLanguage as TranslationLanguage,
+      };
   if (!isAllowedDirection(direction)) {
     return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.");
   }
@@ -89,6 +98,13 @@ export async function POST(request: Request) {
         422,
         "no_speech",
         "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
+      );
+    }
+    if (code === "unsupported_language") {
+      return errorResponse(
+        422,
+        "unsupported_language",
+        "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
       );
     }
     if (code === "transcription_failed") {

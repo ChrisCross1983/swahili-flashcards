@@ -4,9 +4,11 @@ import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 
 const requireUserMock = vi.fn();
 const transcribeMock = vi.fn();
+const classifyLanguageMock = vi.fn();
 const translateMock = vi.fn();
 const createGatewayMock = vi.fn(() => ({
   transcribe: transcribeMock,
+  classifyLanguage: classifyLanguageMock,
   translate: translateMock,
 }));
 
@@ -52,9 +54,14 @@ describe("POST /api/translator/translate", () => {
     requireUserMock.mockReset();
     createGatewayMock.mockClear();
     transcribeMock.mockReset();
+    classifyLanguageMock.mockReset();
     translateMock.mockReset();
     requireUserMock.mockResolvedValue({ user: { id: "user-1" }, response: null });
-    transcribeMock.mockResolvedValue("Tutakuja kesho asubuhi.");
+    transcribeMock.mockResolvedValue({
+      text: "Tutakuja kesho asubuhi.",
+      detectedLanguage: "sw",
+    });
+    classifyLanguageMock.mockResolvedValue("sw");
     translateMock.mockResolvedValue("Wir kommen morgen früh.");
   });
 
@@ -113,7 +120,7 @@ describe("POST /api/translator/translate", () => {
   });
 
   it("returns a controlled error for an empty transcript", async () => {
-    transcribeMock.mockResolvedValue(" ... ");
+    transcribeMock.mockResolvedValue({ text: " ... ", detectedLanguage: "sw" });
     const response = await post(createFormData());
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
@@ -137,6 +144,41 @@ describe("POST /api/translator/translate", () => {
       "Tutakuja kesho asubuhi.",
       { sourceLanguage: "sw", targetLanguage: "de" },
     );
+  });
+
+  it("accepts AUTO and returns the detected concrete direction", async () => {
+    const response = await post(
+      createFormData({ sourceLanguage: "auto", targetLanguage: "auto" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+    });
+    expect(transcribeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ language: null }),
+    );
+  });
+
+  it("asks for manual selection when AUTO detects another language", async () => {
+    transcribeMock.mockResolvedValue({
+      text: "Hello there",
+      detectedLanguage: null,
+    });
+    classifyLanguageMock.mockResolvedValue(null);
+
+    const response = await post(
+      createFormData({ sourceLanguage: "auto", targetLanguage: "auto" }),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      code: "unsupported_language",
+      error:
+        "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+    });
+    expect(translateMock).not.toHaveBeenCalled();
   });
 
   it("does not leak raw OpenAI errors", async () => {

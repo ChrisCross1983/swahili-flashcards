@@ -10,8 +10,8 @@ export function useTranslatorSpeech() {
 
   if (playerRef.current === null) {
     playerRef.current = new TranslatorSpeechPlayer({
-      requestSpeech: (entry, signal) =>
-        requestTranslatorSpeech(entry.translatedText, entry.targetLanguage, {
+      requestSpeech: (entry, speed, signal) =>
+        requestTranslatorSpeech(entry.translatedText, entry.targetLanguage, speed, {
           signal,
         }),
       createObjectUrl: (blob) => URL.createObjectURL(blob),
@@ -27,10 +27,24 @@ export function useTranslatorSpeech() {
     [],
   );
 
-  const playTranslation = useCallback((entry: TranslationEntry) => {
+  const playTranslation = useCallback((
+    entry: TranslationEntry,
+    speed: number,
+    onPlaybackStarted?: () => void,
+  ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
-    return player.play(entry);
+    return player.play(entry, speed, { onPlaybackStarted });
+  }, []);
+
+  const pausePlayback = useCallback(() => {
+    return playerRef.current?.pausePlayback() ?? false;
+  }, []);
+
+  const resumePlayback = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) return Promise.reject(new Error("Speech player unavailable"));
+    return player.resumePlayback();
   }, []);
 
   const stopPlayback = useCallback(() => {
@@ -41,5 +55,11 @@ export function useTranslatorSpeech() {
     playerRef.current?.clearCache();
   }, []);
 
-  return { playTranslation, stopPlayback, clearCache };
+  return {
+    playTranslation,
+    pausePlayback,
+    resumePlayback,
+    stopPlayback,
+    clearCache,
+  };
 }

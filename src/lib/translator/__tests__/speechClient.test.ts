@@ -13,14 +13,14 @@ describe("translator speech client", () => {
       }),
     );
 
-    const result = await requestTranslatorSpeech("Habari", "sw", { fetcher });
+    const result = await requestTranslatorSpeech("Habari", "sw", 1.15, { fetcher });
 
     expect(result).toMatchObject({ size: 3, type: "audio/mpeg" });
     expect(fetcher).toHaveBeenCalledWith(
       "/api/translator/speech",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ text: "Habari", language: "sw" }),
+        body: JSON.stringify({ text: "Habari", language: "sw", speed: 1.15 }),
       }),
     );
   });
@@ -34,7 +34,7 @@ describe("translator speech client", () => {
     );
 
     await expect(
-      requestTranslatorSpeech("Hallo", "de", { fetcher }),
+      requestTranslatorSpeech("Hallo", "de", 1, { fetcher }),
     ).rejects.toBeInstanceOf(TranslatorSpeechClientError);
   });
 });

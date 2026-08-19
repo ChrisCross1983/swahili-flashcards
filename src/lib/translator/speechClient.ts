@@ -17,6 +17,7 @@ type RequestOptions = {
 export async function requestTranslatorSpeech(
   text: string,
   language: TranslationLanguage,
+  speed: number,
   options: RequestOptions = {},
 ) {
   let response: Response;
@@ -24,7 +25,7 @@ export async function requestTranslatorSpeech(
     response = await (options.fetcher ?? fetch)("/api/translator/speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language }),
+      body: JSON.stringify({ text, language, speed }),
       signal: options.signal,
     });
   } catch (error) {

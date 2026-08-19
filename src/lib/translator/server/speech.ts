@@ -7,6 +7,7 @@ export type TranslatorSpeechGateway = {
   synthesize: (
     text: string,
     language: TranslationLanguage,
+    speed: number,
   ) => Promise<ArrayBuffer>;
 };
 
@@ -19,13 +20,14 @@ export function getSpeechInstructions(language: TranslationLanguage) {
 export async function generateTranslatorSpeech(
   text: string,
   language: TranslationLanguage,
+  speed: number,
   gateway: TranslatorSpeechGateway,
 ) {
   const startedAt = Date.now();
   let audio: ArrayBuffer;
 
   try {
-    audio = await gateway.synthesize(text, language);
+    audio = await gateway.synthesize(text, language, speed);
   } catch {
     throw new TranslatorPipelineError(
       "speech_failed",

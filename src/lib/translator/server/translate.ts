@@ -1,9 +1,14 @@
 import type {
   TranslationDirection,
+  TranslationLanguage,
+  TranslationRequestDirection,
   TranslationResult,
 } from "@/lib/translator/types";
 import type { SupportedAudioFormat } from "@/lib/translator/audioFormats";
-import { TranslatorPipelineError } from "@/lib/translator/server/errors";
+import {
+  getTranslatorPipelineErrorCode,
+  TranslatorPipelineError,
+} from "@/lib/translator/server/errors";
 
 export type TranscriptionInput = {
   bytes: Uint8Array;
@@ -11,18 +16,24 @@ export type TranscriptionInput = {
   extension: SupportedAudioFormat["extension"];
   originalMimeType: string;
   normalizedMimeType: string;
-  language: TranslationDirection["sourceLanguage"];
+  language: TranslationLanguage | null;
+};
+
+export type TranscriptionOutput = {
+  text: string;
+  detectedLanguage: TranslationLanguage | null;
 };
 
 export type TranslatorAiGateway = {
-  transcribe: (input: TranscriptionInput) => Promise<string>;
+  transcribe: (input: TranscriptionInput) => Promise<TranscriptionOutput>;
+  classifyLanguage: (text: string) => Promise<TranslationLanguage | null>;
   translate: (text: string, direction: TranslationDirection) => Promise<string>;
 };
 
 type TranslateRecordedAudioInput = {
   audio: Blob;
   format: SupportedAudioFormat;
-  direction: TranslationDirection;
+  direction: TranslationRequestDirection;
 };
 
 function containsSpeechText(text: string) {
@@ -36,20 +47,27 @@ export async function translateRecordedAudio(
   const startedAt = Date.now();
   const transcriptionStartedAt = Date.now();
   let originalText: string;
+  let detectedLanguage: TranslationLanguage | null;
 
   try {
     const bytes = new Uint8Array(await input.audio.arrayBuffer());
-    originalText = (
-      await gateway.transcribe({
-        bytes,
-        fileName: `recording.${input.format.extension}`,
-        extension: input.format.extension,
-        originalMimeType: input.audio.type,
-        normalizedMimeType: input.format.mimeType,
-        language: input.direction.sourceLanguage,
-      })
-    ).trim();
-  } catch {
+    const transcription = await gateway.transcribe({
+      bytes,
+      fileName: `recording.${input.format.extension}`,
+      extension: input.format.extension,
+      originalMimeType: input.audio.type,
+      normalizedMimeType: input.format.mimeType,
+      language:
+        input.direction.sourceLanguage === "auto"
+          ? null
+          : input.direction.sourceLanguage,
+    });
+    originalText = transcription.text.trim();
+    detectedLanguage = transcription.detectedLanguage;
+  } catch (error) {
+    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") {
+      throw error;
+    }
     throw new TranslatorPipelineError(
       "transcription_failed",
       "Audio transcription failed",
@@ -61,11 +79,26 @@ export async function translateRecordedAudio(
     throw new TranslatorPipelineError("no_speech", "No speech detected");
   }
 
+  const sourceLanguage =
+    input.direction.sourceLanguage === "auto"
+      ? detectedLanguage ?? (await classifyFallbackLanguage(originalText, gateway))
+      : input.direction.sourceLanguage;
+  if (!sourceLanguage) {
+    throw new TranslatorPipelineError(
+      "unsupported_language",
+      "Detected language is not supported",
+    );
+  }
+  const direction: TranslationDirection = {
+    sourceLanguage,
+    targetLanguage: sourceLanguage === "de" ? "sw" : "de",
+  };
+
   const translationStartedAt = Date.now();
   let translatedText: string;
   try {
     translatedText = (
-      await gateway.translate(originalText, input.direction)
+      await gateway.translate(originalText, direction)
     ).trim();
   } catch {
     throw new TranslatorPipelineError(
@@ -92,7 +125,18 @@ export async function translateRecordedAudio(
   return {
     originalText,
     translatedText,
-    sourceLanguage: input.direction.sourceLanguage,
-    targetLanguage: input.direction.targetLanguage,
+    sourceLanguage: direction.sourceLanguage,
+    targetLanguage: direction.targetLanguage,
   };
+}
+
+async function classifyFallbackLanguage(
+  transcript: string,
+  gateway: TranslatorAiGateway,
+) {
+  try {
+    return await gateway.classifyLanguage(transcript);
+  } catch {
+    return null;
+  }
 }
