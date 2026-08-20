@@ -30,11 +30,12 @@ export function useTranslatorSpeech() {
   const playTranslation = useCallback((
     entry: TranslationEntry,
     speed: number,
+    autoplay: boolean,
     onPlaybackStarted?: () => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
-    return player.play(entry, speed, { onPlaybackStarted });
+    return player.play(entry, speed, { autoplay, onPlaybackStarted });
   }, []);
 
   const pausePlayback = useCallback(() => {

@@ -1,5 +1,9 @@
 import type { TranslationEntry } from "@/lib/translator/types";
 import { getSpeechCacheKey } from "@/lib/translator/speechSpeed";
+import {
+  getSpeechErrorName,
+  isSpeechPlaybackBlockedError,
+} from "@/lib/translator/speechClient";
 
 type AudioElement = Pick<
   HTMLAudioElement,
@@ -18,6 +22,7 @@ export type TranslatorSpeechPlayerDependencies = {
 };
 
 export type TranslatorSpeechPlaybackOptions = {
+  autoplay?: boolean;
   onPlaybackStarted?: () => void;
 };
 
@@ -32,6 +37,16 @@ function resetAudio(audio: AudioElement) {
   } catch {
     // Some browsers reject seeking before media metadata is available.
   }
+}
+
+function logPlaybackFailure(error: unknown, autoplay: boolean) {
+  if (process.env.NODE_ENV !== "development") return;
+  const metadata = { name: getSpeechErrorName(error), autoplay };
+  if (isSpeechPlaybackBlockedError(error)) {
+    console.info("[translator][speech playback blocked]", metadata);
+    return;
+  }
+  console.error("[translator][speech playback error]", metadata);
 }
 
 export class TranslatorSpeechPlayer {
@@ -102,9 +117,15 @@ export class TranslatorSpeechPlayer {
         audio.onerror = null;
         if (this.activeStop === stop) this.activeStop = null;
         if (this.activeAudio === audio) this.activeAudio = null;
-        if (this.activeFail === finish) this.activeFail = null;
+        if (this.activeFail === failPlayback) this.activeFail = null;
         if (error) reject(error);
         else resolve();
+      };
+
+      const failPlayback = (error: unknown) => {
+        if (settled) return;
+        logPlaybackFailure(error, options.autoplay === true);
+        finish(error);
       };
 
       const stop = () => {
@@ -113,11 +134,11 @@ export class TranslatorSpeechPlayer {
       };
 
       this.activeStop = stop;
-      this.activeFail = finish;
+      this.activeFail = failPlayback;
       this.activeAudio = audio;
       audio.onended = () => finish();
       audio.onerror = () =>
-        finish(new Error("The browser could not play the speech audio"));
+        failPlayback(new Error("The browser could not play the speech audio"));
 
       void audio.play().then(
         () => {
@@ -132,7 +153,7 @@ export class TranslatorSpeechPlayer {
           }
           options.onPlaybackStarted?.();
         },
-        (error) => finish(error),
+        (error) => failPlayback(error),
       );
     });
   }

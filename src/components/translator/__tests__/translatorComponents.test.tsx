@@ -62,7 +62,8 @@ describe("translator components", () => {
     expect(source).toContain("if (state.autoPlay) void handlePlayback(entry, true)");
     expect(source).toContain("aria-checked={state.autoPlay}");
     expect(source).toContain('state.autoPlay ? "AN" : "AUS"');
-    expect(source).toContain("playTranslation(entry, speechSpeed");
+    expect(source).toContain("playTranslation(entry, speechSpeed, automatic");
+    expect(source).toContain("getTranslatorSpeechFailure(error, automatic)");
     expect(source).toContain("DEFAULT_SPEECH_SPEED");
     expect(source).toContain('type="range"');
     expect(source).toContain("setSpeechSpeed(Number(event.target.value))");

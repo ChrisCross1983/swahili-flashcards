@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TranslationEntry } from "@/lib/translator/types";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
+import {
+  getTranslatorSpeechFailure,
+  isSpeechPlaybackBlockedError,
+} from "@/lib/translator/speechClient";
 
 const entry: TranslationEntry = {
   id: "translation-1",
@@ -17,7 +21,7 @@ type FakeAudio = HTMLAudioElement & {
   play: ReturnType<typeof vi.fn>;
 };
 
-function createHarness() {
+function createHarness(playAttempts: Array<() => Promise<void>> = []) {
   const audios: FakeAudio[] = [];
   const requestSpeech = vi.fn(async () =>
     Promise.resolve(new Blob(["audio"], { type: "audio/mpeg" })),
@@ -25,12 +29,13 @@ function createHarness() {
   const createObjectUrl = vi.fn(() => "blob:translation-1");
   const revokeObjectUrl = vi.fn();
   const createAudio = vi.fn(() => {
+    const playAttempt = playAttempts[audios.length];
     const audio = {
       currentTime: 5,
       onended: null,
       onerror: null,
       pause: vi.fn(),
-      play: vi.fn(async () => undefined),
+      play: vi.fn(playAttempt ?? (async () => undefined)),
       preload: "",
     } as unknown as FakeAudio;
     audios.push(audio);
@@ -48,6 +53,7 @@ function createHarness() {
     requestSpeech,
     createObjectUrl,
     revokeObjectUrl,
+    createAudio,
     player,
   };
 }
@@ -61,6 +67,92 @@ function finishAudio(audio: FakeAudio) {
 }
 
 describe("TranslatorSpeechPlayer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("starts automatic playback normally when the browser permits it", async () => {
+    const harness = createHarness();
+    const onPlaybackStarted = vi.fn();
+
+    const playback = harness.player.play(entry, 1, {
+      autoplay: true,
+      onPlaybackStarted,
+    });
+    await waitForAudio(harness.audios, 1);
+    await vi.waitFor(() => expect(onPlaybackStarted).toHaveBeenCalledOnce());
+    finishAudio(harness.audios[0]);
+    await playback;
+
+    expect(harness.requestSpeech).toHaveBeenCalledOnce();
+  });
+
+  it("keeps generated audio cached when iOS blocks autoplay and reuses it on tap", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const notAllowedError = new DOMException(
+      "Playback requires a user gesture",
+      "NotAllowedError",
+    );
+    const harness = createHarness([
+      async () => Promise.reject(notAllowedError),
+      async () => undefined,
+    ]);
+
+    await expect(
+      harness.player.play(entry, 1, { autoplay: true }),
+    ).rejects.toBe(notAllowedError);
+
+    expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(true);
+    expect(harness.requestSpeech).toHaveBeenCalledOnce();
+    expect(getTranslatorSpeechFailure(notAllowedError, true)).toEqual({
+      kind: "autoplay-blocked",
+      message: "Audio ist bereit. Tippe auf Abspielen.",
+    });
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[translator][speech playback blocked]",
+      { name: "NotAllowedError", autoplay: true },
+    );
+
+    const manualPlayback = harness.player.play(entry, 1, { autoplay: false });
+    await waitForAudio(harness.audios, 2);
+    finishAudio(harness.audios[1]);
+    await manualPlayback;
+
+    expect(harness.requestSpeech).toHaveBeenCalledOnce();
+    expect(harness.createObjectUrl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps technical decode failures separate from autoplay blocking", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const decodeError = new DOMException(
+      "The media could not be decoded",
+      "NotSupportedError",
+    );
+    const harness = createHarness([
+      async () => Promise.reject(decodeError),
+    ]);
+
+    await expect(
+      harness.player.play(entry, 1, { autoplay: true }),
+    ).rejects.toBe(decodeError);
+
+    expect(isSpeechPlaybackBlockedError(decodeError)).toBe(false);
+    expect(getTranslatorSpeechFailure(decodeError, true)).toEqual({
+      kind: "playback",
+      message: "Die Wiedergabe ist gerade nicht möglich.",
+    });
+    expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[translator][speech playback error]",
+      { name: "NotSupportedError", autoplay: true },
+    );
+  });
+
   it("generates audio on first replay and reuses the local cache", async () => {
     const harness = createHarness();
 

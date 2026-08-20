@@ -16,7 +16,11 @@ import {
   getTranslatorClientErrorMessage,
   requestAudioTranslation,
 } from "@/lib/translator/client";
-import { isSpeechAbortError } from "@/lib/translator/speechClient";
+import {
+  getTranslatorSpeechFailure,
+  isSpeechAbortError,
+  type TranslatorSpeechFailureKind,
+} from "@/lib/translator/speechClient";
 import { useTranslatorSpeech } from "@/lib/translator/useTranslatorSpeech";
 import type { TranslationEntry } from "@/lib/translator/types";
 import {
@@ -29,7 +33,10 @@ import {
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
-  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [speechFeedback, setSpeechFeedback] = useState<{
+    kind: TranslatorSpeechFailureKind;
+    message: string;
+  } | null>(null);
   const [speechSpeed, setSpeechSpeed] = useState(DEFAULT_SPEECH_SPEED);
   const translationInFlightRef = useRef(false);
   const playbackInFlightRef = useRef(false);
@@ -80,7 +87,7 @@ export default function TranslatorView() {
     if (state.status === "playing" || state.status === "paused") {
       handleStopPlayback();
     }
-    setSpeechError(null);
+    setSpeechFeedback(null);
     try {
       await startRecording();
       dispatch({ type: "START_RECORDING" });
@@ -101,13 +108,13 @@ export default function TranslatorView() {
     playbackRunIdRef.current = runId;
     playbackInFlightRef.current = true;
     setPlaybackReady(false);
-    setSpeechError(null);
+    setSpeechFeedback(null);
     if (!automatic) {
       dispatch({ type: "START_PLAYBACK", entryId: entry.id });
     }
 
     try {
-      await playTranslation(entry, speechSpeed, () => {
+      await playTranslation(entry, speechSpeed, automatic, () => {
         if (mountedRef.current && playbackRunIdRef.current === runId) {
           setPlaybackReady(true);
         }
@@ -118,11 +125,7 @@ export default function TranslatorView() {
         playbackRunIdRef.current === runId &&
         !isSpeechAbortError(error)
       ) {
-        setSpeechError(
-          automatic
-            ? "Die Sprachausgabe konnte nicht erstellt werden."
-            : "Die Wiedergabe ist gerade nicht möglich.",
-        );
+        setSpeechFeedback(getTranslatorSpeechFailure(error, automatic));
       }
     } finally {
       if (playbackRunIdRef.current === runId) {
@@ -207,7 +210,7 @@ export default function TranslatorView() {
 
   function handleClearHistory() {
     clearCache();
-    setSpeechError(null);
+    setSpeechFeedback(null);
     dispatch({ type: "CLEAR_HISTORY" });
   }
 
@@ -328,9 +331,16 @@ export default function TranslatorView() {
           ) : null}
         </section>
 
-        {speechError ? (
-          <div className="status-note status-warning mt-3" role="status">
-            {speechError}
+        {speechFeedback ? (
+          <div
+            className={`status-note mt-3 ${
+              speechFeedback.kind === "autoplay-blocked"
+                ? "status-info"
+                : "status-warning"
+            }`}
+            role="status"
+          >
+            {speechFeedback.message}
           </div>
         ) : null}
 

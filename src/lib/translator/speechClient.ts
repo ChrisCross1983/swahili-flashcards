@@ -1,12 +1,55 @@
 import type { TranslationLanguage } from "@/lib/translator/types";
 
 const SPEECH_ERROR_MESSAGE = "Die Sprachausgabe konnte nicht erstellt werden.";
+const SPEECH_READY_MESSAGE = "Audio ist bereit. Tippe auf Abspielen.";
+const SPEECH_PLAYBACK_ERROR_MESSAGE = "Die Wiedergabe ist gerade nicht möglich.";
+
+export type TranslatorSpeechFailureKind =
+  | "generation"
+  | "autoplay-blocked"
+  | "playback";
 
 export class TranslatorSpeechClientError extends Error {
   constructor(message = SPEECH_ERROR_MESSAGE) {
     super(message);
     this.name = "TranslatorSpeechClientError";
   }
+}
+
+export function getSpeechErrorName(error: unknown) {
+  if (!error || typeof error !== "object" || !("name" in error)) {
+    return "UnknownError";
+  }
+  return typeof error.name === "string" ? error.name : "UnknownError";
+}
+
+export function isSpeechPlaybackBlockedError(error: unknown) {
+  if (getSpeechErrorName(error) === "NotAllowedError") return true;
+  if (!error || typeof error !== "object" || !("message" in error)) {
+    return false;
+  }
+  const message =
+    typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    message.includes("autoplay") ||
+    message.includes("user gesture") ||
+    message.includes("user interaction") ||
+    message.includes("user didn't interact") ||
+    message.includes("not allowed by the user agent")
+  );
+}
+
+export function getTranslatorSpeechFailure(
+  error: unknown,
+  automatic: boolean,
+): { kind: TranslatorSpeechFailureKind; message: string } {
+  if (error instanceof TranslatorSpeechClientError) {
+    return { kind: "generation", message: SPEECH_ERROR_MESSAGE };
+  }
+  if (automatic && isSpeechPlaybackBlockedError(error)) {
+    return { kind: "autoplay-blocked", message: SPEECH_READY_MESSAGE };
+  }
+  return { kind: "playback", message: SPEECH_PLAYBACK_ERROR_MESSAGE };
 }
 
 type RequestOptions = {
@@ -37,7 +80,12 @@ export async function requestTranslatorSpeech(
     throw new TranslatorSpeechClientError();
   }
 
-  const audio = await response.blob();
+  let audio: Blob;
+  try {
+    audio = await response.blob();
+  } catch {
+    throw new TranslatorSpeechClientError();
+  }
   if (audio.size === 0) {
     throw new TranslatorSpeechClientError();
   }
@@ -45,5 +93,5 @@ export async function requestTranslatorSpeech(
 }
 
 export function isSpeechAbortError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
+  return getSpeechErrorName(error) === "AbortError";
 }

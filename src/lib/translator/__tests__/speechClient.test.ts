@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  getTranslatorSpeechFailure,
+  isSpeechPlaybackBlockedError,
   requestTranslatorSpeech,
   TranslatorSpeechClientError,
 } from "@/lib/translator/speechClient";
@@ -33,8 +35,31 @@ describe("translator speech client", () => {
       ),
     );
 
-    await expect(
-      requestTranslatorSpeech("Hallo", "de", 1, { fetcher }),
-    ).rejects.toBeInstanceOf(TranslatorSpeechClientError);
+    const request = requestTranslatorSpeech("Hallo", "de", 1, { fetcher });
+    await expect(request).rejects.toBeInstanceOf(TranslatorSpeechClientError);
+    await request.catch((error) => {
+      expect(getTranslatorSpeechFailure(error, true)).toEqual({
+        kind: "generation",
+        message: "Die Sprachausgabe konnte nicht erstellt werden.",
+      });
+    });
+  });
+
+  it("recognizes only autoplay policy failures as blocked playback", () => {
+    expect(
+      isSpeechPlaybackBlockedError(
+        new DOMException("Playback is not allowed", "NotAllowedError"),
+      ),
+    ).toBe(true);
+    expect(
+      isSpeechPlaybackBlockedError(
+        new Error("play() failed because the user didn't interact"),
+      ),
+    ).toBe(true);
+    expect(
+      isSpeechPlaybackBlockedError(
+        new DOMException("Unsupported audio", "NotSupportedError"),
+      ),
+    ).toBe(false);
   });
 });
