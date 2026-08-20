@@ -141,6 +141,8 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Hallo",
       detectedLanguage: "de",
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
@@ -171,6 +173,8 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Hallo",
       detectedLanguage: "de",
+      model: "whisper-1",
+      fallbackUsed: true,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
@@ -201,6 +205,8 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Guten Morgen",
       detectedLanguage: "de",
+      model: "whisper-1",
+      fallbackUsed: true,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
@@ -219,6 +225,8 @@ describe("OpenAI translator diagnostics", () => {
     ).resolves.toEqual({
       text: "Habari yako?",
       detectedLanguage: null,
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
@@ -328,7 +336,12 @@ describe("OpenAI translator diagnostics", () => {
     const gateway = createOpenAITranslatorGateway("configured-secret");
     await expect(
       gateway.transcribe({ ...transcriptionInput, language: null }),
-    ).resolves.toEqual({ text: "Habari", detectedLanguage: "sw" });
+    ).resolves.toEqual({
+      text: "Habari",
+      detectedLanguage: "sw",
+      model: "whisper-1",
+      fallbackUsed: true,
+    });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenNthCalledWith(
       2,

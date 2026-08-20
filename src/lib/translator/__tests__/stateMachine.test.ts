@@ -178,6 +178,29 @@ describe("translator state machine", () => {
     });
   });
 
+  it("adds TTS diagnostics to the matching translation entry", () => {
+    const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
+    const updated = translatorReducer(withEntry, {
+      type: "UPDATE_ENTRY_DIAGNOSTICS",
+      entryId: swToDeEntry.id,
+      diagnostics: {
+        ttsModel: "gpt-4o-mini-tts",
+        ttsGenerationMs: 420,
+        ttsSpeed: 1.1,
+        autoplayEnabled: true,
+        autoplayBlocked: false,
+      },
+    });
+
+    expect(updated.entries[0].diagnostics).toMatchObject({
+      ttsModel: "gpt-4o-mini-tts",
+      ttsGenerationMs: 420,
+      ttsSpeed: 1.1,
+      autoplayEnabled: true,
+      autoplayBlocked: false,
+    });
+  });
+
   it("clears the local conversation while idle", () => {
     const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
 

@@ -1,5 +1,6 @@
 import type {
   TranslationDirection,
+  TranslationDiagnostics,
   TranslationLanguage,
   TranslationRequestDirection,
   TranslationResult,
@@ -9,6 +10,7 @@ import {
   getTranslatorPipelineErrorCode,
   TranslatorPipelineError,
 } from "@/lib/translator/server/errors";
+import { TRANSLATION_MODEL } from "@/lib/translator/server/models";
 
 export type TranscriptionInput = {
   bytes: Uint8Array;
@@ -22,6 +24,8 @@ export type TranscriptionInput = {
 export type TranscriptionOutput = {
   text: string;
   detectedLanguage: TranslationLanguage | null;
+  model: string;
+  fallbackUsed: boolean;
 };
 
 export type AutoTranslationOutput =
@@ -59,10 +63,11 @@ export async function translateRecordedAudio(
   const startedAt = Date.now();
   const transcriptionStartedAt = Date.now();
   let originalText: string;
+  let transcriptionOutput: TranscriptionOutput;
 
   try {
     const bytes = new Uint8Array(await input.audio.arrayBuffer());
-    const transcription = await gateway.transcribe({
+    transcriptionOutput = await gateway.transcribe({
       bytes,
       fileName: `recording.${input.format.extension}`,
       extension: input.format.extension,
@@ -73,7 +78,7 @@ export async function translateRecordedAudio(
           ? null
           : input.direction.sourceLanguage,
     });
-    originalText = transcription.text.trim();
+    originalText = transcriptionOutput.text.trim();
   } catch (error) {
     if (getTranslatorPipelineErrorCode(error) === "unsupported_language") {
       throw error;
@@ -91,7 +96,7 @@ export async function translateRecordedAudio(
 
   const translationStartedAt = Date.now();
   const isAuto = input.direction.sourceLanguage === "auto";
-  let result: TranslationResult;
+  let result: Omit<TranslationResult, "diagnostics">;
 
   if (input.direction.sourceLanguage === "auto") {
     let autoResult: AutoTranslationOutput;
@@ -148,23 +153,37 @@ export async function translateRecordedAudio(
     };
   }
 
+  const translationDurationMs = Date.now() - translationStartedAt;
+  const diagnostics: TranslationDiagnostics = {
+    transcriptionModel: transcriptionOutput.model,
+    translationModel: TRANSLATION_MODEL,
+    transcriptionMs,
+    ...(isAuto
+      ? { autoTranslateMs: translationDurationMs }
+      : { translationMs: translationDurationMs }),
+    totalMs: Date.now() - startedAt,
+    transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
+    detectedLanguage: isAuto
+      ? result.sourceLanguage
+      : transcriptionOutput.detectedLanguage ?? result.sourceLanguage,
+  };
+
   if (process.env.NODE_ENV === "development") {
-    const translationDurationMs = Date.now() - translationStartedAt;
     console.info(
       "[translator] timings",
       isAuto
         ? {
             transcriptionMs,
             autoTranslateMs: translationDurationMs,
-            totalMs: Date.now() - startedAt,
+            totalMs: diagnostics.totalMs,
           }
         : {
             transcriptionMs,
             translationMs: translationDurationMs,
-            totalMs: Date.now() - startedAt,
+            totalMs: diagnostics.totalMs,
           },
     );
   }
 
-  return result;
+  return { ...result, diagnostics };
 }

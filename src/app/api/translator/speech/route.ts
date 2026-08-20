@@ -8,6 +8,7 @@ import {
   MAX_SPEECH_TEXT_LENGTH,
 } from "@/lib/translator/server/speech";
 import { isValidSpeechSpeed } from "@/lib/translator/speechSpeed";
+import { SPEECH_MODEL } from "@/lib/translator/server/models";
 
 export const runtime = "nodejs";
 
@@ -54,12 +55,16 @@ export async function POST(request: Request) {
 
   try {
     const gateway = createOpenAISpeechGateway();
+    const generationStartedAt = Date.now();
     const audio = await generateTranslatorSpeech(text, language, speed, gateway);
+    const generationMs = Date.now() - generationStartedAt;
     return new Response(audio, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "private, no-store",
+        "X-Translator-Speech-Model": SPEECH_MODEL,
+        "X-Translator-Speech-Generation-Ms": String(generationMs),
       },
     });
   } catch (error) {

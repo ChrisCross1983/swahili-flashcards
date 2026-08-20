@@ -1,5 +1,6 @@
 import type {
   TranslationDirection,
+  TranslationDiagnostics,
   TranslationEntry,
   TranslationMode,
   TranslationRequestDirection,
@@ -44,6 +45,11 @@ export type TranslatorEvent =
   | { type: "RECORDING_FAILED"; message: string }
   | { type: "STOP_AND_TRANSLATE" }
   | { type: "PROCESSING_SUCCEEDED"; entry: TranslationEntry }
+  | {
+      type: "UPDATE_ENTRY_DIAGNOSTICS";
+      entryId: string;
+      diagnostics: Partial<TranslationDiagnostics>;
+    }
   | { type: "PROCESSING_FAILED"; message: string }
   | { type: "START_PLAYBACK"; entryId: string }
   | { type: "PAUSE_PLAYBACK" }
@@ -101,6 +107,25 @@ export function translatorReducer(
     case "PROCESSING_FAILED":
       if (state.status !== "processing") return state;
       return { ...state, status: "error", errorMessage: event.message };
+
+    case "UPDATE_ENTRY_DIAGNOSTICS":
+      if (!state.entries.some((entry) => entry.id === event.entryId)) {
+        return state;
+      }
+      return {
+        ...state,
+        entries: state.entries.map((entry) =>
+          entry.id === event.entryId
+            ? {
+                ...entry,
+                diagnostics: {
+                  ...entry.diagnostics,
+                  ...event.diagnostics,
+                } as TranslationDiagnostics,
+              }
+            : entry,
+        ),
+      };
 
     case "START_PLAYBACK":
       if (

@@ -94,6 +94,12 @@ describe("POST /api/translator/speech", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("audio/mpeg");
+    expect(response.headers.get("X-Translator-Speech-Model")).toBe(
+      "gpt-4o-mini-tts",
+    );
+    expect(response.headers.get("X-Translator-Speech-Generation-Ms")).toMatch(
+      /^\d+$/,
+    );
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       new Uint8Array([1, 2, 3]),
     );

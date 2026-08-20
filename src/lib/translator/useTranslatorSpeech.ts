@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TranslationEntry } from "@/lib/translator/types";
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
+import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
 
 export function useTranslatorSpeech() {
@@ -31,11 +32,18 @@ export function useTranslatorSpeech() {
     entry: TranslationEntry,
     speed: number,
     autoplay: boolean,
+    onSpeechGenerated?: (
+      diagnostics: TranslatorSpeechGenerationDiagnostics,
+    ) => void,
     onPlaybackStarted?: () => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
-    return player.play(entry, speed, { autoplay, onPlaybackStarted });
+    return player.play(entry, speed, {
+      autoplay,
+      onSpeechGenerated,
+      onPlaybackStarted,
+    });
   }, []);
 
   const pausePlayback = useCallback(() => {

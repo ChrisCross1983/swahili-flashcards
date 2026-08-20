@@ -60,6 +60,8 @@ describe("POST /api/translator/translate", () => {
     transcribeMock.mockResolvedValue({
       text: "Tutakuja kesho asubuhi.",
       detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
     autoTranslateMock.mockResolvedValue({
       sourceLanguage: "sw",
@@ -124,7 +126,12 @@ describe("POST /api/translator/translate", () => {
   });
 
   it("returns a controlled error for an empty transcript", async () => {
-    transcribeMock.mockResolvedValue({ text: " ... ", detectedLanguage: "sw" });
+    transcribeMock.mockResolvedValue({
+      text: " ... ",
+      detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
+    });
     const response = await post(createFormData());
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
@@ -135,7 +142,7 @@ describe("POST /api/translator/translate", () => {
     expect(autoTranslateMock).not.toHaveBeenCalled();
   });
 
-  it("returns transcription and translation without OpenAI metadata", async () => {
+  it("returns transcription and translation with safe diagnostics", async () => {
     const response = await post(createFormData());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -143,6 +150,15 @@ describe("POST /api/translator/translate", () => {
       translatedText: "Wir kommen morgen früh.",
       sourceLanguage: "sw",
       targetLanguage: "de",
+      diagnostics: {
+        transcriptionModel: "gpt-4o-mini-transcribe",
+        translationModel: "gpt-5.6-terra",
+        transcriptionMs: expect.any(Number),
+        translationMs: expect.any(Number),
+        totalMs: expect.any(Number),
+        transcriptionFallbackUsed: false,
+        detectedLanguage: "sw",
+      },
     });
     expect(transcribeMock).toHaveBeenCalledOnce();
     expect(translateMock).toHaveBeenCalledWith(
@@ -172,6 +188,8 @@ describe("POST /api/translator/translate", () => {
     transcribeMock.mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
     autoTranslateMock.mockResolvedValue({
       sourceLanguage: "unknown",

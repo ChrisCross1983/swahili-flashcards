@@ -4,6 +4,7 @@ import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer"
 import {
   getTranslatorSpeechFailure,
   isSpeechPlaybackBlockedError,
+  type TranslatorSpeechAsset,
 } from "@/lib/translator/speechClient";
 
 const entry: TranslationEntry = {
@@ -24,7 +25,13 @@ type FakeAudio = HTMLAudioElement & {
 function createHarness(playAttempts: Array<() => Promise<void>> = []) {
   const audios: FakeAudio[] = [];
   const requestSpeech = vi.fn(async () =>
-    Promise.resolve(new Blob(["audio"], { type: "audio/mpeg" })),
+    Promise.resolve({
+      audio: new Blob(["audio"], { type: "audio/mpeg" }),
+      diagnostics: {
+        ttsModel: "gpt-4o-mini-tts",
+        ttsGenerationMs: 400,
+      },
+    }),
   );
   const createObjectUrl = vi.fn(() => "blob:translation-1");
   const revokeObjectUrl = vi.fn();
@@ -75,9 +82,11 @@ describe("TranslatorSpeechPlayer", () => {
   it("starts automatic playback normally when the browser permits it", async () => {
     const harness = createHarness();
     const onPlaybackStarted = vi.fn();
+    const onSpeechGenerated = vi.fn();
 
     const playback = harness.player.play(entry, 1, {
       autoplay: true,
+      onSpeechGenerated,
       onPlaybackStarted,
     });
     await waitForAudio(harness.audios, 1);
@@ -86,6 +95,10 @@ describe("TranslatorSpeechPlayer", () => {
     await playback;
 
     expect(harness.requestSpeech).toHaveBeenCalledOnce();
+    expect(onSpeechGenerated).toHaveBeenCalledWith({
+      ttsModel: "gpt-4o-mini-tts",
+      ttsGenerationMs: 400,
+    });
   });
 
   it("keeps generated audio cached when iOS blocks autoplay and reuses it on tap", async () => {
@@ -268,10 +281,10 @@ describe("TranslatorSpeechPlayer", () => {
   });
 
   it("does not start delayed audio after a pending request was stopped", async () => {
-    let resolveRequest!: (blob: Blob) => void;
+    let resolveRequest!: (asset: TranslatorSpeechAsset) => void;
     const requestSpeech = vi.fn(
       () =>
-        new Promise<Blob>((resolve) => {
+        new Promise<TranslatorSpeechAsset>((resolve) => {
           resolveRequest = resolve;
         }),
     );
@@ -286,7 +299,13 @@ describe("TranslatorSpeechPlayer", () => {
     const playback = player.play(entry, 1);
     await vi.waitFor(() => expect(requestSpeech).toHaveBeenCalledOnce());
     player.stopPlayback();
-    resolveRequest(new Blob(["audio"], { type: "audio/mpeg" }));
+    resolveRequest({
+      audio: new Blob(["audio"], { type: "audio/mpeg" }),
+      diagnostics: {
+        ttsModel: "gpt-4o-mini-tts",
+        ttsGenerationMs: 400,
+      },
+    });
 
     await expect(playback).rejects.toMatchObject({ name: "AbortError" });
     expect(createAudio).not.toHaveBeenCalled();

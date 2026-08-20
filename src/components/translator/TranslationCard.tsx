@@ -10,10 +10,13 @@ type Props = {
   isLatest: boolean;
   playbackState: "idle" | "preparing" | "playing" | "paused";
   playbackDisabled: boolean;
+  feedbackDisabled: boolean;
+  feedbackSaved: boolean;
   onPlay: () => void;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
+  onFeedback: () => void;
 };
 
 export default function TranslationCard({
@@ -21,10 +24,13 @@ export default function TranslationCard({
   isLatest,
   playbackState,
   playbackDisabled,
+  feedbackDisabled,
+  feedbackSaved,
   onPlay,
   onPause,
   onResume,
   onStop,
+  onFeedback,
 }: Props) {
   const isActive = playbackState !== "idle";
   const directionLabel = `${LANGUAGE_LABELS[entry.sourceLanguage]}${
@@ -128,6 +134,23 @@ export default function TranslationCard({
             </button>
           </div>
         ) : null}
+      </div>
+
+      <div className="mt-4 flex min-h-11 items-center justify-end border-t border-soft pt-3">
+        {feedbackSaved ? (
+          <span className="text-sm font-medium text-accent-success-strong" role="status">
+            ✓ Feedback gespeichert
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost min-h-11 px-3 text-sm"
+            disabled={feedbackDisabled}
+            onClick={onFeedback}
+          >
+            Feedback
+          </button>
+        )}
       </div>
     </article>
   );

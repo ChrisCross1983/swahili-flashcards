@@ -9,6 +9,16 @@ export type TranslatorSpeechFailureKind =
   | "autoplay-blocked"
   | "playback";
 
+export type TranslatorSpeechGenerationDiagnostics = {
+  ttsModel: string;
+  ttsGenerationMs: number;
+};
+
+export type TranslatorSpeechAsset = {
+  audio: Blob;
+  diagnostics: TranslatorSpeechGenerationDiagnostics;
+};
+
 export class TranslatorSpeechClientError extends Error {
   constructor(message = SPEECH_ERROR_MESSAGE) {
     super(message);
@@ -63,6 +73,7 @@ export async function requestTranslatorSpeech(
   speed: number,
   options: RequestOptions = {},
 ) {
+  const requestStartedAt = performance.now();
   let response: Response;
   try {
     response = await (options.fetcher ?? fetch)("/api/translator/speech", {
@@ -89,7 +100,20 @@ export async function requestTranslatorSpeech(
   if (audio.size === 0) {
     throw new TranslatorSpeechClientError();
   }
-  return audio;
+  const generationHeader = Number(
+    response.headers.get("X-Translator-Speech-Generation-Ms"),
+  );
+  return {
+    audio,
+    diagnostics: {
+      ttsModel:
+        response.headers.get("X-Translator-Speech-Model")?.trim() || "unknown",
+      ttsGenerationMs:
+        Number.isFinite(generationHeader) && generationHeader >= 0
+          ? generationHeader
+          : Math.max(0, Math.round(performance.now() - requestStartedAt)),
+    },
+  } satisfies TranslatorSpeechAsset;
 }
 
 export function isSpeechAbortError(error: unknown) {

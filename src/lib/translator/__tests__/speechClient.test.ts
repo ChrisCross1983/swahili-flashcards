@@ -11,13 +11,21 @@ describe("translator speech client", () => {
     const fetcher = vi.fn(async () =>
       new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
-        headers: { "Content-Type": "audio/mpeg" },
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "X-Translator-Speech-Model": "gpt-4o-mini-tts",
+          "X-Translator-Speech-Generation-Ms": "321",
+        },
       }),
     );
 
     const result = await requestTranslatorSpeech("Habari", "sw", 1.15, { fetcher });
 
-    expect(result).toMatchObject({ size: 3, type: "audio/mpeg" });
+    expect(result.audio).toMatchObject({ size: 3, type: "audio/mpeg" });
+    expect(result.diagnostics).toEqual({
+      ttsModel: "gpt-4o-mini-tts",
+      ttsGenerationMs: 321,
+    });
     expect(fetcher).toHaveBeenCalledWith(
       "/api/translator/speech",
       expect.objectContaining({

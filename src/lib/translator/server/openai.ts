@@ -205,6 +205,8 @@ export function createOpenAITranslatorGateway(
           return {
             text: primary.text,
             detectedLanguage: input.language,
+            model: PRIMARY_TRANSCRIPTION_MODEL,
+            fallbackUsed: false,
           };
         }
         fallbackReason = "transcription_error";
@@ -244,7 +246,12 @@ export function createOpenAITranslatorGateway(
               transcriptLength: fallback.text.length,
             });
           }
-          return { text: fallback.text, detectedLanguage };
+          return {
+            text: fallback.text,
+            detectedLanguage,
+            model: FALLBACK_TRANSCRIPTION_MODEL,
+            fallbackUsed: true,
+          };
         }
 
         const fallback = await client.audio.transcriptions.create({
@@ -255,6 +262,8 @@ export function createOpenAITranslatorGateway(
         return {
           text: fallback.text,
           detectedLanguage: input.language,
+          model: FALLBACK_TRANSCRIPTION_MODEL,
+          fallbackUsed: true,
         };
       } catch (error) {
         if (process.env.NODE_ENV === "development") {

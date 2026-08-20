@@ -13,6 +13,15 @@ const result = {
   originalText: "Tutakuja kesho asubuhi.",
   translatedText: "Wir kommen morgen früh.",
   ...direction,
+  diagnostics: {
+    transcriptionModel: "gpt-4o-mini-transcribe",
+    translationModel: "gpt-5.6-terra",
+    transcriptionMs: 1200,
+    translationMs: 800,
+    totalMs: 2000,
+    transcriptionFallbackUsed: false,
+    detectedLanguage: "sw" as const,
+  },
 };
 
 describe("translator client", () => {
@@ -53,14 +62,27 @@ describe("translator client", () => {
 
     expect(complete.status).toBe("idle");
     expect(complete.entries).toEqual([entry]);
+    expect(entry.diagnostics).toMatchObject({
+      transcriptionModel: "gpt-4o-mini-transcribe",
+      translationModel: "gpt-5.6-terra",
+      transcriptionFallbackUsed: false,
+    });
   });
 
   it("accepts a concrete detected direction for an AUTO request", async () => {
+    const autoResult = {
+      ...result,
+      diagnostics: {
+        ...result.diagnostics,
+        translationMs: undefined,
+        autoTranslateMs: 800,
+      },
+    };
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const formData = init?.body as FormData;
       expect(formData.get("sourceLanguage")).toBe("auto");
       expect(formData.get("targetLanguage")).toBe("auto");
-      return Response.json(result);
+      return Response.json(autoResult);
     });
 
     await expect(
@@ -69,7 +91,13 @@ describe("translator client", () => {
         { sourceLanguage: "auto", targetLanguage: "auto" },
         { fetcher },
       ),
-    ).resolves.toEqual(result);
+    ).resolves.toMatchObject({
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+      diagnostics: {
+        autoTranslateMs: 800,
+      },
+    });
   });
 
   it("maps API failures to the translator error state", async () => {

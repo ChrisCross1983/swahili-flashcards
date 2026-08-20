@@ -3,6 +3,7 @@ import {
   MAX_TRANSLATION_AUDIO_BYTES,
 } from "@/lib/translator/audioFormats";
 import type {
+  TranslationDiagnostics,
   TranslationEntry,
   TranslationRequestDirection,
   TranslationResult,
@@ -37,6 +38,35 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
+function isNonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isTranslationDiagnostics(
+  value: unknown,
+): value is TranslationDiagnostics {
+  if (!value || typeof value !== "object") return false;
+  const diagnostics = value as Partial<TranslationDiagnostics>;
+  return (
+    typeof diagnostics.transcriptionModel === "string" &&
+    Boolean(diagnostics.transcriptionModel) &&
+    typeof diagnostics.translationModel === "string" &&
+    Boolean(diagnostics.translationModel) &&
+    isNonNegativeNumber(diagnostics.transcriptionMs) &&
+    isNonNegativeNumber(diagnostics.totalMs) &&
+    typeof diagnostics.transcriptionFallbackUsed === "boolean" &&
+    (diagnostics.detectedLanguage === null ||
+      diagnostics.detectedLanguage === "de" ||
+      diagnostics.detectedLanguage === "sw") &&
+    (diagnostics.translationMs === undefined ||
+      isNonNegativeNumber(diagnostics.translationMs)) &&
+    (diagnostics.autoTranslateMs === undefined ||
+      isNonNegativeNumber(diagnostics.autoTranslateMs)) &&
+    (diagnostics.translationMs === undefined) !==
+      (diagnostics.autoTranslateMs === undefined)
+  );
+}
+
 function isTranslationResult(value: unknown): value is TranslationResult {
   if (!value || typeof value !== "object") return false;
   const result = value as Partial<TranslationResult>;
@@ -46,7 +76,8 @@ function isTranslationResult(value: unknown): value is TranslationResult {
     typeof result.translatedText === "string" &&
     Boolean(result.translatedText.trim()) &&
     (result.sourceLanguage === "de" || result.sourceLanguage === "sw") &&
-    (result.targetLanguage === "de" || result.targetLanguage === "sw")
+    (result.targetLanguage === "de" || result.targetLanguage === "sw") &&
+    isTranslationDiagnostics(result.diagnostics)
   );
 }
 
@@ -102,18 +133,44 @@ export async function requestAudioTranslation(
   if (!isTranslationResult(body)) {
     throw new TranslatorClientError(NETWORK_ERROR);
   }
+  const result: TranslationResult = {
+    originalText: body.originalText,
+    translatedText: body.translatedText,
+    sourceLanguage: body.sourceLanguage,
+    targetLanguage: body.targetLanguage,
+    diagnostics: {
+      transcriptionModel: body.diagnostics.transcriptionModel,
+      translationModel: body.diagnostics.translationModel,
+      transcriptionMs: body.diagnostics.transcriptionMs,
+      ...(body.diagnostics.translationMs === undefined
+        ? { autoTranslateMs: body.diagnostics.autoTranslateMs }
+        : { translationMs: body.diagnostics.translationMs }),
+      totalMs: body.diagnostics.totalMs,
+      transcriptionFallbackUsed:
+        body.diagnostics.transcriptionFallbackUsed,
+      detectedLanguage: body.diagnostics.detectedLanguage,
+    },
+  };
   if (
-    direction.sourceLanguage !== "auto" &&
-    (body.sourceLanguage !== direction.sourceLanguage ||
-      body.targetLanguage !== direction.targetLanguage)
+    (direction.sourceLanguage === "auto" &&
+      result.diagnostics.autoTranslateMs === undefined) ||
+    (direction.sourceLanguage !== "auto" &&
+      result.diagnostics.translationMs === undefined)
   ) {
     throw new TranslatorClientError(NETWORK_ERROR);
   }
-  if (body.sourceLanguage === body.targetLanguage) {
+  if (
+    direction.sourceLanguage !== "auto" &&
+    (result.sourceLanguage !== direction.sourceLanguage ||
+      result.targetLanguage !== direction.targetLanguage)
+  ) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+  if (result.sourceLanguage === result.targetLanguage) {
     throw new TranslatorClientError(NETWORK_ERROR);
   }
 
-  return body;
+  return result;
 }
 
 export function createTranslationEntry(
@@ -122,6 +179,7 @@ export function createTranslationEntry(
     sourceWasDetected?: boolean;
     timestamp?: number;
     id?: string;
+    diagnostics?: Partial<TranslationDiagnostics>;
   } = {},
 ): TranslationEntry {
   const timestamp = options.timestamp ?? Date.now();
@@ -134,6 +192,10 @@ export function createTranslationEntry(
     timestamp,
     sourceWasDetected: options.sourceWasDetected ?? false,
     ...result,
+    diagnostics: {
+      ...result.diagnostics,
+      ...options.diagnostics,
+    },
   };
 }
 

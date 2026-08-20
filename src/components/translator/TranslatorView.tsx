@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
+import TranslationFeedbackSheet from "@/components/translator/TranslationFeedbackSheet";
 import {
   getTranslationRequestDirection,
   initialTranslatorState,
@@ -38,6 +39,10 @@ export default function TranslatorView() {
     message: string;
   } | null>(null);
   const [speechSpeed, setSpeechSpeed] = useState(DEFAULT_SPEECH_SPEED);
+  const [feedbackEntryId, setFeedbackEntryId] = useState<string | null>(null);
+  const [savedFeedbackIds, setSavedFeedbackIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const translationInFlightRef = useRef(false);
   const playbackInFlightRef = useRef(false);
   const playbackRunIdRef = useRef(0);
@@ -75,6 +80,9 @@ export default function TranslatorView() {
   const recorderBusy =
     recorderStatus === "starting" || recorderStatus === "stopping";
   const controlsLocked = state.status !== "idle" || recorderBusy;
+  const feedbackEntry = feedbackEntryId
+    ? state.entries.find((entry) => entry.id === feedbackEntryId) ?? null
+    : null;
 
   async function handleStartRecording() {
     if (
@@ -114,18 +122,53 @@ export default function TranslatorView() {
     }
 
     try {
-      await playTranslation(entry, speechSpeed, automatic, () => {
-        if (mountedRef.current && playbackRunIdRef.current === runId) {
-          setPlaybackReady(true);
-        }
-      });
+      await playTranslation(
+        entry,
+        speechSpeed,
+        automatic,
+        (diagnostics) => {
+          dispatch({
+            type: "UPDATE_ENTRY_DIAGNOSTICS",
+            entryId: entry.id,
+            diagnostics: {
+              ...diagnostics,
+              ttsSpeed: speechSpeed,
+            },
+          });
+        },
+        () => {
+          if (mountedRef.current && playbackRunIdRef.current === runId) {
+            setPlaybackReady(true);
+            dispatch({
+              type: "UPDATE_ENTRY_DIAGNOSTICS",
+              entryId: entry.id,
+              diagnostics: { ttsSpeed: speechSpeed },
+            });
+            if (automatic) {
+              dispatch({
+                type: "UPDATE_ENTRY_DIAGNOSTICS",
+                entryId: entry.id,
+                diagnostics: { autoplayBlocked: false },
+              });
+            }
+          }
+        },
+      );
     } catch (error) {
       if (
         mountedRef.current &&
         playbackRunIdRef.current === runId &&
         !isSpeechAbortError(error)
       ) {
-        setSpeechFeedback(getTranslatorSpeechFailure(error, automatic));
+        const failure = getTranslatorSpeechFailure(error, automatic);
+        setSpeechFeedback(failure);
+        if (failure.kind === "autoplay-blocked") {
+          dispatch({
+            type: "UPDATE_ENTRY_DIAGNOSTICS",
+            entryId: entry.id,
+            diagnostics: { autoplayBlocked: true },
+          });
+        }
       }
     } finally {
       if (playbackRunIdRef.current === runId) {
@@ -184,6 +227,10 @@ export default function TranslatorView() {
       });
       const entry = createTranslationEntry(result, {
         sourceWasDetected: direction.sourceLanguage === "auto",
+        diagnostics: {
+          ttsSpeed: speechSpeed,
+          autoplayEnabled: state.autoPlay,
+        },
       });
       dispatch({
         type: "PROCESSING_SUCCEEDED",
@@ -211,7 +258,13 @@ export default function TranslatorView() {
   function handleClearHistory() {
     clearCache();
     setSpeechFeedback(null);
+    setFeedbackEntryId(null);
+    setSavedFeedbackIds(new Set());
     dispatch({ type: "CLEAR_HISTORY" });
+  }
+
+  function handleFeedbackSaved(entryId: string) {
+    setSavedFeedbackIds((current) => new Set(current).add(entryId));
   }
 
   return (
@@ -435,10 +488,13 @@ export default function TranslatorView() {
                     isLatest={index === 0}
                     playbackState={playbackState}
                     playbackDisabled={controlsLocked}
+                    feedbackDisabled={controlsLocked}
+                    feedbackSaved={savedFeedbackIds.has(entry.id)}
                     onPlay={() => void handlePlayback(entry, false)}
                     onPause={handlePausePlayback}
                     onResume={handleResumePlayback}
                     onStop={handleStopPlayback}
+                    onFeedback={() => setFeedbackEntryId(entry.id)}
                   />
                 );
               })}
@@ -446,6 +502,12 @@ export default function TranslatorView() {
           )}
         </section>
       </div>
+      <TranslationFeedbackSheet
+        entry={feedbackEntry}
+        open={Boolean(feedbackEntry)}
+        onClose={() => setFeedbackEntryId(null)}
+        onSaved={handleFeedbackSaved}
+      />
     </main>
   );
 }

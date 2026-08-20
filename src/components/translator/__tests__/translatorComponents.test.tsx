@@ -39,10 +39,13 @@ describe("translator components", () => {
         isLatest
         playbackState="idle"
         playbackDisabled
+        feedbackDisabled={false}
+        feedbackSaved={false}
         onPlay={vi.fn()}
         onPause={vi.fn()}
         onResume={vi.fn()}
         onStop={vi.fn()}
+        onFeedback={vi.fn()}
       />,
     );
 
@@ -51,6 +54,7 @@ describe("translator components", () => {
     expect(html).toContain("Wo ist der nächste Bus?");
     expect(html).toContain("Basi inayofuata iko wapi?");
     expect(html).toContain("Abspielen");
+    expect(html).toContain("Feedback");
   });
 
   it("only starts automatic speech when the visible toggle is enabled", () => {
@@ -62,7 +66,8 @@ describe("translator components", () => {
     expect(source).toContain("if (state.autoPlay) void handlePlayback(entry, true)");
     expect(source).toContain("aria-checked={state.autoPlay}");
     expect(source).toContain('state.autoPlay ? "AN" : "AUS"');
-    expect(source).toContain("playTranslation(entry, speechSpeed, automatic");
+    expect(source).toContain("await playTranslation(");
+    expect(source).toContain("speechSpeed,\n        automatic,");
     expect(source).toContain("getTranslatorSpeechFailure(error, automatic)");
     expect(source).toContain("DEFAULT_SPEECH_SPEED");
     expect(source).toContain('type="range"');
@@ -83,10 +88,13 @@ describe("translator components", () => {
       entry,
       isLatest: true,
       playbackDisabled: false,
+      feedbackDisabled: false,
+      feedbackSaved: false,
       onPlay: vi.fn(),
       onPause: vi.fn(),
       onResume: vi.fn(),
       onStop: vi.fn(),
+      onFeedback: vi.fn(),
     };
 
     const playing = renderToStaticMarkup(
@@ -100,5 +108,34 @@ describe("translator components", () => {
     expect(playing).toContain("Stop");
     expect(paused).toContain("Fortsetzen");
     expect(paused).toContain("Stop");
+  });
+
+  it("shows a saved state on the exact translation card", () => {
+    const entry: TranslationEntry = {
+      id: "translation-feedback",
+      timestamp: 1_700_000_000_000,
+      sourceLanguage: "de",
+      targetLanguage: "sw",
+      originalText: "Danke.",
+      translatedText: "Asante.",
+      sourceWasDetected: false,
+    };
+    const html = renderToStaticMarkup(
+      <TranslationCard
+        entry={entry}
+        isLatest={false}
+        playbackState="idle"
+        playbackDisabled={false}
+        feedbackDisabled={false}
+        feedbackSaved
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onStop={vi.fn()}
+        onFeedback={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("Feedback gespeichert");
   });
 });

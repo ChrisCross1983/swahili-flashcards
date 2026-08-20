@@ -3,6 +3,8 @@ import { getSpeechCacheKey } from "@/lib/translator/speechSpeed";
 import {
   getSpeechErrorName,
   isSpeechPlaybackBlockedError,
+  type TranslatorSpeechAsset,
+  type TranslatorSpeechGenerationDiagnostics,
 } from "@/lib/translator/speechClient";
 
 type AudioElement = Pick<
@@ -15,7 +17,7 @@ export type TranslatorSpeechPlayerDependencies = {
     entry: TranslationEntry,
     speed: number,
     signal: AbortSignal,
-  ) => Promise<Blob>;
+  ) => Promise<TranslatorSpeechAsset>;
   createObjectUrl: (blob: Blob) => string;
   revokeObjectUrl: (url: string) => void;
   createAudio: (url: string) => AudioElement;
@@ -23,6 +25,9 @@ export type TranslatorSpeechPlayerDependencies = {
 
 export type TranslatorSpeechPlaybackOptions = {
   autoplay?: boolean;
+  onSpeechGenerated?: (
+    diagnostics: TranslatorSpeechGenerationDiagnostics,
+  ) => void;
   onPlaybackStarted?: () => void;
 };
 
@@ -79,9 +84,9 @@ export class TranslatorSpeechPlayer {
     if (!objectUrl) {
       const requestController = new AbortController();
       this.requestController = requestController;
-      let audioBlob: Blob;
+      let speechAsset: TranslatorSpeechAsset;
       try {
-        audioBlob = await this.dependencies.requestSpeech(
+        speechAsset = await this.dependencies.requestSpeech(
           entry,
           speed,
           requestController.signal,
@@ -95,7 +100,8 @@ export class TranslatorSpeechPlayer {
       if (operationId !== this.operationId || this.disposed) {
         throw createAbortError();
       }
-      objectUrl = this.dependencies.createObjectUrl(audioBlob);
+      options.onSpeechGenerated?.(speechAsset.diagnostics);
+      objectUrl = this.dependencies.createObjectUrl(speechAsset.audio);
       this.cache.set(cacheKey, objectUrl);
     }
 

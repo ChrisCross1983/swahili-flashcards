@@ -16,6 +16,8 @@ function createGateway(): TranslatorAiGateway {
     transcribe: vi.fn(async () => ({
       text: " Tutakuja kesho asubuhi. ",
       detectedLanguage: "sw" as const,
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     })),
     autoTranslate: vi.fn(async () => ({
       sourceLanguage: "sw" as const,
@@ -47,6 +49,8 @@ describe("translator server pipeline", () => {
         return {
           text: " Tutakuja kesho asubuhi. ",
           detectedLanguage: "sw" as const,
+          model: "gpt-4o-mini-transcribe",
+          fallbackUsed: false,
         };
       }),
       autoTranslate: vi.fn(async () => ({
@@ -62,7 +66,7 @@ describe("translator server pipeline", () => {
       }),
     };
 
-    await expect(translateRecordedAudio(input, gateway)).resolves.toEqual({
+    await expect(translateRecordedAudio(input, gateway)).resolves.toMatchObject({
       originalText: "Tutakuja kesho asubuhi.",
       translatedText: "Wir kommen morgen früh.",
       sourceLanguage: "sw",
@@ -77,6 +81,8 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: " ... ",
       detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
 
     await expect(translateRecordedAudio(input, gateway)).rejects.toMatchObject({
@@ -106,6 +112,8 @@ describe("translator server pipeline", () => {
       vi.mocked(gateway.transcribe).mockResolvedValue({
         text: transcript,
         detectedLanguage: null,
+        model: "gpt-4o-mini-transcribe",
+        fallbackUsed: false,
       });
       vi.mocked(gateway.autoTranslate).mockResolvedValue({
         ...expectedDirection,
@@ -118,7 +126,7 @@ describe("translator server pipeline", () => {
           direction: { sourceLanguage: "auto", targetLanguage: "auto" },
         },
         gateway,
-      )).resolves.toEqual({
+      )).resolves.toMatchObject({
         originalText: transcript,
         translatedText,
         ...expectedDirection,
@@ -140,6 +148,8 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
     vi.mocked(gateway.autoTranslate).mockResolvedValue({
       sourceLanguage: "unknown",
@@ -188,6 +198,30 @@ describe("translator server pipeline", () => {
     expect(timing).not.toHaveProperty("translationMs");
   });
 
+  it("returns safe pipeline diagnostics with the actual transcription fallback", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text: "Habari yako?",
+      detectedLanguage: "sw",
+      model: "whisper-1",
+      fallbackUsed: true,
+    });
+
+    const result = await translateRecordedAudio(input, gateway);
+
+    expect(result.diagnostics).toEqual({
+      transcriptionModel: "whisper-1",
+      translationModel: "gpt-5.6-terra",
+      transcriptionMs: expect.any(Number),
+      translationMs: expect.any(Number),
+      totalMs: expect.any(Number),
+      transcriptionFallbackUsed: true,
+      detectedLanguage: "sw",
+    });
+    expect(result.diagnostics).not.toHaveProperty("apiKey");
+    expect(result.diagnostics).not.toHaveProperty("prompt");
+  });
+
   it.each([
     [{ sourceLanguage: "de", targetLanguage: "sw" }, "Guten Morgen."],
     [{ sourceLanguage: "sw", targetLanguage: "de" }, "Habari za asubuhi."],
@@ -196,6 +230,8 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text,
       detectedLanguage: direction.sourceLanguage,
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
     });
 
     await translateRecordedAudio({ ...input, direction }, gateway);

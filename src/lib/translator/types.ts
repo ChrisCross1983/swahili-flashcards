@@ -11,6 +11,22 @@ export type TranslationRequestDirection =
   | TranslationDirection
   | { sourceLanguage: "auto"; targetLanguage: "auto" };
 
+export type TranslationDiagnostics = {
+  transcriptionModel: string;
+  translationModel: string;
+  transcriptionMs: number;
+  translationMs?: number;
+  autoTranslateMs?: number;
+  totalMs: number;
+  transcriptionFallbackUsed: boolean;
+  detectedLanguage: TranslationLanguage | null;
+  ttsModel?: string;
+  ttsGenerationMs?: number;
+  ttsSpeed?: number;
+  autoplayEnabled?: boolean;
+  autoplayBlocked?: boolean;
+};
+
 export type TranslationEntry = {
   id: string;
   timestamp: number;
@@ -19,6 +35,7 @@ export type TranslationEntry = {
   originalText: string;
   translatedText: string;
   sourceWasDetected: boolean;
+  diagnostics?: TranslationDiagnostics;
 };
 
 export type TranslationResult = {
@@ -26,6 +43,7 @@ export type TranslationResult = {
   translatedText: string;
   sourceLanguage: TranslationLanguage;
   targetLanguage: TranslationLanguage;
+  diagnostics: TranslationDiagnostics;
 };
 
 export type TranslatorApiErrorCode =
