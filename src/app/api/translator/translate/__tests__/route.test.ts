@@ -4,11 +4,11 @@ import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 
 const requireUserMock = vi.fn();
 const transcribeMock = vi.fn();
-const classifyLanguageMock = vi.fn();
+const autoTranslateMock = vi.fn();
 const translateMock = vi.fn();
 const createGatewayMock = vi.fn(() => ({
   transcribe: transcribeMock,
-  classifyLanguage: classifyLanguageMock,
+  autoTranslate: autoTranslateMock,
   translate: translateMock,
 }));
 
@@ -54,14 +54,18 @@ describe("POST /api/translator/translate", () => {
     requireUserMock.mockReset();
     createGatewayMock.mockClear();
     transcribeMock.mockReset();
-    classifyLanguageMock.mockReset();
+    autoTranslateMock.mockReset();
     translateMock.mockReset();
     requireUserMock.mockResolvedValue({ user: { id: "user-1" }, response: null });
     transcribeMock.mockResolvedValue({
       text: "Tutakuja kesho asubuhi.",
       detectedLanguage: "sw",
     });
-    classifyLanguageMock.mockResolvedValue("sw");
+    autoTranslateMock.mockResolvedValue({
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+      translatedText: "Wir kommen morgen früh.",
+    });
     translateMock.mockResolvedValue("Wir kommen morgen früh.");
   });
 
@@ -128,6 +132,7 @@ describe("POST /api/translator/translate", () => {
       error: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
     });
     expect(translateMock).not.toHaveBeenCalled();
+    expect(autoTranslateMock).not.toHaveBeenCalled();
   });
 
   it("returns transcription and translation without OpenAI metadata", async () => {
@@ -159,6 +164,8 @@ describe("POST /api/translator/translate", () => {
     expect(transcribeMock).toHaveBeenCalledWith(
       expect.objectContaining({ language: null }),
     );
+    expect(autoTranslateMock).toHaveBeenCalledOnce();
+    expect(translateMock).not.toHaveBeenCalled();
   });
 
   it("asks for manual selection when AUTO detects another language", async () => {
@@ -166,7 +173,11 @@ describe("POST /api/translator/translate", () => {
       text: "Hello there",
       detectedLanguage: null,
     });
-    classifyLanguageMock.mockResolvedValue(null);
+    autoTranslateMock.mockResolvedValue({
+      sourceLanguage: "unknown",
+      targetLanguage: null,
+      translatedText: null,
+    });
 
     const response = await post(
       createFormData({ sourceLanguage: "auto", targetLanguage: "auto" }),
@@ -179,6 +190,7 @@ describe("POST /api/translator/translate", () => {
         "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
     });
     expect(translateMock).not.toHaveBeenCalled();
+    expect(autoTranslateMock).toHaveBeenCalledOnce();
   });
 
   it("does not leak raw OpenAI errors", async () => {

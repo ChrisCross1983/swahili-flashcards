@@ -9,12 +9,18 @@ import {
   SPEECH_VOICE,
   TRANSLATION_MODEL,
 } from "@/lib/translator/server/models";
-import { buildInterpreterPrompt } from "@/lib/translator/server/prompt";
+import {
+  buildAutoInterpreterPrompt,
+  buildInterpreterPrompt,
+} from "@/lib/translator/server/prompt";
 import {
   getSpeechInstructions,
   type TranslatorSpeechGateway,
 } from "@/lib/translator/server/speech";
-import type { TranslatorAiGateway } from "@/lib/translator/server/translate";
+import type {
+  AutoTranslationOutput,
+  TranslatorAiGateway,
+} from "@/lib/translator/server/translate";
 
 type SafeOpenAIErrorDetails = {
   status: number | undefined;
@@ -84,9 +90,47 @@ export function normalizeDetectedLanguage(language: string) {
   return null;
 }
 
-export function normalizeLanguageClassificationResult(result: string) {
-  const normalized = result.trim().toLowerCase();
-  return normalized === "de" || normalized === "sw" ? normalized : null;
+const AUTO_TRANSLATION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    sourceLanguage: { type: "string", enum: ["de", "sw", "unknown"] },
+    targetLanguage: {
+      anyOf: [
+        { type: "string", enum: ["de", "sw"] },
+        { type: "null" },
+      ],
+    },
+    translatedText: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["sourceLanguage", "targetLanguage", "translatedText"],
+} as const;
+
+export function isAutoTranslationOutput(
+  value: unknown,
+): value is AutoTranslationOutput {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  if (result.sourceLanguage === "unknown") {
+    return result.targetLanguage === null && result.translatedText === null;
+  }
+  if (result.sourceLanguage === "de") {
+    return (
+      result.targetLanguage === "sw" &&
+      typeof result.translatedText === "string" &&
+      Boolean(result.translatedText.trim())
+    );
+  }
+  if (result.sourceLanguage === "sw") {
+    return (
+      result.targetLanguage === "de" &&
+      typeof result.translatedText === "string" &&
+      Boolean(result.translatedText.trim())
+    );
+  }
+  return false;
 }
 
 function containsUsableTranscript(text: string) {
@@ -223,35 +267,49 @@ export function createOpenAITranslatorGateway(
       }
     },
 
-    async classifyLanguage(text: string) {
+    async autoTranslate(text: string) {
+      if (process.env.NODE_ENV === "development") {
+        console.info("[translator][auto translation debug]", {
+          model: TRANSLATION_MODEL,
+          mode: "auto",
+          transcriptLength: text.length,
+          openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+        });
+      }
       try {
-        const response = await client.responses.create({
+        const params = {
           model: TRANSLATION_MODEL,
           reasoning: { effort: "none" },
-          instructions: [
-            "Classify the language of the provided transcript.",
-            "Allowed outputs: de, sw, unknown.",
-            "Return only one of these exact values.",
-            "Use sw for Kiswahili or Swahili.",
-            "Use de for German.",
-            "If uncertain or the text is another language, return unknown.",
-          ].join("\n"),
+          instructions: buildAutoInterpreterPrompt(),
           input: text,
-          max_output_tokens: 16,
-        });
-        const result = normalizeLanguageClassificationResult(
-          response.output_text,
-        );
+          max_output_tokens: 1200,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "translator_auto_result",
+              strict: true,
+              schema: AUTO_TRANSLATION_SCHEMA,
+            },
+          },
+        } as const;
+        const response = await client.responses.parse<
+          typeof params,
+          AutoTranslationOutput
+        >(params);
+        const result = response.output_parsed;
+        if (!isAutoTranslationOutput(result)) {
+          throw new Error("Invalid automatic translation output");
+        }
         if (process.env.NODE_ENV === "development") {
-          console.info("[translator][language classification debug]", {
-            result: result ?? "unknown",
+          console.info("[translator][auto translation result]", {
+            sourceLanguage: result.sourceLanguage,
           });
         }
         return result;
       } catch (error) {
         if (process.env.NODE_ENV === "development") {
           console.error(
-            "[translator][openai language classification error]",
+            "[translator][openai auto translation error]",
             getSafeOpenAIErrorDetails(error),
           );
         }

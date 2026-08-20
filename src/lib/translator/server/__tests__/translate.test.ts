@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
   translateRecordedAudio,
@@ -17,12 +17,21 @@ function createGateway(): TranslatorAiGateway {
       text: " Tutakuja kesho asubuhi. ",
       detectedLanguage: "sw" as const,
     })),
-    classifyLanguage: vi.fn(async () => "sw" as const),
+    autoTranslate: vi.fn(async () => ({
+      sourceLanguage: "sw" as const,
+      targetLanguage: "de" as const,
+      translatedText: "Wir kommen morgen früh.",
+    })),
     translate: vi.fn(async () => " Wir kommen morgen früh. "),
   };
 }
 
 describe("translator server pipeline", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
   it("runs transcription before translation and returns trimmed text", async () => {
     const order: string[] = [];
     const gateway: TranslatorAiGateway = {
@@ -40,7 +49,11 @@ describe("translator server pipeline", () => {
           detectedLanguage: "sw" as const,
         };
       }),
-      classifyLanguage: vi.fn(async () => "sw" as const),
+      autoTranslate: vi.fn(async () => ({
+        sourceLanguage: "sw" as const,
+        targetLanguage: "de" as const,
+        translatedText: "Wir kommen morgen früh.",
+      })),
       translate: vi.fn(async (text, direction) => {
         order.push("translation");
         expect(text).toBe("Tutakuja kesho asubuhi.");
@@ -56,7 +69,7 @@ describe("translator server pipeline", () => {
       targetLanguage: "de",
     });
     expect(order).toEqual(["transcription", "translation"]);
-    expect(gateway.classifyLanguage).not.toHaveBeenCalled();
+    expect(gateway.autoTranslate).not.toHaveBeenCalled();
   });
 
   it("does not translate an empty or content-free transcript", async () => {
@@ -70,67 +83,69 @@ describe("translator server pipeline", () => {
       code: "no_speech",
     } satisfies Partial<TranslatorPipelineError>);
     expect(gateway.translate).not.toHaveBeenCalled();
-  });
-
-  it("uses the detected AUTO language and translates to the opposite language", async () => {
-    const gateway = createGateway();
-    const autoInput = {
-      ...input,
-      direction: { sourceLanguage: "auto", targetLanguage: "auto" } as const,
-    };
-
-    await expect(translateRecordedAudio(autoInput, gateway)).resolves.toEqual({
-      originalText: "Tutakuja kesho asubuhi.",
-      translatedText: "Wir kommen morgen früh.",
-      sourceLanguage: "sw",
-      targetLanguage: "de",
-    });
-    expect(gateway.transcribe).toHaveBeenCalledWith(
-      expect.objectContaining({ language: null }),
-    );
-    expect(gateway.translate).toHaveBeenCalledWith(
-      "Tutakuja kesho asubuhi.",
-      { sourceLanguage: "sw", targetLanguage: "de" },
-    );
+    expect(gateway.autoTranslate).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["sw", { sourceLanguage: "sw", targetLanguage: "de" }],
-    ["de", { sourceLanguage: "de", targetLanguage: "sw" }],
+    [
+      "sw",
+      "Habari yako?",
+      "Wie geht es dir?",
+      { sourceLanguage: "sw", targetLanguage: "de" },
+    ],
+    [
+      "de",
+      "Wie geht es dir?",
+      "Habari yako?",
+      { sourceLanguage: "de", targetLanguage: "sw" },
+    ],
   ] as const)(
-    "uses the fallback classifier result %s when Whisper is inconclusive",
-    async (classifiedLanguage, expectedDirection) => {
+    "combines AUTO %s detection and translation in one request",
+    async (sourceLanguage, transcript, translatedText, expectedDirection) => {
       const gateway = createGateway();
       vi.mocked(gateway.transcribe).mockResolvedValue({
-        text: "Habari yako?",
+        text: transcript,
         detectedLanguage: null,
       });
-      vi.mocked(gateway.classifyLanguage).mockResolvedValue(classifiedLanguage);
+      vi.mocked(gateway.autoTranslate).mockResolvedValue({
+        ...expectedDirection,
+        translatedText,
+      });
 
-      await translateRecordedAudio(
+      await expect(translateRecordedAudio(
         {
           ...input,
           direction: { sourceLanguage: "auto", targetLanguage: "auto" },
         },
         gateway,
-      );
+      )).resolves.toEqual({
+        originalText: transcript,
+        translatedText,
+        ...expectedDirection,
+      });
 
-      expect(gateway.classifyLanguage).toHaveBeenCalledOnce();
-      expect(gateway.classifyLanguage).toHaveBeenCalledWith("Habari yako?");
-      expect(gateway.translate).toHaveBeenCalledWith(
-        "Habari yako?",
-        expectedDirection,
+      expect(sourceLanguage).toBe(expectedDirection.sourceLanguage);
+      expect(gateway.transcribe).toHaveBeenCalledOnce();
+      expect(gateway.autoTranslate).toHaveBeenCalledOnce();
+      expect(gateway.autoTranslate).toHaveBeenCalledWith(transcript);
+      expect(gateway.translate).not.toHaveBeenCalled();
+      expect(gateway.transcribe).toHaveBeenCalledWith(
+        expect.objectContaining({ language: null }),
       );
     },
   );
 
-  it("requires manual selection when the fallback is also inconclusive", async () => {
+  it("requires manual selection when combined AUTO returns unknown", async () => {
     const gateway = createGateway();
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
     });
-    vi.mocked(gateway.classifyLanguage).mockResolvedValue(null);
+    vi.mocked(gateway.autoTranslate).mockResolvedValue({
+      sourceLanguage: "unknown",
+      targetLanguage: null,
+      translatedText: null,
+    });
 
     await expect(
       translateRecordedAudio(
@@ -141,30 +156,52 @@ describe("translator server pipeline", () => {
         gateway,
       ),
     ).rejects.toMatchObject({ code: "unsupported_language" });
-    expect(gateway.classifyLanguage).toHaveBeenCalledWith("Hello there");
+    expect(gateway.autoTranslate).toHaveBeenCalledWith("Hello there");
     expect(gateway.translate).not.toHaveBeenCalled();
   });
 
-  it("does not classify language for a manual direction", async () => {
+  it("reports one combined AUTO timing without classifier or manual translation timing", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const gateway = createGateway();
-    vi.mocked(gateway.transcribe).mockResolvedValue({
-      text: "Guten Morgen.",
-      detectedLanguage: null,
-    });
 
     await translateRecordedAudio(
       {
         ...input,
-        direction: { sourceLanguage: "de", targetLanguage: "sw" },
+        direction: { sourceLanguage: "auto", targetLanguage: "auto" },
       },
       gateway,
     );
 
-    expect(gateway.classifyLanguage).not.toHaveBeenCalled();
-    expect(gateway.translate).toHaveBeenCalledWith("Guten Morgen.", {
-      sourceLanguage: "de",
-      targetLanguage: "sw",
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[translator] timings",
+      expect.objectContaining({
+        transcriptionMs: expect.any(Number),
+        autoTranslateMs: expect.any(Number),
+        totalMs: expect.any(Number),
+      }),
+    );
+    const timing = infoSpy.mock.calls.find(
+      ([message]) => message === "[translator] timings",
+    )?.[1] as Record<string, unknown>;
+    expect(timing).not.toHaveProperty("languageClassificationMs");
+    expect(timing).not.toHaveProperty("translationMs");
+  });
+
+  it.each([
+    [{ sourceLanguage: "de", targetLanguage: "sw" }, "Guten Morgen."],
+    [{ sourceLanguage: "sw", targetLanguage: "de" }, "Habari za asubuhi."],
+  ] as const)("keeps manual %s translation unchanged", async (direction, text) => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text,
+      detectedLanguage: direction.sourceLanguage,
     });
+
+    await translateRecordedAudio({ ...input, direction }, gateway);
+
+    expect(gateway.autoTranslate).not.toHaveBeenCalled();
+    expect(gateway.translate).toHaveBeenCalledWith(text, direction);
   });
 
   it("classifies transcription and translation failures", async () => {
@@ -182,6 +219,20 @@ describe("translator server pipeline", () => {
     );
     await expect(
       translateRecordedAudio(input, translationFailure),
+    ).rejects.toMatchObject({ code: "translation_failed" });
+
+    const autoTranslationFailure = createGateway();
+    vi.mocked(autoTranslationFailure.autoTranslate).mockRejectedValue(
+      new Error("OpenAI automatic translation request failed"),
+    );
+    await expect(
+      translateRecordedAudio(
+        {
+          ...input,
+          direction: { sourceLanguage: "auto", targetLanguage: "auto" },
+        },
+        autoTranslationFailure,
+      ),
     ).rejects.toMatchObject({ code: "translation_failed" });
   });
 });

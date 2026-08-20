@@ -4,6 +4,7 @@ const openAiMocks = vi.hoisted(() => ({
   transcriptionCreate: vi.fn(),
   speechCreate: vi.fn(),
   responseCreate: vi.fn(),
+  responseParse: vi.fn(),
   toFile: vi.fn(
     async (bytes: Uint8Array, name: string, options: { type: string }) => ({
       name,
@@ -20,7 +21,10 @@ vi.mock("openai", () => ({
       speech: { create: openAiMocks.speechCreate },
     };
 
-    responses = { create: openAiMocks.responseCreate };
+    responses = {
+      create: openAiMocks.responseCreate,
+      parse: openAiMocks.responseParse,
+    };
   },
   toFile: openAiMocks.toFile,
 }));
@@ -29,8 +33,8 @@ import {
   createOpenAITranslatorGateway,
   createOpenAISpeechGateway,
   getSafeOpenAIErrorDetails,
+  isAutoTranslationOutput,
   normalizeDetectedLanguage,
-  normalizeLanguageClassificationResult,
 } from "@/lib/translator/server/openai";
 import {
   FALLBACK_TRANSCRIPTION_MODEL,
@@ -53,6 +57,7 @@ describe("OpenAI translator diagnostics", () => {
     openAiMocks.transcriptionCreate.mockReset();
     openAiMocks.speechCreate.mockReset();
     openAiMocks.responseCreate.mockReset();
+    openAiMocks.responseParse.mockReset();
     openAiMocks.toFile.mockClear();
   });
 
@@ -367,44 +372,142 @@ describe("OpenAI translator diagnostics", () => {
   });
 
   it.each([
-    ["  sw\n", "sw"],
-    [" DE ", "de"],
-    ["unknown", null],
-    ["swahili", null],
-    ["The answer is sw", null],
-  ] as const)("limits fallback classification output %s", async (output, expected) => {
-    openAiMocks.responseCreate.mockResolvedValue({ output_text: output });
+    [
+      "German",
+      {
+        sourceLanguage: "de",
+        targetLanguage: "sw",
+        translatedText: "Habari yako?",
+      },
+    ],
+    [
+      "Kiswahili",
+      {
+        sourceLanguage: "sw",
+        targetLanguage: "de",
+        translatedText: "Wie geht es dir?",
+      },
+    ],
+    [
+      "unknown",
+      {
+        sourceLanguage: "unknown",
+        targetLanguage: null,
+        translatedText: null,
+      },
+    ],
+  ] as const)(
+    "returns one structured AUTO result for %s",
+    async (_case, result) => {
+      openAiMocks.responseParse.mockResolvedValue({ output_parsed: result });
+      const gateway = createOpenAITranslatorGateway("configured-secret");
+
+      await expect(gateway.autoTranslate("Transcript")).resolves.toEqual(
+        result,
+      );
+
+      expect(openAiMocks.responseParse).toHaveBeenCalledOnce();
+      expect(openAiMocks.responseCreate).not.toHaveBeenCalled();
+      expect(openAiMocks.responseParse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5.6-terra",
+          reasoning: { effort: "none" },
+          instructions: expect.stringMatching(/sourceLanguage = unknown/),
+          input: "Transcript",
+          text: expect.objectContaining({
+            format: expect.objectContaining({
+              type: "json_schema",
+              name: "translator_auto_result",
+              strict: true,
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    null,
+    { sourceLanguage: "de", targetLanguage: "de", translatedText: "Hallo" },
+    { sourceLanguage: "sw", targetLanguage: "de", translatedText: "   " },
+    {
+      sourceLanguage: "unknown",
+      targetLanguage: "de",
+      translatedText: null,
+    },
+  ])("rejects an inconsistent structured AUTO result", async (result) => {
+    openAiMocks.responseParse.mockResolvedValue({ output_parsed: result });
     const gateway = createOpenAITranslatorGateway("configured-secret");
 
-    await expect(gateway.classifyLanguage("Transcript")).resolves.toBe(expected);
-    expect(openAiMocks.responseCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "gpt-5.6-terra",
-        instructions: expect.stringMatching(/Allowed outputs: de, sw, unknown/),
-        input: "Transcript",
-        max_output_tokens: 16,
-      }),
+    await expect(gateway.autoTranslate("Transcript")).rejects.toThrow(
+      "Invalid automatic translation output",
     );
-    expect(normalizeLanguageClassificationResult(output)).toBe(expected);
+    expect(isAutoTranslationOutput(result)).toBe(false);
   });
 
-  it("logs only the normalized fallback result in development", async () => {
+  it("logs only AUTO metadata and the detected language in development", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    openAiMocks.responseCreate.mockResolvedValue({ output_text: "  SW\n" });
+    openAiMocks.responseParse.mockResolvedValue({
+      output_parsed: {
+        sourceLanguage: "sw",
+        targetLanguage: "de",
+        translatedText: "Vertrauliche Übersetzung",
+      },
+    });
     const gateway = createOpenAITranslatorGateway("configured-secret");
 
-    await expect(gateway.classifyLanguage("Sensitive transcript")).resolves.toBe(
-      "sw",
-    );
+    await gateway.autoTranslate("Sensitive transcript");
 
     expect(infoSpy).toHaveBeenCalledWith(
-      "[translator][language classification debug]",
-      { result: "sw" },
+      "[translator][auto translation debug]",
+      {
+        model: "gpt-5.6-terra",
+        mode: "auto",
+        transcriptLength: 20,
+        openAiApiKeyConfigured: false,
+      },
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[translator][auto translation result]",
+      { sourceLanguage: "sw" },
     );
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(
       "Sensitive transcript",
     );
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(
+      "Vertrauliche Übersetzung",
+    );
+  });
+
+  it("uses the Whisper fallback before the single combined AUTO request", async () => {
+    openAiMocks.transcriptionCreate
+      .mockRejectedValueOnce(new Error("Primary failed"))
+      .mockResolvedValueOnce({
+        text: "Habari yako?",
+        language: "swahili",
+      });
+    openAiMocks.responseParse.mockResolvedValue({
+      output_parsed: {
+        sourceLanguage: "sw",
+        targetLanguage: "de",
+        translatedText: "Wie geht es dir?",
+      },
+    });
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+
+    const transcript = await gateway.transcribe({
+      ...transcriptionInput,
+      language: null,
+    });
+    await expect(gateway.autoTranslate(transcript.text)).resolves.toMatchObject({
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+    });
+
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
+    expect(openAiMocks.responseParse).toHaveBeenCalledOnce();
+    expect(openAiMocks.responseCreate).not.toHaveBeenCalled();
   });
 
   it("does not expose additional SDK error properties", () => {
