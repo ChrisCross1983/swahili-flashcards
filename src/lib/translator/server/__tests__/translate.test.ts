@@ -16,7 +16,7 @@ function createGateway(): TranslatorAiGateway {
     transcribe: vi.fn(async () => ({
       text: " Tutakuja kesho asubuhi. ",
       detectedLanguage: "sw" as const,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     })),
     autoTranslate: vi.fn(async () => ({
@@ -49,7 +49,7 @@ describe("translator server pipeline", () => {
         return {
           text: " Tutakuja kesho asubuhi. ",
           detectedLanguage: "sw" as const,
-          model: "gpt-4o-mini-transcribe",
+          model: "gpt-4o-transcribe",
           fallbackUsed: false,
         };
       }),
@@ -81,7 +81,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: " ... ",
       detectedLanguage: "sw",
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     });
 
@@ -112,7 +112,7 @@ describe("translator server pipeline", () => {
       vi.mocked(gateway.transcribe).mockResolvedValue({
         text: transcript,
         detectedLanguage: null,
-        model: "gpt-4o-mini-transcribe",
+        model: "gpt-4o-transcribe",
         fallbackUsed: false,
       });
       vi.mocked(gateway.autoTranslate).mockResolvedValue({
@@ -148,7 +148,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     });
     vi.mocked(gateway.autoTranslate).mockResolvedValue({
@@ -230,7 +230,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text,
       detectedLanguage: direction.sourceLanguage,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     });
 

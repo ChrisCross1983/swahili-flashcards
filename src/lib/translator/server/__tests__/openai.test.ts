@@ -38,6 +38,7 @@ import {
 } from "@/lib/translator/server/openai";
 import {
   FALLBACK_TRANSCRIPTION_MODEL,
+  FINAL_TRANSCRIPTION_FALLBACK_MODEL,
   PRIMARY_TRANSCRIPTION_MODEL,
 } from "@/lib/translator/server/models";
 
@@ -61,9 +62,10 @@ describe("OpenAI translator diagnostics", () => {
     openAiMocks.toFile.mockClear();
   });
 
-  it("defines the requested primary and fallback transcription models", () => {
-    expect(PRIMARY_TRANSCRIPTION_MODEL).toBe("gpt-4o-mini-transcribe");
-    expect(FALLBACK_TRANSCRIPTION_MODEL).toBe("whisper-1");
+  it("defines the quality-first transcription model cascade", () => {
+    expect(PRIMARY_TRANSCRIPTION_MODEL).toBe("gpt-4o-transcribe");
+    expect(FALLBACK_TRANSCRIPTION_MODEL).toBe("gpt-4o-mini-transcribe");
+    expect(FINAL_TRANSCRIPTION_FALLBACK_MODEL).toBe("whisper-1");
   });
 
   it("logs file metadata and only safe upstream error fields in development", async () => {
@@ -94,7 +96,7 @@ describe("OpenAI translator diagnostics", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "[translator][transcription debug]",
       {
-        model: "gpt-4o-mini-transcribe",
+        model: "gpt-4o-transcribe",
         fallbackUsed: false,
         language: "de",
         originalMimeType: "audio/webm;codecs=opus",
@@ -111,8 +113,8 @@ describe("OpenAI translator diagnostics", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "[translator][transcription fallback]",
       {
-        from: "gpt-4o-mini-transcribe",
-        to: "whisper-1",
+        from: "gpt-4o-transcribe",
+        to: "gpt-4o-mini-transcribe",
         reason: "transcription_error",
       },
     );
@@ -141,14 +143,14 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Hallo",
       detectedLanguage: "de",
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledWith({
       file: expect.anything(),
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       language: "de",
     });
 
@@ -156,7 +158,7 @@ describe("OpenAI translator diagnostics", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("falls back once to Whisper when the primary model is unavailable", async () => {
+  it("falls back to gpt-4o-mini-transcribe when the primary model is unavailable", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -173,25 +175,34 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Hallo",
       detectedLanguage: "de",
-      model: "whisper-1",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: true,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
     expect(openAiMocks.transcriptionCreate).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ model: "gpt-4o-mini-transcribe" }),
+      expect.objectContaining({ model: "gpt-4o-transcribe" }),
     );
     expect(openAiMocks.transcriptionCreate).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ model: "whisper-1", language: "de" }),
+      expect.objectContaining({ model: "gpt-4o-mini-transcribe", language: "de" }),
     );
     expect(infoSpy).toHaveBeenCalledWith(
       "[translator][transcription fallback]",
       {
-        from: "gpt-4o-mini-transcribe",
-        to: "whisper-1",
+        from: "gpt-4o-transcribe",
+        to: "gpt-4o-mini-transcribe",
         reason: "model_access",
+      },
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[translator][transcription quality debug]",
+      {
+        model: "gpt-4o-mini-transcribe",
+        fallbackUsed: true,
+        transcriptLength: 5,
+        transcriptionMs: expect.any(Number),
       },
     );
   });
@@ -205,14 +216,14 @@ describe("OpenAI translator diagnostics", () => {
     await expect(gateway.transcribe(transcriptionInput)).resolves.toEqual({
       text: "Guten Morgen",
       detectedLanguage: "de",
-      model: "whisper-1",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: true,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
     expect(openAiMocks.transcriptionCreate).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ model: "whisper-1" }),
+      expect.objectContaining({ model: "gpt-4o-mini-transcribe" }),
     );
   });
 
@@ -225,15 +236,43 @@ describe("OpenAI translator diagnostics", () => {
     ).resolves.toEqual({
       text: "Habari yako?",
       detectedLanguage: null,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       fallbackUsed: false,
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
     expect(openAiMocks.transcriptionCreate).toHaveBeenCalledWith({
       file: expect.anything(),
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
+      prompt: expect.stringMatching(/German or Tanzanian Kiswahili/i),
     });
+    const prompt = openAiMocks.transcriptionCreate.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/Transcribe the spoken words faithfully/i);
+    expect(prompt).toMatch(/Do not translate, infer, complete, or add words/i);
+  });
+
+  it("logs quality metadata without transcript content in development", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    openAiMocks.transcriptionCreate.mockResolvedValue({
+      text: "Sensitive transcript",
+    });
+
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+    await gateway.transcribe(transcriptionInput);
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[translator][transcription quality debug]",
+      {
+        model: "gpt-4o-transcribe",
+        fallbackUsed: false,
+        transcriptLength: 20,
+        transcriptionMs: expect.any(Number),
+      },
+    );
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(
+      "Sensitive transcript",
+    );
   });
 
   it("logs translation metadata and only safe upstream error fields in development", async () => {
@@ -325,9 +364,10 @@ describe("OpenAI translator diagnostics", () => {
     });
   });
 
-  it("uses verbose Whisper language detection after an AUTO primary failure", async () => {
+  it("uses verbose Whisper language detection after both modern models fail", async () => {
     openAiMocks.transcriptionCreate
       .mockRejectedValueOnce(new Error("Primary failed"))
+      .mockRejectedValueOnce(new Error("Fallback failed"))
       .mockResolvedValueOnce({
         text: "Habari",
         language: "swahili",
@@ -344,7 +384,7 @@ describe("OpenAI translator diagnostics", () => {
     });
 
     expect(openAiMocks.transcriptionCreate).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.objectContaining({
         model: "whisper-1",
         response_format: "verbose_json",
@@ -365,6 +405,7 @@ describe("OpenAI translator diagnostics", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     openAiMocks.transcriptionCreate
       .mockRejectedValueOnce(new Error("Primary failed"))
+      .mockRejectedValueOnce(new Error("Fallback failed"))
       .mockResolvedValueOnce({
         text: "Sensitive transcript",
         language: "swa",
@@ -493,9 +534,10 @@ describe("OpenAI translator diagnostics", () => {
     );
   });
 
-  it("uses the Whisper fallback before the single combined AUTO request", async () => {
+  it("uses the final Whisper fallback before the single combined AUTO request", async () => {
     openAiMocks.transcriptionCreate
       .mockRejectedValueOnce(new Error("Primary failed"))
+      .mockRejectedValueOnce(new Error("Fallback failed"))
       .mockResolvedValueOnce({
         text: "Habari yako?",
         language: "swahili",
@@ -518,7 +560,7 @@ describe("OpenAI translator diagnostics", () => {
       targetLanguage: "de",
     });
 
-    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(2);
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledTimes(3);
     expect(openAiMocks.responseParse).toHaveBeenCalledOnce();
     expect(openAiMocks.responseCreate).not.toHaveBeenCalled();
   });

@@ -3,6 +3,7 @@ import type { TranslationDirection } from "@/lib/translator/types";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
   FALLBACK_TRANSCRIPTION_MODEL,
+  FINAL_TRANSCRIPTION_FALLBACK_MODEL,
   PRIMARY_TRANSCRIPTION_MODEL,
   SPEECH_MODEL,
   SPEECH_RESPONSE_FORMAT,
@@ -146,6 +147,18 @@ function getTranscriptionFallbackReason(error: unknown) {
     : ("transcription_error" as const);
 }
 
+const AUTO_TRANSCRIPTION_CONTEXT = [
+  "Expected languages: German or Tanzanian Kiswahili.",
+  "Transcribe the spoken words faithfully.",
+  "Common Kiswahili vocabulary and colloquial Tanzanian speech may occur.",
+  "Do not translate, infer, complete, or add words that were not spoken.",
+].join(" ");
+
+type TranscriptionModel =
+  | typeof PRIMARY_TRANSCRIPTION_MODEL
+  | typeof FALLBACK_TRANSCRIPTION_MODEL
+  | typeof FINAL_TRANSCRIPTION_FALLBACK_MODEL;
+
 export function createOpenAITranslatorGateway(
   apiKey = process.env.OPENAI_API_KEY,
 ): TranslatorAiGateway {
@@ -165,7 +178,7 @@ export function createOpenAITranslatorGateway(
       });
 
       const logTranscriptionDebug = (
-        model: typeof PRIMARY_TRANSCRIPTION_MODEL | typeof FALLBACK_TRANSCRIPTION_MODEL,
+        model: TranscriptionModel,
         fallbackUsed: boolean,
       ) => {
         if (process.env.NODE_ENV !== "development") return;
@@ -185,23 +198,79 @@ export function createOpenAITranslatorGateway(
         });
       };
 
+      const logTranscriptionQualityDebug = (
+        model: TranscriptionModel,
+        fallbackUsed: boolean,
+        transcript: string,
+        startedAt: number,
+      ) => {
+        if (process.env.NODE_ENV !== "development") return;
+        console.info("[translator][transcription quality debug]", {
+          model,
+          fallbackUsed,
+          transcriptLength: transcript.length,
+          transcriptionMs: Date.now() - startedAt,
+        });
+      };
+
+      const logTranscriptionError = (error: unknown) => {
+        if (process.env.NODE_ENV !== "development") return;
+        console.error(
+          "[translator][openai transcription error]",
+          getSafeOpenAIErrorDetails(error),
+        );
+      };
+
+      const logLanguageDetection = (
+        rawDetectedLanguage: string | null,
+        normalizedDetectedLanguage: "de" | "sw" | null,
+        transcriptLength: number,
+      ) => {
+        if (process.env.NODE_ENV !== "development" || input.language) return;
+        console.info("[translator][language detection debug]", {
+          rawDetectedLanguage,
+          normalizedDetectedLanguage:
+            normalizedDetectedLanguage ?? "unknown",
+          transcriptLength,
+        });
+      };
+
+      const logFallback = (
+        from: TranscriptionModel,
+        to: TranscriptionModel,
+        reason: "model_access" | "transcription_error",
+      ) => {
+        if (process.env.NODE_ENV !== "development") return;
+        console.info("[translator][transcription fallback]", {
+          from,
+          to,
+          reason,
+        });
+      };
+
+      const autoContext = input.language
+        ? {}
+        : { prompt: AUTO_TRANSCRIPTION_CONTEXT };
+
       logTranscriptionDebug(PRIMARY_TRANSCRIPTION_MODEL, false);
       let fallbackReason: "model_access" | "transcription_error";
 
       try {
+        const startedAt = Date.now();
         const primary = await client.audio.transcriptions.create({
           file,
           model: PRIMARY_TRANSCRIPTION_MODEL,
           ...(input.language ? { language: input.language } : {}),
+          ...autoContext,
         });
+        logTranscriptionQualityDebug(
+          PRIMARY_TRANSCRIPTION_MODEL,
+          false,
+          primary.text,
+          startedAt,
+        );
         if (containsUsableTranscript(primary.text)) {
-          if (!input.language && process.env.NODE_ENV === "development") {
-            console.info("[translator][language detection debug]", {
-              rawDetectedLanguage: null,
-              normalizedDetectedLanguage: "unknown",
-              transcriptLength: primary.text.length,
-            });
-          }
+          logLanguageDetection(null, null, primary.text.length);
           return {
             text: primary.text,
             detectedLanguage: input.language,
@@ -212,66 +281,101 @@ export function createOpenAITranslatorGateway(
         fallbackReason = "transcription_error";
       } catch (error) {
         fallbackReason = getTranscriptionFallbackReason(error);
-        if (process.env.NODE_ENV === "development") {
-          console.error(
-            "[translator][openai transcription error]",
-            getSafeOpenAIErrorDetails(error),
-          );
-        }
+        logTranscriptionError(error);
       }
 
-      if (process.env.NODE_ENV === "development") {
-        console.info("[translator][transcription fallback]", {
-          from: PRIMARY_TRANSCRIPTION_MODEL,
-          to: FALLBACK_TRANSCRIPTION_MODEL,
-          reason: fallbackReason,
-        });
-      }
+      logFallback(
+        PRIMARY_TRANSCRIPTION_MODEL,
+        FALLBACK_TRANSCRIPTION_MODEL,
+        fallbackReason,
+      );
       logTranscriptionDebug(FALLBACK_TRANSCRIPTION_MODEL, true);
 
       try {
-        if (!input.language) {
-          const fallback = await client.audio.transcriptions.create({
-            file,
-            model: FALLBACK_TRANSCRIPTION_MODEL,
-            response_format: "verbose_json",
-          });
-          const detectedLanguage = normalizeDetectedLanguage(
-            fallback.language,
-          );
-          if (process.env.NODE_ENV === "development") {
-            console.info("[translator][language detection debug]", {
-              rawDetectedLanguage: fallback.language,
-              normalizedDetectedLanguage: detectedLanguage ?? "unknown",
-              transcriptLength: fallback.text.length,
-            });
-          }
+        const startedAt = Date.now();
+        const fallback = await client.audio.transcriptions.create({
+          file,
+          model: FALLBACK_TRANSCRIPTION_MODEL,
+          ...(input.language ? { language: input.language } : {}),
+          ...autoContext,
+        });
+        logTranscriptionQualityDebug(
+          FALLBACK_TRANSCRIPTION_MODEL,
+          true,
+          fallback.text,
+          startedAt,
+        );
+        if (containsUsableTranscript(fallback.text)) {
+          logLanguageDetection(null, null, fallback.text.length);
           return {
             text: fallback.text,
-            detectedLanguage,
+            detectedLanguage: input.language,
             model: FALLBACK_TRANSCRIPTION_MODEL,
             fallbackUsed: true,
           };
         }
+        fallbackReason = "transcription_error";
+      } catch (error) {
+        fallbackReason = getTranscriptionFallbackReason(error);
+        logTranscriptionError(error);
+      }
 
-        const fallback = await client.audio.transcriptions.create({
+      logFallback(
+        FALLBACK_TRANSCRIPTION_MODEL,
+        FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+        fallbackReason,
+      );
+      logTranscriptionDebug(FINAL_TRANSCRIPTION_FALLBACK_MODEL, true);
+
+      try {
+        const startedAt = Date.now();
+        if (!input.language) {
+          const finalFallback = await client.audio.transcriptions.create({
+            file,
+            model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+            response_format: "verbose_json",
+          });
+          const detectedLanguage = normalizeDetectedLanguage(
+            finalFallback.language,
+          );
+          logTranscriptionQualityDebug(
+            FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+            true,
+            finalFallback.text,
+            startedAt,
+          );
+          logLanguageDetection(
+            finalFallback.language,
+            detectedLanguage,
+            finalFallback.text.length,
+          );
+          return {
+            text: finalFallback.text,
+            detectedLanguage,
+            model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+            fallbackUsed: true,
+          };
+        }
+
+        const finalFallback = await client.audio.transcriptions.create({
           file,
-          model: FALLBACK_TRANSCRIPTION_MODEL,
+          model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
           language: input.language,
         });
+        logTranscriptionQualityDebug(
+          FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+          true,
+          finalFallback.text,
+          startedAt,
+        );
         return {
-          text: fallback.text,
+          text: finalFallback.text,
           detectedLanguage: input.language,
-          model: FALLBACK_TRANSCRIPTION_MODEL,
+          model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
           fallbackUsed: true,
         };
       } catch (error) {
-        if (process.env.NODE_ENV === "development") {
-          console.error(
-            "[translator][openai transcription error]",
-            getSafeOpenAIErrorDetails(error),
-          );
-        }
+        logTranscriptionError(error);
         throw error;
       }
     },

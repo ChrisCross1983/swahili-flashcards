@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_TRANSLATOR_FEEDBACK_COMMENT_LENGTH } from "@/lib/translator/feedback";
 
 const requireUserMock = vi.fn();
@@ -23,7 +23,7 @@ const validFeedback = {
   originalText: "Wie geht es dir?",
   translatedText: "Habari yako?",
   diagnostics: {
-    transcriptionModel: "gpt-4o-mini-transcribe",
+    transcriptionModel: "gpt-4o-transcribe",
     translationModel: "gpt-5.6-terra",
     ttsModel: "gpt-4o-mini-tts",
     transcriptionMs: 1200,
@@ -53,6 +53,10 @@ async function post(body: unknown) {
 }
 
 describe("POST /api/translator/feedback", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.resetModules();
     requireUserMock.mockReset();
@@ -100,7 +104,7 @@ describe("POST /api/translator/feedback", () => {
         categories: ["translation_wrong", "overall_too_slow"],
         original_text: "Wie geht es dir?",
         translated_text: "Habari yako?",
-        transcription_model: "gpt-4o-mini-transcribe",
+        transcription_model: "gpt-4o-transcribe",
         translation_model: "gpt-5.6-terra",
         tts_model: "gpt-4o-mini-tts",
         auto_translate_ms: 800,
@@ -168,4 +172,43 @@ describe("POST /api/translator/feedback", () => {
       { onConflict: "owner_key,translation_entry_id" },
     );
   });
+
+  it.each(["PGRST205", "42P01"])(
+    "reports missing feedback storage safely for database code %s",
+    async (code) => {
+      const errorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      singleMock.mockResolvedValue({
+        data: null,
+        error: {
+          code,
+          message: "Internal database details must not be logged",
+          details: "private schema details",
+          hint: "private migration hint",
+        },
+      });
+
+      const response = await post(validFeedback);
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        code: "feedback_storage_unavailable",
+        error: "Feedback-Speicher ist nicht verfügbar.",
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        "[translator] feedback write failed",
+        {
+          code,
+          reason: "table_missing",
+          requiredMigration:
+            "supabase/migrations/20260820000000_translator_feedback.sql",
+        },
+      );
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain("Internal database details");
+      expect(logged).not.toContain("private schema details");
+      expect(logged).not.toContain("private migration hint");
+    },
+  );
 });
