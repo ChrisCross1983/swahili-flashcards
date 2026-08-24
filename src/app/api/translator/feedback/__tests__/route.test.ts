@@ -23,13 +23,19 @@ const validFeedback = {
   originalText: "Wie geht es dir?",
   translatedText: "Habari yako?",
   diagnostics: {
-    transcriptionModel: "gpt-4o-transcribe",
+    transcriptionModel: "gpt-4o-mini-transcribe",
     translationModel: "gpt-5.6-terra",
     ttsModel: "gpt-4o-mini-tts",
     transcriptionMs: 1200,
     autoTranslateMs: 800,
-    totalMs: 2000,
+    serverTranslationTotalMs: 2000,
+    translationRequestMs: 2060,
+    stopToTranslationVisibleMs: 2120,
     ttsGenerationMs: 450,
+    ttsRequestToReadyMs: 520,
+    translationVisibleToTtsReadyMs: 540,
+    stopToTtsReadyMs: 2660,
+    stopToPlaybackStartedMs: 2690,
     ttsSpeed: 1,
     transcriptionFallbackUsed: false,
     detectedLanguage: "de",
@@ -104,10 +110,17 @@ describe("POST /api/translator/feedback", () => {
         categories: ["translation_wrong", "overall_too_slow"],
         original_text: "Wie geht es dir?",
         translated_text: "Habari yako?",
-        transcription_model: "gpt-4o-transcribe",
+        transcription_model: "gpt-4o-mini-transcribe",
         translation_model: "gpt-5.6-terra",
         tts_model: "gpt-4o-mini-tts",
         auto_translate_ms: 800,
+        server_translation_total_ms: 2000,
+        translation_request_ms: 2060,
+        stop_to_translation_visible_ms: 2120,
+        tts_request_to_ready_ms: 520,
+        translation_visible_to_tts_ready_ms: 540,
+        stop_to_tts_ready_ms: 2660,
+        stop_to_playback_started_ms: 2690,
         tts_speed: 1,
         autoplay_blocked: false,
       }),
@@ -150,6 +163,60 @@ describe("POST /api/translator/feedback", () => {
 
     expect(response.status).toBe(400);
     expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects negative client performance diagnostics", async () => {
+    const response = await post({
+      ...validFeedback,
+      diagnostics: {
+        ...validFeedback.diagnostics,
+        stopToTtsReadyMs: -1,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts feedback without optional diagnostics", async () => {
+    const response = await post({ ...validFeedback, diagnostics: null });
+
+    expect(response.status).toBe(200);
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transcription_model: null,
+        server_translation_total_ms: null,
+        stop_to_translation_visible_ms: null,
+        stop_to_tts_ready_ms: null,
+      }),
+      { onConflict: "owner_key,translation_entry_id" },
+    );
+  });
+
+  it("keeps legacy feedback diagnostics compatible", async () => {
+    const response = await post({
+      ...validFeedback,
+      diagnostics: {
+        transcriptionModel: "gpt-4o-mini-transcribe",
+        translationModel: "gpt-5.6-terra",
+        transcriptionMs: 1200,
+        autoTranslateMs: 800,
+        totalMs: 2000,
+        transcriptionFallbackUsed: false,
+        detectedLanguage: "de",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        total_ms: 2000,
+        server_translation_total_ms: 2000,
+        stop_to_translation_visible_ms: null,
+        stop_to_tts_ready_ms: null,
+      }),
+      { onConflict: "owner_key,translation_entry_id" },
+    );
   });
 
   it("upserts repeated feedback using the owner and entry constraint", async () => {
@@ -202,7 +269,7 @@ describe("POST /api/translator/feedback", () => {
           code,
           reason: "table_missing",
           requiredMigration:
-            "supabase/migrations/20260820000000_translator_feedback.sql",
+            "supabase/migrations/20260824000000_translator_feedback_performance.sql",
         },
       );
       const logged = JSON.stringify(errorSpy.mock.calls);

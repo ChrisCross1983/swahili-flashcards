@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
 import TranslationFeedbackSheet from "@/components/translator/TranslationFeedbackSheet";
@@ -23,7 +23,11 @@ import {
   type TranslatorSpeechFailureKind,
 } from "@/lib/translator/speechClient";
 import { useTranslatorSpeech } from "@/lib/translator/useTranslatorSpeech";
-import type { TranslationEntry } from "@/lib/translator/types";
+import type {
+  TranslationDiagnostics,
+  TranslationEntry,
+} from "@/lib/translator/types";
+import { TranslatorTurnPerformance } from "@/lib/translator/turnPerformance";
 import {
   DEFAULT_SPEECH_SPEED,
   formatSpeechSpeed,
@@ -47,6 +51,10 @@ export default function TranslatorView() {
   const playbackInFlightRef = useRef(false);
   const playbackRunIdRef = useRef(0);
   const requestAbortRef = useRef<AbortController | null>(null);
+  const turnPerformanceByEntryRef = useRef(
+    new Map<string, TranslatorTurnPerformance>(),
+  );
+  const pendingTranslationVisibleEntryIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const {
     status: recorderStatus,
@@ -57,6 +65,7 @@ export default function TranslatorView() {
   } = useAudioRecorder();
   const {
     playTranslation,
+    preparePlaybackForUserGesture,
     pausePlayback,
     resumePlayback,
     stopPlayback,
@@ -64,10 +73,47 @@ export default function TranslatorView() {
   } = useTranslatorSpeech();
   const [playbackReady, setPlaybackReady] = useState(false);
 
+  const updateEntryDiagnostics = useCallback((
+    entry: TranslationEntry,
+    diagnostics: Partial<TranslationDiagnostics>,
+    phase: string,
+  ) => {
+    dispatch({
+      type: "UPDATE_ENTRY_DIAGNOSTICS",
+      entryId: entry.id,
+      diagnostics,
+    });
+    if (process.env.NODE_ENV === "development") {
+      console.info("[translator][turn performance][client]", {
+        phase,
+        transcriptionModel: entry.diagnostics?.transcriptionModel,
+        transcriptionFallbackUsed:
+          entry.diagnostics?.transcriptionFallbackUsed,
+        autoplayEnabled: entry.diagnostics?.autoplayEnabled,
+        ...diagnostics,
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!recorderError) return;
     dispatch({ type: "RECORDING_FAILED", message: recorderError });
   }, [recorderError]);
+
+  useEffect(() => {
+    const entryId = pendingTranslationVisibleEntryIdRef.current;
+    if (!entryId) return;
+    const entry = state.entries.find((candidate) => candidate.id === entryId);
+    const performance = turnPerformanceByEntryRef.current.get(entryId);
+    if (!entry || !performance) return;
+
+    pendingTranslationVisibleEntryIdRef.current = null;
+    updateEntryDiagnostics(
+      entry,
+      performance.markTranslationVisible(),
+      "translationVisible",
+    );
+  }, [state.entries, updateEntryDiagnostics]);
 
   useEffect(() => () => requestAbortRef.current?.abort(), []);
   useEffect(
@@ -95,6 +141,7 @@ export default function TranslatorView() {
     if (state.status === "playing" || state.status === "paused") {
       handleStopPlayback();
     }
+    if (state.autoPlay) preparePlaybackForUserGesture();
     setSpeechFeedback(null);
     try {
       await startRecording();
@@ -127,30 +174,40 @@ export default function TranslatorView() {
         speechSpeed,
         automatic,
         (diagnostics) => {
-          dispatch({
-            type: "UPDATE_ENTRY_DIAGNOSTICS",
-            entryId: entry.id,
-            diagnostics: {
-              ...diagnostics,
-              ttsSpeed: speechSpeed,
-            },
-          });
+          updateEntryDiagnostics(
+            entry,
+            { ...diagnostics, ttsSpeed: speechSpeed },
+            "ttsGenerated",
+          );
+        },
+        () => {
+          turnPerformanceByEntryRef.current
+            .get(entry.id)
+            ?.markTtsRequestStarted();
+        },
+        () => {
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          if (performance) {
+            updateEntryDiagnostics(
+              entry,
+              performance.markTtsReady(),
+              "ttsReady",
+            );
+          }
         },
         () => {
           if (mountedRef.current && playbackRunIdRef.current === runId) {
             setPlaybackReady(true);
-            dispatch({
-              type: "UPDATE_ENTRY_DIAGNOSTICS",
-              entryId: entry.id,
-              diagnostics: { ttsSpeed: speechSpeed },
-            });
-            if (automatic) {
-              dispatch({
-                type: "UPDATE_ENTRY_DIAGNOSTICS",
-                entryId: entry.id,
-                diagnostics: { autoplayBlocked: false },
-              });
-            }
+            const performance = turnPerformanceByEntryRef.current.get(entry.id);
+            updateEntryDiagnostics(
+              entry,
+              {
+                ...(performance?.markPlaybackStarted() ?? {}),
+                ttsSpeed: speechSpeed,
+                ...(automatic ? { autoplayBlocked: false } : {}),
+              },
+              "playbackStarted",
+            );
           }
         },
       );
@@ -163,11 +220,11 @@ export default function TranslatorView() {
         const failure = getTranslatorSpeechFailure(error, automatic);
         setSpeechFeedback(failure);
         if (failure.kind === "autoplay-blocked") {
-          dispatch({
-            type: "UPDATE_ENTRY_DIAGNOSTICS",
-            entryId: entry.id,
-            diagnostics: { autoplayBlocked: true },
-          });
+          updateEntryDiagnostics(
+            entry,
+            { autoplayBlocked: true },
+            "autoplayBlocked",
+          );
         }
       }
     } finally {
@@ -202,6 +259,7 @@ export default function TranslatorView() {
 
   async function handleStopRecording() {
     if (state.status !== "recording" || translationInFlightRef.current) return;
+    const turnPerformance = new TranslatorTurnPerformance(performance.now());
     translationInFlightRef.current = true;
     const direction = getTranslationRequestDirection(state.mode);
     let audioBlob: Blob;
@@ -222,16 +280,21 @@ export default function TranslatorView() {
     requestAbortRef.current = abortController;
 
     try {
+      turnPerformance.markTranslationRequestStarted();
       const result = await requestAudioTranslation(audioBlob, direction, {
         signal: abortController.signal,
       });
+      turnPerformance.markTranslationCompleted();
       const entry = createTranslationEntry(result, {
         sourceWasDetected: direction.sourceLanguage === "auto",
         diagnostics: {
           ttsSpeed: speechSpeed,
           autoplayEnabled: state.autoPlay,
+          ...turnPerformance.getDiagnostics(),
         },
       });
+      turnPerformanceByEntryRef.current.set(entry.id, turnPerformance);
+      pendingTranslationVisibleEntryIdRef.current = entry.id;
       dispatch({
         type: "PROCESSING_SUCCEEDED",
         entry,
@@ -257,6 +320,8 @@ export default function TranslatorView() {
 
   function handleClearHistory() {
     clearCache();
+    turnPerformanceByEntryRef.current.clear();
+    pendingTranslationVisibleEntryIdRef.current = null;
     setSpeechFeedback(null);
     setFeedbackEntryId(null);
     setSavedFeedbackIds(new Set());

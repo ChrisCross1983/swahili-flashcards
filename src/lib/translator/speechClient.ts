@@ -1,7 +1,8 @@
 import type { TranslationLanguage } from "@/lib/translator/types";
 
 const SPEECH_ERROR_MESSAGE = "Die Sprachausgabe konnte nicht erstellt werden.";
-const SPEECH_READY_MESSAGE = "Audio ist bereit. Tippe auf Abspielen.";
+const SPEECH_READY_MESSAGE =
+  "Audio ist bereit. Tippe einmal auf „Abspielen“ – es wird nicht neu erzeugt.";
 const SPEECH_PLAYBACK_ERROR_MESSAGE = "Die Wiedergabe ist gerade nicht möglich.";
 
 export type TranslatorSpeechFailureKind =

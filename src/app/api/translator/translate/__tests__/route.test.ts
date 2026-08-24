@@ -155,7 +155,7 @@ describe("POST /api/translator/translate", () => {
         translationModel: "gpt-5.6-terra",
         transcriptionMs: expect.any(Number),
         translationMs: expect.any(Number),
-        totalMs: expect.any(Number),
+        serverTranslationTotalMs: expect.any(Number),
         transcriptionFallbackUsed: false,
         detectedLanguage: "sw",
       },

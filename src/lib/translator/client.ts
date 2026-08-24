@@ -53,7 +53,8 @@ function isTranslationDiagnostics(
     typeof diagnostics.translationModel === "string" &&
     Boolean(diagnostics.translationModel) &&
     isNonNegativeNumber(diagnostics.transcriptionMs) &&
-    isNonNegativeNumber(diagnostics.totalMs) &&
+    (isNonNegativeNumber(diagnostics.serverTranslationTotalMs) ||
+      isNonNegativeNumber(diagnostics.totalMs)) &&
     typeof diagnostics.transcriptionFallbackUsed === "boolean" &&
     (diagnostics.detectedLanguage === null ||
       diagnostics.detectedLanguage === "de" ||
@@ -145,7 +146,9 @@ export async function requestAudioTranslation(
       ...(body.diagnostics.translationMs === undefined
         ? { autoTranslateMs: body.diagnostics.autoTranslateMs }
         : { translationMs: body.diagnostics.translationMs }),
-      totalMs: body.diagnostics.totalMs,
+      serverTranslationTotalMs:
+        body.diagnostics.serverTranslationTotalMs ??
+        (body.diagnostics.totalMs as number),
       transcriptionFallbackUsed:
         body.diagnostics.transcriptionFallbackUsed,
       detectedLanguage: body.diagnostics.detectedLanguage,

@@ -3,7 +3,6 @@ import type { TranslationDirection } from "@/lib/translator/types";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
   FALLBACK_TRANSCRIPTION_MODEL,
-  FINAL_TRANSCRIPTION_FALLBACK_MODEL,
   PRIMARY_TRANSCRIPTION_MODEL,
   SPEECH_MODEL,
   SPEECH_RESPONSE_FORMAT,
@@ -156,8 +155,7 @@ const AUTO_TRANSCRIPTION_CONTEXT = [
 
 type TranscriptionModel =
   | typeof PRIMARY_TRANSCRIPTION_MODEL
-  | typeof FALLBACK_TRANSCRIPTION_MODEL
-  | typeof FINAL_TRANSCRIPTION_FALLBACK_MODEL;
+  | typeof FALLBACK_TRANSCRIPTION_MODEL;
 
 export function createOpenAITranslatorGateway(
   apiKey = process.env.OPENAI_API_KEY,
@@ -293,11 +291,38 @@ export function createOpenAITranslatorGateway(
 
       try {
         const startedAt = Date.now();
+        if (!input.language) {
+          const fallback = await client.audio.transcriptions.create({
+            file,
+            model: FALLBACK_TRANSCRIPTION_MODEL,
+            response_format: "verbose_json",
+          });
+          const detectedLanguage = normalizeDetectedLanguage(
+            fallback.language,
+          );
+          logTranscriptionQualityDebug(
+            FALLBACK_TRANSCRIPTION_MODEL,
+            true,
+            fallback.text,
+            startedAt,
+          );
+          logLanguageDetection(
+            fallback.language,
+            detectedLanguage,
+            fallback.text.length,
+          );
+          return {
+            text: fallback.text,
+            detectedLanguage,
+            model: FALLBACK_TRANSCRIPTION_MODEL,
+            fallbackUsed: true,
+          };
+        }
+
         const fallback = await client.audio.transcriptions.create({
           file,
           model: FALLBACK_TRANSCRIPTION_MODEL,
-          ...(input.language ? { language: input.language } : {}),
-          ...autoContext,
+          language: input.language,
         });
         logTranscriptionQualityDebug(
           FALLBACK_TRANSCRIPTION_MODEL,
@@ -305,73 +330,10 @@ export function createOpenAITranslatorGateway(
           fallback.text,
           startedAt,
         );
-        if (containsUsableTranscript(fallback.text)) {
-          logLanguageDetection(null, null, fallback.text.length);
-          return {
-            text: fallback.text,
-            detectedLanguage: input.language,
-            model: FALLBACK_TRANSCRIPTION_MODEL,
-            fallbackUsed: true,
-          };
-        }
-        fallbackReason = "transcription_error";
-      } catch (error) {
-        fallbackReason = getTranscriptionFallbackReason(error);
-        logTranscriptionError(error);
-      }
-
-      logFallback(
-        FALLBACK_TRANSCRIPTION_MODEL,
-        FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-        fallbackReason,
-      );
-      logTranscriptionDebug(FINAL_TRANSCRIPTION_FALLBACK_MODEL, true);
-
-      try {
-        const startedAt = Date.now();
-        if (!input.language) {
-          const finalFallback = await client.audio.transcriptions.create({
-            file,
-            model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-            response_format: "verbose_json",
-          });
-          const detectedLanguage = normalizeDetectedLanguage(
-            finalFallback.language,
-          );
-          logTranscriptionQualityDebug(
-            FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-            true,
-            finalFallback.text,
-            startedAt,
-          );
-          logLanguageDetection(
-            finalFallback.language,
-            detectedLanguage,
-            finalFallback.text.length,
-          );
-          return {
-            text: finalFallback.text,
-            detectedLanguage,
-            model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-            fallbackUsed: true,
-          };
-        }
-
-        const finalFallback = await client.audio.transcriptions.create({
-          file,
-          model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-          language: input.language,
-        });
-        logTranscriptionQualityDebug(
-          FINAL_TRANSCRIPTION_FALLBACK_MODEL,
-          true,
-          finalFallback.text,
-          startedAt,
-        );
         return {
-          text: finalFallback.text,
+          text: fallback.text,
           detectedLanguage: input.language,
-          model: FINAL_TRANSCRIPTION_FALLBACK_MODEL,
+          model: FALLBACK_TRANSCRIPTION_MODEL,
           fallbackUsed: true,
         };
       } catch (error) {

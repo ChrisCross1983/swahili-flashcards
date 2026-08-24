@@ -18,6 +18,7 @@ export function useTranslatorSpeech() {
       createObjectUrl: (blob) => URL.createObjectURL(blob),
       revokeObjectUrl: (url) => URL.revokeObjectURL(url),
       createAudio: (url) => new Audio(url),
+      isDocumentVisible: () => document.visibilityState === "visible",
     });
   }
 
@@ -35,6 +36,8 @@ export function useTranslatorSpeech() {
     onSpeechGenerated?: (
       diagnostics: TranslatorSpeechGenerationDiagnostics,
     ) => void,
+    onSpeechRequestStarted?: () => void,
+    onSpeechReady?: () => void,
     onPlaybackStarted?: () => void,
   ) => {
     const player = playerRef.current;
@@ -42,8 +45,14 @@ export function useTranslatorSpeech() {
     return player.play(entry, speed, {
       autoplay,
       onSpeechGenerated,
+      onSpeechRequestStarted,
+      onSpeechReady,
       onPlaybackStarted,
     });
+  }, []);
+
+  const preparePlaybackForUserGesture = useCallback(() => {
+    playerRef.current?.prepareForUserGesture();
   }, []);
 
   const pausePlayback = useCallback(() => {
@@ -66,6 +75,7 @@ export function useTranslatorSpeech() {
 
   return {
     playTranslation,
+    preparePlaybackForUserGesture,
     pausePlayback,
     resumePlayback,
     stopPlayback,

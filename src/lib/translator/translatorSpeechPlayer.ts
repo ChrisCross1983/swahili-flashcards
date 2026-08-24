@@ -9,8 +9,20 @@ import {
 
 type AudioElement = Pick<
   HTMLAudioElement,
-  "currentTime" | "onended" | "onerror" | "pause" | "play" | "preload"
+  | "currentTime"
+  | "load"
+  | "onended"
+  | "onerror"
+  | "pause"
+  | "play"
+  | "preload"
+  | "src"
 >;
+
+type CachedSpeech = {
+  objectUrl: string;
+  audio: AudioElement;
+};
 
 export type TranslatorSpeechPlayerDependencies = {
   requestSpeech: (
@@ -20,7 +32,8 @@ export type TranslatorSpeechPlayerDependencies = {
   ) => Promise<TranslatorSpeechAsset>;
   createObjectUrl: (blob: Blob) => string;
   revokeObjectUrl: (url: string) => void;
-  createAudio: (url: string) => AudioElement;
+  createAudio: (url?: string) => AudioElement;
+  isDocumentVisible?: () => boolean;
 };
 
 export type TranslatorSpeechPlaybackOptions = {
@@ -28,6 +41,8 @@ export type TranslatorSpeechPlaybackOptions = {
   onSpeechGenerated?: (
     diagnostics: TranslatorSpeechGenerationDiagnostics,
   ) => void;
+  onSpeechRequestStarted?: () => void;
+  onSpeechReady?: () => void;
   onPlaybackStarted?: () => void;
 };
 
@@ -55,11 +70,12 @@ function logPlaybackFailure(error: unknown, autoplay: boolean) {
 }
 
 export class TranslatorSpeechPlayer {
-  private readonly cache = new Map<string, string>();
+  private readonly cache = new Map<string, CachedSpeech>();
   private activeStop: (() => void) | null = null;
   private activeFail: ((error: unknown) => void) | null = null;
   private activeAudio: AudioElement | null = null;
   private requestController: AbortController | null = null;
+  private preparedAudio: AudioElement | null = null;
   private operationId = 0;
   private disposed = false;
 
@@ -67,6 +83,13 @@ export class TranslatorSpeechPlayer {
 
   hasCachedAudio(entryId: string, speed: number) {
     return this.cache.has(getSpeechCacheKey(entryId, speed));
+  }
+
+  prepareForUserGesture() {
+    if (this.disposed || this.preparedAudio) return;
+    const audio = this.dependencies.createAudio();
+    audio.preload = "auto";
+    this.preparedAudio = audio;
   }
 
   async play(
@@ -79,12 +102,13 @@ export class TranslatorSpeechPlayer {
     this.stopPlayback();
     const operationId = this.operationId;
     const cacheKey = getSpeechCacheKey(entry.id, speed);
-    let objectUrl = this.cache.get(cacheKey);
+    let cachedSpeech = this.cache.get(cacheKey);
 
-    if (!objectUrl) {
+    if (!cachedSpeech) {
       const requestController = new AbortController();
       this.requestController = requestController;
       let speechAsset: TranslatorSpeechAsset;
+      options.onSpeechRequestStarted?.();
       try {
         speechAsset = await this.dependencies.requestSpeech(
           entry,
@@ -101,16 +125,32 @@ export class TranslatorSpeechPlayer {
         throw createAbortError();
       }
       options.onSpeechGenerated?.(speechAsset.diagnostics);
-      objectUrl = this.dependencies.createObjectUrl(speechAsset.audio);
-      this.cache.set(cacheKey, objectUrl);
+      const objectUrl = this.dependencies.createObjectUrl(speechAsset.audio);
+      const audio = this.preparedAudio ?? this.dependencies.createAudio();
+      this.preparedAudio = null;
+      audio.preload = "auto";
+      audio.src = objectUrl;
+      audio.load();
+      cachedSpeech = { objectUrl, audio };
+      this.cache.set(cacheKey, cachedSpeech);
     }
 
     if (operationId !== this.operationId || this.disposed) {
       throw createAbortError();
     }
 
-    const audio = this.dependencies.createAudio(objectUrl);
-    audio.preload = "auto";
+    options.onSpeechReady?.();
+    if (
+      options.autoplay === true &&
+      this.dependencies.isDocumentVisible?.() === false
+    ) {
+      throw new DOMException(
+        "Automatic playback requires a visible page",
+        "NotAllowedError",
+      );
+    }
+
+    const audio = cachedSpeech.audio;
     const playbackRequestedAt = performance.now();
 
     await new Promise<void>((resolve, reject) => {
@@ -130,6 +170,7 @@ export class TranslatorSpeechPlayer {
 
       const failPlayback = (error: unknown) => {
         if (settled) return;
+        resetAudio(audio);
         logPlaybackFailure(error, options.autoplay === true);
         finish(error);
       };
@@ -142,25 +183,34 @@ export class TranslatorSpeechPlayer {
       this.activeStop = stop;
       this.activeFail = failPlayback;
       this.activeAudio = audio;
-      audio.onended = () => finish();
+      audio.onended = () => {
+        resetAudio(audio);
+        finish();
+      };
       audio.onerror = () =>
         failPlayback(new Error("The browser could not play the speech audio"));
 
-      void audio.play().then(
-        () => {
-          if (operationId !== this.operationId || this.disposed) {
-            stop();
-            return;
-          }
-          if (process.env.NODE_ENV === "development") {
-            console.info("[translator] playback timing", {
-              playbackStartMs: Math.round(performance.now() - playbackRequestedAt),
-            });
-          }
-          options.onPlaybackStarted?.();
-        },
-        (error) => failPlayback(error),
-      );
+      try {
+        void audio.play().then(
+          () => {
+            if (operationId !== this.operationId || this.disposed) {
+              stop();
+              return;
+            }
+            if (process.env.NODE_ENV === "development") {
+              console.info("[translator] playback timing", {
+                playbackStartMs: Math.round(
+                  performance.now() - playbackRequestedAt,
+                ),
+              });
+            }
+            options.onPlaybackStarted?.();
+          },
+          (error) => failPlayback(error),
+        );
+      } catch (error) {
+        failPlayback(error);
+      }
     });
   }
 
@@ -205,10 +255,13 @@ export class TranslatorSpeechPlayer {
 
   clearCache() {
     this.stopPlayback();
-    for (const objectUrl of this.cache.values()) {
-      this.dependencies.revokeObjectUrl(objectUrl);
+    for (const cachedSpeech of this.cache.values()) {
+      resetAudio(cachedSpeech.audio);
+      this.dependencies.revokeObjectUrl(cachedSpeech.objectUrl);
     }
     this.cache.clear();
+    if (this.preparedAudio) resetAudio(this.preparedAudio);
+    this.preparedAudio = null;
   }
 
   dispose() {

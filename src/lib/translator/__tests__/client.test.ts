@@ -18,7 +18,7 @@ const result = {
     translationModel: "gpt-5.6-terra",
     transcriptionMs: 1200,
     translationMs: 800,
-    totalMs: 2000,
+    serverTranslationTotalMs: 2000,
     transcriptionFallbackUsed: false,
     detectedLanguage: "sw" as const,
   },

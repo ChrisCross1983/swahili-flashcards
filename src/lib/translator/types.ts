@@ -17,11 +17,19 @@ export type TranslationDiagnostics = {
   transcriptionMs: number;
   translationMs?: number;
   autoTranslateMs?: number;
-  totalMs: number;
+  serverTranslationTotalMs: number;
+  /** Legacy field accepted from older feedback/API payloads. */
+  totalMs?: number;
   transcriptionFallbackUsed: boolean;
   detectedLanguage: TranslationLanguage | null;
+  translationRequestMs?: number;
+  stopToTranslationVisibleMs?: number;
   ttsModel?: string;
   ttsGenerationMs?: number;
+  ttsRequestToReadyMs?: number;
+  translationVisibleToTtsReadyMs?: number;
+  stopToTtsReadyMs?: number;
+  stopToPlaybackStartedMs?: number;
   ttsSpeed?: number;
   autoplayEnabled?: boolean;
   autoplayBlocked?: boolean;

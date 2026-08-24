@@ -31,7 +31,14 @@ type FeedbackDatabasePayload = {
   translation_ms: number | null;
   auto_translate_ms: number | null;
   total_ms: number | null;
+  server_translation_total_ms: number | null;
+  translation_request_ms: number | null;
+  stop_to_translation_visible_ms: number | null;
   tts_generation_ms: number | null;
+  tts_request_to_ready_ms: number | null;
+  translation_visible_to_tts_ready_ms: number | null;
+  stop_to_tts_ready_ms: number | null;
+  stop_to_playback_started_ms: number | null;
   tts_speed: number | null;
   transcription_fallback_used: boolean | null;
   detected_language: "de" | "sw" | null;
@@ -135,7 +142,24 @@ export function parseTranslatorFeedback(
   const translationMs = parseOptionalDuration(values.translationMs);
   const autoTranslateMs = parseOptionalDuration(values.autoTranslateMs);
   const totalMs = parseOptionalDuration(values.totalMs);
+  const serverTranslationTotalMs = parseOptionalDuration(
+    values.serverTranslationTotalMs,
+  );
+  const translationRequestMs = parseOptionalDuration(
+    values.translationRequestMs,
+  );
+  const stopToTranslationVisibleMs = parseOptionalDuration(
+    values.stopToTranslationVisibleMs,
+  );
   const ttsGenerationMs = parseOptionalDuration(values.ttsGenerationMs);
+  const ttsRequestToReadyMs = parseOptionalDuration(values.ttsRequestToReadyMs);
+  const translationVisibleToTtsReadyMs = parseOptionalDuration(
+    values.translationVisibleToTtsReadyMs,
+  );
+  const stopToTtsReadyMs = parseOptionalDuration(values.stopToTtsReadyMs);
+  const stopToPlaybackStartedMs = parseOptionalDuration(
+    values.stopToPlaybackStartedMs,
+  );
   const transcriptionFallbackUsed = parseOptionalBoolean(
     values.transcriptionFallbackUsed,
   );
@@ -160,7 +184,14 @@ export function parseTranslatorFeedback(
     translationMs === undefined ||
     autoTranslateMs === undefined ||
     totalMs === undefined ||
+    serverTranslationTotalMs === undefined ||
+    translationRequestMs === undefined ||
+    stopToTranslationVisibleMs === undefined ||
     ttsGenerationMs === undefined ||
+    ttsRequestToReadyMs === undefined ||
+    translationVisibleToTtsReadyMs === undefined ||
+    stopToTtsReadyMs === undefined ||
+    stopToPlaybackStartedMs === undefined ||
     transcriptionFallbackUsed === undefined ||
     detectedLanguage === undefined ||
     autoplayEnabled === undefined ||
@@ -195,8 +226,15 @@ export function parseTranslatorFeedback(
     transcription_ms: transcriptionMs,
     translation_ms: translationMs,
     auto_translate_ms: autoTranslateMs,
-    total_ms: totalMs,
+    total_ms: totalMs ?? serverTranslationTotalMs,
+    server_translation_total_ms: serverTranslationTotalMs ?? totalMs,
+    translation_request_ms: translationRequestMs,
+    stop_to_translation_visible_ms: stopToTranslationVisibleMs,
     tts_generation_ms: ttsGenerationMs,
+    tts_request_to_ready_ms: ttsRequestToReadyMs,
+    translation_visible_to_tts_ready_ms: translationVisibleToTtsReadyMs,
+    stop_to_tts_ready_ms: stopToTtsReadyMs,
+    stop_to_playback_started_ms: stopToPlaybackStartedMs,
     tts_speed: ttsSpeed,
     transcription_fallback_used: transcriptionFallbackUsed,
     detected_language: detectedLanguage,

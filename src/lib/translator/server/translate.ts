@@ -154,6 +154,7 @@ export async function translateRecordedAudio(
   }
 
   const translationDurationMs = Date.now() - translationStartedAt;
+  const serverTranslationTotalMs = Date.now() - startedAt;
   const diagnostics: TranslationDiagnostics = {
     transcriptionModel: transcriptionOutput.model,
     translationModel: TRANSLATION_MODEL,
@@ -161,7 +162,7 @@ export async function translateRecordedAudio(
     ...(isAuto
       ? { autoTranslateMs: translationDurationMs }
       : { translationMs: translationDurationMs }),
-    totalMs: Date.now() - startedAt,
+    serverTranslationTotalMs,
     transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
     detectedLanguage: isAuto
       ? result.sourceLanguage
@@ -169,20 +170,15 @@ export async function translateRecordedAudio(
   };
 
   if (process.env.NODE_ENV === "development") {
-    console.info(
-      "[translator] timings",
-      isAuto
-        ? {
-            transcriptionMs,
-            autoTranslateMs: translationDurationMs,
-            totalMs: diagnostics.totalMs,
-          }
-        : {
-            transcriptionMs,
-            translationMs: translationDurationMs,
-            totalMs: diagnostics.totalMs,
-          },
-    );
+    console.info("[translator][turn performance][server]", {
+      transcriptionModel: transcriptionOutput.model,
+      transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
+      transcriptionMs,
+      ...(isAuto
+        ? { autoTranslateMs: translationDurationMs }
+        : { translationMs: translationDurationMs }),
+      serverTranslationTotalMs,
+    });
   }
 
   return { ...result, diagnostics };

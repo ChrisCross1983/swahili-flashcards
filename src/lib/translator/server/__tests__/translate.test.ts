@@ -16,7 +16,7 @@ function createGateway(): TranslatorAiGateway {
     transcribe: vi.fn(async () => ({
       text: " Tutakuja kesho asubuhi. ",
       detectedLanguage: "sw" as const,
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: false,
     })),
     autoTranslate: vi.fn(async () => ({
@@ -49,7 +49,7 @@ describe("translator server pipeline", () => {
         return {
           text: " Tutakuja kesho asubuhi. ",
           detectedLanguage: "sw" as const,
-          model: "gpt-4o-transcribe",
+          model: "gpt-4o-mini-transcribe",
           fallbackUsed: false,
         };
       }),
@@ -81,7 +81,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: " ... ",
       detectedLanguage: "sw",
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: false,
     });
 
@@ -112,7 +112,7 @@ describe("translator server pipeline", () => {
       vi.mocked(gateway.transcribe).mockResolvedValue({
         text: transcript,
         detectedLanguage: null,
-        model: "gpt-4o-transcribe",
+        model: "gpt-4o-mini-transcribe",
         fallbackUsed: false,
       });
       vi.mocked(gateway.autoTranslate).mockResolvedValue({
@@ -148,7 +148,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: false,
     });
     vi.mocked(gateway.autoTranslate).mockResolvedValue({
@@ -184,15 +184,16 @@ describe("translator server pipeline", () => {
     );
 
     expect(infoSpy).toHaveBeenCalledWith(
-      "[translator] timings",
+      "[translator][turn performance][server]",
       expect.objectContaining({
         transcriptionMs: expect.any(Number),
         autoTranslateMs: expect.any(Number),
-        totalMs: expect.any(Number),
+        serverTranslationTotalMs: expect.any(Number),
       }),
     );
     const timing = infoSpy.mock.calls.find(
-      ([message]) => message === "[translator] timings",
+      ([message]) =>
+        message === "[translator][turn performance][server]",
     )?.[1] as Record<string, unknown>;
     expect(timing).not.toHaveProperty("languageClassificationMs");
     expect(timing).not.toHaveProperty("translationMs");
@@ -214,7 +215,7 @@ describe("translator server pipeline", () => {
       translationModel: "gpt-5.6-terra",
       transcriptionMs: expect.any(Number),
       translationMs: expect.any(Number),
-      totalMs: expect.any(Number),
+      serverTranslationTotalMs: expect.any(Number),
       transcriptionFallbackUsed: true,
       detectedLanguage: "sw",
     });
@@ -230,7 +231,7 @@ describe("translator server pipeline", () => {
     vi.mocked(gateway.transcribe).mockResolvedValue({
       text,
       detectedLanguage: direction.sourceLanguage,
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
       fallbackUsed: false,
     });
 

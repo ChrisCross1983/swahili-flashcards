@@ -6,10 +6,10 @@ import { parseTranslatorFeedback } from "@/lib/translator/server/feedback";
 export const runtime = "nodejs";
 
 const REQUIRED_FEEDBACK_MIGRATION =
-  "supabase/migrations/20260820000000_translator_feedback.sql";
+  "supabase/migrations/20260824000000_translator_feedback_performance.sql";
 
 function isMissingFeedbackTableError(code: string | undefined) {
-  return code === "42P01" || code === "PGRST205";
+  return code === "42P01" || code === "PGRST204" || code === "PGRST205";
 }
 
 export async function POST(request: Request) {
