@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { LIVE_TRANSLATOR_BETA } from "@/lib/translator/live/config";
 
 type Props = { ownerKey: string };
 
@@ -133,6 +134,20 @@ export default function HomeClient({ ownerKey }: Props) {
             <div className="mt-2 text-xl font-semibold">Übersetzer</div>
             <div className="mt-2 text-sm text-muted">Deutsch und Kiswahili direkt übersetzen.</div>
           </button>
+
+          {LIVE_TRANSLATOR_BETA.enabled ? (
+            <button
+              onClick={() => router.push("/translator/live")}
+              className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta-strong">Unterwegs</div>
+                <span className="badge border-[color:var(--accent-cta)] bg-accent-cta-soft text-accent-cta-strong">BETA</span>
+              </div>
+              <div className="mt-2 text-xl font-semibold">Live-Gespräch</div>
+              <div className="mt-2 text-sm text-muted">Deutsch ↔ Kiswahili in Echtzeit.</div>
+            </button>
+          ) : null}
 
           <button
             onClick={() => router.push("/stats")}
