@@ -48,6 +48,17 @@ async function post(formData: FormData) {
   );
 }
 
+async function postJson(body: unknown) {
+  const { POST } = await import("../route");
+  return POST(
+    new Request("http://localhost/api/translator/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 describe("POST /api/translator/translate", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -158,6 +169,9 @@ describe("POST /api/translator/translate", () => {
         serverTranslationTotalMs: expect.any(Number),
         transcriptionFallbackUsed: false,
         detectedLanguage: "sw",
+        transcriptFinalAt: expect.any(String),
+        translationStartedAt: expect.any(String),
+        translationReadyAt: expect.any(String),
       },
     });
     expect(transcribeMock).toHaveBeenCalledOnce();
@@ -182,6 +196,45 @@ describe("POST /api/translator/translate", () => {
     );
     expect(autoTranslateMock).toHaveBeenCalledOnce();
     expect(translateMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts realtime text, skips audio STT and calls Terra exactly once", async () => {
+    const response = await postJson({
+      authoritativeTranscript: "Habari yako?",
+      sourceLanguage: "auto",
+      targetLanguage: "auto",
+      transcriptionMs: 950,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      originalText: "Habari yako?",
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+      diagnostics: {
+        transcriptionModel: "gpt-live-transcribe",
+        transcriptionMs: 950,
+        translationModel: "gpt-5.6-terra",
+      },
+    });
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(autoTranslateMock).toHaveBeenCalledOnce();
+    expect(autoTranslateMock).toHaveBeenCalledWith("Habari yako?");
+    expect(translateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid realtime transcript timing without calling a model", async () => {
+    const response = await postJson({
+      authoritativeTranscript: "Habari yako?",
+      sourceLanguage: "auto",
+      targetLanguage: "auto",
+      transcriptionMs: -1,
+    });
+
+    expect(response.status).toBe(400);
+    expect(createGatewayMock).not.toHaveBeenCalled();
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(autoTranslateMock).not.toHaveBeenCalled();
   });
 
   it("asks for manual selection when AUTO detects another language", async () => {

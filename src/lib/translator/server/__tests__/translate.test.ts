@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
   translateRecordedAudio,
+  translateAuthoritativeText,
   type TranslatorAiGateway,
 } from "@/lib/translator/server/translate";
 
@@ -74,6 +75,55 @@ describe("translator server pipeline", () => {
     });
     expect(order).toEqual(["transcription", "translation"]);
     expect(gateway.autoTranslate).not.toHaveBeenCalled();
+  });
+
+  it("translates an authoritative transcript through the same Terra gateway without audio STT", async () => {
+    const gateway = createGateway();
+
+    const result = await translateAuthoritativeText(
+      {
+        authoritativeTranscript: " Tutakuja kesho asubuhi. ",
+        direction: input.direction,
+        transcriptionModel: "gpt-live-transcribe",
+        transcriptionMs: 1850,
+      },
+      gateway,
+    );
+
+    expect(gateway.transcribe).not.toHaveBeenCalled();
+    expect(gateway.translate).toHaveBeenCalledOnce();
+    expect(gateway.translate).toHaveBeenCalledWith(
+      "Tutakuja kesho asubuhi.",
+      input.direction,
+    );
+    expect(result).toMatchObject({
+      originalText: "Tutakuja kesho asubuhi.",
+      translatedText: "Wir kommen morgen früh.",
+      diagnostics: {
+        transcriptionModel: "gpt-live-transcribe",
+        transcriptionMs: 1850,
+        translationModel: "gpt-5.6-terra",
+      },
+    });
+  });
+
+  it("keeps AUTO detection and translation combined in one Terra request for realtime text", async () => {
+    const gateway = createGateway();
+
+    await translateAuthoritativeText(
+      {
+        authoritativeTranscript: "Habari yako?",
+        direction: { sourceLanguage: "auto", targetLanguage: "auto" },
+        transcriptionModel: "gpt-live-transcribe",
+        transcriptionMs: 900,
+      },
+      gateway,
+    );
+
+    expect(gateway.transcribe).not.toHaveBeenCalled();
+    expect(gateway.autoTranslate).toHaveBeenCalledOnce();
+    expect(gateway.autoTranslate).toHaveBeenCalledWith("Habari yako?");
+    expect(gateway.translate).not.toHaveBeenCalled();
   });
 
   it("does not translate an empty or content-free transcript", async () => {
@@ -218,6 +268,9 @@ describe("translator server pipeline", () => {
       serverTranslationTotalMs: expect.any(Number),
       transcriptionFallbackUsed: true,
       detectedLanguage: "sw",
+      transcriptFinalAt: expect.any(String),
+      translationStartedAt: expect.any(String),
+      translationReadyAt: expect.any(String),
     });
     expect(result.diagnostics).not.toHaveProperty("apiKey");
     expect(result.diagnostics).not.toHaveProperty("prompt");

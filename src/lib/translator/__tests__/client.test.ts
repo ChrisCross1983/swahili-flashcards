@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTranslationEntry,
   requestAudioTranslation,
+  requestTextTranslation,
 } from "@/lib/translator/client";
 import {
   initialTranslatorState,
@@ -44,6 +45,32 @@ describe("translator client", () => {
       ),
     ).resolves.toEqual(result);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends an authoritative realtime transcript without an audio upload", async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(init?.body).toBe(
+        JSON.stringify({
+          authoritativeTranscript: "Tutakuja kesho asubuhi.",
+          sourceLanguage: "sw",
+          targetLanguage: "de",
+          transcriptionMs: 1850,
+        }),
+      );
+      expect(init?.body).not.toBeInstanceOf(FormData);
+      return Response.json(result);
+    });
+
+    await expect(
+      requestTextTranslation(
+        "Tutakuja kesho asubuhi.",
+        direction,
+        1850,
+        { fetcher },
+      ),
+    ).resolves.toEqual(result);
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("creates a TranslationEntry and stores it through the processing transition", () => {

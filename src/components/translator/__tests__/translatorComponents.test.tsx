@@ -74,6 +74,33 @@ describe("translator components", () => {
     expect(source).toContain("setSpeechSpeed(Number(event.target.value))");
   });
 
+  it("starts MediaRecorder without waiting for realtime and exposes the QA report", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    const microphoneIndex = source.indexOf("await acquireMicrophone()");
+    const prepareIndex = source.indexOf("await prepareRecording()");
+    const recorderStartIndex = source.indexOf(
+      "await startPreparedRecording()",
+    );
+    const backgroundWarmIndex = source.indexOf(
+      "getRealtimeManager().recordingStarted(realtimeTurn, stream)",
+    );
+
+    expect(microphoneIndex).toBeGreaterThan(-1);
+    expect(prepareIndex).toBeGreaterThan(-1);
+    expect(recorderStartIndex).toBeGreaterThan(prepareIndex);
+    expect(backgroundWarmIndex).toBeGreaterThan(recorderStartIndex);
+    expect(source).not.toContain("waitUntilReady");
+    expect(source).toContain("Mikrofon wird geöffnet …");
+    expect(source).toContain("Aufnahme läuft …");
+    expect(source).toContain("Testreport exportieren");
+    expect(source).toContain("JSON.stringify({");
+    expect(source).toContain('window.addEventListener("pagehide"');
+    expect(source).toContain('realtimeManagerRef.current?.close("classic_unmount")');
+  });
+
   it("shows entry-bound pause, resume and stop controls", () => {
     const entry: TranslationEntry = {
       id: "translation-2",

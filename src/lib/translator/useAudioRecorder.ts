@@ -53,9 +53,39 @@ export function useAudioRecorder() {
     [getController],
   );
 
+  const acquireMicrophone = useCallback(
+    () => getController().acquireMicrophone(),
+    [getController],
+  );
+
+  const prepareRecording = useCallback(
+    () => getController().prepareRecording(),
+    [getController],
+  );
+
+  const startPreparedRecording = useCallback(
+    () => getController().startPreparedRecording(),
+    [getController],
+  );
+
   const stopRecording = useCallback(
     () => getController().stopRecording(),
     [getController],
+  );
+
+  const getMediaStream = useCallback(
+    () => controllerRef.current?.getMediaStream() ?? null,
+    [],
+  );
+
+  const suspendMicrophone = useCallback(
+    () => controllerRef.current?.suspendMicrophone() ?? false,
+    [],
+  );
+
+  const releaseMicrophone = useCallback(
+    () => controllerRef.current?.releaseMicrophone() ?? true,
+    [],
   );
 
   const clearError = useCallback(() => {
@@ -64,6 +94,12 @@ export function useAudioRecorder() {
       return;
     }
     setSnapshot((current) => ({ ...current, status: "idle", error: null }));
+  }, []);
+
+  const disposeRecorder = useCallback(() => {
+    controllerRef.current?.dispose();
+    controllerRef.current = null;
+    if (mountedRef.current) setSnapshot(INITIAL_SNAPSHOT);
   }, []);
 
   useEffect(() => {
@@ -78,10 +114,17 @@ export function useAudioRecorder() {
   return {
     status: snapshot.status,
     startRecording,
+    acquireMicrophone,
+    prepareRecording,
+    startPreparedRecording,
     stopRecording,
+    getMediaStream,
+    suspendMicrophone,
+    releaseMicrophone,
     error: snapshot.error,
     audioBlob: snapshot.audioBlob,
     mimeType: snapshot.mimeType,
     clearError,
+    disposeRecorder,
   };
 }

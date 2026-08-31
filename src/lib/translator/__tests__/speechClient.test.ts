@@ -25,6 +25,7 @@ describe("translator speech client", () => {
     expect(result.diagnostics).toEqual({
       ttsModel: "gpt-4o-mini-tts",
       ttsGenerationMs: 321,
+      ttsRequestMs: expect.any(Number),
     });
     expect(fetcher).toHaveBeenCalledWith(
       "/api/translator/speech",

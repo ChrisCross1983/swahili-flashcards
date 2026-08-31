@@ -20,7 +20,8 @@ class FakePeer {
   iceConnectionState: RTCIceConnectionState = "checking";
   onconnectionstatechange: (() => void) | null = null;
   channel = new FakeChannel();
-  addTrack = vi.fn();
+  sender = { replaceTrack: vi.fn(async () => undefined) };
+  addTrack = vi.fn(() => this.sender);
   createDataChannel = vi.fn(() => this.channel);
   createOffer = vi.fn(async () => ({ type: "offer", sdp: "offer-sdp" }));
   setLocalDescription = vi.fn(async () => undefined);
@@ -96,10 +97,12 @@ describe("RealtimeTranscriptionClientV2", () => {
     vi.stubGlobal("fetch", fetchMock);
     const deltas: string[] = [];
     const onConnectionAttempt = vi.fn();
+    const onDiagnosticEvent = vi.fn();
     const client = new RealtimeTranscriptionClientV2({
       onDelta: (delta) => deltas.push(delta),
       onError: vi.fn(),
       onConnectionAttempt,
+      onDiagnosticEvent,
     });
 
     await client.connect(new FakeStream() as unknown as MediaStream);
@@ -113,6 +116,18 @@ describe("RealtimeTranscriptionClientV2", () => {
       httpStatus: 201,
       requestId: "req_success",
     });
+    expect(onDiagnosticEvent.mock.calls.map(([event]) => event.stage)).toEqual(
+      expect.arrayContaining([
+        "session_request_started",
+        "session_response",
+        "peer_connection_created",
+        "offer_created",
+        "sdp_request_started",
+        "sdp_response",
+        "data_channel_open",
+        "connection_ready",
+      ]),
+    );
 
     peers[0].channel.emit({
       type: "conversation.item.input_audio_transcription.delta",
@@ -350,6 +365,29 @@ describe("RealtimeTranscriptionClientV2", () => {
     await client.connect(new FakeStream() as unknown as MediaStream);
     client.clearTurn();
     expect(JSON.parse(peers[0].channel.sent[0])).toEqual({ type: "input_audio_buffer.clear" });
+    client.disconnect();
+  });
+
+  it("can gate and restore the input sender without changing the Live V2 connection", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_gate")));
+    const stream = new FakeStream();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError: vi.fn(),
+    });
+    await client.connect(stream as unknown as MediaStream);
+
+    await client.setInputEnabled(false);
+    await client.setInputEnabled(true);
+
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(1, null);
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(
+      2,
+      stream.track,
+    );
+    expect(peers).toHaveLength(1);
     client.disconnect();
   });
 });

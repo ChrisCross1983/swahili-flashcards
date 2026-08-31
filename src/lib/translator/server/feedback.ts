@@ -34,11 +34,23 @@ type FeedbackDatabasePayload = {
   server_translation_total_ms: number | null;
   translation_request_ms: number | null;
   stop_to_translation_visible_ms: number | null;
+  recording_started_at: string | null;
+  recording_stopped_at: string | null;
+  first_transcript_delta_at: string | null;
+  transcript_final_at: string | null;
+  stop_to_transcript_final_ms: number | null;
+  translation_started_at: string | null;
+  translation_ready_at: string | null;
   tts_generation_ms: number | null;
+  tts_started_at: string | null;
+  tts_ready_at: string | null;
   tts_request_to_ready_ms: number | null;
   translation_visible_to_tts_ready_ms: number | null;
   stop_to_tts_ready_ms: number | null;
   stop_to_playback_started_ms: number | null;
+  playback_started_at: string | null;
+  transcription_path: "realtime" | "audio_upload_fallback" | null;
+  fallback_reason: string | null;
   tts_speed: number | null;
   transcription_fallback_used: boolean | null;
   detected_language: "de" | "sw" | null;
@@ -82,6 +94,27 @@ function parseOptionalDuration(value: unknown) {
 function parseOptionalBoolean(value: unknown) {
   if (value === undefined || value === null) return null;
   return typeof value === "boolean" ? value : undefined;
+}
+
+function parseOptionalTimestamp(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value.length > 40) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
+}
+
+function parseOptionalTranscriptionPath(value: unknown) {
+  if (value === undefined || value === null) return null;
+  return value === "realtime" || value === "audio_upload_fallback"
+    ? value
+    : undefined;
+}
+
+function parseOptionalFallbackReason(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const reason = value.trim();
+  return reason && reason.length <= 100 ? reason : undefined;
 }
 
 export function parseTranslatorFeedback(
@@ -151,7 +184,20 @@ export function parseTranslatorFeedback(
   const stopToTranslationVisibleMs = parseOptionalDuration(
     values.stopToTranslationVisibleMs,
   );
+  const recordingStartedAt = parseOptionalTimestamp(values.recordingStartedAt);
+  const recordingStoppedAt = parseOptionalTimestamp(values.recordingStoppedAt);
+  const firstTranscriptDeltaAt = parseOptionalTimestamp(
+    values.firstTranscriptDeltaAt,
+  );
+  const transcriptFinalAt = parseOptionalTimestamp(values.transcriptFinalAt);
+  const stopToTranscriptFinalMs = parseOptionalDuration(
+    values.stopToTranscriptFinalMs,
+  );
+  const translationStartedAt = parseOptionalTimestamp(values.translationStartedAt);
+  const translationReadyAt = parseOptionalTimestamp(values.translationReadyAt);
   const ttsGenerationMs = parseOptionalDuration(values.ttsGenerationMs);
+  const ttsStartedAt = parseOptionalTimestamp(values.ttsStartedAt);
+  const ttsReadyAt = parseOptionalTimestamp(values.ttsReadyAt);
   const ttsRequestToReadyMs = parseOptionalDuration(values.ttsRequestToReadyMs);
   const translationVisibleToTtsReadyMs = parseOptionalDuration(
     values.translationVisibleToTtsReadyMs,
@@ -160,6 +206,11 @@ export function parseTranslatorFeedback(
   const stopToPlaybackStartedMs = parseOptionalDuration(
     values.stopToPlaybackStartedMs,
   );
+  const playbackStartedAt = parseOptionalTimestamp(values.playbackStartedAt);
+  const transcriptionPath = parseOptionalTranscriptionPath(
+    values.transcriptionPath,
+  );
+  const fallbackReason = parseOptionalFallbackReason(values.fallbackReason);
   const transcriptionFallbackUsed = parseOptionalBoolean(
     values.transcriptionFallbackUsed,
   );
@@ -187,11 +238,23 @@ export function parseTranslatorFeedback(
     serverTranslationTotalMs === undefined ||
     translationRequestMs === undefined ||
     stopToTranslationVisibleMs === undefined ||
+    recordingStartedAt === undefined ||
+    recordingStoppedAt === undefined ||
+    firstTranscriptDeltaAt === undefined ||
+    transcriptFinalAt === undefined ||
+    stopToTranscriptFinalMs === undefined ||
+    translationStartedAt === undefined ||
+    translationReadyAt === undefined ||
     ttsGenerationMs === undefined ||
+    ttsStartedAt === undefined ||
+    ttsReadyAt === undefined ||
     ttsRequestToReadyMs === undefined ||
     translationVisibleToTtsReadyMs === undefined ||
     stopToTtsReadyMs === undefined ||
     stopToPlaybackStartedMs === undefined ||
+    playbackStartedAt === undefined ||
+    transcriptionPath === undefined ||
+    fallbackReason === undefined ||
     transcriptionFallbackUsed === undefined ||
     detectedLanguage === undefined ||
     autoplayEnabled === undefined ||
@@ -230,11 +293,23 @@ export function parseTranslatorFeedback(
     server_translation_total_ms: serverTranslationTotalMs ?? totalMs,
     translation_request_ms: translationRequestMs,
     stop_to_translation_visible_ms: stopToTranslationVisibleMs,
+    recording_started_at: recordingStartedAt,
+    recording_stopped_at: recordingStoppedAt,
+    first_transcript_delta_at: firstTranscriptDeltaAt,
+    transcript_final_at: transcriptFinalAt,
+    stop_to_transcript_final_ms: stopToTranscriptFinalMs,
+    translation_started_at: translationStartedAt,
+    translation_ready_at: translationReadyAt,
     tts_generation_ms: ttsGenerationMs,
+    tts_started_at: ttsStartedAt,
+    tts_ready_at: ttsReadyAt,
     tts_request_to_ready_ms: ttsRequestToReadyMs,
     translation_visible_to_tts_ready_ms: translationVisibleToTtsReadyMs,
     stop_to_tts_ready_ms: stopToTtsReadyMs,
     stop_to_playback_started_ms: stopToPlaybackStartedMs,
+    playback_started_at: playbackStartedAt,
+    transcription_path: transcriptionPath,
+    fallback_reason: fallbackReason,
     tts_speed: ttsSpeed,
     transcription_fallback_used: transcriptionFallbackUsed,
     detected_language: detectedLanguage,

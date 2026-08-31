@@ -80,6 +80,22 @@ function createHarness(options?: {
 }
 
 describe("AudioRecorderController", () => {
+  it("prepares the microphone without starting MediaRecorder until realtime is ready", async () => {
+    const { controller, recorder, stream } = createHarness();
+
+    await expect(controller.prepareRecording()).resolves.toBe(stream);
+
+    expect(controller.getSnapshot().status).toBe("starting");
+    expect(controller.getMediaStream()).toBe(stream);
+    expect(recorder.start).not.toHaveBeenCalled();
+
+    await controller.startPreparedRecording();
+
+    expect(recorder.start).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().status).toBe("recording");
+    controller.dispose();
+  });
+
   it("starts a real recorder only after microphone access succeeds", async () => {
     const { controller, createRecorder, getUserMedia, recorder, stream } =
       createHarness();
@@ -93,6 +109,7 @@ describe("AudioRecorderController", () => {
     );
     expect(recorder.start).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe("recording");
+    expect(controller.getMediaStream()).toBe(stream);
   });
 
   it("combines audio chunks into one blob and preserves the recorder MIME type", async () => {
@@ -110,15 +127,41 @@ describe("AudioRecorderController", () => {
       audioBlob: blob,
       mimeType: "audio/webm;codecs=opus",
     });
+    expect(controller.getMediaStream()).not.toBeNull();
   });
 
-  it("stops every microphone track after recording stops", async () => {
+  it("keeps and gates the microphone track after recording stops", async () => {
     const { controller, track } = createHarness();
     await controller.startRecording();
 
     await controller.stopRecording();
+    controller.suspendMicrophone();
 
-    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(track.enabled).toBe(false);
+  });
+
+  it("starts a fresh complete recording after the previous recording stops", async () => {
+    const { controller, getUserMedia, recorder } = createHarness();
+
+    await controller.startRecording();
+    await controller.stopRecording();
+    await controller.startRecording();
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(recorder.start).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().status).toBe("recording");
+    controller.dispose();
+  });
+
+  it("releases the retained microphone explicitly after idle", async () => {
+    const { controller, track } = createHarness();
+    await controller.startRecording();
+    await controller.stopRecording();
+
+    expect(controller.releaseMicrophone()).toBe(true);
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(controller.getMediaStream()).toBeNull();
   });
 
   it("maps denied microphone permission to a user-facing error", async () => {

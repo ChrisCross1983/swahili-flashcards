@@ -18,6 +18,30 @@ type TranscriptionHandlers = {
   onDelta: (delta: string) => void;
   onError: () => void;
   onConnectionAttempt?: (details: ConnectionAttemptDetails) => void;
+  onDiagnosticEvent?: (event: RealtimeTranscriptionDiagnosticEvent) => void;
+};
+
+export type RealtimeTranscriptionDiagnosticEvent = {
+  stage:
+    | "connection_sequence_started"
+    | "session_request_started"
+    | "session_response"
+    | "peer_connection_created"
+    | "offer_created"
+    | "sdp_request_started"
+    | "sdp_response"
+    | "remote_description_set"
+    | "data_channel_open"
+    | "connection_ready"
+    | "connection_error";
+  attempt?: number;
+  durationMs?: number;
+  httpStatus?: number;
+  requestId?: string | null;
+  errorStage?: string;
+  errorType?: string;
+  errorCode?: string;
+  sanitizedErrorMessage?: string;
 };
 
 type TranscriptionEvent = {
@@ -29,6 +53,7 @@ type TranscriptionEvent = {
 type PeerAttempt = {
   peer: RTCPeerConnection;
   events: RTCDataChannel;
+  sender: RTCRtpSender;
   dataChannelReady: Promise<void>;
   cancelDataChannelWait: () => void;
 };
@@ -43,7 +68,10 @@ class ConnectionCancelled extends Error {
 async function requestCredential(
   signal: AbortSignal,
   connectionAttemptId: string,
+  emitDiagnostic: (event: RealtimeTranscriptionDiagnosticEvent) => void,
 ): Promise<LiveV2SessionCredential> {
+  const requestStartedAt = performance.now();
+  emitDiagnostic({ stage: "session_request_started" });
   let response: Response;
   try {
     response = await fetch("/api/translator/live/v2/session", {
@@ -63,6 +91,11 @@ async function requestCredential(
     }, "error");
     throw error;
   }
+  emitDiagnostic({
+    stage: "session_response",
+    httpStatus: response.status,
+    durationMs: Math.round(performance.now() - requestStartedAt),
+  });
   if (!response.ok) {
     liveV2DevelopmentLog("request error", {
       request: "client_secret",
@@ -100,6 +133,8 @@ export class RealtimeTranscriptionClientV2 {
   private events: RTCDataChannel | null = null;
   private abortController: AbortController | null = null;
   private connectionAttemptId: string | null = null;
+  private inputTrack: MediaStreamTrack | null = null;
+  private sender: RTCRtpSender | null = null;
   private finalWaiter: {
     resolve: (transcript: string) => void;
     reject: (error: Error) => void;
@@ -120,11 +155,13 @@ export class RealtimeTranscriptionClientV2 {
       event: "connection_sequence_started",
       connectionAttemptId,
     });
+    this.emitDiagnostic({ stage: "connection_sequence_started" });
 
     try {
       const credential = await requestCredential(
         abortController.signal,
         connectionAttemptId,
+        (event) => this.emitDiagnostic(event),
       );
       this.ensureCurrent(abortController, connectionAttemptId);
       liveV2DevelopmentLog("connection", {
@@ -152,6 +189,7 @@ export class RealtimeTranscriptionClientV2 {
             connectionAttemptId,
             attempt,
           });
+          this.emitDiagnostic({ stage: "offer_created", attempt });
           await resources.peer.setLocalDescription(offer);
           this.ensureCurrent(abortController, connectionAttemptId, resources.peer);
           liveV2DevelopmentLog("connection", {
@@ -161,6 +199,8 @@ export class RealtimeTranscriptionClientV2 {
           });
 
           let response: Response;
+          const sdpRequestStartedAt = performance.now();
+          this.emitDiagnostic({ stage: "sdp_request_started", attempt });
           try {
             response = await fetch(LIVE_V2_CONFIG.realtimeCallsEndpoint, {
               method: "POST",
@@ -199,6 +239,19 @@ export class RealtimeTranscriptionClientV2 {
           const safeError = response.ok
             ? { sanitizedErrorCode: null, sanitizedMessage: null }
             : safeOpenAIResponseError(body);
+          this.emitDiagnostic({
+            stage: "sdp_response",
+            attempt,
+            httpStatus: response.status,
+            requestId,
+            durationMs: Math.round(performance.now() - sdpRequestStartedAt),
+            ...(safeError.sanitizedErrorCode
+              ? { errorCode: safeError.sanitizedErrorCode }
+              : {}),
+            ...(safeError.sanitizedMessage
+              ? { sanitizedErrorMessage: safeError.sanitizedMessage }
+              : {}),
+          });
           liveV2DevelopmentLog("connection", {
             step: "sdp_response_received",
             target: "transcription",
@@ -274,6 +327,11 @@ export class RealtimeTranscriptionClientV2 {
             attempt,
             requestId,
           });
+          this.emitDiagnostic({
+            stage: "remote_description_set",
+            attempt,
+            requestId,
+          });
           if (resources.events.readyState !== "open") {
             await this.waitForDataChannel(
               resources.dataChannelReady,
@@ -282,6 +340,7 @@ export class RealtimeTranscriptionClientV2 {
           }
           this.ensureCurrent(abortController, connectionAttemptId, resources.peer);
           keepPeer = true;
+          this.sender = resources.sender;
           liveV2DevelopmentLog("connection", {
             step: "connection_ready",
             target: "transcription",
@@ -292,6 +351,12 @@ export class RealtimeTranscriptionClientV2 {
             requestId,
             connectionState: resources.peer.connectionState,
             iceConnectionState: resources.peer.iceConnectionState,
+          });
+          this.emitDiagnostic({
+            stage: "connection_ready",
+            attempt,
+            httpStatus: response.status,
+            requestId,
           });
           return;
         } finally {
@@ -313,6 +378,16 @@ export class RealtimeTranscriptionClientV2 {
             "Realtime connection failed",
           ),
         }, "error");
+        this.emitDiagnostic({
+          stage: "connection_error",
+          errorStage: "connection_sequence",
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          errorCode: error instanceof Error ? error.message : "connection_failed",
+          sanitizedErrorMessage: sanitizeLiveV2LogText(
+            error instanceof Error ? error.message : null,
+            "Realtime connection failed",
+          ),
+        });
       }
       this.disconnect(cancelled ? "cancelled" : "failed");
       throw cancelled ? new ConnectionCancelled() : error;
@@ -350,6 +425,15 @@ export class RealtimeTranscriptionClientV2 {
     });
   }
 
+  async setInputEnabled(enabled: boolean) {
+    const sender = this.sender;
+    if (!sender) throw new Error("transcription_sender_unavailable");
+    if (enabled && !this.inputTrack) {
+      throw new Error("transcription_track_unavailable");
+    }
+    await sender.replaceTrack(enabled ? this.inputTrack : null);
+  }
+
   disconnect(reason = "client_disconnect") {
     const connectionAttemptId = this.connectionAttemptId;
     this.connectionAttemptId = null;
@@ -364,6 +448,8 @@ export class RealtimeTranscriptionClientV2 {
     const events = this.events;
     this.peer = null;
     this.events = null;
+    this.sender = null;
+    this.inputTrack = null;
     if (events) {
       events.onopen = null;
       events.onmessage = null;
@@ -394,7 +480,8 @@ export class RealtimeTranscriptionClientV2 {
       peer.close();
       throw new Error("single_audio_track_required");
     }
-    peer.addTrack(audioTracks[0], stream);
+    this.inputTrack = audioTracks[0];
+    const sender = peer.addTrack(audioTracks[0], stream);
     const events = peer.createDataChannel("oai-events");
     this.peer = peer;
     this.events = events;
@@ -404,6 +491,7 @@ export class RealtimeTranscriptionClientV2 {
       attempt,
       trackCount: 1,
     });
+    this.emitDiagnostic({ stage: "peer_connection_created", attempt });
 
     let settled = false;
     let resolveReady!: () => void;
@@ -432,6 +520,7 @@ export class RealtimeTranscriptionClientV2 {
         connectionAttemptId,
         attempt,
       });
+      this.emitDiagnostic({ stage: "data_channel_open", attempt });
       resolveReady();
     };
     events.onerror = () => {
@@ -466,7 +555,7 @@ export class RealtimeTranscriptionClientV2 {
       }
     };
 
-    return { peer, events, dataChannelReady, cancelDataChannelWait };
+    return { peer, events, sender, dataChannelReady, cancelDataChannelWait };
   }
 
   private cleanupPeerAttempt(resources: PeerAttempt) {
@@ -480,6 +569,7 @@ export class RealtimeTranscriptionClientV2 {
     resources.peer.close();
     if (this.events === resources.events) this.events = null;
     if (this.peer === resources.peer) this.peer = null;
+    if (this.sender === resources.sender) this.sender = null;
   }
 
   private waitForRetry(
@@ -591,5 +681,9 @@ export class RealtimeTranscriptionClientV2 {
       this.finalWaiter = null;
     }
     this.handlers.onError();
+  }
+
+  private emitDiagnostic(event: RealtimeTranscriptionDiagnosticEvent) {
+    this.handlers.onDiagnosticEvent?.(event);
   }
 }

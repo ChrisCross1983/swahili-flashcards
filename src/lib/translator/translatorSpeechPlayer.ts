@@ -44,6 +44,7 @@ export type TranslatorSpeechPlaybackOptions = {
   onSpeechRequestStarted?: () => void;
   onSpeechReady?: () => void;
   onPlaybackStarted?: () => void;
+  onPlaybackCompleted?: () => void;
 };
 
 function createAbortError() {
@@ -63,10 +64,14 @@ function logPlaybackFailure(error: unknown, autoplay: boolean) {
   if (process.env.NODE_ENV !== "development") return;
   const metadata = { name: getSpeechErrorName(error), autoplay };
   if (isSpeechPlaybackBlockedError(error)) {
-    console.info("[translator][speech playback blocked]", metadata);
+    console.info(
+      `[translator][speech playback blocked] ${JSON.stringify(metadata)}`,
+    );
     return;
   }
-  console.error("[translator][speech playback error]", metadata);
+  console.error(
+    `[translator][speech playback error] ${JSON.stringify(metadata)}`,
+  );
 }
 
 export class TranslatorSpeechPlayer {
@@ -184,6 +189,7 @@ export class TranslatorSpeechPlayer {
       this.activeFail = failPlayback;
       this.activeAudio = audio;
       audio.onended = () => {
+        options.onPlaybackCompleted?.();
         resetAudio(audio);
         finish();
       };
@@ -198,11 +204,11 @@ export class TranslatorSpeechPlayer {
               return;
             }
             if (process.env.NODE_ENV === "development") {
-              console.info("[translator] playback timing", {
+              console.info(`[translator] playback timing ${JSON.stringify({
                 playbackStartMs: Math.round(
                   performance.now() - playbackRequestedAt,
                 ),
-              });
+              })}`);
             }
             options.onPlaybackStarted?.();
           },
@@ -233,9 +239,9 @@ export class TranslatorSpeechPlayer {
         return;
       }
       if (process.env.NODE_ENV === "development") {
-        console.info("[translator] playback timing", {
+        console.info(`[translator] playback timing ${JSON.stringify({
           playbackStartMs: Math.round(performance.now() - playbackRequestedAt),
-        });
+        })}`);
       }
     } catch (error) {
       this.activeFail?.(error);

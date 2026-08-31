@@ -52,8 +52,150 @@ type TranslateRecordedAudioInput = {
   direction: TranslationRequestDirection;
 };
 
+type TranslateAuthoritativeTextInput = {
+  authoritativeTranscript: string;
+  direction: TranslationRequestDirection;
+  transcriptionModel: string;
+  transcriptionMs: number;
+};
+
 function containsSpeechText(text: string) {
   return /[\p{L}\p{N}]/u.test(text);
+}
+
+async function translateTranscript(
+  originalText: string,
+  direction: TranslationRequestDirection,
+  transcriptionOutput: TranscriptionOutput,
+  transcriptionMs: number,
+  startedAt: number,
+  gateway: TranslatorAiGateway,
+  transcriptFinalAt?: string,
+): Promise<TranslationResult> {
+  const translationStartedAt = Date.now();
+  const isAuto = direction.sourceLanguage === "auto";
+  let result: Omit<TranslationResult, "diagnostics">;
+
+  if (direction.sourceLanguage === "auto") {
+    let autoResult: AutoTranslationOutput;
+    try {
+      autoResult = await gateway.autoTranslate(originalText);
+    } catch {
+      throw new TranslatorPipelineError(
+        "translation_failed",
+        "Automatic translation failed",
+      );
+    }
+    if (autoResult.sourceLanguage === "unknown") {
+      throw new TranslatorPipelineError(
+        "unsupported_language",
+        "Detected language is not supported",
+      );
+    }
+    if (!autoResult.translatedText.trim()) {
+      throw new TranslatorPipelineError(
+        "translation_failed",
+        "Automatic translation returned empty output",
+      );
+    }
+    result = {
+      originalText,
+      translatedText: autoResult.translatedText.trim(),
+      sourceLanguage: autoResult.sourceLanguage,
+      targetLanguage: autoResult.targetLanguage,
+    };
+  } else {
+    const concreteDirection: TranslationDirection = direction;
+    let translatedText: string;
+    try {
+      translatedText = (
+        await gateway.translate(originalText, concreteDirection)
+      ).trim();
+    } catch {
+      throw new TranslatorPipelineError(
+        "translation_failed",
+        "Text translation failed",
+      );
+    }
+    if (!translatedText) {
+      throw new TranslatorPipelineError(
+        "translation_failed",
+        "Translation returned empty output",
+      );
+    }
+    result = {
+      originalText,
+      translatedText,
+      sourceLanguage: concreteDirection.sourceLanguage,
+      targetLanguage: concreteDirection.targetLanguage,
+    };
+  }
+
+  const translationReadyAt = Date.now();
+  const translationDurationMs = translationReadyAt - translationStartedAt;
+  const serverTranslationTotalMs = translationReadyAt - startedAt;
+  const diagnostics: TranslationDiagnostics = {
+    transcriptionModel: transcriptionOutput.model,
+    translationModel: TRANSLATION_MODEL,
+    transcriptionMs,
+    ...(isAuto
+      ? { autoTranslateMs: translationDurationMs }
+      : { translationMs: translationDurationMs }),
+    serverTranslationTotalMs,
+    transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
+    detectedLanguage: isAuto
+      ? result.sourceLanguage
+      : transcriptionOutput.detectedLanguage ?? result.sourceLanguage,
+    ...(transcriptFinalAt
+      ? {
+          transcriptFinalAt,
+          translationStartedAt: new Date(translationStartedAt).toISOString(),
+          translationReadyAt: new Date(translationReadyAt).toISOString(),
+        }
+      : {}),
+  };
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[translator][turn performance][server]", {
+      transcriptionModel: transcriptionOutput.model,
+      transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
+      transcriptionMs,
+      ...(isAuto
+        ? { autoTranslateMs: translationDurationMs }
+        : { translationMs: translationDurationMs }),
+      serverTranslationTotalMs,
+    });
+  }
+
+  return { ...result, diagnostics };
+}
+
+export async function translateAuthoritativeText(
+  input: TranslateAuthoritativeTextInput,
+  gateway: TranslatorAiGateway,
+): Promise<TranslationResult> {
+  const startedAt = Date.now();
+  const originalText = input.authoritativeTranscript.trim();
+  if (!originalText || !containsSpeechText(originalText)) {
+    throw new TranslatorPipelineError("no_speech", "No speech detected");
+  }
+
+  return translateTranscript(
+    originalText,
+    input.direction,
+    {
+      text: originalText,
+      detectedLanguage:
+        input.direction.sourceLanguage === "auto"
+          ? null
+          : input.direction.sourceLanguage,
+      model: input.transcriptionModel,
+      fallbackUsed: false,
+    },
+    input.transcriptionMs,
+    startedAt,
+    gateway,
+  );
 }
 
 export async function translateRecordedAudio(
@@ -93,93 +235,15 @@ export async function translateRecordedAudio(
   if (!originalText || !containsSpeechText(originalText)) {
     throw new TranslatorPipelineError("no_speech", "No speech detected");
   }
+  const transcriptFinalAt = new Date().toISOString();
 
-  const translationStartedAt = Date.now();
-  const isAuto = input.direction.sourceLanguage === "auto";
-  let result: Omit<TranslationResult, "diagnostics">;
-
-  if (input.direction.sourceLanguage === "auto") {
-    let autoResult: AutoTranslationOutput;
-    try {
-      autoResult = await gateway.autoTranslate(originalText);
-    } catch {
-      throw new TranslatorPipelineError(
-        "translation_failed",
-        "Automatic translation failed",
-      );
-    }
-    if (autoResult.sourceLanguage === "unknown") {
-      throw new TranslatorPipelineError(
-        "unsupported_language",
-        "Detected language is not supported",
-      );
-    }
-    if (!autoResult.translatedText.trim()) {
-      throw new TranslatorPipelineError(
-        "translation_failed",
-        "Automatic translation returned empty output",
-      );
-    }
-    result = {
-      originalText,
-      translatedText: autoResult.translatedText.trim(),
-      sourceLanguage: autoResult.sourceLanguage,
-      targetLanguage: autoResult.targetLanguage,
-    };
-  } else {
-    const direction: TranslationDirection = input.direction;
-    let translatedText: string;
-    try {
-      translatedText = (
-        await gateway.translate(originalText, direction)
-      ).trim();
-    } catch {
-      throw new TranslatorPipelineError(
-        "translation_failed",
-        "Text translation failed",
-      );
-    }
-    if (!translatedText) {
-      throw new TranslatorPipelineError(
-        "translation_failed",
-        "Translation returned empty output",
-      );
-    }
-    result = {
-      originalText,
-      translatedText,
-      sourceLanguage: direction.sourceLanguage,
-      targetLanguage: direction.targetLanguage,
-    };
-  }
-
-  const translationDurationMs = Date.now() - translationStartedAt;
-  const serverTranslationTotalMs = Date.now() - startedAt;
-  const diagnostics: TranslationDiagnostics = {
-    transcriptionModel: transcriptionOutput.model,
-    translationModel: TRANSLATION_MODEL,
+  return translateTranscript(
+    originalText,
+    input.direction,
+    transcriptionOutput,
     transcriptionMs,
-    ...(isAuto
-      ? { autoTranslateMs: translationDurationMs }
-      : { translationMs: translationDurationMs }),
-    serverTranslationTotalMs,
-    transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
-    detectedLanguage: isAuto
-      ? result.sourceLanguage
-      : transcriptionOutput.detectedLanguage ?? result.sourceLanguage,
-  };
-
-  if (process.env.NODE_ENV === "development") {
-    console.info("[translator][turn performance][server]", {
-      transcriptionModel: transcriptionOutput.model,
-      transcriptionFallbackUsed: transcriptionOutput.fallbackUsed,
-      transcriptionMs,
-      ...(isAuto
-        ? { autoTranslateMs: translationDurationMs }
-        : { translationMs: translationDurationMs }),
-      serverTranslationTotalMs,
-    });
-  }
-
-  return { ...result, diagnostics };
+    startedAt,
+    gateway,
+    transcriptFinalAt,
+  );
 }

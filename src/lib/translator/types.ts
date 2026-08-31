@@ -11,6 +11,8 @@ export type TranslationRequestDirection =
   | TranslationDirection
   | { sourceLanguage: "auto"; targetLanguage: "auto" };
 
+export type TranscriptionPath = "realtime" | "audio_upload_fallback";
+
 export type TranslationDiagnostics = {
   transcriptionModel: string;
   translationModel: string;
@@ -22,14 +24,51 @@ export type TranslationDiagnostics = {
   totalMs?: number;
   transcriptionFallbackUsed: boolean;
   detectedLanguage: TranslationLanguage | null;
+  recordButtonClickedAt?: string;
+  getUserMediaStartedAt?: string;
+  getUserMediaReadyAt?: string;
+  mediaRecorderPreparedAt?: string;
+  recordClickToGetUserMediaReadyMs?: number;
+  recordClickToMicReadyMs?: number;
+  recordClickToRecordingStartedMs?: number;
+  getUserMediaToRecordingStartedMs?: number;
+  realtimeSetupStartedAt?: string;
+  realtimeConnectionReadyAt?: string;
+  realtimeSetupMs?: number;
+  recordingStartedAt?: string;
+  recordingStoppedAt?: string;
+  recordingDurationMs?: number;
+  firstTranscriptDeltaAt?: string;
+  transcriptFinalAt?: string;
+  stopToTranscriptFinalMs?: number;
+  translationStartedAt?: string;
+  translationReadyAt?: string;
   translationRequestMs?: number;
+  transcriptFinalToTranslationReadyMs?: number;
   stopToTranslationVisibleMs?: number;
+  ttsStartedAt?: string;
+  ttsReadyAt?: string;
   ttsModel?: string;
   ttsGenerationMs?: number;
   ttsRequestToReadyMs?: number;
+  ttsRequestMs?: number;
+  translationReadyToTtsReadyMs?: number;
   translationVisibleToTtsReadyMs?: number;
   stopToTtsReadyMs?: number;
+  playbackStartedAt?: string;
+  playbackCompletedAt?: string;
+  ttsReadyToPlaybackStartedMs?: number;
   stopToPlaybackStartedMs?: number;
+  interactionOverheadMs?: number;
+  transcriptionPath?: TranscriptionPath;
+  fallbackReason?: string;
+  transcriptionPathDecisionAt?: string;
+  transcriptionPathDecisionReason?: string;
+  connectionId?: string;
+  realtimeConnectionReadyAtRecordingStart?: string;
+  realtimeConnectionReused?: boolean;
+  realtimeConnectionAgeAtRecordingStartMs?: number;
+  warmStart?: boolean;
   ttsSpeed?: number;
   autoplayEnabled?: boolean;
   autoplayBlocked?: boolean;

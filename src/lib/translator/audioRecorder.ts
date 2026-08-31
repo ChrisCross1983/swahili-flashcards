@@ -95,6 +95,8 @@ export class AudioRecorderController {
   private recorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private chunks: Blob[] = [];
+  private acquirePromise: Promise<MediaStream> | null = null;
+  private preparePromise: Promise<MediaStream> | null = null;
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<Blob> | null = null;
   private resolveStop: ((blob: Blob) => void) | null = null;
@@ -109,9 +111,48 @@ export class AudioRecorderController {
     return this.snapshot;
   }
 
+  getMediaStream() {
+    return this.stream;
+  }
+
   clearError() {
     if (this.snapshot.status !== "error") return;
     this.update({ status: "idle", error: null });
+  }
+
+  acquireMicrophone() {
+    if (this.stream && this.isStreamUsable(this.stream)) {
+      this.setTracksEnabled(this.stream, true);
+      return Promise.resolve(this.stream);
+    }
+    if (this.acquirePromise) return this.acquirePromise;
+    if (this.disposed || !this.dependencies.getUserMedia) {
+      const error = new AudioRecorderError(
+        this.dependencies.getUserMedia
+          ? ERROR_MESSAGES.start
+          : ERROR_MESSAGES.noDevice,
+      );
+      this.update({ status: "error", error: error.message });
+      return Promise.reject(error);
+    }
+
+    this.update({
+      status: "starting",
+      error: null,
+      audioBlob: null,
+      mimeType: null,
+    });
+    const promise = this.acquire();
+    this.acquirePromise = promise;
+    void promise.then(
+      () => {
+        if (this.acquirePromise === promise) this.acquirePromise = null;
+      },
+      () => {
+        if (this.acquirePromise === promise) this.acquirePromise = null;
+      },
+    );
+    return promise;
   }
 
   startRecording() {
@@ -121,7 +162,9 @@ export class AudioRecorderController {
       return Promise.reject(new AudioRecorderError(ERROR_MESSAGES.start));
     }
 
-    const promise = this.start();
+    const promise = this.prepareRecording().then(() =>
+      this.startPreparedRecording(),
+    );
     this.startPromise = promise;
     void promise.then(
       () => {
@@ -134,32 +177,112 @@ export class AudioRecorderController {
     return promise;
   }
 
-  private async start() {
+  prepareRecording() {
+    if (this.preparePromise) return this.preparePromise;
+    if (
+      this.stream &&
+      this.recorder &&
+      (this.snapshot.status === "starting" ||
+        this.snapshot.status === "recording")
+    ) {
+      return Promise.resolve(this.stream);
+    }
+    if (this.snapshot.status === "stopping") {
+      return Promise.reject(new AudioRecorderError(ERROR_MESSAGES.start));
+    }
+
+    const promise = this.prepare();
+    this.preparePromise = promise;
+    void promise.then(
+      () => {
+        if (this.preparePromise === promise) this.preparePromise = null;
+      },
+      () => {
+        if (this.preparePromise === promise) this.preparePromise = null;
+      },
+    );
+    return promise;
+  }
+
+  async startPreparedRecording() {
+    if (this.snapshot.status === "recording") return;
+    if (this.preparePromise) await this.preparePromise;
+    if (
+      this.disposed ||
+      !this.stream ||
+      !this.recorder ||
+      this.snapshot.status !== "starting"
+    ) {
+      throw new AudioRecorderError(ERROR_MESSAGES.start);
+    }
+
+    try {
+      this.recorder.start();
+      this.update({
+        status: "recording",
+        error: null,
+        audioBlob: null,
+        mimeType: this.recorder.mimeType || this.snapshot.mimeType,
+      });
+    } catch {
+      this.stopTracks(this.stream);
+      this.stream = null;
+      this.releaseRecorder();
+      this.update({ status: "error", error: ERROR_MESSAGES.start });
+      throw new AudioRecorderError(ERROR_MESSAGES.start);
+    }
+  }
+
+  suspendMicrophone() {
+    if (this.snapshot.status === "recording") return false;
+    this.setTracksEnabled(this.stream, false);
+    return Boolean(this.stream);
+  }
+
+  releaseMicrophone() {
+    if (
+      this.snapshot.status === "recording" ||
+      this.snapshot.status === "stopping"
+    ) {
+      return false;
+    }
+    this.stopTracks(this.stream);
+    this.stream = null;
+    return true;
+  }
+
+  private async acquire() {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await this.dependencies.getUserMedia?.() ?? null;
+      if (!stream) throw new AudioRecorderError(ERROR_MESSAGES.noDevice);
+      if (this.disposed) {
+        this.stopTracks(stream);
+        stream = null;
+        throw new AudioRecorderError(ERROR_MESSAGES.start);
+      }
+      this.stream = stream;
+      this.setTracksEnabled(stream, true);
+      return stream;
+    } catch (error) {
+      if (stream) this.stopTracks(stream);
+      const message = getAudioRecorderErrorMessage(error);
+      this.update({ status: "error", error: message });
+      throw new AudioRecorderError(message);
+    }
+  }
+
+  private async prepare() {
     if (this.disposed) throw new AudioRecorderError(ERROR_MESSAGES.start);
     if (!this.dependencies.createRecorder) {
       const error = new AudioRecorderError(ERROR_MESSAGES.unsupported);
       this.update({ status: "error", error: error.message });
       throw error;
     }
-    if (!this.dependencies.getUserMedia) {
-      const error = new AudioRecorderError(ERROR_MESSAGES.noDevice);
-      this.update({ status: "error", error: error.message });
-      throw error;
-    }
-
-    this.update({
-      status: "starting",
-      error: null,
-      audioBlob: null,
-      mimeType: null,
-    });
-
     let stream: MediaStream | null = null;
     try {
-      stream = await this.dependencies.getUserMedia();
+      stream = await this.acquireMicrophone();
       if (this.disposed) {
-        this.stopTracks(stream);
-        stream = null;
         throw new AudioRecorderError(ERROR_MESSAGES.start);
       }
 
@@ -180,16 +303,15 @@ export class AudioRecorderController {
       recorder.addEventListener("dataavailable", this.handleDataAvailable);
       recorder.addEventListener("stop", this.handleStop);
       recorder.addEventListener("error", this.handleRecorderError);
-      recorder.start();
 
       this.update({
-        status: "recording",
+        status: "starting",
         error: null,
         audioBlob: null,
         mimeType: recorder.mimeType || selectedMimeType || null,
       });
+      return stream;
     } catch (error) {
-      if (stream) this.stopTracks(stream);
       this.releaseRecorder();
       const message = getAudioRecorderErrorMessage(error);
       this.update({ status: "error", error: message });
@@ -239,6 +361,9 @@ export class AudioRecorderController {
     this.recorder = null;
     this.stream = null;
     this.chunks = [];
+    this.acquirePromise = null;
+    this.preparePromise = null;
+    this.startPromise = null;
   }
 
   private handleDataAvailable = (event: BlobEvent) => {
@@ -254,10 +379,8 @@ export class AudioRecorderController {
       "";
     const blob = new Blob(this.chunks, { type: mimeType });
 
-    this.stopTracks(this.stream);
     this.removeRecorderListeners();
     this.recorder = null;
-    this.stream = null;
     this.chunks = [];
 
     if (!this.disposed) {
@@ -288,6 +411,7 @@ export class AudioRecorderController {
       }
     }
     this.stopTracks(this.stream);
+    this.stream = null;
     this.releaseRecorder();
     this.update({ status: "error", error: error.message });
     this.rejectStop?.(error);
@@ -297,7 +421,6 @@ export class AudioRecorderController {
   private releaseRecorder() {
     this.removeRecorderListeners();
     this.recorder = null;
-    this.stream = null;
     this.chunks = [];
   }
 
@@ -309,6 +432,20 @@ export class AudioRecorderController {
 
   private stopTracks(stream: MediaStream | null) {
     stream?.getTracks().forEach((track) => track.stop());
+  }
+
+  private setTracksEnabled(stream: MediaStream | null, enabled: boolean) {
+    stream?.getTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+  }
+
+  private isStreamUsable(stream: MediaStream) {
+    const tracks = stream.getTracks();
+    return (
+      tracks.length > 0 &&
+      tracks.every((track) => track.readyState === undefined || track.readyState !== "ended")
+    );
   }
 
   private clearStopPromise() {

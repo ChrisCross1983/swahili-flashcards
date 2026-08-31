@@ -42,6 +42,13 @@ function isNonNegativeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function isOptionalTimestamp(value: unknown) {
+  return (
+    value === undefined ||
+    (typeof value === "string" && Number.isFinite(Date.parse(value)))
+  );
+}
+
 function isTranslationDiagnostics(
   value: unknown,
 ): value is TranslationDiagnostics {
@@ -63,6 +70,9 @@ function isTranslationDiagnostics(
       isNonNegativeNumber(diagnostics.translationMs)) &&
     (diagnostics.autoTranslateMs === undefined ||
       isNonNegativeNumber(diagnostics.autoTranslateMs)) &&
+    isOptionalTimestamp(diagnostics.transcriptFinalAt) &&
+    isOptionalTimestamp(diagnostics.translationStartedAt) &&
+    isOptionalTimestamp(diagnostics.translationReadyAt) &&
     (diagnostics.translationMs === undefined) !==
       (diagnostics.autoTranslateMs === undefined)
   );
@@ -80,6 +90,77 @@ function isTranslationResult(value: unknown): value is TranslationResult {
     (result.targetLanguage === "de" || result.targetLanguage === "sw") &&
     isTranslationDiagnostics(result.diagnostics)
   );
+}
+
+async function readTranslationResponse(
+  response: Response,
+  direction: TranslationRequestDirection,
+) {
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const code =
+      body && typeof body.code === "string"
+        ? (body.code as TranslatorApiErrorCode)
+        : null;
+    throw new TranslatorClientError(
+      code && Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, code)
+        ? API_ERROR_MESSAGES[code]
+        : NETWORK_ERROR,
+    );
+  }
+
+  if (!isTranslationResult(body)) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+  const result: TranslationResult = {
+    originalText: body.originalText,
+    translatedText: body.translatedText,
+    sourceLanguage: body.sourceLanguage,
+    targetLanguage: body.targetLanguage,
+    diagnostics: {
+      transcriptionModel: body.diagnostics.transcriptionModel,
+      translationModel: body.diagnostics.translationModel,
+      transcriptionMs: body.diagnostics.transcriptionMs,
+      ...(body.diagnostics.translationMs === undefined
+        ? { autoTranslateMs: body.diagnostics.autoTranslateMs }
+        : { translationMs: body.diagnostics.translationMs }),
+      serverTranslationTotalMs:
+        body.diagnostics.serverTranslationTotalMs ??
+        (body.diagnostics.totalMs as number),
+      transcriptionFallbackUsed:
+        body.diagnostics.transcriptionFallbackUsed,
+      detectedLanguage: body.diagnostics.detectedLanguage,
+      ...(body.diagnostics.transcriptFinalAt
+        ? { transcriptFinalAt: body.diagnostics.transcriptFinalAt }
+        : {}),
+      ...(body.diagnostics.translationStartedAt
+        ? { translationStartedAt: body.diagnostics.translationStartedAt }
+        : {}),
+      ...(body.diagnostics.translationReadyAt
+        ? { translationReadyAt: body.diagnostics.translationReadyAt }
+        : {}),
+    },
+  };
+  if (
+    (direction.sourceLanguage === "auto" &&
+      result.diagnostics.autoTranslateMs === undefined) ||
+    (direction.sourceLanguage !== "auto" &&
+      result.diagnostics.translationMs === undefined)
+  ) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+  if (
+    direction.sourceLanguage !== "auto" &&
+    (result.sourceLanguage !== direction.sourceLanguage ||
+      result.targetLanguage !== direction.targetLanguage)
+  ) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+  if (result.sourceLanguage === result.targetLanguage) {
+    throw new TranslatorClientError(NETWORK_ERROR);
+  }
+
+  return result;
 }
 
 export async function requestAudioTranslation(
@@ -118,62 +199,34 @@ export async function requestAudioTranslation(
     throw new TranslatorClientError(NETWORK_ERROR);
   }
 
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const code =
-      body && typeof body.code === "string"
-        ? (body.code as TranslatorApiErrorCode)
-        : null;
-    throw new TranslatorClientError(
-      code && Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, code)
-        ? API_ERROR_MESSAGES[code]
-        : NETWORK_ERROR,
-    );
-  }
+  return readTranslationResponse(response, direction);
+}
 
-  if (!isTranslationResult(body)) {
-    throw new TranslatorClientError(NETWORK_ERROR);
-  }
-  const result: TranslationResult = {
-    originalText: body.originalText,
-    translatedText: body.translatedText,
-    sourceLanguage: body.sourceLanguage,
-    targetLanguage: body.targetLanguage,
-    diagnostics: {
-      transcriptionModel: body.diagnostics.transcriptionModel,
-      translationModel: body.diagnostics.translationModel,
-      transcriptionMs: body.diagnostics.transcriptionMs,
-      ...(body.diagnostics.translationMs === undefined
-        ? { autoTranslateMs: body.diagnostics.autoTranslateMs }
-        : { translationMs: body.diagnostics.translationMs }),
-      serverTranslationTotalMs:
-        body.diagnostics.serverTranslationTotalMs ??
-        (body.diagnostics.totalMs as number),
-      transcriptionFallbackUsed:
-        body.diagnostics.transcriptionFallbackUsed,
-      detectedLanguage: body.diagnostics.detectedLanguage,
-    },
-  };
-  if (
-    (direction.sourceLanguage === "auto" &&
-      result.diagnostics.autoTranslateMs === undefined) ||
-    (direction.sourceLanguage !== "auto" &&
-      result.diagnostics.translationMs === undefined)
-  ) {
-    throw new TranslatorClientError(NETWORK_ERROR);
-  }
-  if (
-    direction.sourceLanguage !== "auto" &&
-    (result.sourceLanguage !== direction.sourceLanguage ||
-      result.targetLanguage !== direction.targetLanguage)
-  ) {
-    throw new TranslatorClientError(NETWORK_ERROR);
-  }
-  if (result.sourceLanguage === result.targetLanguage) {
+export async function requestTextTranslation(
+  authoritativeTranscript: string,
+  direction: TranslationRequestDirection,
+  transcriptionMs: number,
+  options: RequestOptions = {},
+): Promise<TranslationResult> {
+  let response: Response;
+  try {
+    response = await (options.fetcher ?? fetch)("/api/translator/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        authoritativeTranscript,
+        sourceLanguage: direction.sourceLanguage,
+        targetLanguage: direction.targetLanguage,
+        transcriptionMs,
+      }),
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new TranslatorClientError(NETWORK_ERROR);
   }
 
-  return result;
+  return readTranslationResponse(response, direction);
 }
 
 export function createTranslationEntry(

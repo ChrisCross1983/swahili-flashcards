@@ -92,6 +92,7 @@ describe("TranslatorSpeechPlayer", () => {
   it("starts automatic playback normally when the browser permits it", async () => {
     const harness = createHarness();
     const onPlaybackStarted = vi.fn();
+    const onPlaybackCompleted = vi.fn();
     const onSpeechGenerated = vi.fn();
     const onSpeechRequestStarted = vi.fn();
     const onSpeechReady = vi.fn();
@@ -102,11 +103,13 @@ describe("TranslatorSpeechPlayer", () => {
       onSpeechRequestStarted,
       onSpeechReady,
       onPlaybackStarted,
+      onPlaybackCompleted,
     });
     await waitForAudio(harness.audios, 1);
     await vi.waitFor(() => expect(onPlaybackStarted).toHaveBeenCalledOnce());
     finishAudio(harness.audios[0]);
     await playback;
+    expect(onPlaybackCompleted).toHaveBeenCalledOnce();
 
     expect(harness.requestSpeech).toHaveBeenCalledOnce();
     expect(onSpeechRequestStarted).toHaveBeenCalledOnce();
@@ -141,8 +144,7 @@ describe("TranslatorSpeechPlayer", () => {
         "Audio ist bereit. Tippe einmal auf „Abspielen“ – es wird nicht neu erzeugt.",
     });
     expect(infoSpy).toHaveBeenCalledWith(
-      "[translator][speech playback blocked]",
-      { name: "NotAllowedError", autoplay: true },
+      '[translator][speech playback blocked] {"name":"NotAllowedError","autoplay":true}',
     );
 
     const manualPlayback = harness.player.play(entry, 1, { autoplay: false });
@@ -208,8 +210,7 @@ describe("TranslatorSpeechPlayer", () => {
     });
     expect(harness.player.hasCachedAudio(entry.id, 1)).toBe(true);
     expect(errorSpy).toHaveBeenCalledWith(
-      "[translator][speech playback error]",
-      { name: "NotSupportedError", autoplay: true },
+      '[translator][speech playback error] {"name":"NotSupportedError","autoplay":true}',
     );
   });
 

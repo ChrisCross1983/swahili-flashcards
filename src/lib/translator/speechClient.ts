@@ -13,6 +13,7 @@ export type TranslatorSpeechFailureKind =
 export type TranslatorSpeechGenerationDiagnostics = {
   ttsModel: string;
   ttsGenerationMs: number;
+  ttsRequestMs?: number;
 };
 
 export type TranslatorSpeechAsset = {
@@ -104,6 +105,7 @@ export async function requestTranslatorSpeech(
   const generationHeader = Number(
     response.headers.get("X-Translator-Speech-Generation-Ms"),
   );
+  const ttsRequestMs = Math.round(performance.now() - requestStartedAt);
   return {
     audio,
     diagnostics: {
@@ -112,7 +114,8 @@ export async function requestTranslatorSpeech(
       ttsGenerationMs:
         Number.isFinite(generationHeader) && generationHeader >= 0
           ? generationHeader
-          : Math.max(0, Math.round(performance.now() - requestStartedAt)),
+          : ttsRequestMs,
+      ttsRequestMs,
     },
   } satisfies TranslatorSpeechAsset;
 }

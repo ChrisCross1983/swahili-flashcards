@@ -5,6 +5,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
 import TranslationFeedbackSheet from "@/components/translator/TranslationFeedbackSheet";
+import type { SavedTranslatorFeedback } from "@/components/translator/TranslationFeedbackSheet";
 import {
   getTranslationRequestDirection,
   initialTranslatorState,
@@ -15,7 +16,6 @@ import { useAudioRecorder } from "@/lib/translator/useAudioRecorder";
 import {
   createTranslationEntry,
   getTranslatorClientErrorMessage,
-  requestAudioTranslation,
 } from "@/lib/translator/client";
 import {
   getTranslatorSpeechFailure,
@@ -28,6 +28,17 @@ import type {
   TranslationEntry,
 } from "@/lib/translator/types";
 import { TranslatorTurnPerformance } from "@/lib/translator/turnPerformance";
+import { RealtimeTranscriptionClientV2 } from "@/lib/translator/live/v2/realtimeTranscriptionClient";
+import {
+  ClassicRealtimeSessionManager,
+  type ClassicRealtimeTurnHandle,
+} from "@/lib/translator/classicRealtimeSessionManager";
+import { requestClassicTranslation } from "@/lib/translator/classicTranslationPipeline";
+import {
+  buildClassicTranslatorReport,
+  downloadClassicTranslatorReport,
+  type ClassicTranslatorFailedTurn,
+} from "@/lib/translator/classicReport";
 import {
   DEFAULT_SPEECH_SPEED,
   formatSpeechSpeed,
@@ -48,6 +59,7 @@ export default function TranslatorView() {
     () => new Set(),
   );
   const translationInFlightRef = useRef(false);
+  const recordingStartInFlightRef = useRef(false);
   const playbackInFlightRef = useRef(false);
   const playbackRunIdRef = useRef(0);
   const requestAbortRef = useRef<AbortController | null>(null);
@@ -55,11 +67,21 @@ export default function TranslatorView() {
     new Map<string, TranslatorTurnPerformance>(),
   );
   const pendingTranslationVisibleEntryIdRef = useRef<string | null>(null);
+  const activeTurnPerformanceRef = useRef<TranslatorTurnPerformance | null>(
+    null,
+  );
+  const realtimeManagerRef = useRef<ClassicRealtimeSessionManager | null>(null);
+  const activeRealtimeTurnRef = useRef<ClassicRealtimeTurnHandle | null>(null);
   const mountedRef = useRef(true);
   const {
     status: recorderStatus,
-    startRecording,
+    acquireMicrophone,
+    prepareRecording,
+    startPreparedRecording,
     stopRecording,
+    suspendMicrophone,
+    releaseMicrophone,
+    disposeRecorder,
     error: recorderError,
     clearError: clearRecorderError,
   } = useAudioRecorder();
@@ -72,6 +94,31 @@ export default function TranslatorView() {
     clearCache,
   } = useTranslatorSpeech();
   const [playbackReady, setPlaybackReady] = useState(false);
+  const [failedReportTurns, setFailedReportTurns] = useState<
+    ClassicTranslatorFailedTurn[]
+  >([]);
+  const reportStartedAtRef = useRef(new Date().toISOString());
+  const reportIdRef = useRef(
+    globalThis.crypto?.randomUUID?.() ?? `report-${Date.now()}`,
+  );
+  const activeTurnCreatedAtRef = useRef<string | null>(null);
+  const audioMetadataByTurnRef = useRef(
+    new Map<string, { audioMimeType: string | null; audioSize: number | null }>(),
+  );
+  const feedbackByTurnRef = useRef(new Map<string, SavedTranslatorFeedback>());
+
+  const getRealtimeManager = useCallback(() => {
+    if (realtimeManagerRef.current) return realtimeManagerRef.current;
+    const manager = new ClassicRealtimeSessionManager({
+      createTransport: (handlers) =>
+        new RealtimeTranscriptionClientV2(handlers),
+      releaseMicrophone: () => {
+        releaseMicrophone();
+      },
+    });
+    realtimeManagerRef.current = manager;
+    return manager;
+  }, [releaseMicrophone]);
 
   const updateEntryDiagnostics = useCallback((
     entry: TranslationEntry,
@@ -84,14 +131,16 @@ export default function TranslatorView() {
       diagnostics,
     });
     if (process.env.NODE_ENV === "development") {
-      console.info("[translator][turn performance][client]", {
-        phase,
-        transcriptionModel: entry.diagnostics?.transcriptionModel,
-        transcriptionFallbackUsed:
-          entry.diagnostics?.transcriptionFallbackUsed,
-        autoplayEnabled: entry.diagnostics?.autoplayEnabled,
-        ...diagnostics,
-      });
+      console.info(
+        `[translator][turn performance][client] ${JSON.stringify({
+          phase,
+          transcriptionModel: entry.diagnostics?.transcriptionModel,
+          transcriptionFallbackUsed:
+            entry.diagnostics?.transcriptionFallbackUsed,
+          autoplayEnabled: entry.diagnostics?.autoplayEnabled,
+          ...diagnostics,
+        })}`,
+      );
     }
   }, []);
 
@@ -115,7 +164,29 @@ export default function TranslatorView() {
     );
   }, [state.entries, updateEntryDiagnostics]);
 
-  useEffect(() => () => requestAbortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      requestAbortRef.current?.abort();
+      realtimeManagerRef.current?.close("classic_unmount");
+      realtimeManagerRef.current = null;
+      activeRealtimeTurnRef.current = null;
+      activeTurnPerformanceRef.current = null;
+    },
+    [],
+  );
+  useEffect(() => {
+    const handlePageHide = () => {
+      requestAbortRef.current?.abort();
+      stopPlayback();
+      realtimeManagerRef.current?.close("classic_page_hide");
+      realtimeManagerRef.current = null;
+      activeRealtimeTurnRef.current = null;
+      activeTurnPerformanceRef.current = null;
+      disposeRecorder();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, [disposeRecorder, stopPlayback]);
   useEffect(
     () => () => {
       mountedRef.current = false;
@@ -131,6 +202,7 @@ export default function TranslatorView() {
     : null;
 
   async function handleStartRecording() {
+    if (recordingStartInFlightRef.current) return;
     if (
       state.status !== "idle" &&
       state.status !== "playing" &&
@@ -138,19 +210,78 @@ export default function TranslatorView() {
     ) {
       return;
     }
+    recordingStartInFlightRef.current = true;
     if (state.status === "playing" || state.status === "paused") {
       handleStopPlayback();
     }
     if (state.autoPlay) preparePlaybackForUserGesture();
     setSpeechFeedback(null);
+    activeTurnCreatedAtRef.current = new Date().toISOString();
+    const turnPerformance = new TranslatorTurnPerformance({
+      recordButtonClicked: performance.now(),
+    });
+    activeTurnPerformanceRef.current = turnPerformance;
+    let realtimeTurn: ClassicRealtimeTurnHandle | null = null;
     try {
-      await startRecording();
+      turnPerformance.markGetUserMediaStarted();
+      const stream = await acquireMicrophone();
+      turnPerformance.markGetUserMediaReady();
+      await prepareRecording();
+      turnPerformance.markMediaRecorderPrepared();
+      realtimeTurn = await getRealtimeManager().prepareTurn(
+        stream,
+        () => turnPerformance.markFirstTranscriptDelta(),
+      );
+      activeRealtimeTurnRef.current = realtimeTurn;
+      turnPerformance.markTranscriptionPathDecision(realtimeTurn);
+      if (!mountedRef.current) return;
+      await startPreparedRecording();
+      turnPerformance.markRecordingStarted();
       dispatch({ type: "START_RECORDING" });
+      getRealtimeManager().recordingStarted(realtimeTurn, stream);
     } catch (error) {
+      if (realtimeTurn) {
+        await getRealtimeManager().abortTurn(realtimeTurn);
+      }
+      activeRealtimeTurnRef.current = null;
+      suspendMicrophone();
+      const message = getAudioRecorderErrorMessage(error);
+      const direction = getTranslationRequestDirection(state.mode);
+      setFailedReportTurns((current) => [
+        ...current,
+        {
+          turnId:
+            globalThis.crypto?.randomUUID?.() ?? `failed-${Date.now()}`,
+          createdAt:
+            activeTurnCreatedAtRef.current ?? new Date().toISOString(),
+          mode: state.mode,
+          sourceLanguage:
+            direction.sourceLanguage === "auto"
+              ? null
+              : direction.sourceLanguage,
+          targetLanguage:
+            direction.targetLanguage === "auto"
+              ? null
+              : direction.targetLanguage,
+          diagnostics: turnPerformance.getDiagnostics(),
+          transcriptionModel: realtimeTurn ? "gpt-live-transcribe" : null,
+          translationModel: "gpt-5.6-terra",
+          ttsModel: "gpt-4o-mini-tts",
+          ttsSpeed: speechSpeed,
+          errorCode: "recording_failed",
+          errorStage: "recording_setup",
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          sanitizedErrorMessage: message,
+        },
+      ]);
       dispatch({
         type: "RECORDING_FAILED",
-        message: getAudioRecorderErrorMessage(error),
+        message,
       });
+      activeTurnPerformanceRef.current = null;
+      activeTurnCreatedAtRef.current = null;
+    } finally {
+      recordingStartInFlightRef.current = false;
     }
   }
 
@@ -210,6 +341,16 @@ export default function TranslatorView() {
             );
           }
         },
+        () => {
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          if (performance) {
+            updateEntryDiagnostics(
+              entry,
+              performance.markPlaybackCompleted(),
+              "playbackCompleted",
+            );
+          }
+        },
       );
     } catch (error) {
       if (
@@ -259,32 +400,68 @@ export default function TranslatorView() {
 
   async function handleStopRecording() {
     if (state.status !== "recording" || translationInFlightRef.current) return;
-    const turnPerformance = new TranslatorTurnPerformance(performance.now());
+    const turnPerformance =
+      activeTurnPerformanceRef.current ??
+      new TranslatorTurnPerformance({ recordingStarted: performance.now() });
+    turnPerformance.markRecordingStopped();
     translationInFlightRef.current = true;
     const direction = getTranslationRequestDirection(state.mode);
-    let audioBlob: Blob;
-
-    try {
-      audioBlob = await stopRecording();
-    } catch (error) {
-      dispatch({
-        type: "RECORDING_FAILED",
-        message: getAudioRecorderErrorMessage(error),
-      });
-      translationInFlightRef.current = false;
-      return;
-    }
-
+    const audioBlobResult = stopRecording().then(
+      (audioBlob) => ({ ok: true as const, audioBlob }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
     dispatch({ type: "STOP_AND_TRANSLATE" });
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
+    let authoritativeTranscript: string | null = null;
+    let errorStage = "transcription";
 
     try {
+      const realtimeTurn = activeRealtimeTurnRef.current;
+      activeRealtimeTurnRef.current = null;
+      const realtimeResult = realtimeTurn
+        ? await getRealtimeManager().finishTurn(realtimeTurn)
+        : {
+            ok: false as const,
+            fallbackReason:
+              "realtime_not_ready_at_recording_start" as const,
+          };
+      turnPerformance.setRealtimeSetupDuration(realtimeTurn?.realtimeSetupMs);
+      suspendMicrophone();
+
+      let transcriptionMs: number | undefined;
+      if (realtimeResult.ok) {
+        authoritativeTranscript = realtimeResult.authoritativeTranscript;
+        turnPerformance.markTranscriptFinal();
+        transcriptionMs = turnPerformance.getRecordingToTranscriptFinalMs();
+      }
+      if (realtimeResult.ok && transcriptionMs !== undefined) {
+        turnPerformance.setTranscriptionOutcome("realtime");
+      } else {
+        turnPerformance.setTranscriptionOutcome(
+          "audio_upload_fallback",
+          realtimeResult.ok
+            ? "transcript_not_finalized"
+            : realtimeResult.fallbackReason,
+        );
+      }
       turnPerformance.markTranslationRequestStarted();
-      const result = await requestAudioTranslation(audioBlob, direction, {
+      errorStage = "translation";
+      const result = await requestClassicTranslation({
+        realtimeResult,
+        transcriptionMs,
+        getAudioBlob: async () => {
+          const recordedAudio = await audioBlobResult;
+          if (!recordedAudio.ok) throw recordedAudio.error;
+          return recordedAudio.audioBlob;
+        },
+        direction,
         signal: abortController.signal,
       });
       turnPerformance.markTranslationCompleted();
+      if (!(realtimeResult.ok && transcriptionMs !== undefined)) {
+        turnPerformance.setFallbackServerTimings(result.diagnostics);
+      }
       const entry = createTranslationEntry(result, {
         sourceWasDetected: direction.sourceLanguage === "auto",
         diagnostics: {
@@ -294,6 +471,13 @@ export default function TranslatorView() {
         },
       });
       turnPerformanceByEntryRef.current.set(entry.id, turnPerformance);
+      void audioBlobResult.then((recordedAudio) => {
+        if (!recordedAudio.ok) return;
+        audioMetadataByTurnRef.current.set(entry.id, {
+          audioMimeType: recordedAudio.audioBlob.type || null,
+          audioSize: recordedAudio.audioBlob.size,
+        });
+      });
       pendingTranslationVisibleEntryIdRef.current = entry.id;
       dispatch({
         type: "PROCESSING_SUCCEEDED",
@@ -302,14 +486,69 @@ export default function TranslatorView() {
       if (state.autoPlay) void handlePlayback(entry, true);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
-        dispatch({
-          type: "PROCESSING_FAILED",
-          message: getTranslatorClientErrorMessage(error),
-        });
+        const recordedAudio = await audioBlobResult;
+        const message = recordedAudio.ok
+          ? getTranslatorClientErrorMessage(error)
+          : getAudioRecorderErrorMessage(recordedAudio.error);
+        const diagnostics = turnPerformance.getDiagnostics();
+        setFailedReportTurns((current) => [
+          ...current,
+          {
+            turnId:
+              globalThis.crypto?.randomUUID?.() ?? `failed-${Date.now()}`,
+            createdAt:
+              activeTurnCreatedAtRef.current ?? new Date().toISOString(),
+            mode: state.mode,
+            sourceLanguage:
+              direction.sourceLanguage === "auto"
+                ? null
+                : direction.sourceLanguage,
+            targetLanguage:
+              direction.targetLanguage === "auto"
+                ? null
+                : direction.targetLanguage,
+            diagnostics,
+            originalText: authoritativeTranscript,
+            transcriptionModel:
+              diagnostics.transcriptionPath === "realtime"
+                ? "gpt-live-transcribe"
+                : "gpt-4o-mini-transcribe",
+            translationModel: "gpt-5.6-terra",
+            ttsModel: "gpt-4o-mini-tts",
+            ttsSpeed: speechSpeed,
+            audioMimeType:
+              recordedAudio.ok && recordedAudio.audioBlob.type
+                ? recordedAudio.audioBlob.type
+                : null,
+            audioSize: recordedAudio.ok
+              ? recordedAudio.audioBlob.size
+              : null,
+            errorCode: recordedAudio.ok
+              ? "processing_failed"
+              : "recording_failed",
+            errorStage: recordedAudio.ok ? errorStage : "recording_stop",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+            sanitizedErrorMessage: message,
+          },
+        ]);
+        dispatch(
+          recordedAudio.ok
+            ? {
+                type: "PROCESSING_FAILED",
+                message,
+              }
+            : {
+                type: "PROCESSING_FAILED",
+                message,
+              },
+        );
       }
     } finally {
+      suspendMicrophone();
       requestAbortRef.current = null;
       translationInFlightRef.current = false;
+      activeTurnPerformanceRef.current = null;
+      activeTurnCreatedAtRef.current = null;
     }
   }
 
@@ -319,16 +558,56 @@ export default function TranslatorView() {
   }
 
   function handleClearHistory() {
+    realtimeManagerRef.current?.close("classic_history_cleared");
+    realtimeManagerRef.current = null;
+    activeRealtimeTurnRef.current = null;
+    releaseMicrophone();
     clearCache();
     turnPerformanceByEntryRef.current.clear();
+    audioMetadataByTurnRef.current.clear();
+    feedbackByTurnRef.current.clear();
     pendingTranslationVisibleEntryIdRef.current = null;
+    reportStartedAtRef.current = new Date().toISOString();
+    reportIdRef.current =
+      globalThis.crypto?.randomUUID?.() ?? `report-${Date.now()}`;
+    setFailedReportTurns([]);
     setSpeechFeedback(null);
     setFeedbackEntryId(null);
     setSavedFeedbackIds(new Set());
     dispatch({ type: "CLEAR_HISTORY" });
   }
 
-  function handleFeedbackSaved(entryId: string) {
+  function handleExportReport() {
+    const connectionDiagnostics =
+      realtimeManagerRef.current?.getConnectionDiagnostics() ?? {
+        connectionAttempts: [],
+        connectionAttemptsTotal: 0,
+        connectionSuccesses: 0,
+        connectionFailures: 0,
+        reconnectCount: 0,
+      };
+    downloadClassicTranslatorReport(
+      buildClassicTranslatorReport({
+        reportId: reportIdRef.current,
+        startedAt: reportStartedAtRef.current,
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        currentMode: state.mode,
+        ttsSpeed: speechSpeed,
+        entries: state.entries,
+        failedTurns: failedReportTurns,
+        audioMetadataByTurn: audioMetadataByTurnRef.current,
+        feedbackByTurn: feedbackByTurnRef.current,
+        ...connectionDiagnostics,
+      }),
+    );
+  }
+
+  function handleFeedbackSaved(
+    entryId: string,
+    feedback: SavedTranslatorFeedback,
+  ) {
+    feedbackByTurnRef.current.set(entryId, feedback);
     setSavedFeedbackIds((current) => new Set(current).add(entryId));
   }
 
@@ -361,10 +640,12 @@ export default function TranslatorView() {
               <button
                 type="button"
                 className="btn btn-primary mt-4 min-h-24 w-full touch-manipulation text-lg active:scale-[0.99]"
-                disabled={recorderStatus === "starting"}
+                disabled={recorderStatus !== "idle"}
                 onClick={() => void handleStartRecording()}
               >
-                {recorderStatus === "starting" ? "Mikrofon wird geöffnet …" : "Aufnahme starten"}
+                {recorderStatus === "starting" || recorderStatus === "recording"
+                  ? "Mikrofon wird geöffnet …"
+                  : "Aufnahme starten"}
               </button>
             </>
           ) : null}
@@ -373,7 +654,7 @@ export default function TranslatorView() {
             <>
               <div className="flex items-center justify-center gap-3 text-accent-danger-strong">
                 <span className="h-3 w-3 rounded-full bg-accent-danger motion-safe:animate-pulse" aria-hidden="true" />
-                <p className="font-semibold">Ich höre zu …</p>
+                <p className="font-semibold">Aufnahme läuft …</p>
               </div>
               <button
                 type="button"
@@ -523,7 +804,10 @@ export default function TranslatorView() {
             <button
               type="button"
               className="btn btn-utility min-h-11 px-3 text-sm text-accent-danger-strong"
-              disabled={state.entries.length === 0 || controlsLocked}
+              disabled={
+                (state.entries.length === 0 && failedReportTurns.length === 0) ||
+                controlsLocked
+              }
               onClick={handleClearHistory}
             >
               Gespräch löschen
@@ -565,6 +849,20 @@ export default function TranslatorView() {
               })}
             </div>
           )}
+          <div className="mt-4">
+              <button
+                type="button"
+                className="btn btn-secondary min-h-12 w-full"
+                onClick={handleExportReport}
+              >
+                Testreport exportieren
+              </button>
+              {process.env.NODE_ENV === "development" ? (
+                <p className="mt-2 text-center text-xs text-muted">
+                  Enthält Gespräch, Performance und technische Diagnostik – kein Audio.
+                </p>
+              ) : null}
+          </div>
         </section>
       </div>
       <TranslationFeedbackSheet

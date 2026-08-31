@@ -29,22 +29,74 @@ function createEntry(id: string): TranslationEntry {
 
 describe("translator turn performance", () => {
   it("derives one turn's client durations from a single performance clock", () => {
-    const turn = new TranslatorTurnPerformance(100);
+    const turn = new TranslatorTurnPerformance({ recordButtonClicked: 0 });
 
+    turn.markGetUserMediaStarted(1);
+    turn.markGetUserMediaReady(10);
+    turn.markMediaRecorderPrepared(20);
+    turn.markRealtimeSetupStarted(10);
+    turn.markRealtimeConnectionReady(40);
+    turn.markTranscriptionPathDecision({
+      transcriptionPathDecisionAt: "2026-08-31T06:00:00.000Z",
+      transcriptionPathDecisionReason: "warm_realtime_ready",
+      connectionId: "connection-1",
+      realtimeConnectionReadyAtRecordingStart: "2026-08-31T05:59:55.000Z",
+      realtimeConnectionReused: true,
+      realtimeConnectionAgeAtRecordingStartMs: 5_000,
+      warmStart: true,
+    }, 45);
+    turn.markRecordingStarted(50);
+    turn.markFirstTranscriptDelta(80);
+    turn.markRecordingStopped(100);
+    turn.markTranscriptFinal(115);
+    turn.setTranscriptionOutcome("realtime");
     turn.markTranslationRequestStarted(120);
     turn.markTranslationCompleted(700);
     turn.markTranslationVisible(720);
     turn.markTtsRequestStarted(730);
     turn.markTtsReady(1_030);
     turn.markPlaybackStarted(1_050);
+    turn.markPlaybackCompleted(2_000);
 
-    expect(turn.getDiagnostics()).toEqual({
+    expect(turn.getDiagnostics()).toMatchObject({
+      realtimeSetupMs: 30,
+      recordClickToMicReadyMs: 10,
+      recordClickToRecordingStartedMs: 50,
+      getUserMediaToRecordingStartedMs: 49,
+      recordingDurationMs: 50,
+      stopToTranscriptFinalMs: 15,
       translationRequestMs: 580,
+      transcriptFinalToTranslationReadyMs: 585,
       stopToTranslationVisibleMs: 620,
       ttsRequestToReadyMs: 300,
+      translationReadyToTtsReadyMs: 330,
       translationVisibleToTtsReadyMs: 310,
       stopToTtsReadyMs: 930,
       stopToPlaybackStartedMs: 950,
+      ttsReadyToPlaybackStartedMs: 20,
+      interactionOverheadMs: 1_000,
+      transcriptionPath: "realtime",
+      transcriptionPathDecisionReason: "warm_realtime_ready",
+      connectionId: "connection-1",
+      realtimeConnectionReused: true,
+    });
+    expect(turn.getDiagnostics()).toMatchObject({
+      realtimeSetupStartedAt: expect.any(String),
+      realtimeConnectionReadyAt: expect.any(String),
+      recordingStartedAt: expect.any(String),
+      recordButtonClickedAt: expect.any(String),
+      getUserMediaStartedAt: expect.any(String),
+      getUserMediaReadyAt: expect.any(String),
+      mediaRecorderPreparedAt: expect.any(String),
+      recordingStoppedAt: expect.any(String),
+      firstTranscriptDeltaAt: expect.any(String),
+      transcriptFinalAt: expect.any(String),
+      translationStartedAt: expect.any(String),
+      translationReadyAt: expect.any(String),
+      ttsStartedAt: expect.any(String),
+      ttsReadyAt: expect.any(String),
+      playbackStartedAt: expect.any(String),
+      playbackCompletedAt: expect.any(String),
     });
   });
 
@@ -58,7 +110,14 @@ describe("translator turn performance", () => {
     turn.markTtsReady(450);
     turn.markPlaybackStarted(Number.POSITIVE_INFINITY);
 
-    expect(turn.getDiagnostics()).toEqual({});
+    expect(turn.getDiagnostics()).not.toHaveProperty("translationRequestMs");
+    expect(turn.getDiagnostics()).not.toHaveProperty(
+      "stopToTranslationVisibleMs",
+    );
+    expect(turn.getDiagnostics()).not.toHaveProperty("ttsRequestToReadyMs");
+    expect(turn.getDiagnostics()).not.toHaveProperty(
+      "stopToPlaybackStartedMs",
+    );
   });
 
   it("keeps new turns and TTS diagnostics bound to their own cards", () => {
@@ -90,7 +149,7 @@ describe("translator turn performance", () => {
       ttsRequestToReadyMs: 290,
       stopToTtsReadyMs: 700,
     });
-    expect(second.getDiagnostics()).toEqual({
+    expect(second.getDiagnostics()).toMatchObject({
       stopToTranslationVisibleMs: 300,
     });
   });

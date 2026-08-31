@@ -39,6 +39,7 @@ export function useTranslatorSpeech() {
     onSpeechRequestStarted?: () => void,
     onSpeechReady?: () => void,
     onPlaybackStarted?: () => void,
+    onPlaybackCompleted?: () => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
@@ -48,6 +49,7 @@ export function useTranslatorSpeech() {
       onSpeechRequestStarted,
       onSpeechReady,
       onPlaybackStarted,
+      onPlaybackCompleted,
     });
   }, []);
 

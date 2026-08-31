@@ -121,7 +121,13 @@ type Props = {
   entry: TranslationEntry | null;
   open: boolean;
   onClose: () => void;
-  onSaved: (entryId: string) => void;
+  onSaved: (entryId: string, feedback: SavedTranslatorFeedback) => void;
+};
+
+export type SavedTranslatorFeedback = {
+  feedbackRating: TranslatorFeedbackRating;
+  feedbackCategories: TranslatorFeedbackCategory[];
+  feedbackComment: string | null;
 };
 
 export default function TranslationFeedbackSheet({
@@ -164,7 +170,11 @@ export default function TranslationFeedbackSheet({
     setStatus(null);
     try {
       await submitTranslatorFeedback(entry, { rating, categories, comment });
-      onSaved(entry.id);
+      onSaved(entry.id, {
+        feedbackRating: rating,
+        feedbackCategories: rating === "problem" ? [...categories] : [],
+        feedbackComment: comment.trim() || null,
+      });
       onClose();
     } catch (error) {
       setStatus(
