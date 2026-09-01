@@ -8,13 +8,19 @@ import {
 
 describe("translator speech client", () => {
   it("requests target-language speech and returns its blob", async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(new Uint8Array([1, 2, 3]), {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("?correlationId=")
+        ? Response.json({
+            ttsOpenAiTimeToFirstByteMs: 120,
+            ttsOpenAiTotalMs: 300,
+          })
+        : new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
         headers: {
           "Content-Type": "audio/mpeg",
           "X-Translator-Speech-Model": "gpt-4o-mini-tts",
           "X-Translator-Speech-Generation-Ms": "321",
+          "X-Translator-Correlation-Id": "tts-turn-1",
         },
       }),
     );
@@ -22,10 +28,18 @@ describe("translator speech client", () => {
     const result = await requestTranslatorSpeech("Habari", "sw", 1.15, { fetcher });
 
     expect(result.audio).toMatchObject({ size: 3, type: "audio/mpeg" });
-    expect(result.diagnostics).toEqual({
+    expect(result.diagnostics).toMatchObject({
       ttsModel: "gpt-4o-mini-tts",
       ttsGenerationMs: 321,
       ttsRequestMs: expect.any(Number),
+      ttsRequestCorrelationId: "tts-turn-1",
+      ttsClientFirstByteAt: expect.any(String),
+      ttsClientResponseCompletedAt: expect.any(String),
+      ttsStreamingUsed: true,
+    });
+    await expect(result.serverDiagnostics).resolves.toMatchObject({
+      ttsOpenAiTimeToFirstByteMs: 120,
+      ttsOpenAiTotalMs: 300,
     });
     expect(fetcher).toHaveBeenCalledWith(
       "/api/translator/speech",
@@ -70,5 +84,28 @@ describe("translator speech client", () => {
         new DOMException("Unsupported audio", "NotSupportedError"),
       ),
     ).toBe(false);
+  });
+
+  it("preserves a client abort while reading streamed audio", async () => {
+    const abortError = new DOMException("request stopped", "AbortError");
+    const fetcher = vi.fn(async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(abortError);
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "X-Translator-Speech-Model": "gpt-4o-mini-tts",
+          },
+        },
+      ),
+    );
+
+    await expect(
+      requestTranslatorSpeech("Hallo", "de", 1, { fetcher }),
+    ).rejects.toBe(abortError);
   });
 });

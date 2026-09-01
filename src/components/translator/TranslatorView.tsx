@@ -102,6 +102,7 @@ export default function TranslatorView() {
     globalThis.crypto?.randomUUID?.() ?? `report-${Date.now()}`,
   );
   const activeTurnCreatedAtRef = useRef<string | null>(null);
+  const activeTurnIdRef = useRef<string | null>(null);
   const audioMetadataByTurnRef = useRef(
     new Map<string, { audioMimeType: string | null; audioSize: number | null }>(),
   );
@@ -217,6 +218,8 @@ export default function TranslatorView() {
     if (state.autoPlay) preparePlaybackForUserGesture();
     setSpeechFeedback(null);
     activeTurnCreatedAtRef.current = new Date().toISOString();
+    activeTurnIdRef.current =
+      globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
     const turnPerformance = new TranslatorTurnPerformance({
       recordButtonClicked: performance.now(),
     });
@@ -251,7 +254,9 @@ export default function TranslatorView() {
         ...current,
         {
           turnId:
-            globalThis.crypto?.randomUUID?.() ?? `failed-${Date.now()}`,
+            activeTurnIdRef.current ??
+            globalThis.crypto?.randomUUID?.() ??
+            `failed-${Date.now()}`,
           createdAt:
             activeTurnCreatedAtRef.current ?? new Date().toISOString(),
           mode: state.mode,
@@ -280,6 +285,7 @@ export default function TranslatorView() {
       });
       activeTurnPerformanceRef.current = null;
       activeTurnCreatedAtRef.current = null;
+      activeTurnIdRef.current = null;
     } finally {
       recordingStartInFlightRef.current = false;
     }
@@ -350,6 +356,36 @@ export default function TranslatorView() {
               "playbackCompleted",
             );
           }
+        },
+        (diagnostics) => {
+          updateEntryDiagnostics(
+            entry,
+            {
+              ...diagnostics,
+              ...(typeof diagnostics.ttsOpenAiTotalMs === "number"
+                ? { ttsGenerationMs: diagnostics.ttsOpenAiTotalMs }
+                : {}),
+            },
+            "ttsServerDiagnostics",
+          );
+        },
+        () => {
+          turnPerformanceByEntryRef.current
+            .get(entry.id)
+            ?.markTtsAudioPreparationStarted();
+        },
+        () => {
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          if (performance) {
+            updateEntryDiagnostics(
+              entry,
+              performance.markTtsAudioPreparationCompleted(),
+              "firstPlayableAudio",
+            );
+          }
+        },
+        () => {
+          turnPerformanceByEntryRef.current.get(entry.id)?.markPlayRequested();
         },
       );
     } catch (error) {
@@ -457,12 +493,18 @@ export default function TranslatorView() {
         },
         direction,
         signal: abortController.signal,
+        correlationId: activeTurnIdRef.current
+          ? `translation-${activeTurnIdRef.current}`
+          : undefined,
+        onResponseCompleted: (now) =>
+          turnPerformance.markTranslationClientResponseCompleted(now),
       });
       turnPerformance.markTranslationCompleted();
       if (!(realtimeResult.ok && transcriptionMs !== undefined)) {
         turnPerformance.setFallbackServerTimings(result.diagnostics);
       }
       const entry = createTranslationEntry(result, {
+        id: activeTurnIdRef.current ?? undefined,
         sourceWasDetected: direction.sourceLanguage === "auto",
         diagnostics: {
           ttsSpeed: speechSpeed,
@@ -479,6 +521,7 @@ export default function TranslatorView() {
         });
       });
       pendingTranslationVisibleEntryIdRef.current = entry.id;
+      turnPerformance.markTranslationStateCommitted();
       dispatch({
         type: "PROCESSING_SUCCEEDED",
         entry,
@@ -495,7 +538,9 @@ export default function TranslatorView() {
           ...current,
           {
             turnId:
-              globalThis.crypto?.randomUUID?.() ?? `failed-${Date.now()}`,
+              activeTurnIdRef.current ??
+              globalThis.crypto?.randomUUID?.() ??
+              `failed-${Date.now()}`,
             createdAt:
               activeTurnCreatedAtRef.current ?? new Date().toISOString(),
             mode: state.mode,
@@ -549,6 +594,7 @@ export default function TranslatorView() {
       translationInFlightRef.current = false;
       activeTurnPerformanceRef.current = null;
       activeTurnCreatedAtRef.current = null;
+      activeTurnIdRef.current = null;
     }
   }
 

@@ -159,6 +159,11 @@ type TranscriptionModel =
 
 export function createOpenAITranslatorGateway(
   apiKey = process.env.OPENAI_API_KEY,
+  options: {
+    signal?: AbortSignal;
+    onTranslationRequestStarted?: () => void;
+    onTranslationCompleted?: () => void;
+  } = {},
 ): TranslatorAiGateway {
   if (!apiKey) {
     throw new TranslatorPipelineError(
@@ -367,10 +372,16 @@ export function createOpenAITranslatorGateway(
             },
           },
         } as const;
-        const response = await client.responses.parse<
-          typeof params,
-          AutoTranslationOutput
-        >(params);
+        options.onTranslationRequestStarted?.();
+        const response = options.signal
+          ? await client.responses.parse<typeof params, AutoTranslationOutput>(
+              params,
+              { signal: options.signal },
+            )
+          : await client.responses.parse<typeof params, AutoTranslationOutput>(
+              params,
+            );
+        options.onTranslationCompleted?.();
         const result = response.output_parsed;
         if (!isAutoTranslationOutput(result)) {
           throw new Error("Invalid automatic translation output");
@@ -404,13 +415,18 @@ export function createOpenAITranslatorGateway(
       }
 
       try {
-        const response = await client.responses.create({
+        options.onTranslationRequestStarted?.();
+        const params = {
           model: TRANSLATION_MODEL,
           reasoning: { effort: "none" },
           instructions: buildInterpreterPrompt(direction),
           input: text,
           max_output_tokens: 1200,
-        });
+        } as const;
+        const response = options.signal
+          ? await client.responses.create(params, { signal: options.signal })
+          : await client.responses.create(params);
+        options.onTranslationCompleted?.();
         return response.output_text;
       } catch (error) {
         if (process.env.NODE_ENV === "development") {
@@ -438,17 +454,20 @@ export function createOpenAISpeechGateway(
   const client = new OpenAI({ apiKey });
 
   return {
-    async synthesize(text, language, speed) {
+    async synthesize(text, language, speed, signal) {
       try {
-        const response = await client.audio.speech.create({
+        const params = {
           model: SPEECH_MODEL,
           voice: SPEECH_VOICE,
           input: text,
           instructions: getSpeechInstructions(language),
           response_format: SPEECH_RESPONSE_FORMAT,
           speed,
-        });
-        return response.arrayBuffer();
+        } as const;
+        const request = signal
+          ? client.audio.speech.create(params, { signal })
+          : client.audio.speech.create(params);
+        return await request;
       } catch (error) {
         if (process.env.NODE_ENV === "development") {
           console.error(

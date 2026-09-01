@@ -38,7 +38,11 @@ describe("POST /api/translator/speech", () => {
       user: { id: "user-1" },
       response: null,
     });
-    synthesizeMock.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer);
+    synthesizeMock.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "Content-Type": "audio/mpeg" },
+      }),
+    );
   });
 
   it("returns 401 before generating speech for an unauthenticated request", async () => {
@@ -97,13 +101,48 @@ describe("POST /api/translator/speech", () => {
     expect(response.headers.get("X-Translator-Speech-Model")).toBe(
       "gpt-4o-mini-tts",
     );
-    expect(response.headers.get("X-Translator-Speech-Generation-Ms")).toMatch(
-      /^\d+$/,
-    );
+    expect(response.headers.get("Server-Timing")).toContain("app-pre");
+    expect(response.headers.get("X-Translator-Speech-Timing")).toBeTruthy();
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       new Uint8Array([1, 2, 3]),
     );
-    expect(synthesizeMock).toHaveBeenCalledWith("Habari", "sw", 1);
+    const correlationId = response.headers.get("X-Translator-Correlation-Id");
+    expect(correlationId).toBeTruthy();
+    const { GET } = await import("../route");
+    const diagnosticsResponse = await GET(
+      new Request(
+        `http://localhost/api/translator/speech?correlationId=${correlationId}`,
+      ),
+    );
+    await expect(diagnosticsResponse.json()).resolves.toMatchObject({
+      ttsRequestCorrelationId: correlationId,
+      ttsOpenAiFirstByteAt: expect.any(String),
+      ttsOpenAiCompletedAt: expect.any(String),
+      status: "completed",
+    });
+    expect(synthesizeMock).toHaveBeenCalledWith(
+      "Habari",
+      "sw",
+      1,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("cancels the upstream audio stream when the browser aborts playback", async () => {
+    const upstreamCancel = vi.fn();
+    synthesizeMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel: upstreamCancel,
+        }),
+      ),
+    );
+
+    const response = await post({ text: "Habari", language: "sw" });
+    await response.body?.cancel("client_abort");
+
+    expect(upstreamCancel).toHaveBeenCalledWith("client_abort");
+    expect(synthesizeMock).toHaveBeenCalledOnce();
   });
 
   it("does not leak OpenAI TTS errors", async () => {

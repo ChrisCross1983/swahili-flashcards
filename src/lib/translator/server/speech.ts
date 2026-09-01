@@ -8,7 +8,8 @@ export type TranslatorSpeechGateway = {
     text: string,
     language: TranslationLanguage,
     speed: number,
-  ) => Promise<ArrayBuffer>;
+    signal?: AbortSignal,
+  ) => Promise<Response>;
 };
 
 export function getSpeechInstructions(language: TranslationLanguage) {
@@ -22,12 +23,13 @@ export async function generateTranslatorSpeech(
   language: TranslationLanguage,
   speed: number,
   gateway: TranslatorSpeechGateway,
+  signal?: AbortSignal,
 ) {
-  const startedAt = Date.now();
-  let audio: ArrayBuffer;
+  const startedAt = performance.now();
+  let response: Response;
 
   try {
-    audio = await gateway.synthesize(text, language, speed);
+    response = await gateway.synthesize(text, language, speed, signal);
   } catch {
     throw new TranslatorPipelineError(
       "speech_failed",
@@ -35,7 +37,7 @@ export async function generateTranslatorSpeech(
     );
   }
 
-  if (audio.byteLength === 0) {
+  if (!response.body) {
     throw new TranslatorPipelineError(
       "speech_failed",
       "Speech generation returned empty audio",
@@ -44,9 +46,9 @@ export async function generateTranslatorSpeech(
 
   if (process.env.NODE_ENV === "development") {
     console.info("[translator] speech timing", {
-      ttsGenerationMs: Date.now() - startedAt,
+      ttsUpstreamResponseHeadersMs: Math.round(performance.now() - startedAt),
     });
   }
 
-  return audio;
+  return response;
 }

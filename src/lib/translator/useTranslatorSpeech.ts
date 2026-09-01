@@ -14,6 +14,7 @@ export function useTranslatorSpeech() {
       requestSpeech: (entry, speed, signal) =>
         requestTranslatorSpeech(entry.translatedText, entry.targetLanguage, speed, {
           signal,
+          correlationId: `tts-${entry.id}`,
         }),
       createObjectUrl: (blob) => URL.createObjectURL(blob),
       revokeObjectUrl: (url) => URL.revokeObjectURL(url),
@@ -40,6 +41,12 @@ export function useTranslatorSpeech() {
     onSpeechReady?: () => void,
     onPlaybackStarted?: () => void,
     onPlaybackCompleted?: () => void,
+    onSpeechDiagnosticsUpdated?: (
+      diagnostics: Partial<TranslatorSpeechGenerationDiagnostics>,
+    ) => void,
+    onAudioPreparationStarted?: () => void,
+    onAudioPreparationCompleted?: () => void,
+    onPlayRequested?: () => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
@@ -50,6 +57,10 @@ export function useTranslatorSpeech() {
       onSpeechReady,
       onPlaybackStarted,
       onPlaybackCompleted,
+      onSpeechDiagnosticsUpdated,
+      onAudioPreparationStarted,
+      onAudioPreparationCompleted,
+      onPlayRequested,
     });
   }, []);
 

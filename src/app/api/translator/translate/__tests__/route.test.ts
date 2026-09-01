@@ -6,11 +6,26 @@ const requireUserMock = vi.fn();
 const transcribeMock = vi.fn();
 const autoTranslateMock = vi.fn();
 const translateMock = vi.fn();
-const createGatewayMock = vi.fn(() => ({
-  transcribe: transcribeMock,
-  autoTranslate: autoTranslateMock,
-  translate: translateMock,
-}));
+const createGatewayMock = vi.fn(
+  (_client?: unknown, instrumentation?: {
+    onTranslationRequestStarted?: () => void;
+    onTranslationCompleted?: () => void;
+  }) => ({
+    transcribe: transcribeMock,
+    autoTranslate: async (...args: unknown[]) => {
+      instrumentation?.onTranslationRequestStarted?.();
+      const result = await autoTranslateMock(...args);
+      instrumentation?.onTranslationCompleted?.();
+      return result;
+    },
+    translate: async (...args: unknown[]) => {
+      instrumentation?.onTranslationRequestStarted?.();
+      const result = await translateMock(...args);
+      instrumentation?.onTranslationCompleted?.();
+      return result;
+    },
+  }),
+);
 
 vi.mock("@/lib/api/auth", () => ({
   requireUser: requireUserMock,
@@ -53,7 +68,10 @@ async function postJson(body: unknown) {
   return POST(
     new Request("http://localhost/api/translator/translate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Translator-Correlation-Id": "translation-turn-1",
+      },
       body: JSON.stringify(body),
     }),
   );
@@ -145,7 +163,7 @@ describe("POST /api/translator/translate", () => {
     });
     const response = await post(createFormData());
     expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       code: "no_speech",
       error: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
     });
@@ -156,7 +174,9 @@ describe("POST /api/translator/translate", () => {
   it("returns transcription and translation with safe diagnostics", async () => {
     const response = await post(createFormData());
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    expect(response.headers.get("Server-Timing")).toContain("app-pre");
+    expect(response.headers.get("X-Translator-Translation-Timing")).toBeTruthy();
+    await expect(response.json()).resolves.toMatchObject({
       originalText: "Tutakuja kesho asubuhi.",
       translatedText: "Wir kommen morgen früh.",
       sourceLanguage: "sw",
@@ -207,6 +227,9 @@ describe("POST /api/translator/translate", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("X-Translator-Correlation-Id")).toBe(
+      "translation-turn-1",
+    );
     await expect(response.json()).resolves.toMatchObject({
       originalText: "Habari yako?",
       sourceLanguage: "sw",
@@ -215,6 +238,7 @@ describe("POST /api/translator/translate", () => {
         transcriptionModel: "gpt-live-transcribe",
         transcriptionMs: 950,
         translationModel: "gpt-5.6-terra",
+        translationRequestCorrelationId: "translation-turn-1",
       },
     });
     expect(transcribeMock).not.toHaveBeenCalled();

@@ -41,7 +41,7 @@ function entry(
       realtimeConnectionReadyAt: realtime
         ? "2023-11-14T22:13:19.200Z"
         : undefined,
-      realtimeSetupMs: realtime ? 200 : 5_000,
+      realtimeSetupMs: realtime ? undefined : 5_000,
       recordingStartedAt: "2023-11-14T22:13:20.000Z",
       recordingStoppedAt: "2023-11-14T22:13:21.000Z",
       recordingDurationMs: 1_000,
@@ -52,10 +52,55 @@ function entry(
       stopToTranscriptFinalMs: realtime ? 100 : 640,
       translationStartedAt: "2023-11-14T22:13:21.100Z",
       translationReadyAt: "2023-11-14T22:13:21.410Z",
+      translationClientRequestStartedAt: "2023-11-14T22:13:21.100Z",
+      translationServerRequestReceivedAt: "2023-11-14T22:13:21.110Z",
+      translationServerParsingDoneAt: "2023-11-14T22:13:21.112Z",
+      translationOpenAiRequestStartedAt: "2023-11-14T22:13:21.115Z",
+      translationOpenAiCompletedAt: "2023-11-14T22:13:21.400Z",
+      translationServerSerializationDoneAt: "2023-11-14T22:13:21.405Z",
+      translationServerResponseStartedAt: "2023-11-14T22:13:21.406Z",
+      translationClientResponseFirstByteAt: "2023-11-14T22:13:21.407Z",
+      translationClientResponseCompletedAt: "2023-11-14T22:13:21.410Z",
+      translationStateCommittedAt: "2023-11-14T22:13:21.411Z",
+      translationVisibleAt: "2023-11-14T22:13:21.420Z",
+      translationRequestCorrelationId: `translation-${id}`,
+      translationServerPreOpenAiMs: 3,
+      translationOpenAiTotalMs: 285,
+      translationServerPostOpenAiMs: 5,
+      translationClientPostResponseMs: 10,
+      transcriptFinalToTranslationRequestStartMs: 0,
+      translationRequestToVisibleMs: 320,
+      transcriptFinalToTranslationVisibleMs: 320,
       transcriptFinalToTranslationReadyMs: 310,
       stopToTranslationVisibleMs: realtime ? 420 : 1_010,
       ttsStartedAt: "2023-11-14T22:13:21.420Z",
       ttsReadyAt: "2023-11-14T22:13:21.720Z",
+      ttsClientRequestStartedAt: "2023-11-14T22:13:21.420Z",
+      ttsServerRequestReceivedAt: "2023-11-14T22:13:21.425Z",
+      ttsServerParsingDoneAt: "2023-11-14T22:13:21.427Z",
+      ttsOpenAiRequestStartedAt: "2023-11-14T22:13:21.430Z",
+      ttsOpenAiFirstByteAt: "2023-11-14T22:13:21.550Z",
+      ttsOpenAiCompletedAt: "2023-11-14T22:13:21.700Z",
+      ttsServerFirstByteSentAt: "2023-11-14T22:13:21.551Z",
+      ttsServerCompletedAt: "2023-11-14T22:13:21.702Z",
+      ttsClientFirstByteAt: "2023-11-14T22:13:21.552Z",
+      ttsClientResponseCompletedAt: "2023-11-14T22:13:21.720Z",
+      ttsAudioPreparationStartedAt: "2023-11-14T22:13:21.720Z",
+      ttsAudioPreparationCompletedAt: "2023-11-14T22:13:21.722Z",
+      firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
+      playRequestedAt: "2023-11-14T22:13:21.723Z",
+      ttsRequestCorrelationId: `tts-${id}`,
+      ttsServerPreOpenAiMs: 3,
+      ttsOpenAiTimeToFirstByteMs: 120,
+      ttsOpenAiTotalMs: 270,
+      ttsServerStreamingOverheadMs: 2,
+      ttsClientDownloadTotalMs: 300,
+      ttsAudioPreparationMs: 2,
+      ttsPlayCallToStartedMs: 7,
+      translationReadyToPlaybackStartedMs: 320,
+      translationReadyToFirstPlayableAudioMs: 312,
+      translationVisibleToFirstPlayableAudioMs: 302,
+      stopToFirstPlayableAudioMs: realtime ? 722 : 1_312,
       ttsRequestToReadyMs: 300,
       translationReadyToTtsReadyMs: 310,
       stopToTtsReadyMs: realtime ? 720 : 1_310,
@@ -82,6 +127,8 @@ function entry(
       ttsModel: "gpt-4o-mini-tts",
       ttsGenerationMs: 280,
       ttsSpeed: 1,
+      autoplayEnabled: true,
+      ttsStreamingUsed: true,
     },
   };
 }
@@ -116,7 +163,7 @@ describe("classic translator QA report", () => {
           errorCode: "processing_failed",
           errorStage: "translation",
           sanitizedErrorMessage:
-            "Authorization: Bearer secret-token und sk-exampleSecret123\nCookie: session=abc\nephemeral_secret=hidden",
+            "Authorization: Bearer secret-token und sk-exampleSecret123\nCookie: session=abc\nephemeral_secret=hidden OPENAI_API_KEY=plain-secret SUPABASE_SESSION_TOKEN=session-secret",
         },
       ],
       audioMetadataByTurn: new Map([
@@ -174,7 +221,12 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 2,
+      reportVersion: 3,
+      performanceOptimizationVersion: "classic-post-stop-v3",
+      translationStreamingEnabled: false,
+      ttsStreamingEnabled: true,
+      earlyTtsEnabled: false,
+      initialRealtimeSetupMs: 5_000,
       reportId: "report-qa",
       totalTurns: 3,
       successfulTurns: 2,
@@ -197,9 +249,13 @@ describe("classic translator QA report", () => {
       ttsModel: "gpt-4o-mini-tts",
       connectionAttemptsTotal: 1,
       connectionSuccesses: 1,
+      ttsStreamingTurns: 2,
+      streamingFallbackTurns: 0,
     });
-    expect(report.turns.find((turn) => turn.turnId === "realtime-turn"))
-      .toMatchObject({
+    const realtimeReportTurn = report.turns.find(
+      (turn) => turn.turnId === "realtime-turn",
+    );
+    expect(realtimeReportTurn).toMatchObject({
         status: "success",
         originalText: "Habari yako?",
         translatedText: "Wie geht es dir?",
@@ -212,7 +268,23 @@ describe("classic translator QA report", () => {
         serverTranscriptionMs: null,
         feedbackRating: "good",
         feedbackComment: "Klingt natürlich.",
+        realtimeSetupMs: null,
+        translationRequestCorrelationId: "translation-realtime-turn",
+        ttsRequestCorrelationId: "tts-realtime-turn",
+        ttsStreamingUsed: true,
+        ttsOpenAiTimeToFirstByteMs: 120,
+        firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
       });
+    expect(realtimeReportTurn?.ttsClientFirstByteAt).not.toBe(
+      realtimeReportTurn?.firstPlayableAudioAt,
+    );
+    expect(realtimeReportTurn?.criticalPath).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: "translation_openai", durationMs: 285 }),
+        expect.objectContaining({ stage: "tts_openai_to_first_byte", durationMs: 120 }),
+      ]),
+    );
+    expect(report.bottleneckSummary.largestMedianStage).toBeTruthy();
     expect(report.turns.find((turn) => turn.turnId === "fallback-turn"))
       .toMatchObject({
         transcriptionPath: "audio_upload_fallback",
@@ -229,6 +301,8 @@ describe("classic translator QA report", () => {
     expect(serialized).not.toContain("session=abc");
     expect(serialized).not.toContain("ephemeral_secret");
     expect(serialized).not.toContain("OPENAI_API_KEY");
+    expect(serialized).not.toContain("plain-secret");
+    expect(serialized).not.toContain("session-secret");
     expect(serialized).not.toContain("rawAudio");
     expect(serialized).not.toContain("offer-sdp");
     expect(serialized).not.toContain("answer-sdp");
@@ -263,7 +337,7 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 2,
+      reportVersion: 3,
       realtimeTurns: 3,
       fallbackTurns: 0,
       realtimeRate: 1,
@@ -281,6 +355,15 @@ describe("classic translator QA report", () => {
       p90: 900,
       min: 100,
       max: 900,
+    });
+    expect(
+      report.performanceSummary.warmReusedRealtimeTurns.realtimeSetupMs,
+    ).toEqual({
+      count: 0,
+      average: null,
+      median: null,
+      min: null,
+      max: null,
     });
     expect(
       report.performanceSummary.audioUploadFallbackTurns
@@ -325,7 +408,7 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 2,
+      reportVersion: 3,
       totalTurns: 0,
       realtimeRate: null,
       fallbackRate: null,

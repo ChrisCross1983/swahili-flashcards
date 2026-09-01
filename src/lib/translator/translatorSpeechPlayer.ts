@@ -41,8 +41,14 @@ export type TranslatorSpeechPlaybackOptions = {
   onSpeechGenerated?: (
     diagnostics: TranslatorSpeechGenerationDiagnostics,
   ) => void;
+  onSpeechDiagnosticsUpdated?: (
+    diagnostics: Partial<TranslatorSpeechGenerationDiagnostics>,
+  ) => void;
   onSpeechRequestStarted?: () => void;
+  onAudioPreparationStarted?: () => void;
+  onAudioPreparationCompleted?: () => void;
   onSpeechReady?: () => void;
+  onPlayRequested?: () => void;
   onPlaybackStarted?: () => void;
   onPlaybackCompleted?: () => void;
 };
@@ -130,6 +136,14 @@ export class TranslatorSpeechPlayer {
         throw createAbortError();
       }
       options.onSpeechGenerated?.(speechAsset.diagnostics);
+      if (speechAsset.serverDiagnostics) {
+        void speechAsset.serverDiagnostics.then((diagnostics) => {
+          if (diagnostics && operationId === this.operationId && !this.disposed) {
+            options.onSpeechDiagnosticsUpdated?.(diagnostics);
+          }
+        });
+      }
+      options.onAudioPreparationStarted?.();
       const objectUrl = this.dependencies.createObjectUrl(speechAsset.audio);
       const audio = this.preparedAudio ?? this.dependencies.createAudio();
       this.preparedAudio = null;
@@ -138,6 +152,7 @@ export class TranslatorSpeechPlayer {
       audio.load();
       cachedSpeech = { objectUrl, audio };
       this.cache.set(cacheKey, cachedSpeech);
+      options.onAudioPreparationCompleted?.();
     }
 
     if (operationId !== this.operationId || this.disposed) {
@@ -157,6 +172,7 @@ export class TranslatorSpeechPlayer {
 
     const audio = cachedSpeech.audio;
     const playbackRequestedAt = performance.now();
+    options.onPlayRequested?.();
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;

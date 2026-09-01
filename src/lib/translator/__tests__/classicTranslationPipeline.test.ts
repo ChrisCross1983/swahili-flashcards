@@ -36,12 +36,19 @@ describe("classic post-stop translation path", () => {
           getAudioBlob,
           direction,
           signal: new AbortController().signal,
+          correlationId: "translation-turn-1",
         },
         { requestText, requestAudio },
       ),
     ).resolves.toBe(result);
 
     expect(requestText).toHaveBeenCalledOnce();
+    expect(requestText).toHaveBeenCalledWith(
+      "Habari yako?",
+      direction,
+      900,
+      expect.objectContaining({ correlationId: "translation-turn-1" }),
+    );
     expect(requestAudio).not.toHaveBeenCalled();
     expect(getAudioBlob).not.toHaveBeenCalled();
   });

@@ -1,4 +1,10 @@
 import type { TranslationLanguage } from "@/lib/translator/types";
+import {
+  createCorrelationId,
+  parseTimingHeader,
+  SPEECH_TIMING_HEADER,
+  TRANSLATOR_CORRELATION_HEADER,
+} from "@/lib/translator/performanceHeaders";
 
 const SPEECH_ERROR_MESSAGE = "Die Sprachausgabe konnte nicht erstellt werden.";
 const SPEECH_READY_MESSAGE =
@@ -14,11 +20,30 @@ export type TranslatorSpeechGenerationDiagnostics = {
   ttsModel: string;
   ttsGenerationMs: number;
   ttsRequestMs?: number;
+  ttsRequestCorrelationId?: string;
+  ttsClientRequestStartedAt?: string;
+  ttsServerRequestReceivedAt?: string;
+  ttsServerParsingDoneAt?: string;
+  ttsOpenAiRequestStartedAt?: string;
+  ttsOpenAiFirstByteAt?: string | null;
+  ttsOpenAiCompletedAt?: string | null;
+  ttsServerFirstByteSentAt?: string | null;
+  ttsServerCompletedAt?: string | null;
+  ttsClientFirstByteAt?: string;
+  ttsClientResponseCompletedAt?: string;
+  ttsServerPreOpenAiMs?: number;
+  ttsOpenAiTimeToFirstByteMs?: number | null;
+  ttsOpenAiTotalMs?: number | null;
+  ttsServerStreamingOverheadMs?: number | null;
+  ttsClientDownloadTotalMs?: number;
+  ttsStreamingUsed?: boolean;
+  streamingFallbackReason?: string;
 };
 
 export type TranslatorSpeechAsset = {
   audio: Blob;
   diagnostics: TranslatorSpeechGenerationDiagnostics;
+  serverDiagnostics?: Promise<Partial<TranslatorSpeechGenerationDiagnostics> | null>;
 };
 
 export class TranslatorSpeechClientError extends Error {
@@ -67,6 +92,7 @@ export function getTranslatorSpeechFailure(
 type RequestOptions = {
   fetcher?: typeof fetch;
   signal?: AbortSignal;
+  correlationId?: string;
 };
 
 export async function requestTranslatorSpeech(
@@ -76,11 +102,17 @@ export async function requestTranslatorSpeech(
   options: RequestOptions = {},
 ) {
   const requestStartedAt = performance.now();
+  const requestStartedIso = new Date().toISOString();
+  const correlationId = options.correlationId ?? createCorrelationId("tts");
+  const fetcher = options.fetcher ?? fetch;
   let response: Response;
   try {
-    response = await (options.fetcher ?? fetch)("/api/translator/speech", {
+    response = await fetcher("/api/translator/speech", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        [TRANSLATOR_CORRELATION_HEADER]: correlationId,
+      },
       body: JSON.stringify({ text, language, speed }),
       signal: options.signal,
     });
@@ -93,19 +125,60 @@ export async function requestTranslatorSpeech(
     throw new TranslatorSpeechClientError();
   }
 
+  const responseHeadersReceivedMono = performance.now();
   let audio: Blob;
+  let firstByteAt: string | null = null;
+  let streamingFallbackReason: string | undefined;
   try {
-    audio = await response.blob();
-  } catch {
+    if (!response.body) {
+      streamingFallbackReason = "response_body_unavailable";
+      audio = await response.blob();
+    } else {
+      const reader = response.body.getReader();
+      const chunks: ArrayBuffer[] = [];
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        if (!firstByteAt && chunk.value.byteLength > 0) {
+          firstByteAt = new Date().toISOString();
+        }
+        chunks.push(chunk.value.slice().buffer as ArrayBuffer);
+      }
+      audio = new Blob(chunks, {
+        type: response.headers.get("content-type") || "audio/mpeg",
+      });
+    }
+  } catch (error) {
+    if (getSpeechErrorName(error) === "AbortError") throw error;
     throw new TranslatorSpeechClientError();
   }
   if (audio.size === 0) {
     throw new TranslatorSpeechClientError();
   }
+  const responseCompletedAt = new Date().toISOString();
+  const responseCompletedMono = performance.now();
+  const ttsRequestMs = Math.round(responseCompletedMono - requestStartedAt);
+  const ttsClientDownloadTotalMs = Math.round(
+    responseCompletedMono - responseHeadersReceivedMono,
+  );
   const generationHeader = Number(
     response.headers.get("X-Translator-Speech-Generation-Ms"),
   );
-  const ttsRequestMs = Math.round(performance.now() - requestStartedAt);
+  const responseCorrelationId =
+    response.headers.get(TRANSLATOR_CORRELATION_HEADER)?.trim() || correlationId;
+  const headerDiagnostics = parseTimingHeader<TranslatorSpeechGenerationDiagnostics>(
+    response.headers.get(SPEECH_TIMING_HEADER),
+  );
+  const serverDiagnostics = fetcher(
+    `/api/translator/speech?correlationId=${encodeURIComponent(responseCorrelationId)}`,
+    { method: "GET", signal: options.signal },
+  ).then(async (diagnosticResponse) => {
+    if (!diagnosticResponse.ok) return null;
+    const value = await diagnosticResponse.json().catch(() => null);
+    return value && typeof value === "object"
+      ? value as Partial<TranslatorSpeechGenerationDiagnostics>
+      : null;
+  }).catch(() => null);
   return {
     audio,
     diagnostics: {
@@ -116,7 +189,16 @@ export async function requestTranslatorSpeech(
           ? generationHeader
           : ttsRequestMs,
       ttsRequestMs,
+      ...headerDiagnostics,
+      ttsRequestCorrelationId: responseCorrelationId,
+      ttsClientRequestStartedAt: requestStartedIso,
+      ...(firstByteAt ? { ttsClientFirstByteAt: firstByteAt } : {}),
+      ttsClientResponseCompletedAt: responseCompletedAt,
+      ttsClientDownloadTotalMs,
+      ttsStreamingUsed: streamingFallbackReason === undefined,
+      ...(streamingFallbackReason ? { streamingFallbackReason } : {}),
     },
+    serverDiagnostics,
   } satisfies TranslatorSpeechAsset;
 }
 

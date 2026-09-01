@@ -345,10 +345,8 @@ describe("OpenAI translator diagnostics", () => {
   });
 
   it("generates calm MP3 speech with the central model and voice", async () => {
-    const audio = new Uint8Array([1, 2, 3]).buffer;
-    openAiMocks.speechCreate.mockResolvedValue({
-      arrayBuffer: vi.fn(async () => audio),
-    });
+    const audio = new Response(new Uint8Array([1, 2, 3]));
+    openAiMocks.speechCreate.mockResolvedValue(audio);
 
     const gateway = createOpenAISpeechGateway("configured-secret");
     await expect(gateway.synthesize("Habari", "sw", 1)).resolves.toBe(audio);

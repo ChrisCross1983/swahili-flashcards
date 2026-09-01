@@ -51,10 +51,15 @@ describe("translator turn performance", () => {
     turn.markTranscriptFinal(115);
     turn.setTranscriptionOutcome("realtime");
     turn.markTranslationRequestStarted(120);
+    turn.markTranslationClientResponseCompleted(700);
     turn.markTranslationCompleted(700);
+    turn.markTranslationStateCommitted(705);
     turn.markTranslationVisible(720);
     turn.markTtsRequestStarted(730);
+    turn.markTtsAudioPreparationStarted(1_000);
+    turn.markTtsAudioPreparationCompleted(1_030);
     turn.markTtsReady(1_030);
+    turn.markPlayRequested(1_040);
     turn.markPlaybackStarted(1_050);
     turn.markPlaybackCompleted(2_000);
 
@@ -67,13 +72,24 @@ describe("translator turn performance", () => {
       stopToTranscriptFinalMs: 15,
       translationRequestMs: 580,
       transcriptFinalToTranslationReadyMs: 585,
+      transcriptFinalToTranslationRequestStartMs: 5,
+      translationRequestToVisibleMs: 600,
+      transcriptFinalToTranslationVisibleMs: 605,
+      translationClientPostResponseMs: 20,
       stopToTranslationVisibleMs: 620,
       ttsRequestToReadyMs: 300,
       translationReadyToTtsReadyMs: 330,
       translationVisibleToTtsReadyMs: 310,
+      translationVisibleToTtsRequestStartMs: 10,
+      ttsAudioPreparationMs: 30,
+      translationReadyToFirstPlayableAudioMs: 330,
+      translationVisibleToFirstPlayableAudioMs: 310,
+      stopToFirstPlayableAudioMs: 930,
       stopToTtsReadyMs: 930,
       stopToPlaybackStartedMs: 950,
       ttsReadyToPlaybackStartedMs: 20,
+      ttsPlayCallToStartedMs: 10,
+      translationReadyToPlaybackStartedMs: 350,
       interactionOverheadMs: 1_000,
       transcriptionPath: "realtime",
       transcriptionPathDecisionReason: "warm_realtime_ready",

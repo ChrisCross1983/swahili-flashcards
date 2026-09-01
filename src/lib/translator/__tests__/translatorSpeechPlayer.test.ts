@@ -36,6 +36,7 @@ function createHarness(
         ttsModel: "gpt-4o-mini-tts",
         ttsGenerationMs: 400,
       },
+      serverDiagnostics: Promise.resolve({ ttsOpenAiTotalMs: 350 }),
     }),
   );
   const createObjectUrl = vi.fn(() => "blob:translation-1");
@@ -96,6 +97,10 @@ describe("TranslatorSpeechPlayer", () => {
     const onSpeechGenerated = vi.fn();
     const onSpeechRequestStarted = vi.fn();
     const onSpeechReady = vi.fn();
+    const onAudioPreparationStarted = vi.fn();
+    const onAudioPreparationCompleted = vi.fn();
+    const onPlayRequested = vi.fn();
+    const onSpeechDiagnosticsUpdated = vi.fn();
 
     const playback = harness.player.play(entry, 1, {
       autoplay: true,
@@ -104,6 +109,10 @@ describe("TranslatorSpeechPlayer", () => {
       onSpeechReady,
       onPlaybackStarted,
       onPlaybackCompleted,
+      onAudioPreparationStarted,
+      onAudioPreparationCompleted,
+      onPlayRequested,
+      onSpeechDiagnosticsUpdated,
     });
     await waitForAudio(harness.audios, 1);
     await vi.waitFor(() => expect(onPlaybackStarted).toHaveBeenCalledOnce());
@@ -114,6 +123,12 @@ describe("TranslatorSpeechPlayer", () => {
     expect(harness.requestSpeech).toHaveBeenCalledOnce();
     expect(onSpeechRequestStarted).toHaveBeenCalledOnce();
     expect(onSpeechReady).toHaveBeenCalledOnce();
+    expect(onAudioPreparationStarted).toHaveBeenCalledOnce();
+    expect(onAudioPreparationCompleted).toHaveBeenCalledOnce();
+    expect(onPlayRequested).toHaveBeenCalledOnce();
+    expect(onSpeechDiagnosticsUpdated).toHaveBeenCalledWith({
+      ttsOpenAiTotalMs: 350,
+    });
     expect(onSpeechGenerated).toHaveBeenCalledWith({
       ttsModel: "gpt-4o-mini-tts",
       ttsGenerationMs: 400,

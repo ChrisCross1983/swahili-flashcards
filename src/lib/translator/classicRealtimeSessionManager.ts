@@ -176,13 +176,9 @@ export class ClassicRealtimeSessionManager {
       onFirstDelta,
       firstDeltaSeen: false,
       backgroundConnectionAttemptId: null,
-      realtimeSetupMs: ready && this.connectionId
-        ? this.attempts.find(
-            (attempt) =>
-              attempt.connectionId === this.connectionId &&
-              attempt.status === "success",
-          )?.totalSetupMs ?? null
-        : null,
+      // Warm turns reuse an existing connection; its one-time setup cost belongs
+      // to the connection attempt, not to every subsequent turn.
+      realtimeSetupMs: null,
     };
     this.activeTurn = handle;
     this.state = "recording";

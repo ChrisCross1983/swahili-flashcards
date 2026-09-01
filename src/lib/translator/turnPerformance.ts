@@ -24,11 +24,30 @@ type ClientPerformanceDiagnostics = Pick<
   | "stopToTranscriptFinalMs"
   | "translationStartedAt"
   | "translationReadyAt"
+  | "translationClientRequestStartedAt"
+  | "translationStateCommittedAt"
+  | "translationVisibleAt"
+  | "transcriptFinalToTranslationRequestStartMs"
+  | "translationRequestToVisibleMs"
+  | "transcriptFinalToTranslationVisibleMs"
+  | "translationClientPostResponseMs"
   | "translationRequestMs"
   | "transcriptFinalToTranslationReadyMs"
   | "stopToTranslationVisibleMs"
   | "ttsStartedAt"
   | "ttsReadyAt"
+  | "ttsClientRequestStartedAt"
+  | "ttsAudioPreparationStartedAt"
+  | "ttsAudioPreparationCompletedAt"
+  | "firstPlayableAudioAt"
+  | "playRequestedAt"
+  | "translationVisibleToTtsRequestStartMs"
+  | "ttsAudioPreparationMs"
+  | "ttsPlayCallToStartedMs"
+  | "translationReadyToPlaybackStartedMs"
+  | "translationReadyToFirstPlayableAudioMs"
+  | "translationVisibleToFirstPlayableAudioMs"
+  | "stopToFirstPlayableAudioMs"
   | "ttsRequestToReadyMs"
   | "ttsRequestMs"
   | "translationReadyToTtsReadyMs"
@@ -65,9 +84,14 @@ type TurnTimepointName =
   | "transcriptFinal"
   | "translationRequestStarted"
   | "translationCompleted"
+  | "translationClientResponseCompleted"
+  | "translationStateCommitted"
   | "translationVisible"
   | "ttsRequestStarted"
+  | "ttsAudioPreparationStarted"
+  | "ttsAudioPreparationCompleted"
   | "ttsReady"
+  | "playRequested"
   | "playbackStarted"
   | "playbackCompleted";
 
@@ -278,6 +302,14 @@ export class TranslatorTurnPerformance {
     this.markOnce("translationCompleted", now);
   }
 
+  markTranslationClientResponseCompleted(now = performance.now()) {
+    this.markOnce("translationClientResponseCompleted", now);
+  }
+
+  markTranslationStateCommitted(now = performance.now()) {
+    this.markOnce("translationStateCommitted", now);
+  }
+
   markTranslationVisible(now = performance.now()) {
     this.markOnce("translationVisible", now);
     return this.getDiagnostics();
@@ -285,6 +317,19 @@ export class TranslatorTurnPerformance {
 
   markTtsRequestStarted(now = performance.now()) {
     this.markOnce("ttsRequestStarted", now);
+  }
+
+  markTtsAudioPreparationStarted(now = performance.now()) {
+    this.markOnce("ttsAudioPreparationStarted", now);
+  }
+
+  markTtsAudioPreparationCompleted(now = performance.now()) {
+    this.markOnce("ttsAudioPreparationCompleted", now);
+    return this.getDiagnostics();
+  }
+
+  markPlayRequested(now = performance.now()) {
+    this.markOnce("playRequested", now);
   }
 
   markTtsReady(now = performance.now()) {
@@ -329,6 +374,22 @@ export class TranslatorTurnPerformance {
       this.timepoints.translationRequestStarted,
       this.timepoints.translationCompleted,
     );
+    const transcriptFinalToTranslationRequestStartMs = duration(
+      this.timepoints.transcriptFinal,
+      this.timepoints.translationRequestStarted,
+    );
+    const translationRequestToVisibleMs = duration(
+      this.timepoints.translationRequestStarted,
+      this.timepoints.translationVisible,
+    );
+    const transcriptFinalToTranslationVisibleMs = duration(
+      this.timepoints.transcriptFinal,
+      this.timepoints.translationVisible,
+    );
+    const translationClientPostResponseMs = duration(
+      this.timepoints.translationClientResponseCompleted,
+      this.timepoints.translationVisible,
+    );
     const recordingDurationMs = duration(
       this.timepoints.recordingStarted,
       this.timepoints.recordingStopped,
@@ -354,6 +415,26 @@ export class TranslatorTurnPerformance {
       this.timepoints.translationCompleted,
       this.timepoints.ttsReady,
     );
+    const translationVisibleToTtsRequestStartMs = duration(
+      this.timepoints.translationVisible,
+      this.timepoints.ttsRequestStarted,
+    );
+    const ttsAudioPreparationMs = duration(
+      this.timepoints.ttsAudioPreparationStarted,
+      this.timepoints.ttsAudioPreparationCompleted,
+    );
+    const translationReadyToFirstPlayableAudioMs = duration(
+      this.timepoints.translationCompleted,
+      this.timepoints.ttsAudioPreparationCompleted,
+    );
+    const translationVisibleToFirstPlayableAudioMs = duration(
+      this.timepoints.translationVisible,
+      this.timepoints.ttsAudioPreparationCompleted,
+    );
+    const stopToFirstPlayableAudioMs = duration(
+      this.timepoints.recordingStopped,
+      this.timepoints.ttsAudioPreparationCompleted,
+    );
     const stopToTtsReadyMs = duration(
       this.timepoints.recordingStopped,
       this.timepoints.ttsReady,
@@ -364,6 +445,14 @@ export class TranslatorTurnPerformance {
     );
     const ttsReadyToPlaybackStartedMs = duration(
       this.timepoints.ttsReady,
+      this.timepoints.playbackStarted,
+    );
+    const ttsPlayCallToStartedMs = duration(
+      this.timepoints.playRequested,
+      this.timepoints.playbackStarted,
+    );
+    const translationReadyToPlaybackStartedMs = duration(
+      this.timepoints.translationCompleted,
       this.timepoints.playbackStarted,
     );
     const interactionOverheadMs =
@@ -419,15 +508,53 @@ export class TranslatorTurnPerformance {
         "translationRequestStarted",
         "translationStartedAt",
       ),
+      ...this.timestampDiagnostic(
+        "translationRequestStarted",
+        "translationClientRequestStartedAt",
+      ),
       ...this.timestampDiagnostic("translationCompleted", "translationReadyAt"),
+      ...this.timestampDiagnostic(
+        "translationStateCommitted",
+        "translationStateCommittedAt",
+      ),
+      ...this.timestampDiagnostic("translationVisible", "translationVisibleAt"),
       ...(translationRequestMs === undefined ? {} : { translationRequestMs }),
       ...(transcriptFinalToTranslationReadyMs === undefined
         ? {}
         : { transcriptFinalToTranslationReadyMs }),
+      ...(transcriptFinalToTranslationRequestStartMs === undefined
+        ? {}
+        : { transcriptFinalToTranslationRequestStartMs }),
+      ...(translationRequestToVisibleMs === undefined
+        ? {}
+        : { translationRequestToVisibleMs }),
+      ...(transcriptFinalToTranslationVisibleMs === undefined
+        ? {}
+        : { transcriptFinalToTranslationVisibleMs }),
+      ...(translationClientPostResponseMs === undefined
+        ? {}
+        : { translationClientPostResponseMs }),
       ...(stopToTranslationVisibleMs === undefined
         ? {}
         : { stopToTranslationVisibleMs }),
       ...this.timestampDiagnostic("ttsRequestStarted", "ttsStartedAt"),
+      ...this.timestampDiagnostic(
+        "ttsRequestStarted",
+        "ttsClientRequestStartedAt",
+      ),
+      ...this.timestampDiagnostic(
+        "ttsAudioPreparationStarted",
+        "ttsAudioPreparationStartedAt",
+      ),
+      ...this.timestampDiagnostic(
+        "ttsAudioPreparationCompleted",
+        "ttsAudioPreparationCompletedAt",
+      ),
+      ...this.timestampDiagnostic(
+        "ttsAudioPreparationCompleted",
+        "firstPlayableAudioAt",
+      ),
+      ...this.timestampDiagnostic("playRequested", "playRequestedAt"),
       ...this.timestampDiagnostic("ttsReady", "ttsReadyAt"),
       ...(ttsRequestToReadyMs === undefined ? {} : { ttsRequestToReadyMs }),
       ...(ttsRequestToReadyMs === undefined
@@ -439,12 +566,31 @@ export class TranslatorTurnPerformance {
       ...(translationVisibleToTtsReadyMs === undefined
         ? {}
         : { translationVisibleToTtsReadyMs }),
+      ...(translationVisibleToTtsRequestStartMs === undefined
+        ? {}
+        : { translationVisibleToTtsRequestStartMs }),
+      ...(ttsAudioPreparationMs === undefined ? {} : { ttsAudioPreparationMs }),
+      ...(translationReadyToFirstPlayableAudioMs === undefined
+        ? {}
+        : { translationReadyToFirstPlayableAudioMs }),
+      ...(translationVisibleToFirstPlayableAudioMs === undefined
+        ? {}
+        : { translationVisibleToFirstPlayableAudioMs }),
+      ...(stopToFirstPlayableAudioMs === undefined
+        ? {}
+        : { stopToFirstPlayableAudioMs }),
       ...(stopToTtsReadyMs === undefined ? {} : { stopToTtsReadyMs }),
       ...this.timestampDiagnostic("playbackStarted", "playbackStartedAt"),
       ...this.timestampDiagnostic("playbackCompleted", "playbackCompletedAt"),
       ...(ttsReadyToPlaybackStartedMs === undefined
         ? {}
         : { ttsReadyToPlaybackStartedMs }),
+      ...(ttsPlayCallToStartedMs === undefined
+        ? {}
+        : { ttsPlayCallToStartedMs }),
+      ...(translationReadyToPlaybackStartedMs === undefined
+        ? {}
+        : { translationReadyToPlaybackStartedMs }),
       ...(stopToPlaybackStartedMs === undefined
         ? {}
         : { stopToPlaybackStartedMs }),
@@ -472,7 +618,15 @@ export class TranslatorTurnPerformance {
       | "transcriptFinalAt"
       | "translationStartedAt"
       | "translationReadyAt"
+      | "translationClientRequestStartedAt"
+      | "translationStateCommittedAt"
+      | "translationVisibleAt"
       | "ttsStartedAt"
+      | "ttsClientRequestStartedAt"
+      | "ttsAudioPreparationStartedAt"
+      | "ttsAudioPreparationCompletedAt"
+      | "firstPlayableAudioAt"
+      | "playRequestedAt"
       | "ttsReadyAt"
       | "playbackStartedAt"
       | "playbackCompletedAt",

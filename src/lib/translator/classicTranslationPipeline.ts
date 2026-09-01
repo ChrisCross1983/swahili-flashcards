@@ -20,6 +20,8 @@ export async function requestClassicTranslation(
     getAudioBlob: () => Promise<Blob>;
     direction: TranslationRequestDirection;
     signal: AbortSignal;
+    correlationId?: string;
+    onResponseCompleted?: (now: number) => void;
   },
   dependencies: ClassicTranslationPipelineDependencies = {},
 ): Promise<TranslationResult> {
@@ -28,13 +30,21 @@ export async function requestClassicTranslation(
       input.realtimeResult.authoritativeTranscript,
       input.direction,
       input.transcriptionMs,
-      { signal: input.signal },
+      {
+        signal: input.signal,
+        correlationId: input.correlationId,
+        onResponseCompleted: input.onResponseCompleted,
+      },
     );
   }
 
   return (dependencies.requestAudio ?? requestAudioTranslation)(
     await input.getAudioBlob(),
     input.direction,
-    { signal: input.signal },
+    {
+      signal: input.signal,
+      correlationId: input.correlationId,
+      onResponseCompleted: input.onResponseCompleted,
+    },
   );
 }

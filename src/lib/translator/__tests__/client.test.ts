@@ -43,13 +43,16 @@ describe("translator client", () => {
         direction,
         { fetcher },
       ),
-    ).resolves.toEqual(result);
+    ).resolves.toMatchObject(result);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("sends an authoritative realtime transcript without an audio upload", async () => {
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(init?.headers).toEqual({
+        "Content-Type": "application/json",
+        "X-Translator-Correlation-Id": "translation-turn-1",
+      });
       expect(init?.body).toBe(
         JSON.stringify({
           authoritativeTranscript: "Tutakuja kesho asubuhi.",
@@ -67,9 +70,18 @@ describe("translator client", () => {
         "Tutakuja kesho asubuhi.",
         direction,
         1850,
-        { fetcher },
+        { fetcher, correlationId: "translation-turn-1" },
       ),
-    ).resolves.toEqual(result);
+    ).resolves.toMatchObject({
+      ...result,
+      diagnostics: {
+        ...result.diagnostics,
+        translationClientRequestStartedAt: expect.any(String),
+        translationClientResponseFirstByteAt: expect.any(String),
+        translationClientResponseCompletedAt: expect.any(String),
+        translationRequestCorrelationId: "translation-turn-1",
+      },
+    });
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
@@ -153,5 +165,22 @@ describe("translator client", () => {
         message: "Die Aufnahme konnte nicht verarbeitet werden.",
       }),
     ).toMatchObject({ status: "error" });
+  });
+
+  it("preserves a client abort while reading a translation response", async () => {
+    const abortError = new DOMException("request stopped", "AbortError");
+    const fetcher = vi.fn(async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(abortError);
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      requestTextTranslation("Habari", direction, 100, { fetcher }),
+    ).rejects.toBe(abortError);
   });
 });

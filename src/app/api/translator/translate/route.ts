@@ -7,6 +7,7 @@ import {
 import type {
   TranslationLanguage,
   TranslationRequestDirection,
+  TranslationResult,
   TranslatorApiErrorCode,
 } from "@/lib/translator/types";
 import { getTranslatorPipelineErrorCode } from "@/lib/translator/server/errors";
@@ -16,6 +17,12 @@ import {
   translateRecordedAudio,
 } from "@/lib/translator/server/translate";
 import { LIVE_V2_CONFIG } from "@/lib/translator/live/v2/config";
+import {
+  serverTimingHeader,
+  TRANSLATION_TIMING_HEADER,
+  TRANSLATOR_CORRELATION_HEADER,
+  validCorrelationId,
+} from "@/lib/translator/performanceHeaders";
 
 export const runtime = "nodejs";
 
@@ -58,9 +65,96 @@ function directionFromValues(
   return isAllowedDirection(direction) ? direction : null;
 }
 
-async function translationResponse(operation: () => Promise<unknown>) {
+async function translationResponse(
+  request: Request,
+  requestReceivedAt: string,
+  requestReceivedMono: number,
+  parsingDoneAt: string,
+  correlationId: string | null,
+  operation: (
+    gateway: ReturnType<typeof createOpenAITranslatorGateway>,
+  ) => Promise<TranslationResult>,
+) {
+  let openAiStartedAt: string | null = null;
+  let openAiStartedMono: number | null = null;
+  let openAiCompletedAt: string | null = null;
+  let openAiCompletedMono: number | null = null;
   try {
-    return NextResponse.json(await operation());
+    const gateway = createOpenAITranslatorGateway(undefined, {
+      signal: request.signal,
+      onTranslationRequestStarted: () => {
+        openAiStartedMono = performance.now();
+        openAiStartedAt = new Date().toISOString();
+      },
+      onTranslationCompleted: () => {
+        openAiCompletedMono = performance.now();
+        openAiCompletedAt = new Date().toISOString();
+      },
+    });
+    const result = await operation(gateway);
+    const preOpenAiMs = openAiStartedMono === null
+      ? null
+      : openAiStartedMono - requestReceivedMono;
+    const openAiTotalMs =
+      openAiStartedMono === null || openAiCompletedMono === null
+        ? null
+        : openAiCompletedMono - openAiStartedMono;
+    const serializationStartedMono = performance.now();
+    const responseBody = JSON.stringify({
+      ...result,
+      diagnostics: {
+        ...result.diagnostics,
+        ...(correlationId
+          ? { translationRequestCorrelationId: correlationId }
+          : {}),
+        translationServerRequestReceivedAt: requestReceivedAt,
+        translationServerParsingDoneAt: parsingDoneAt,
+        ...(openAiStartedAt
+          ? { translationOpenAiRequestStartedAt: openAiStartedAt }
+          : {}),
+        ...(openAiCompletedAt
+          ? { translationOpenAiCompletedAt: openAiCompletedAt }
+          : {}),
+        ...(preOpenAiMs === null
+          ? {}
+          : { translationServerPreOpenAiMs: Math.round(preOpenAiMs) }),
+        ...(openAiTotalMs === null
+          ? {}
+          : { translationOpenAiTotalMs: Math.round(openAiTotalMs) }),
+      },
+    });
+    const serializationDoneMono = performance.now();
+    const serializationDoneAt = new Date().toISOString();
+    const responseStartedAt = new Date().toISOString();
+    const serverPostOpenAiMs = openAiCompletedMono === null
+      ? null
+      : serializationDoneMono - openAiCompletedMono;
+    const timing = {
+      translationServerSerializationDoneAt: serializationDoneAt,
+      translationServerResponseStartedAt: responseStartedAt,
+      ...(serverPostOpenAiMs === null
+        ? {}
+        : { translationServerPostOpenAiMs: Math.round(serverPostOpenAiMs) }),
+    };
+    const serverTiming = serverTimingHeader({
+      "app-pre": preOpenAiMs,
+      openai: openAiTotalMs,
+      "app-post": serverPostOpenAiMs,
+      total: serializationDoneMono - requestReceivedMono,
+      serialization: serializationDoneMono - serializationStartedMono,
+    });
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "private, no-store",
+        ...(correlationId
+          ? { [TRANSLATOR_CORRELATION_HEADER]: correlationId }
+          : {}),
+        [TRANSLATION_TIMING_HEADER]: JSON.stringify(timing),
+        ...(serverTiming ? { "Server-Timing": serverTiming } : {}),
+      },
+    });
   } catch (error) {
     const code = getTranslatorPipelineErrorCode(error) ?? "translation_failed";
     console.error("[translator] request failed", { code });
@@ -102,6 +196,11 @@ async function translationResponse(operation: () => Promise<unknown>) {
 }
 
 export async function POST(request: Request) {
+  const requestReceivedMono = performance.now();
+  const requestReceivedAt = new Date().toISOString();
+  const correlationId = validCorrelationId(
+    request.headers.get(TRANSLATOR_CORRELATION_HEADER),
+  );
   const { response } = await requireUser();
   if (response) return response;
 
@@ -139,8 +238,14 @@ export async function POST(request: Request) {
       return errorResponse(400, "invalid_request", "Ungültiges Transkript.");
     }
 
-    return translationResponse(() => {
-      const gateway = createOpenAITranslatorGateway();
+    const parsingDoneAt = new Date().toISOString();
+    return translationResponse(
+      request,
+      requestReceivedAt,
+      requestReceivedMono,
+      parsingDoneAt,
+      correlationId,
+      (gateway) => {
       return translateAuthoritativeText(
         {
           authoritativeTranscript,
@@ -150,7 +255,8 @@ export async function POST(request: Request) {
         },
         gateway,
       );
-    });
+      },
+    );
   }
 
   let formData: FormData;
@@ -196,11 +302,18 @@ export async function POST(request: Request) {
     );
   }
 
-  return translationResponse(() => {
-    const gateway = createOpenAITranslatorGateway();
+  const parsingDoneAt = new Date().toISOString();
+  return translationResponse(
+    request,
+    requestReceivedAt,
+    requestReceivedMono,
+    parsingDoneAt,
+    correlationId,
+    (gateway) => {
     return translateRecordedAudio(
       { audio, format, direction },
       gateway,
     );
-  });
+    },
+  );
 }

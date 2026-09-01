@@ -8,7 +8,8 @@ import type {
   TranscriptionPath,
 } from "@/lib/translator/types";
 
-const REPORT_VERSION = 2;
+const REPORT_VERSION = 3;
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-post-stop-v3";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -50,15 +51,52 @@ const PERFORMANCE_METRICS = [
   "realtimeSetupMs",
   "recordingDurationMs",
   "stopToTranscriptFinalMs",
+  "transcriptFinalToTranslationRequestStartMs",
+  "translationClientToServerMs",
+  "translationServerPreOpenAiMs",
+  "translationOpenAiFirstResponseMs",
+  "translationOpenAiTotalMs",
+  "translationServerPostOpenAiMs",
+  "translationServerToClientMs",
+  "translationClientPostResponseMs",
+  "translationRequestToVisibleMs",
+  "transcriptFinalToTranslationVisibleMs",
   "transcriptFinalToTranslationReadyMs",
   "stopToTranslationVisibleMs",
   "translationReadyToTtsReadyMs",
+  "translationVisibleToTtsRequestStartMs",
+  "ttsClientToServerMs",
+  "ttsServerPreOpenAiMs",
+  "ttsOpenAiTimeToFirstByteMs",
+  "ttsOpenAiTotalMs",
+  "ttsServerStreamingOverheadMs",
+  "ttsServerToClientFirstByteMs",
+  "ttsClientDownloadTotalMs",
+  "ttsAudioPreparationMs",
+  "ttsPlayCallToStartedMs",
+  "translationReadyToPlaybackStartedMs",
+  "translationReadyToFirstPlayableAudioMs",
+  "translationVisibleToFirstPlayableAudioMs",
+  "stopToFirstPlayableAudioMs",
   "ttsRequestToReadyMs",
   "stopToTtsReadyMs",
   "ttsReadyToPlaybackStartedMs",
   "stopToPlaybackStartedMs",
   "interactionOverheadMs",
 ] as const;
+
+export type ClassicCriticalPathStage = {
+  stage: string;
+  startAt: string;
+  endAt: string;
+  durationMs: number;
+};
+
+export type ClassicPerformanceBudgetViolation = {
+  metric: string;
+  budgetMs: number;
+  actualMs: number;
+};
 
 type PerformanceMetric = (typeof PERFORMANCE_METRICS)[number];
 
@@ -97,8 +135,37 @@ export type ClassicTranslatorReportTurn = {
   transcriptFinalAt: string | null;
   translationStartedAt: string | null;
   translationReadyAt: string | null;
+  translationClientRequestStartedAt: string | null;
+  translationServerRequestReceivedAt: string | null;
+  translationServerParsingDoneAt: string | null;
+  translationOpenAiRequestStartedAt: string | null;
+  translationOpenAiFirstEventAt: string | null;
+  translationOpenAiFirstByteAt: string | null;
+  translationOpenAiCompletedAt: string | null;
+  translationServerSerializationDoneAt: string | null;
+  translationServerResponseStartedAt: string | null;
+  translationClientResponseFirstByteAt: string | null;
+  translationClientResponseCompletedAt: string | null;
+  translationStateCommittedAt: string | null;
+  translationVisibleAt: string | null;
+  translationRequestCorrelationId: string | null;
   ttsStartedAt: string | null;
   ttsReadyAt: string | null;
+  ttsClientRequestStartedAt: string | null;
+  ttsServerRequestReceivedAt: string | null;
+  ttsServerParsingDoneAt: string | null;
+  ttsOpenAiRequestStartedAt: string | null;
+  ttsOpenAiFirstByteAt: string | null;
+  ttsOpenAiCompletedAt: string | null;
+  ttsServerFirstByteSentAt: string | null;
+  ttsServerCompletedAt: string | null;
+  ttsClientFirstByteAt: string | null;
+  ttsClientResponseCompletedAt: string | null;
+  ttsAudioPreparationStartedAt: string | null;
+  ttsAudioPreparationCompletedAt: string | null;
+  firstPlayableAudioAt: string | null;
+  playRequestedAt: string | null;
+  ttsRequestCorrelationId: string | null;
   playbackStartedAt: string | null;
   playbackCompletedAt: string | null;
   recordClickToGetUserMediaReadyMs: number | null;
@@ -109,8 +176,33 @@ export type ClassicTranslatorReportTurn = {
   recordingDurationMs: number | null;
   stopToTranscriptFinalMs: number | null;
   transcriptFinalToTranslationReadyMs: number | null;
+  clientToTranslationServerMs: number | null;
+  translationClientToServerMs: number | null;
+  translationServerPreOpenAiMs: number | null;
+  translationOpenAiFirstResponseMs: number | null;
+  translationOpenAiTotalMs: number | null;
+  translationServerPostOpenAiMs: number | null;
+  translationServerToClientMs: number | null;
+  translationClientPostResponseMs: number | null;
+  transcriptFinalToTranslationRequestStartMs: number | null;
+  translationRequestToVisibleMs: number | null;
+  transcriptFinalToTranslationVisibleMs: number | null;
   stopToTranslationVisibleMs: number | null;
   translationReadyToTtsReadyMs: number | null;
+  translationVisibleToTtsRequestStartMs: number | null;
+  ttsClientToServerMs: number | null;
+  ttsServerPreOpenAiMs: number | null;
+  ttsOpenAiTimeToFirstByteMs: number | null;
+  ttsOpenAiTotalMs: number | null;
+  ttsServerStreamingOverheadMs: number | null;
+  ttsServerToClientFirstByteMs: number | null;
+  ttsClientDownloadTotalMs: number | null;
+  ttsAudioPreparationMs: number | null;
+  ttsPlayCallToStartedMs: number | null;
+  translationReadyToPlaybackStartedMs: number | null;
+  translationReadyToFirstPlayableAudioMs: number | null;
+  translationVisibleToFirstPlayableAudioMs: number | null;
+  stopToFirstPlayableAudioMs: number | null;
   ttsRequestToReadyMs: number | null;
   stopToTtsReadyMs: number | null;
   ttsReadyToPlaybackStartedMs: number | null;
@@ -122,6 +214,13 @@ export type ClassicTranslatorReportTurn = {
   translationRequestMs: number | null;
   ttsGenerationMs: number | null;
   ttsRequestMs: number | null;
+  autoplayEnabled: boolean;
+  translationStreamingUsed: boolean;
+  ttsStreamingUsed: boolean;
+  earlyTtsUsed: boolean;
+  streamingFallbackReason: string | null;
+  criticalPath: ClassicCriticalPathStage[];
+  performanceBudgetViolations: ClassicPerformanceBudgetViolation[];
   transcriptionPathDecisionAt: string | null;
   transcriptionPathDecisionReason: string | null;
   feedbackRating: TranslatorFeedbackRating | null;
@@ -174,8 +273,34 @@ function performanceGroup(turns: ClassicTranslatorReportTurn[]) {
   ) as Record<PerformanceMetric, ReturnType<typeof metricSummary>>;
 }
 
+function bottleneckSummary(turns: ClassicTranslatorReportTurn[]) {
+  const values = new Map<string, number[]>();
+  for (const turn of turns) {
+    for (const item of turn.criticalPath) {
+      const current = values.get(item.stage) ?? [];
+      current.push(item.durationMs);
+      values.set(item.stage, current);
+    }
+  }
+  const ranked = Array.from(values, ([stage, durations]) => ({
+    stage,
+    median: metricSummary(durations).median,
+  }))
+    .filter((item): item is { stage: string; median: number } =>
+      typeof item.median === "number",
+    )
+    .sort((left, right) => right.median - left.median);
+  return {
+    largestMedianStage: ranked[0]?.stage ?? null,
+    largestMedianStageMs: ranked[0]?.median ?? null,
+    secondLargestMedianStage: ranked[1]?.stage ?? null,
+    secondLargestMedianStageMs: ranked[1]?.median ?? null,
+  };
+}
+
 export function sanitizeClassicReportError(message: string) {
   return message
+    .replace(/\b(?:OPENAI_API_KEY|SUPABASE_SESSION_TOKEN|JWT)\s*[:=]\s*[^\s,;]+/gi, "[REDACTED]")
     .replace(/Authorization\s*:\s*(?:Bearer\s+)?[^\s,;]+/gi, "[REDACTED]")
     .replace(/Cookie\s*:\s*[^\r\n]+/gi, "[REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
@@ -188,6 +313,64 @@ export function sanitizeClassicReportError(message: string) {
 function modeForEntry(entry: TranslationEntry): TranslationMode {
   if (entry.sourceWasDetected) return "auto";
   return entry.sourceLanguage === "de" ? "de-to-sw" : "sw-to-de";
+}
+
+function criticalPathStage(
+  stage: string,
+  startAt: unknown,
+  endAt: unknown,
+  durationMs: unknown,
+) {
+  const measured = finite(durationMs);
+  return typeof startAt === "string" &&
+    typeof endAt === "string" &&
+    measured !== null
+    ? { stage, startAt, endAt, durationMs: measured }
+    : null;
+}
+
+function buildCriticalPath(d: Partial<TranslationDiagnostics>) {
+  const ttsRemaining =
+    finite(d.ttsOpenAiTotalMs) !== null &&
+    finite(d.ttsOpenAiTimeToFirstByteMs) !== null &&
+    (finite(d.ttsOpenAiTotalMs) as number) >=
+      (finite(d.ttsOpenAiTimeToFirstByteMs) as number)
+      ? (finite(d.ttsOpenAiTotalMs) as number) -
+        (finite(d.ttsOpenAiTimeToFirstByteMs) as number)
+      : null;
+  return [
+    criticalPathStage("record_start_overhead", d.recordButtonClickedAt, d.recordingStartedAt, d.recordClickToRecordingStartedMs),
+    criticalPathStage("realtime_transcript_finalize", d.recordingStoppedAt, d.transcriptFinalAt, d.stopToTranscriptFinalMs),
+    criticalPathStage("translation_client_to_server", d.translationClientRequestStartedAt, d.translationServerRequestReceivedAt, d.clientToTranslationServerMs),
+    criticalPathStage("translation_server_pre_openai", d.translationServerRequestReceivedAt, d.translationOpenAiRequestStartedAt, d.translationServerPreOpenAiMs),
+    criticalPathStage("translation_openai", d.translationOpenAiRequestStartedAt, d.translationOpenAiCompletedAt, d.translationOpenAiTotalMs),
+    criticalPathStage("translation_server_post_openai", d.translationOpenAiCompletedAt, d.translationServerSerializationDoneAt, d.translationServerPostOpenAiMs),
+    criticalPathStage("translation_server_to_client", d.translationServerResponseStartedAt, d.translationClientResponseFirstByteAt, d.translationServerToClientMs),
+    criticalPathStage("translation_client_render", d.translationClientResponseCompletedAt, d.translationVisibleAt, d.translationClientPostResponseMs),
+    criticalPathStage("tts_client_to_server", d.ttsClientRequestStartedAt, d.ttsServerRequestReceivedAt, d.ttsClientToServerMs),
+    criticalPathStage("tts_server_pre_openai", d.ttsServerRequestReceivedAt, d.ttsOpenAiRequestStartedAt, d.ttsServerPreOpenAiMs),
+    criticalPathStage("tts_openai_to_first_byte", d.ttsOpenAiRequestStartedAt, d.ttsOpenAiFirstByteAt, d.ttsOpenAiTimeToFirstByteMs),
+    criticalPathStage("tts_openai_remaining", d.ttsOpenAiFirstByteAt, d.ttsOpenAiCompletedAt, ttsRemaining),
+    criticalPathStage("tts_server_to_client", d.ttsServerFirstByteSentAt, d.ttsClientFirstByteAt, d.ttsServerToClientFirstByteMs),
+    criticalPathStage("tts_client_audio_prepare", d.ttsAudioPreparationStartedAt, d.ttsAudioPreparationCompletedAt, d.ttsAudioPreparationMs),
+    criticalPathStage("play_start", d.playRequestedAt, d.playbackStartedAt, d.ttsPlayCallToStartedMs),
+  ].filter((stage): stage is ClassicCriticalPathStage => stage !== null);
+}
+
+function budgetViolations(d: Partial<TranslationDiagnostics>) {
+  const budgets = [
+    ["warmRecordClickToRecordingStartedMs", d.warmStart ? d.recordClickToRecordingStartedMs : null, 100],
+    ["stopToTranscriptFinalMs", d.stopToTranscriptFinalMs, 1_200],
+    ["transcriptFinalToTranslationVisibleMs", d.transcriptFinalToTranslationVisibleMs, 3_000],
+    ["translationVisibleToFirstPlayableAudioMs", d.translationVisibleToFirstPlayableAudioMs, 1_500],
+    ["stopToPlaybackStartedMs", d.stopToPlaybackStartedMs, 5_000],
+  ] as const;
+  return budgets.flatMap(([metric, value, budgetMs]) => {
+    const actualMs = finite(value);
+    return actualMs !== null && actualMs >= budgetMs
+      ? [{ metric, budgetMs, actualMs }]
+      : [];
+  });
 }
 
 function turnFromValues(input: {
@@ -206,7 +389,6 @@ function turnFromValues(input: {
   ttsModel: string | null;
   ttsSpeed: number;
   feedback: ClassicTranslatorLocalFeedback | null;
-  connectionSetupMs: number | null;
   errorStage: string | null;
   errorType: string | null;
   errorCode: string | null;
@@ -255,22 +437,90 @@ function turnFromValues(input: {
     transcriptFinalAt: d.transcriptFinalAt ?? null,
     translationStartedAt: d.translationStartedAt ?? null,
     translationReadyAt: d.translationReadyAt ?? null,
+    translationClientRequestStartedAt: d.translationClientRequestStartedAt ?? null,
+    translationServerRequestReceivedAt: d.translationServerRequestReceivedAt ?? null,
+    translationServerParsingDoneAt: d.translationServerParsingDoneAt ?? null,
+    translationOpenAiRequestStartedAt: d.translationOpenAiRequestStartedAt ?? null,
+    translationOpenAiFirstEventAt: d.translationOpenAiFirstEventAt ?? null,
+    translationOpenAiFirstByteAt: d.translationOpenAiFirstByteAt ?? null,
+    translationOpenAiCompletedAt: d.translationOpenAiCompletedAt ?? null,
+    translationServerSerializationDoneAt: d.translationServerSerializationDoneAt ?? null,
+    translationServerResponseStartedAt: d.translationServerResponseStartedAt ?? null,
+    translationClientResponseFirstByteAt: d.translationClientResponseFirstByteAt ?? null,
+    translationClientResponseCompletedAt: d.translationClientResponseCompletedAt ?? null,
+    translationStateCommittedAt: d.translationStateCommittedAt ?? null,
+    translationVisibleAt: d.translationVisibleAt ?? null,
+    translationRequestCorrelationId: d.translationRequestCorrelationId ?? null,
     ttsStartedAt: d.ttsStartedAt ?? null,
     ttsReadyAt: d.ttsReadyAt ?? null,
+    ttsClientRequestStartedAt: d.ttsClientRequestStartedAt ?? null,
+    ttsServerRequestReceivedAt: d.ttsServerRequestReceivedAt ?? null,
+    ttsServerParsingDoneAt: d.ttsServerParsingDoneAt ?? null,
+    ttsOpenAiRequestStartedAt: d.ttsOpenAiRequestStartedAt ?? null,
+    ttsOpenAiFirstByteAt: d.ttsOpenAiFirstByteAt ?? null,
+    ttsOpenAiCompletedAt: d.ttsOpenAiCompletedAt ?? null,
+    ttsServerFirstByteSentAt: d.ttsServerFirstByteSentAt ?? null,
+    ttsServerCompletedAt: d.ttsServerCompletedAt ?? null,
+    ttsClientFirstByteAt: d.ttsClientFirstByteAt ?? null,
+    ttsClientResponseCompletedAt: d.ttsClientResponseCompletedAt ?? null,
+    ttsAudioPreparationStartedAt: d.ttsAudioPreparationStartedAt ?? null,
+    ttsAudioPreparationCompletedAt: d.ttsAudioPreparationCompletedAt ?? null,
+    firstPlayableAudioAt: d.firstPlayableAudioAt ?? null,
+    playRequestedAt: d.playRequestedAt ?? null,
+    ttsRequestCorrelationId: d.ttsRequestCorrelationId ?? null,
     playbackStartedAt: d.playbackStartedAt ?? null,
     playbackCompletedAt: d.playbackCompletedAt ?? null,
     recordClickToGetUserMediaReadyMs: finite(d.recordClickToGetUserMediaReadyMs),
     recordClickToMicReadyMs: finite(d.recordClickToMicReadyMs),
     recordClickToRecordingStartedMs: finite(d.recordClickToRecordingStartedMs),
     getUserMediaToRecordingStartedMs: finite(d.getUserMediaToRecordingStartedMs),
-    realtimeSetupMs: finite(d.realtimeSetupMs) ?? input.connectionSetupMs,
+    realtimeSetupMs: finite(d.realtimeSetupMs),
     recordingDurationMs: finite(d.recordingDurationMs),
     stopToTranscriptFinalMs: finite(d.stopToTranscriptFinalMs),
     transcriptFinalToTranslationReadyMs: finite(
       d.transcriptFinalToTranslationReadyMs,
     ),
+    clientToTranslationServerMs: finite(d.clientToTranslationServerMs),
+    translationClientToServerMs: finite(
+      d.translationClientToServerMs ?? d.clientToTranslationServerMs,
+    ),
+    translationServerPreOpenAiMs: finite(d.translationServerPreOpenAiMs),
+    translationOpenAiFirstResponseMs: finite(d.translationOpenAiFirstResponseMs),
+    translationOpenAiTotalMs: finite(d.translationOpenAiTotalMs),
+    translationServerPostOpenAiMs: finite(d.translationServerPostOpenAiMs),
+    translationServerToClientMs: finite(d.translationServerToClientMs),
+    translationClientPostResponseMs: finite(d.translationClientPostResponseMs),
+    transcriptFinalToTranslationRequestStartMs: finite(
+      d.transcriptFinalToTranslationRequestStartMs,
+    ),
+    translationRequestToVisibleMs: finite(d.translationRequestToVisibleMs),
+    transcriptFinalToTranslationVisibleMs: finite(
+      d.transcriptFinalToTranslationVisibleMs,
+    ),
     stopToTranslationVisibleMs: finite(d.stopToTranslationVisibleMs),
     translationReadyToTtsReadyMs: finite(d.translationReadyToTtsReadyMs),
+    translationVisibleToTtsRequestStartMs: finite(
+      d.translationVisibleToTtsRequestStartMs,
+    ),
+    ttsClientToServerMs: finite(d.ttsClientToServerMs),
+    ttsServerPreOpenAiMs: finite(d.ttsServerPreOpenAiMs),
+    ttsOpenAiTimeToFirstByteMs: finite(d.ttsOpenAiTimeToFirstByteMs),
+    ttsOpenAiTotalMs: finite(d.ttsOpenAiTotalMs),
+    ttsServerStreamingOverheadMs: finite(d.ttsServerStreamingOverheadMs),
+    ttsServerToClientFirstByteMs: finite(d.ttsServerToClientFirstByteMs),
+    ttsClientDownloadTotalMs: finite(d.ttsClientDownloadTotalMs),
+    ttsAudioPreparationMs: finite(d.ttsAudioPreparationMs),
+    ttsPlayCallToStartedMs: finite(d.ttsPlayCallToStartedMs),
+    translationReadyToPlaybackStartedMs: finite(
+      d.translationReadyToPlaybackStartedMs,
+    ),
+    translationReadyToFirstPlayableAudioMs: finite(
+      d.translationReadyToFirstPlayableAudioMs,
+    ),
+    translationVisibleToFirstPlayableAudioMs: finite(
+      d.translationVisibleToFirstPlayableAudioMs,
+    ),
+    stopToFirstPlayableAudioMs: finite(d.stopToFirstPlayableAudioMs),
     ttsRequestToReadyMs: finite(d.ttsRequestToReadyMs),
     stopToTtsReadyMs: finite(d.stopToTtsReadyMs),
     ttsReadyToPlaybackStartedMs: finite(d.ttsReadyToPlaybackStartedMs),
@@ -283,6 +533,13 @@ function turnFromValues(input: {
     translationRequestMs: finite(d.translationRequestMs),
     ttsGenerationMs: finite(d.ttsGenerationMs),
     ttsRequestMs: finite(d.ttsRequestMs ?? d.ttsRequestToReadyMs),
+    autoplayEnabled: d.autoplayEnabled === true,
+    translationStreamingUsed: d.translationStreamingUsed === true,
+    ttsStreamingUsed: d.ttsStreamingUsed === true,
+    earlyTtsUsed: d.earlyTtsUsed === true,
+    streamingFallbackReason: d.streamingFallbackReason ?? null,
+    criticalPath: buildCriticalPath(d),
+    performanceBudgetViolations: budgetViolations(d),
     transcriptionPathDecisionAt: d.transcriptionPathDecisionAt ?? null,
     transcriptionPathDecisionReason:
       d.transcriptionPathDecisionReason ?? d.fallbackReason ?? null,
@@ -319,16 +576,8 @@ export function buildClassicTranslatorReport(input: {
   reconnectCount?: number;
 }) {
   const sourceConnectionAttempts = input.connectionAttempts ?? [];
-  const attemptByConnectionId = new Map(
-    sourceConnectionAttempts
-      .filter((attempt) => attempt.status === "success")
-      .map((attempt) => [attempt.connectionId, attempt]),
-  );
   const successfulTurns = input.entries.map((entry) => {
     const diagnostics: Partial<TranslationDiagnostics> = entry.diagnostics ?? {};
-    const attempt = diagnostics.connectionId
-      ? attemptByConnectionId.get(diagnostics.connectionId)
-      : undefined;
     return turnFromValues({
       turnId: entry.id,
       createdAt: new Date(entry.timestamp).toISOString(),
@@ -348,7 +597,6 @@ export function buildClassicTranslatorReport(input: {
       ttsModel: diagnostics.ttsModel ?? null,
       ttsSpeed: diagnostics.ttsSpeed ?? input.ttsSpeed,
       feedback: input.feedbackByTurn?.get(entry.id) ?? null,
-      connectionSetupMs: attempt?.totalSetupMs ?? null,
       errorStage: null,
       errorType: null,
       errorCode: null,
@@ -356,9 +604,6 @@ export function buildClassicTranslatorReport(input: {
     });
   });
   const failedTurns = input.failedTurns.map((turn) => {
-    const attempt = turn.diagnostics.connectionId
-      ? attemptByConnectionId.get(turn.diagnostics.connectionId)
-      : undefined;
     return turnFromValues({
       turnId: turn.turnId,
       createdAt: turn.createdAt,
@@ -380,7 +625,6 @@ export function buildClassicTranslatorReport(input: {
       ttsModel: turn.ttsModel ?? turn.diagnostics.ttsModel ?? null,
       ttsSpeed: turn.ttsSpeed,
       feedback: input.feedbackByTurn?.get(turn.turnId) ?? null,
-      connectionSetupMs: attempt?.totalSetupMs ?? null,
       errorStage: turn.errorStage,
       errorType: turn.errorType ?? "Error",
       errorCode: turn.errorCode,
@@ -425,9 +669,37 @@ export function buildClassicTranslatorReport(input: {
       ? sanitizeClassicReportError(attempt.sanitizedErrorMessage)
       : null,
   }));
+  const ttsStreamingTurns = successful.filter((turn) => turn.ttsStreamingUsed);
+  const nonStreamingTtsTurns = successful.filter(
+    (turn) => !turn.ttsStreamingUsed && turn.ttsStartedAt !== null,
+  );
+  const streamingFallbackTurns = turns.filter(
+    (turn) => turn.streamingFallbackReason !== null,
+  );
+  const streamingFallbackReasons = streamingFallbackTurns.reduce<Record<string, number>>(
+    (counts, turn) => {
+      const reason = turn.streamingFallbackReason;
+      if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+      return counts;
+    },
+    {},
+  );
+  const userPerceived = metricSummary(
+    successful
+      .filter((turn) => turn.autoplayEnabled)
+      .map((turn) => turn.stopToPlaybackStartedMs),
+  );
+  const initialRealtimeSetupMs = finite(
+    sourceConnectionAttempts.find((attempt) => attempt.status === "success")
+      ?.totalSetupMs,
+  );
 
   return {
     reportVersion: REPORT_VERSION,
+    performanceOptimizationVersion: PERFORMANCE_OPTIMIZATION_VERSION,
+    translationStreamingEnabled: false,
+    ttsStreamingEnabled: true,
+    earlyTtsEnabled: false,
     reportId:
       input.reportId ??
       globalThis.crypto?.randomUUID?.() ??
@@ -453,6 +725,7 @@ export function buildClassicTranslatorReport(input: {
     warmRealtimeTurns: warmRealtimeAll.length,
     coldRealtimeTurns: realtimeAll.length - warmRealtimeAll.length,
     warmReuseRate: rate(warmRealtimeAll.length, realtimeAll.length),
+    initialRealtimeSetupMs,
     connectionAttemptsTotal:
       input.connectionAttemptsTotal ?? sourceConnectionAttempts.length,
     connectionSuccesses:
@@ -464,6 +737,22 @@ export function buildClassicTranslatorReport(input: {
     reconnectCount: input.reconnectCount ??
       sourceConnectionAttempts.filter((attempt) => attempt.reason === "reconnect").length,
     fallbackReasons,
+    translationStreamingTurns: successful.filter(
+      (turn) => turn.translationStreamingUsed,
+    ).length,
+    ttsStreamingTurns: ttsStreamingTurns.length,
+    streamingFallbackTurns: streamingFallbackTurns.length,
+    streamingFallbackReasons,
+    medianUserPerceivedPostStopLatencyMs: userPerceived.median,
+    p90UserPerceivedPostStopLatencyMs:
+      "p90" in userPerceived ? userPerceived.p90 : null,
+    performanceBudgets: {
+      warmRecordClickToRecordingStartedMs: 100,
+      stopToTranscriptFinalMs: 1_200,
+      transcriptFinalToTranslationVisibleMs: 3_000,
+      translationVisibleToFirstPlayableAudioMs: 1_500,
+      stopToPlaybackStartedMs: 5_000,
+    },
     transcriptionModels,
     connectionAttempts,
     performanceSummary: {
@@ -471,7 +760,10 @@ export function buildClassicTranslatorReport(input: {
       realtimeTurns: performanceGroup(realtime),
       audioUploadFallbackTurns: performanceGroup(fallback),
       warmReusedRealtimeTurns: performanceGroup(warmRealtime),
+      ttsStreamingTurns: performanceGroup(ttsStreamingTurns),
+      nonStreamingTtsTurns: performanceGroup(nonStreamingTtsTurns),
     },
+    bottleneckSummary: bottleneckSummary(successful),
     turns,
   };
 }
