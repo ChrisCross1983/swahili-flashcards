@@ -8,17 +8,27 @@ const autoTranslateMock = vi.fn();
 const translateMock = vi.fn();
 const createGatewayMock = vi.fn(
   (_client?: unknown, instrumentation?: {
+    onPromptPreparationStarted?: () => void;
+    onPromptPreparationCompleted?: () => void;
+    onSchemaPreparationStarted?: () => void;
+    onSchemaPreparationCompleted?: () => void;
     onTranslationRequestStarted?: () => void;
     onTranslationCompleted?: () => void;
   }) => ({
     transcribe: transcribeMock,
     autoTranslate: async (...args: unknown[]) => {
+      instrumentation?.onPromptPreparationStarted?.();
+      instrumentation?.onPromptPreparationCompleted?.();
+      instrumentation?.onSchemaPreparationStarted?.();
+      instrumentation?.onSchemaPreparationCompleted?.();
       instrumentation?.onTranslationRequestStarted?.();
       const result = await autoTranslateMock(...args);
       instrumentation?.onTranslationCompleted?.();
       return result;
     },
     translate: async (...args: unknown[]) => {
+      instrumentation?.onPromptPreparationStarted?.();
+      instrumentation?.onPromptPreparationCompleted?.();
       instrumentation?.onTranslationRequestStarted?.();
       const result = await translateMock(...args);
       instrumentation?.onTranslationCompleted?.();
@@ -85,7 +95,13 @@ describe("POST /api/translator/translate", () => {
     transcribeMock.mockReset();
     autoTranslateMock.mockReset();
     translateMock.mockReset();
-    requireUserMock.mockResolvedValue({ user: { id: "user-1" }, response: null });
+    requireUserMock.mockImplementation(async (instrumentation) => {
+      instrumentation?.onClientPreparationStarted?.();
+      instrumentation?.onClientPreparationCompleted?.();
+      instrumentation?.onUserLookupStarted?.();
+      instrumentation?.onUserLookupCompleted?.();
+      return { user: { id: "user-1" }, response: null };
+    });
     transcribeMock.mockResolvedValue({
       text: "Tutakuja kesho asubuhi.",
       detectedLanguage: "sw",
@@ -192,6 +208,19 @@ describe("POST /api/translator/translate", () => {
         transcriptFinalAt: expect.any(String),
         translationStartedAt: expect.any(String),
         translationReadyAt: expect.any(String),
+        translationRouteReceivedAt: expect.any(String),
+        translationAuthStartedAt: expect.any(String),
+        translationAuthCompletedAt: expect.any(String),
+        translationAuthClientPreparationMs: expect.any(Number),
+        translationAuthUserLookupMs: expect.any(Number),
+        translationBodyReadMs: expect.any(Number),
+        translationJsonParseMs: null,
+        translationValidationMs: expect.any(Number),
+        translationNormalizationMs: expect.any(Number),
+        translationPromptPreparationMs: expect.any(Number),
+        translationSchemaPreparationMs: null,
+        translationOpenAiClientPreparationMs: expect.any(Number),
+        translationOtherPreOpenAiMs: expect.any(Number),
       },
     });
     expect(transcribeMock).toHaveBeenCalledOnce();
@@ -199,6 +228,7 @@ describe("POST /api/translator/translate", () => {
       "Tutakuja kesho asubuhi.",
       { sourceLanguage: "sw", targetLanguage: "de" },
     );
+    expect(requireUserMock).toHaveBeenCalledOnce();
   });
 
   it("accepts AUTO and returns the detected concrete direction", async () => {
@@ -239,6 +269,8 @@ describe("POST /api/translator/translate", () => {
         transcriptionMs: 950,
         translationModel: "gpt-5.6-terra",
         translationRequestCorrelationId: "translation-turn-1",
+        translationJsonParseMs: expect.any(Number),
+        translationSchemaPreparationMs: expect.any(Number),
       },
     });
     expect(transcribeMock).not.toHaveBeenCalled();

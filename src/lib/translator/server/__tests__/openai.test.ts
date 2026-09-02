@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openAiMocks = vi.hoisted(() => ({
+  clientConstruct: vi.fn(),
   transcriptionCreate: vi.fn(),
   speechCreate: vi.fn(),
   responseCreate: vi.fn(),
@@ -16,6 +17,10 @@ const openAiMocks = vi.hoisted(() => ({
 
 vi.mock("openai", () => ({
   default: class OpenAIMock {
+    constructor() {
+      openAiMocks.clientConstruct();
+    }
+
     audio = {
       transcriptions: { create: openAiMocks.transcriptionCreate },
       speech: { create: openAiMocks.speechCreate },
@@ -59,6 +64,7 @@ describe("OpenAI translator diagnostics", () => {
     openAiMocks.responseCreate.mockReset();
     openAiMocks.responseParse.mockReset();
     openAiMocks.toFile.mockClear();
+    openAiMocks.clientConstruct.mockClear();
   });
 
   it("uses the accessible model directly with one Whisper fallback", () => {
@@ -361,6 +367,14 @@ describe("OpenAI translator diagnostics", () => {
       response_format: "mp3",
       speed: 1,
     });
+  });
+
+  it("reuses one immutable OpenAI client across translation and speech gateways", () => {
+    createOpenAITranslatorGateway("singleton-lifecycle-test");
+    createOpenAISpeechGateway("singleton-lifecycle-test");
+    createOpenAITranslatorGateway("singleton-lifecycle-test");
+
+    expect(openAiMocks.clientConstruct).toHaveBeenCalledOnce();
   });
 
   it("uses verbose Whisper language detection after the primary fails", async () => {

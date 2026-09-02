@@ -20,8 +20,24 @@ import {
   setSpeechServerDiagnostics,
   updateSpeechServerDiagnostics,
 } from "@/lib/translator/server/speechDiagnostics";
+import {
+  otherPreOpenAiTiming,
+  roundedServerTiming,
+  ServerStageTimings,
+} from "@/lib/translator/server/preOpenAiTimings";
 
 export const runtime = "nodejs";
+
+type TtsPreOpenAiStage =
+  | "auth"
+  | "authClientPreparation"
+  | "authUserLookup"
+  | "bodyRead"
+  | "jsonParse"
+  | "validation"
+  | "normalization"
+  | "openAiClientPreparation"
+  | "instructionPreparation";
 
 function errorResponse(status: number, code: string, error: string) {
   return NextResponse.json({ error, code }, { status });
@@ -48,46 +64,100 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const requestReceivedMono = performance.now();
   const requestReceivedAt = new Date().toISOString();
+  const stages = new ServerStageTimings<TtsPreOpenAiStage>();
   const correlationId = validCorrelationId(
     request.headers.get(TRANSLATOR_CORRELATION_HEADER),
   );
-  const { response } = await requireUser();
+  stages.start("auth");
+  const { response } = await requireUser({
+    onClientPreparationStarted: () => {
+      stages.start("authClientPreparation");
+    },
+    onClientPreparationCompleted: () => {
+      stages.complete("authClientPreparation");
+    },
+    onUserLookupStarted: () => {
+      stages.start("authUserLookup");
+    },
+    onUserLookupCompleted: () => {
+      stages.complete("authUserLookup");
+    },
+  });
+  stages.complete("auth");
   if (response) return response;
 
-  let body: unknown;
+  let bodyText: string;
+  stages.start("bodyRead");
   try {
-    body = await request.json();
+    bodyText = await request.text();
   } catch {
+    stages.complete("bodyRead");
     return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
   }
+  stages.complete("bodyRead");
+  let body: unknown;
+  stages.start("jsonParse");
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    stages.complete("jsonParse");
+    return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
+  }
+  stages.complete("jsonParse");
 
+  stages.start("normalization");
+  const payload = body && typeof body === "object"
+    ? body as Record<string, unknown>
+    : null;
+  const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+  const language = parseLanguage(payload?.language);
+  const speed = payload?.speed;
+  stages.complete("normalization");
+  stages.start("validation");
   if (!body || typeof body !== "object") {
+    stages.complete("validation");
     return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
   }
-
-  const payload = body as Record<string, unknown>;
-  const text = typeof payload.text === "string" ? payload.text.trim() : "";
-  const language = parseLanguage(payload.language);
-  const speed = payload.speed;
 
   if (!text) {
+    stages.complete("validation");
     return errorResponse(400, "invalid_text", "Text für die Sprachausgabe fehlt.");
   }
   if (!language) {
+    stages.complete("validation");
     return errorResponse(400, "invalid_language", "Ungültige Sprache.");
   }
   if (!isValidSpeechSpeed(speed)) {
+    stages.complete("validation");
     return errorResponse(400, "invalid_speed", "Ungültiges Sprechtempo.");
   }
   if (text.length > MAX_SPEECH_TEXT_LENGTH) {
+    stages.complete("validation");
     return errorResponse(413, "text_too_long", "Der Text ist zu lang.");
   }
+  stages.complete("validation");
 
   try {
     const parsingDoneAt = new Date().toISOString();
-    const gateway = createOpenAISpeechGateway();
-    const openAiStartedMono = performance.now();
-    const openAiStartedAt = new Date().toISOString();
+    const serviceEnteredAt = new Date().toISOString();
+    const openAiStart: { mono: number | null; at: string | null } = {
+      mono: null,
+      at: null,
+    };
+    stages.start("openAiClientPreparation");
+    const gateway = createOpenAISpeechGateway(undefined, {
+      onInstructionPreparationStarted: () => {
+        stages.start("instructionPreparation");
+      },
+      onInstructionPreparationCompleted: () => {
+        stages.complete("instructionPreparation");
+      },
+      onSpeechRequestStarted: () => {
+        openAiStart.mono = performance.now();
+        openAiStart.at = new Date().toISOString();
+      },
+    });
+    const openAiClientReadyAt = stages.complete("openAiClientPreparation");
     const upstream = await generateTranslatorSpeech(
       text,
       language,
@@ -95,14 +165,78 @@ export async function POST(request: Request) {
       gateway,
       request.signal,
     );
+    const openAiStartedMono = openAiStart.mono;
+    const openAiStartedAt = openAiStart.at;
+    if (openAiStartedMono === null || openAiStartedAt === null) {
+      throw new Error("Speech gateway did not report request start");
+    }
     const upstreamHeadersAt = new Date().toISOString();
     const preOpenAiMs = openAiStartedMono - requestReceivedMono;
+    const ttsStageDurations = {
+      ttsAuthMs: stages.duration("auth"),
+      ttsBodyReadMs: stages.duration("bodyRead"),
+      ttsJsonParseMs: stages.duration("jsonParse"),
+      ttsValidationMs: stages.duration("validation"),
+      ttsNormalizationMs: stages.duration("normalization"),
+      ttsInstructionPreparationMs: stages.duration("instructionPreparation"),
+      ttsOpenAiClientPreparationMs: stages.duration("openAiClientPreparation"),
+    };
+    const ttsOtherPreOpenAiMs = otherPreOpenAiTiming(
+      preOpenAiMs,
+      Object.values(ttsStageDurations),
+    );
+    const preOpenAiDiagnostics = {
+      ttsRouteReceivedAt: requestReceivedAt,
+      ttsAuthStartedAt: stages.startedAt("auth"),
+      ttsAuthCompletedAt: stages.completedAt("auth"),
+      ttsAuthClientPreparationStartedAt:
+        stages.startedAt("authClientPreparation"),
+      ttsAuthClientPreparationCompletedAt:
+        stages.completedAt("authClientPreparation"),
+      ttsAuthUserLookupStartedAt: stages.startedAt("authUserLookup"),
+      ttsAuthUserLookupCompletedAt: stages.completedAt("authUserLookup"),
+      ttsBodyReadStartedAt: stages.startedAt("bodyRead"),
+      ttsBodyReadCompletedAt: stages.completedAt("bodyRead"),
+      ttsJsonParseStartedAt: stages.startedAt("jsonParse"),
+      ttsJsonParseCompletedAt: stages.completedAt("jsonParse"),
+      ttsValidationStartedAt: stages.startedAt("validation"),
+      ttsValidationCompletedAt: stages.completedAt("validation"),
+      ttsInputNormalizationStartedAt: stages.startedAt("normalization"),
+      ttsInputNormalizationCompletedAt: stages.completedAt("normalization"),
+      ttsServiceEnteredAt: serviceEnteredAt,
+      ttsInstructionPreparationStartedAt:
+        stages.startedAt("instructionPreparation"),
+      ttsInstructionPreparationCompletedAt:
+        stages.completedAt("instructionPreparation"),
+      ttsOpenAiClientReadyAt: openAiClientReadyAt,
+      ttsAuthMs: roundedServerTiming(ttsStageDurations.ttsAuthMs),
+      ttsAuthClientPreparationMs: roundedServerTiming(
+        stages.duration("authClientPreparation"),
+      ),
+      ttsAuthUserLookupMs: roundedServerTiming(
+        stages.duration("authUserLookup"),
+      ),
+      ttsBodyReadMs: roundedServerTiming(ttsStageDurations.ttsBodyReadMs),
+      ttsJsonParseMs: roundedServerTiming(ttsStageDurations.ttsJsonParseMs),
+      ttsValidationMs: roundedServerTiming(ttsStageDurations.ttsValidationMs),
+      ttsNormalizationMs: roundedServerTiming(
+        ttsStageDurations.ttsNormalizationMs,
+      ),
+      ttsInstructionPreparationMs: roundedServerTiming(
+        ttsStageDurations.ttsInstructionPreparationMs,
+      ),
+      ttsOpenAiClientPreparationMs: roundedServerTiming(
+        ttsStageDurations.ttsOpenAiClientPreparationMs,
+      ),
+      ttsOtherPreOpenAiMs: roundedServerTiming(ttsOtherPreOpenAiMs),
+    };
     const correlation = correlationId ?? `tts-server-${Date.now()}`;
     setSpeechServerDiagnostics(correlation, {
       ttsRequestCorrelationId: correlation,
       ttsServerRequestReceivedAt: requestReceivedAt,
       ttsServerParsingDoneAt: parsingDoneAt,
       ttsOpenAiRequestStartedAt: openAiStartedAt,
+      ...preOpenAiDiagnostics,
       ttsOpenAiFirstByteAt: null,
       ttsOpenAiCompletedAt: null,
       ttsServerFirstByteSentAt: null,
@@ -167,6 +301,7 @@ export async function POST(request: Request) {
       ttsOpenAiRequestStartedAt: openAiStartedAt,
       ttsOpenAiResponseHeadersAt: upstreamHeadersAt,
       ttsServerPreOpenAiMs: Math.round(preOpenAiMs),
+      ...preOpenAiDiagnostics,
     };
     const serverTiming = serverTimingHeader({
       "app-pre": preOpenAiMs,

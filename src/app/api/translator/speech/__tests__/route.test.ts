@@ -3,7 +3,20 @@ import { MAX_SPEECH_TEXT_LENGTH } from "@/lib/translator/server/speech";
 
 const requireUserMock = vi.fn();
 const synthesizeMock = vi.fn();
-const createSpeechGatewayMock = vi.fn(() => ({ synthesize: synthesizeMock }));
+const createSpeechGatewayMock = vi.fn(
+  (_client?: unknown, instrumentation?: {
+    onInstructionPreparationStarted?: () => void;
+    onInstructionPreparationCompleted?: () => void;
+    onSpeechRequestStarted?: () => void;
+  }) => ({
+    synthesize: async (...args: unknown[]) => {
+      instrumentation?.onInstructionPreparationStarted?.();
+      instrumentation?.onInstructionPreparationCompleted?.();
+      instrumentation?.onSpeechRequestStarted?.();
+      return synthesizeMock(...args);
+    },
+  }),
+);
 
 vi.mock("@/lib/api/auth", () => ({
   requireUser: requireUserMock,
@@ -34,9 +47,15 @@ describe("POST /api/translator/speech", () => {
     requireUserMock.mockReset();
     synthesizeMock.mockReset();
     createSpeechGatewayMock.mockClear();
-    requireUserMock.mockResolvedValue({
-      user: { id: "user-1" },
-      response: null,
+    requireUserMock.mockImplementation(async (instrumentation) => {
+      instrumentation?.onClientPreparationStarted?.();
+      instrumentation?.onClientPreparationCompleted?.();
+      instrumentation?.onUserLookupStarted?.();
+      instrumentation?.onUserLookupCompleted?.();
+      return {
+        user: { id: "user-1" },
+        response: null,
+      };
     });
     synthesizeMock.mockResolvedValue(
       new Response(new Uint8Array([1, 2, 3]), {
@@ -103,9 +122,27 @@ describe("POST /api/translator/speech", () => {
     );
     expect(response.headers.get("Server-Timing")).toContain("app-pre");
     expect(response.headers.get("X-Translator-Speech-Timing")).toBeTruthy();
+    const timing = JSON.parse(
+      response.headers.get("X-Translator-Speech-Timing") ?? "{}",
+    );
+    expect(timing).toMatchObject({
+      ttsRouteReceivedAt: expect.any(String),
+      ttsAuthStartedAt: expect.any(String),
+      ttsAuthCompletedAt: expect.any(String),
+      ttsAuthClientPreparationMs: expect.any(Number),
+      ttsAuthUserLookupMs: expect.any(Number),
+      ttsBodyReadMs: expect.any(Number),
+      ttsJsonParseMs: expect.any(Number),
+      ttsValidationMs: expect.any(Number),
+      ttsNormalizationMs: expect.any(Number),
+      ttsInstructionPreparationMs: expect.any(Number),
+      ttsOpenAiClientPreparationMs: expect.any(Number),
+      ttsOtherPreOpenAiMs: expect.any(Number),
+    });
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       new Uint8Array([1, 2, 3]),
     );
+    expect(requireUserMock).toHaveBeenCalledOnce();
     const correlationId = response.headers.get("X-Translator-Correlation-Id");
     expect(correlationId).toBeTruthy();
     const { GET } = await import("../route");
@@ -126,6 +163,8 @@ describe("POST /api/translator/speech", () => {
       1,
       expect.any(AbortSignal),
     );
+    expect(requireUserMock).toHaveBeenCalledTimes(2);
+    expect(synthesizeMock).toHaveBeenCalledOnce();
   });
 
   it("cancels the upstream audio stream when the browser aborts playback", async () => {

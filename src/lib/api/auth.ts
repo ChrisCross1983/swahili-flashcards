@@ -6,9 +6,22 @@ type RequireUserResult =
     | { user: User; response: null }
     | { user: null; response: NextResponse };
 
-export async function requireUser(): Promise<RequireUserResult> {
+type RequireUserInstrumentation = {
+    onClientPreparationStarted?: () => void;
+    onClientPreparationCompleted?: () => void;
+    onUserLookupStarted?: () => void;
+    onUserLookupCompleted?: () => void;
+};
+
+export async function requireUser(
+    instrumentation: RequireUserInstrumentation = {},
+): Promise<RequireUserResult> {
+    instrumentation.onClientPreparationStarted?.();
     const supabase = await supabaseServer();
+    instrumentation.onClientPreparationCompleted?.();
+    instrumentation.onUserLookupStarted?.();
     const { data, error } = await supabase.auth.getUser();
+    instrumentation.onUserLookupCompleted?.();
 
     if (error || !data.user) {
         return {

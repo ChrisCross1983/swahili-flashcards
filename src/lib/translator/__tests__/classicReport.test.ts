@@ -53,6 +53,27 @@ function entry(
       translationStartedAt: "2023-11-14T22:13:21.100Z",
       translationReadyAt: "2023-11-14T22:13:21.410Z",
       translationClientRequestStartedAt: "2023-11-14T22:13:21.100Z",
+      translationRouteReceivedAt: "2023-11-14T22:13:21.110Z",
+      translationAuthStartedAt: "2023-11-14T22:13:21.110Z",
+      translationAuthCompletedAt: "2023-11-14T22:13:21.150Z",
+      translationAuthClientPreparationStartedAt: "2023-11-14T22:13:21.110Z",
+      translationAuthClientPreparationCompletedAt: "2023-11-14T22:13:21.115Z",
+      translationAuthUserLookupStartedAt: "2023-11-14T22:13:21.115Z",
+      translationAuthUserLookupCompletedAt: "2023-11-14T22:13:21.150Z",
+      translationBodyReadStartedAt: "2023-11-14T22:13:21.150Z",
+      translationBodyReadCompletedAt: "2023-11-14T22:13:21.160Z",
+      translationJsonParseStartedAt: "2023-11-14T22:13:21.160Z",
+      translationJsonParseCompletedAt: "2023-11-14T22:13:21.165Z",
+      translationValidationStartedAt: "2023-11-14T22:13:21.170Z",
+      translationValidationCompletedAt: "2023-11-14T22:13:21.180Z",
+      translationInputNormalizationStartedAt: "2023-11-14T22:13:21.165Z",
+      translationInputNormalizationCompletedAt: "2023-11-14T22:13:21.170Z",
+      translationServiceEnteredAt: "2023-11-14T22:13:21.180Z",
+      translationOpenAiClientReadyAt: "2023-11-14T22:13:21.185Z",
+      translationPromptPreparationStartedAt: "2023-11-14T22:13:21.185Z",
+      translationPromptPreparationCompletedAt: "2023-11-14T22:13:21.190Z",
+      translationSchemaPreparationStartedAt: "2023-11-14T22:13:21.190Z",
+      translationSchemaPreparationCompletedAt: "2023-11-14T22:13:21.195Z",
       translationServerRequestReceivedAt: "2023-11-14T22:13:21.110Z",
       translationServerParsingDoneAt: "2023-11-14T22:13:21.112Z",
       translationOpenAiRequestStartedAt: "2023-11-14T22:13:21.115Z",
@@ -64,7 +85,18 @@ function entry(
       translationStateCommittedAt: "2023-11-14T22:13:21.411Z",
       translationVisibleAt: "2023-11-14T22:13:21.420Z",
       translationRequestCorrelationId: `translation-${id}`,
-      translationServerPreOpenAiMs: 3,
+      translationServerPreOpenAiMs: 100,
+      translationAuthMs: 40,
+      translationAuthClientPreparationMs: 5,
+      translationAuthUserLookupMs: 35,
+      translationBodyReadMs: 10,
+      translationJsonParseMs: 5,
+      translationValidationMs: 10,
+      translationNormalizationMs: 5,
+      translationPromptPreparationMs: 5,
+      translationSchemaPreparationMs: 5,
+      translationOpenAiClientPreparationMs: 5,
+      translationOtherPreOpenAiMs: 15,
       translationOpenAiTotalMs: 285,
       translationServerPostOpenAiMs: 5,
       translationClientPostResponseMs: 10,
@@ -76,6 +108,25 @@ function entry(
       ttsStartedAt: "2023-11-14T22:13:21.420Z",
       ttsReadyAt: "2023-11-14T22:13:21.720Z",
       ttsClientRequestStartedAt: "2023-11-14T22:13:21.420Z",
+      ttsRouteReceivedAt: "2023-11-14T22:13:21.425Z",
+      ttsAuthStartedAt: "2023-11-14T22:13:21.425Z",
+      ttsAuthCompletedAt: "2023-11-14T22:13:21.455Z",
+      ttsAuthClientPreparationStartedAt: "2023-11-14T22:13:21.425Z",
+      ttsAuthClientPreparationCompletedAt: "2023-11-14T22:13:21.430Z",
+      ttsAuthUserLookupStartedAt: "2023-11-14T22:13:21.430Z",
+      ttsAuthUserLookupCompletedAt: "2023-11-14T22:13:21.455Z",
+      ttsBodyReadStartedAt: "2023-11-14T22:13:21.455Z",
+      ttsBodyReadCompletedAt: "2023-11-14T22:13:21.465Z",
+      ttsJsonParseStartedAt: "2023-11-14T22:13:21.465Z",
+      ttsJsonParseCompletedAt: "2023-11-14T22:13:21.470Z",
+      ttsInputNormalizationStartedAt: "2023-11-14T22:13:21.470Z",
+      ttsInputNormalizationCompletedAt: "2023-11-14T22:13:21.475Z",
+      ttsValidationStartedAt: "2023-11-14T22:13:21.475Z",
+      ttsValidationCompletedAt: "2023-11-14T22:13:21.480Z",
+      ttsServiceEnteredAt: "2023-11-14T22:13:21.480Z",
+      ttsOpenAiClientReadyAt: "2023-11-14T22:13:21.485Z",
+      ttsInstructionPreparationStartedAt: "2023-11-14T22:13:21.485Z",
+      ttsInstructionPreparationCompletedAt: "2023-11-14T22:13:21.490Z",
       ttsServerRequestReceivedAt: "2023-11-14T22:13:21.425Z",
       ttsServerParsingDoneAt: "2023-11-14T22:13:21.427Z",
       ttsOpenAiRequestStartedAt: "2023-11-14T22:13:21.430Z",
@@ -90,7 +141,17 @@ function entry(
       firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
       playRequestedAt: "2023-11-14T22:13:21.723Z",
       ttsRequestCorrelationId: `tts-${id}`,
-      ttsServerPreOpenAiMs: 3,
+      ttsServerPreOpenAiMs: 80,
+      ttsAuthMs: 30,
+      ttsAuthClientPreparationMs: 5,
+      ttsAuthUserLookupMs: 25,
+      ttsBodyReadMs: 10,
+      ttsJsonParseMs: 5,
+      ttsValidationMs: 5,
+      ttsNormalizationMs: 5,
+      ttsInstructionPreparationMs: 5,
+      ttsOpenAiClientPreparationMs: 5,
+      ttsOtherPreOpenAiMs: 15,
       ttsOpenAiTimeToFirstByteMs: 120,
       ttsOpenAiTotalMs: 270,
       ttsServerStreamingOverheadMs: 2,
@@ -221,8 +282,11 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 3,
-      performanceOptimizationVersion: "classic-post-stop-v3",
+      reportVersion: 4,
+      performanceOptimizationVersion: "classic-pre-openai-v4",
+      preOpenAiOptimizationEnabled: true,
+      translationPreOpenAiOptimized: true,
+      ttsPreOpenAiOptimized: true,
       translationStreamingEnabled: false,
       ttsStreamingEnabled: true,
       earlyTtsEnabled: false,
@@ -273,6 +337,11 @@ describe("classic translator QA report", () => {
         ttsRequestCorrelationId: "tts-realtime-turn",
         ttsStreamingUsed: true,
         ttsOpenAiTimeToFirstByteMs: 120,
+        translationAuthMs: 40,
+        translationAuthUserLookupMs: 35,
+        ttsAuthMs: 30,
+        ttsAuthUserLookupMs: 25,
+        combinedPreOpenAiMs: 180,
         firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
       });
     expect(realtimeReportTurn?.ttsClientFirstByteAt).not.toBe(
@@ -281,10 +350,23 @@ describe("classic translator QA report", () => {
     expect(realtimeReportTurn?.criticalPath).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ stage: "translation_openai", durationMs: 285 }),
+        expect.objectContaining({ stage: "translation_auth", durationMs: 40 }),
+        expect.objectContaining({ stage: "translation_auth_user_lookup", durationMs: 35 }),
+        expect.objectContaining({ stage: "tts_auth", durationMs: 30 }),
+        expect.objectContaining({ stage: "tts_auth_user_lookup", durationMs: 25 }),
         expect.objectContaining({ stage: "tts_openai_to_first_byte", durationMs: 120 }),
       ]),
     );
     expect(report.bottleneckSummary.largestMedianStage).toBeTruthy();
+    expect(report.preOpenAiBottleneckSummary).toEqual({
+      largestTranslationPreOpenAiStage: "auth",
+      largestTranslationPreOpenAiStageMedianMs: 40,
+      largestTtsPreOpenAiStage: "auth",
+      largestTtsPreOpenAiStageMedianMs: 30,
+    });
+    expect(
+      report.preOpenAiBottleneckSummaryByGroup.warmReusedRealtimeTurns,
+    ).toEqual(report.preOpenAiBottleneckSummary);
     expect(report.turns.find((turn) => turn.turnId === "fallback-turn"))
       .toMatchObject({
         transcriptionPath: "audio_upload_fallback",
@@ -322,6 +404,8 @@ describe("classic translator QA report", () => {
       if (turn.diagnostics) {
         turn.diagnostics.stopToPlaybackStartedMs = value;
         turn.diagnostics.interactionOverheadMs = value + 10;
+        turn.diagnostics.translationServerPreOpenAiMs = value;
+        turn.diagnostics.ttsServerPreOpenAiMs = [50, 100, 300][index];
       }
       return turn;
     });
@@ -337,7 +421,7 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 3,
+      reportVersion: 4,
       realtimeTurns: 3,
       fallbackTurns: 0,
       realtimeRate: 1,
@@ -356,6 +440,25 @@ describe("classic translator QA report", () => {
       min: 100,
       max: 900,
     });
+    expect(report).toMatchObject({
+      medianTranslationServerPreOpenAiMs: 200,
+      p90TranslationServerPreOpenAiMs: 900,
+      medianTtsServerPreOpenAiMs: 100,
+      p90TtsServerPreOpenAiMs: 300,
+      medianCombinedPreOpenAiMs: 300,
+      p90CombinedPreOpenAiMs: 1_200,
+    });
+    expect(
+      report.performanceSummary.warmReusedRealtimeTurns.combinedPreOpenAiMs,
+    ).toMatchObject({ median: 300, p90: 1_200 });
+    expect(report.turns.find((turn) => turn.turnId === "warm-3")
+      ?.performanceBudgetViolations).toEqual(
+        expect.arrayContaining([
+          { metric: "translationServerPreOpenAiMs", budgetMs: 300, actualMs: 900 },
+          { metric: "ttsServerPreOpenAiMs", budgetMs: 300, actualMs: 300 },
+          { metric: "combinedPreOpenAiMs", budgetMs: 600, actualMs: 1_200 },
+        ]),
+      );
     expect(
       report.performanceSummary.warmReusedRealtimeTurns.realtimeSetupMs,
     ).toEqual({
@@ -408,13 +511,34 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 3,
+      reportVersion: 4,
       totalTurns: 0,
       realtimeRate: null,
       fallbackRate: null,
       warmReuseRate: null,
       connectionAttempts: [],
+      medianTranslationServerPreOpenAiMs: null,
+      p90TranslationServerPreOpenAiMs: null,
+      medianTtsServerPreOpenAiMs: null,
+      p90TtsServerPreOpenAiMs: null,
+      medianCombinedPreOpenAiMs: null,
+      p90CombinedPreOpenAiMs: null,
+      preOpenAiBottleneckSummary: {
+        largestTranslationPreOpenAiStage: null,
+        largestTranslationPreOpenAiStageMedianMs: null,
+        largestTtsPreOpenAiStage: null,
+        largestTtsPreOpenAiStageMedianMs: null,
+      },
+      preOpenAiBottleneckSummaryByGroup: {
+        allSuccessfulTurns: {
+          largestTranslationPreOpenAiStage: null,
+          largestTranslationPreOpenAiStageMedianMs: null,
+          largestTtsPreOpenAiStage: null,
+          largestTtsPreOpenAiStageMedianMs: null,
+        },
+      },
     });
+    expect(report.turns).toEqual([]);
 
     expect(downloadClassicTranslatorReport(report)).toBe(true);
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));

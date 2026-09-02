@@ -108,6 +108,15 @@ const AUTO_TRANSLATION_SCHEMA = {
   required: ["sourceLanguage", "targetLanguage", "translatedText"],
 } as const;
 
+const AUTO_TRANSLATION_TEXT_FORMAT = {
+  format: {
+    type: "json_schema",
+    name: "translator_auto_result",
+    strict: true,
+    schema: AUTO_TRANSLATION_SCHEMA,
+  },
+} as const;
+
 export function isAutoTranslationOutput(
   value: unknown,
 ): value is AutoTranslationOutput {
@@ -157,13 +166,28 @@ type TranscriptionModel =
   | typeof PRIMARY_TRANSCRIPTION_MODEL
   | typeof FALLBACK_TRANSCRIPTION_MODEL;
 
+let sharedOpenAiClient: { apiKey: string; client: OpenAI } | null = null;
+
+function getSharedOpenAiClient(apiKey: string) {
+  if (sharedOpenAiClient?.apiKey === apiKey) return sharedOpenAiClient.client;
+  const client = new OpenAI({ apiKey });
+  sharedOpenAiClient = { apiKey, client };
+  return client;
+}
+
+type TranslationGatewayInstrumentation = {
+  signal?: AbortSignal;
+  onPromptPreparationStarted?: () => void;
+  onPromptPreparationCompleted?: () => void;
+  onSchemaPreparationStarted?: () => void;
+  onSchemaPreparationCompleted?: () => void;
+  onTranslationRequestStarted?: () => void;
+  onTranslationCompleted?: () => void;
+};
+
 export function createOpenAITranslatorGateway(
   apiKey = process.env.OPENAI_API_KEY,
-  options: {
-    signal?: AbortSignal;
-    onTranslationRequestStarted?: () => void;
-    onTranslationCompleted?: () => void;
-  } = {},
+  options: TranslationGatewayInstrumentation = {},
 ): TranslatorAiGateway {
   if (!apiKey) {
     throw new TranslatorPipelineError(
@@ -172,7 +196,7 @@ export function createOpenAITranslatorGateway(
     );
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = getSharedOpenAiClient(apiKey);
 
   return {
     async transcribe(input) {
@@ -348,40 +372,40 @@ export function createOpenAITranslatorGateway(
     },
 
     async autoTranslate(text: string) {
-      if (process.env.NODE_ENV === "development") {
-        console.info("[translator][auto translation debug]", {
-          model: TRANSLATION_MODEL,
-          mode: "auto",
-          transcriptLength: text.length,
-          openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
-        });
-      }
       try {
+        options.onPromptPreparationStarted?.();
+        const instructions = buildAutoInterpreterPrompt();
+        options.onPromptPreparationCompleted?.();
+        options.onSchemaPreparationStarted?.();
+        const responseTextFormat = AUTO_TRANSLATION_TEXT_FORMAT;
+        options.onSchemaPreparationCompleted?.();
         const params = {
           model: TRANSLATION_MODEL,
           reasoning: { effort: "none" },
-          instructions: buildAutoInterpreterPrompt(),
+          instructions,
           input: text,
           max_output_tokens: 1200,
-          text: {
-            format: {
-              type: "json_schema",
-              name: "translator_auto_result",
-              strict: true,
-              schema: AUTO_TRANSLATION_SCHEMA,
-            },
-          },
+          text: responseTextFormat,
         } as const;
         options.onTranslationRequestStarted?.();
-        const response = options.signal
-          ? await client.responses.parse<typeof params, AutoTranslationOutput>(
+        const request = options.signal
+          ? client.responses.parse<typeof params, AutoTranslationOutput>(
               params,
               { signal: options.signal },
             )
-          : await client.responses.parse<typeof params, AutoTranslationOutput>(
+          : client.responses.parse<typeof params, AutoTranslationOutput>(
               params,
             );
+        const response = await request;
         options.onTranslationCompleted?.();
+        if (process.env.NODE_ENV === "development") {
+          console.info("[translator][auto translation debug]", {
+            model: TRANSLATION_MODEL,
+            mode: "auto",
+            transcriptLength: text.length,
+            openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+          });
+        }
         const result = response.output_parsed;
         if (!isAutoTranslationOutput(result)) {
           throw new Error("Invalid automatic translation output");
@@ -404,32 +428,42 @@ export function createOpenAITranslatorGateway(
     },
 
     async translate(text: string, direction: TranslationDirection) {
-      if (process.env.NODE_ENV === "development") {
-        console.info("[translator][translation debug]", {
-          model: TRANSLATION_MODEL,
-          sourceLanguage: direction.sourceLanguage,
-          targetLanguage: direction.targetLanguage,
-          transcriptLength: text.length,
-          openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
-        });
-      }
-
       try {
-        options.onTranslationRequestStarted?.();
+        options.onPromptPreparationStarted?.();
+        const instructions = buildInterpreterPrompt(direction);
+        options.onPromptPreparationCompleted?.();
         const params = {
           model: TRANSLATION_MODEL,
           reasoning: { effort: "none" },
-          instructions: buildInterpreterPrompt(direction),
+          instructions,
           input: text,
           max_output_tokens: 1200,
         } as const;
-        const response = options.signal
-          ? await client.responses.create(params, { signal: options.signal })
-          : await client.responses.create(params);
+        options.onTranslationRequestStarted?.();
+        const request = options.signal
+          ? client.responses.create(params, { signal: options.signal })
+          : client.responses.create(params);
+        const response = await request;
         options.onTranslationCompleted?.();
+        if (process.env.NODE_ENV === "development") {
+          console.info("[translator][translation debug]", {
+            model: TRANSLATION_MODEL,
+            sourceLanguage: direction.sourceLanguage,
+            targetLanguage: direction.targetLanguage,
+            transcriptLength: text.length,
+            openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+          });
+        }
         return response.output_text;
       } catch (error) {
         if (process.env.NODE_ENV === "development") {
+          console.info("[translator][translation debug]", {
+            model: TRANSLATION_MODEL,
+            sourceLanguage: direction.sourceLanguage,
+            targetLanguage: direction.targetLanguage,
+            transcriptLength: text.length,
+            openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+          });
           console.error(
             "[translator][openai translation error]",
             getSafeOpenAIErrorDetails(error),
@@ -443,6 +477,11 @@ export function createOpenAITranslatorGateway(
 
 export function createOpenAISpeechGateway(
   apiKey = process.env.OPENAI_API_KEY,
+  options: {
+    onInstructionPreparationStarted?: () => void;
+    onInstructionPreparationCompleted?: () => void;
+    onSpeechRequestStarted?: () => void;
+  } = {},
 ): TranslatorSpeechGateway {
   if (!apiKey) {
     throw new TranslatorPipelineError(
@@ -451,19 +490,23 @@ export function createOpenAISpeechGateway(
     );
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = getSharedOpenAiClient(apiKey);
 
   return {
     async synthesize(text, language, speed, signal) {
       try {
+        options.onInstructionPreparationStarted?.();
+        const instructions = getSpeechInstructions(language);
+        options.onInstructionPreparationCompleted?.();
         const params = {
           model: SPEECH_MODEL,
           voice: SPEECH_VOICE,
           input: text,
-          instructions: getSpeechInstructions(language),
+          instructions,
           response_format: SPEECH_RESPONSE_FORMAT,
           speed,
         } as const;
+        options.onSpeechRequestStarted?.();
         const request = signal
           ? client.audio.speech.create(params, { signal })
           : client.audio.speech.create(params);

@@ -8,8 +8,8 @@ import type {
   TranscriptionPath,
 } from "@/lib/translator/types";
 
-const REPORT_VERSION = 3;
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-post-stop-v3";
+const REPORT_VERSION = 4;
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-pre-openai-v4";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -54,6 +54,15 @@ const PERFORMANCE_METRICS = [
   "transcriptFinalToTranslationRequestStartMs",
   "translationClientToServerMs",
   "translationServerPreOpenAiMs",
+  "translationAuthMs",
+  "translationBodyReadMs",
+  "translationJsonParseMs",
+  "translationValidationMs",
+  "translationNormalizationMs",
+  "translationPromptPreparationMs",
+  "translationSchemaPreparationMs",
+  "translationOpenAiClientPreparationMs",
+  "translationOtherPreOpenAiMs",
   "translationOpenAiFirstResponseMs",
   "translationOpenAiTotalMs",
   "translationServerPostOpenAiMs",
@@ -67,6 +76,15 @@ const PERFORMANCE_METRICS = [
   "translationVisibleToTtsRequestStartMs",
   "ttsClientToServerMs",
   "ttsServerPreOpenAiMs",
+  "ttsAuthMs",
+  "ttsBodyReadMs",
+  "ttsJsonParseMs",
+  "ttsValidationMs",
+  "ttsNormalizationMs",
+  "ttsInstructionPreparationMs",
+  "ttsOpenAiClientPreparationMs",
+  "ttsOtherPreOpenAiMs",
+  "combinedPreOpenAiMs",
   "ttsOpenAiTimeToFirstByteMs",
   "ttsOpenAiTotalMs",
   "ttsServerStreamingOverheadMs",
@@ -136,6 +154,27 @@ export type ClassicTranslatorReportTurn = {
   translationStartedAt: string | null;
   translationReadyAt: string | null;
   translationClientRequestStartedAt: string | null;
+  translationRouteReceivedAt: string | null;
+  translationAuthStartedAt: string | null;
+  translationAuthCompletedAt: string | null;
+  translationAuthClientPreparationStartedAt: string | null;
+  translationAuthClientPreparationCompletedAt: string | null;
+  translationAuthUserLookupStartedAt: string | null;
+  translationAuthUserLookupCompletedAt: string | null;
+  translationBodyReadStartedAt: string | null;
+  translationBodyReadCompletedAt: string | null;
+  translationJsonParseStartedAt: string | null;
+  translationJsonParseCompletedAt: string | null;
+  translationValidationStartedAt: string | null;
+  translationValidationCompletedAt: string | null;
+  translationInputNormalizationStartedAt: string | null;
+  translationInputNormalizationCompletedAt: string | null;
+  translationServiceEnteredAt: string | null;
+  translationPromptPreparationStartedAt: string | null;
+  translationPromptPreparationCompletedAt: string | null;
+  translationSchemaPreparationStartedAt: string | null;
+  translationSchemaPreparationCompletedAt: string | null;
+  translationOpenAiClientReadyAt: string | null;
   translationServerRequestReceivedAt: string | null;
   translationServerParsingDoneAt: string | null;
   translationOpenAiRequestStartedAt: string | null;
@@ -152,6 +191,25 @@ export type ClassicTranslatorReportTurn = {
   ttsStartedAt: string | null;
   ttsReadyAt: string | null;
   ttsClientRequestStartedAt: string | null;
+  ttsRouteReceivedAt: string | null;
+  ttsAuthStartedAt: string | null;
+  ttsAuthCompletedAt: string | null;
+  ttsAuthClientPreparationStartedAt: string | null;
+  ttsAuthClientPreparationCompletedAt: string | null;
+  ttsAuthUserLookupStartedAt: string | null;
+  ttsAuthUserLookupCompletedAt: string | null;
+  ttsBodyReadStartedAt: string | null;
+  ttsBodyReadCompletedAt: string | null;
+  ttsJsonParseStartedAt: string | null;
+  ttsJsonParseCompletedAt: string | null;
+  ttsValidationStartedAt: string | null;
+  ttsValidationCompletedAt: string | null;
+  ttsInputNormalizationStartedAt: string | null;
+  ttsInputNormalizationCompletedAt: string | null;
+  ttsServiceEnteredAt: string | null;
+  ttsInstructionPreparationStartedAt: string | null;
+  ttsInstructionPreparationCompletedAt: string | null;
+  ttsOpenAiClientReadyAt: string | null;
   ttsServerRequestReceivedAt: string | null;
   ttsServerParsingDoneAt: string | null;
   ttsOpenAiRequestStartedAt: string | null;
@@ -179,6 +237,17 @@ export type ClassicTranslatorReportTurn = {
   clientToTranslationServerMs: number | null;
   translationClientToServerMs: number | null;
   translationServerPreOpenAiMs: number | null;
+  translationAuthMs: number | null;
+  translationAuthClientPreparationMs: number | null;
+  translationAuthUserLookupMs: number | null;
+  translationBodyReadMs: number | null;
+  translationJsonParseMs: number | null;
+  translationValidationMs: number | null;
+  translationNormalizationMs: number | null;
+  translationPromptPreparationMs: number | null;
+  translationSchemaPreparationMs: number | null;
+  translationOpenAiClientPreparationMs: number | null;
+  translationOtherPreOpenAiMs: number | null;
   translationOpenAiFirstResponseMs: number | null;
   translationOpenAiTotalMs: number | null;
   translationServerPostOpenAiMs: number | null;
@@ -192,6 +261,17 @@ export type ClassicTranslatorReportTurn = {
   translationVisibleToTtsRequestStartMs: number | null;
   ttsClientToServerMs: number | null;
   ttsServerPreOpenAiMs: number | null;
+  ttsAuthMs: number | null;
+  ttsAuthClientPreparationMs: number | null;
+  ttsAuthUserLookupMs: number | null;
+  ttsBodyReadMs: number | null;
+  ttsJsonParseMs: number | null;
+  ttsValidationMs: number | null;
+  ttsNormalizationMs: number | null;
+  ttsInstructionPreparationMs: number | null;
+  ttsOpenAiClientPreparationMs: number | null;
+  ttsOtherPreOpenAiMs: number | null;
+  combinedPreOpenAiMs: number | null;
   ttsOpenAiTimeToFirstByteMs: number | null;
   ttsOpenAiTotalMs: number | null;
   ttsServerStreamingOverheadMs: number | null;
@@ -240,6 +320,15 @@ function finite(value: unknown) {
 
 function rate(numerator: number, denominator: number) {
   return denominator === 0 ? null : Number((numerator / denominator).toFixed(4));
+}
+
+function combinedPreOpenAiMs(
+  translationValue: unknown,
+  ttsValue: unknown,
+) {
+  const translation = finite(translationValue);
+  const tts = finite(ttsValue);
+  return translation === null || tts === null ? null : translation + tts;
 }
 
 function metricSummary(values: Array<number | null>) {
@@ -298,6 +387,61 @@ function bottleneckSummary(turns: ClassicTranslatorReportTurn[]) {
   };
 }
 
+const TRANSLATION_PRE_OPENAI_STAGES = [
+  ["auth", "translationAuthMs"],
+  ["body_read", "translationBodyReadMs"],
+  ["json_parse", "translationJsonParseMs"],
+  ["validation", "translationValidationMs"],
+  ["normalization", "translationNormalizationMs"],
+  ["prompt_preparation", "translationPromptPreparationMs"],
+  ["schema_preparation", "translationSchemaPreparationMs"],
+  ["openai_client_preparation", "translationOpenAiClientPreparationMs"],
+  ["other", "translationOtherPreOpenAiMs"],
+] as const;
+
+const TTS_PRE_OPENAI_STAGES = [
+  ["auth", "ttsAuthMs"],
+  ["body_read", "ttsBodyReadMs"],
+  ["json_parse", "ttsJsonParseMs"],
+  ["validation", "ttsValidationMs"],
+  ["normalization", "ttsNormalizationMs"],
+  ["instruction_preparation", "ttsInstructionPreparationMs"],
+  ["openai_client_preparation", "ttsOpenAiClientPreparationMs"],
+  ["other", "ttsOtherPreOpenAiMs"],
+] as const;
+
+function largestPreOpenAiStage(
+  turns: ClassicTranslatorReportTurn[],
+  stages: ReadonlyArray<readonly [string, keyof ClassicTranslatorReportTurn]>,
+) {
+  return stages.reduce<{ stage: string | null; medianMs: number | null }>(
+    (largest, [stage, metric]) => {
+      const summary = metricSummary(
+        turns.map((turn) => finite(turn[metric])),
+      );
+      return summary.median !== null &&
+        (largest.medianMs === null || summary.median > largest.medianMs)
+        ? { stage, medianMs: summary.median }
+        : largest;
+    },
+    { stage: null, medianMs: null },
+  );
+}
+
+function preOpenAiBottleneckSummary(turns: ClassicTranslatorReportTurn[]) {
+  const translation = largestPreOpenAiStage(
+    turns,
+    TRANSLATION_PRE_OPENAI_STAGES,
+  );
+  const tts = largestPreOpenAiStage(turns, TTS_PRE_OPENAI_STAGES);
+  return {
+    largestTranslationPreOpenAiStage: translation.stage,
+    largestTranslationPreOpenAiStageMedianMs: translation.medianMs,
+    largestTtsPreOpenAiStage: tts.stage,
+    largestTtsPreOpenAiStageMedianMs: tts.medianMs,
+  };
+}
+
 export function sanitizeClassicReportError(message: string) {
   return message
     .replace(/\b(?:OPENAI_API_KEY|SUPABASE_SESSION_TOKEN|JWT)\s*[:=]\s*[^\s,;]+/gi, "[REDACTED]")
@@ -343,12 +487,31 @@ function buildCriticalPath(d: Partial<TranslationDiagnostics>) {
     criticalPathStage("realtime_transcript_finalize", d.recordingStoppedAt, d.transcriptFinalAt, d.stopToTranscriptFinalMs),
     criticalPathStage("translation_client_to_server", d.translationClientRequestStartedAt, d.translationServerRequestReceivedAt, d.clientToTranslationServerMs),
     criticalPathStage("translation_server_pre_openai", d.translationServerRequestReceivedAt, d.translationOpenAiRequestStartedAt, d.translationServerPreOpenAiMs),
+    criticalPathStage("translation_auth", d.translationAuthStartedAt, d.translationAuthCompletedAt, d.translationAuthMs),
+    criticalPathStage("translation_auth_client_prepare", d.translationAuthClientPreparationStartedAt, d.translationAuthClientPreparationCompletedAt, d.translationAuthClientPreparationMs),
+    criticalPathStage("translation_auth_user_lookup", d.translationAuthUserLookupStartedAt, d.translationAuthUserLookupCompletedAt, d.translationAuthUserLookupMs),
+    criticalPathStage("translation_body_read", d.translationBodyReadStartedAt, d.translationBodyReadCompletedAt, d.translationBodyReadMs),
+    criticalPathStage("translation_json_parse", d.translationJsonParseStartedAt, d.translationJsonParseCompletedAt, d.translationJsonParseMs),
+    criticalPathStage("translation_validation", d.translationValidationStartedAt, d.translationValidationCompletedAt, d.translationValidationMs),
+    criticalPathStage("translation_normalization", d.translationInputNormalizationStartedAt, d.translationInputNormalizationCompletedAt, d.translationNormalizationMs),
+    criticalPathStage("translation_prompt_prepare", d.translationPromptPreparationStartedAt, d.translationPromptPreparationCompletedAt, d.translationPromptPreparationMs),
+    criticalPathStage("translation_schema_prepare", d.translationSchemaPreparationStartedAt, d.translationSchemaPreparationCompletedAt, d.translationSchemaPreparationMs),
+    criticalPathStage("translation_openai_client_prepare", d.translationServiceEnteredAt, d.translationOpenAiClientReadyAt, d.translationOpenAiClientPreparationMs),
     criticalPathStage("translation_openai", d.translationOpenAiRequestStartedAt, d.translationOpenAiCompletedAt, d.translationOpenAiTotalMs),
     criticalPathStage("translation_server_post_openai", d.translationOpenAiCompletedAt, d.translationServerSerializationDoneAt, d.translationServerPostOpenAiMs),
     criticalPathStage("translation_server_to_client", d.translationServerResponseStartedAt, d.translationClientResponseFirstByteAt, d.translationServerToClientMs),
     criticalPathStage("translation_client_render", d.translationClientResponseCompletedAt, d.translationVisibleAt, d.translationClientPostResponseMs),
     criticalPathStage("tts_client_to_server", d.ttsClientRequestStartedAt, d.ttsServerRequestReceivedAt, d.ttsClientToServerMs),
     criticalPathStage("tts_server_pre_openai", d.ttsServerRequestReceivedAt, d.ttsOpenAiRequestStartedAt, d.ttsServerPreOpenAiMs),
+    criticalPathStage("tts_auth", d.ttsAuthStartedAt, d.ttsAuthCompletedAt, d.ttsAuthMs),
+    criticalPathStage("tts_auth_client_prepare", d.ttsAuthClientPreparationStartedAt, d.ttsAuthClientPreparationCompletedAt, d.ttsAuthClientPreparationMs),
+    criticalPathStage("tts_auth_user_lookup", d.ttsAuthUserLookupStartedAt, d.ttsAuthUserLookupCompletedAt, d.ttsAuthUserLookupMs),
+    criticalPathStage("tts_body_read", d.ttsBodyReadStartedAt, d.ttsBodyReadCompletedAt, d.ttsBodyReadMs),
+    criticalPathStage("tts_json_parse", d.ttsJsonParseStartedAt, d.ttsJsonParseCompletedAt, d.ttsJsonParseMs),
+    criticalPathStage("tts_validation", d.ttsValidationStartedAt, d.ttsValidationCompletedAt, d.ttsValidationMs),
+    criticalPathStage("tts_normalization", d.ttsInputNormalizationStartedAt, d.ttsInputNormalizationCompletedAt, d.ttsNormalizationMs),
+    criticalPathStage("tts_instruction_prepare", d.ttsInstructionPreparationStartedAt, d.ttsInstructionPreparationCompletedAt, d.ttsInstructionPreparationMs),
+    criticalPathStage("tts_openai_client_prepare", d.ttsServiceEnteredAt, d.ttsOpenAiClientReadyAt, d.ttsOpenAiClientPreparationMs),
     criticalPathStage("tts_openai_to_first_byte", d.ttsOpenAiRequestStartedAt, d.ttsOpenAiFirstByteAt, d.ttsOpenAiTimeToFirstByteMs),
     criticalPathStage("tts_openai_remaining", d.ttsOpenAiFirstByteAt, d.ttsOpenAiCompletedAt, ttsRemaining),
     criticalPathStage("tts_server_to_client", d.ttsServerFirstByteSentAt, d.ttsClientFirstByteAt, d.ttsServerToClientFirstByteMs),
@@ -364,6 +527,24 @@ function budgetViolations(d: Partial<TranslationDiagnostics>) {
     ["transcriptFinalToTranslationVisibleMs", d.transcriptFinalToTranslationVisibleMs, 3_000],
     ["translationVisibleToFirstPlayableAudioMs", d.translationVisibleToFirstPlayableAudioMs, 1_500],
     ["stopToPlaybackStartedMs", d.stopToPlaybackStartedMs, 5_000],
+    ["translationAuthMs", d.translationAuthMs, 150],
+    ["translationValidationMs", d.translationValidationMs, 50],
+    ["translationPromptPreparationMs", d.translationPromptPreparationMs, 20],
+    ["translationOpenAiClientPreparationMs", d.translationOpenAiClientPreparationMs, 20],
+    ["translationServerPreOpenAiMs", d.translationServerPreOpenAiMs, 300],
+    ["ttsAuthMs", d.ttsAuthMs, 150],
+    ["ttsValidationMs", d.ttsValidationMs, 50],
+    ["ttsInstructionPreparationMs", d.ttsInstructionPreparationMs, 20],
+    ["ttsOpenAiClientPreparationMs", d.ttsOpenAiClientPreparationMs, 20],
+    ["ttsServerPreOpenAiMs", d.ttsServerPreOpenAiMs, 300],
+    [
+      "combinedPreOpenAiMs",
+      combinedPreOpenAiMs(
+        d.translationServerPreOpenAiMs,
+        d.ttsServerPreOpenAiMs,
+      ),
+      600,
+    ],
   ] as const;
   return budgets.flatMap(([metric, value, budgetMs]) => {
     const actualMs = finite(value);
@@ -438,6 +619,38 @@ function turnFromValues(input: {
     translationStartedAt: d.translationStartedAt ?? null,
     translationReadyAt: d.translationReadyAt ?? null,
     translationClientRequestStartedAt: d.translationClientRequestStartedAt ?? null,
+    translationRouteReceivedAt: d.translationRouteReceivedAt ?? null,
+    translationAuthStartedAt: d.translationAuthStartedAt ?? null,
+    translationAuthCompletedAt: d.translationAuthCompletedAt ?? null,
+    translationAuthClientPreparationStartedAt:
+      d.translationAuthClientPreparationStartedAt ?? null,
+    translationAuthClientPreparationCompletedAt:
+      d.translationAuthClientPreparationCompletedAt ?? null,
+    translationAuthUserLookupStartedAt:
+      d.translationAuthUserLookupStartedAt ?? null,
+    translationAuthUserLookupCompletedAt:
+      d.translationAuthUserLookupCompletedAt ?? null,
+    translationBodyReadStartedAt: d.translationBodyReadStartedAt ?? null,
+    translationBodyReadCompletedAt: d.translationBodyReadCompletedAt ?? null,
+    translationJsonParseStartedAt: d.translationJsonParseStartedAt ?? null,
+    translationJsonParseCompletedAt: d.translationJsonParseCompletedAt ?? null,
+    translationValidationStartedAt: d.translationValidationStartedAt ?? null,
+    translationValidationCompletedAt: d.translationValidationCompletedAt ?? null,
+    translationInputNormalizationStartedAt:
+      d.translationInputNormalizationStartedAt ?? null,
+    translationInputNormalizationCompletedAt:
+      d.translationInputNormalizationCompletedAt ?? null,
+    translationServiceEnteredAt: d.translationServiceEnteredAt ?? null,
+    translationPromptPreparationStartedAt:
+      d.translationPromptPreparationStartedAt ?? null,
+    translationPromptPreparationCompletedAt:
+      d.translationPromptPreparationCompletedAt ?? null,
+    translationSchemaPreparationStartedAt:
+      d.translationSchemaPreparationStartedAt ?? null,
+    translationSchemaPreparationCompletedAt:
+      d.translationSchemaPreparationCompletedAt ?? null,
+    translationOpenAiClientReadyAt:
+      d.translationOpenAiClientReadyAt ?? null,
     translationServerRequestReceivedAt: d.translationServerRequestReceivedAt ?? null,
     translationServerParsingDoneAt: d.translationServerParsingDoneAt ?? null,
     translationOpenAiRequestStartedAt: d.translationOpenAiRequestStartedAt ?? null,
@@ -454,6 +667,31 @@ function turnFromValues(input: {
     ttsStartedAt: d.ttsStartedAt ?? null,
     ttsReadyAt: d.ttsReadyAt ?? null,
     ttsClientRequestStartedAt: d.ttsClientRequestStartedAt ?? null,
+    ttsRouteReceivedAt: d.ttsRouteReceivedAt ?? null,
+    ttsAuthStartedAt: d.ttsAuthStartedAt ?? null,
+    ttsAuthCompletedAt: d.ttsAuthCompletedAt ?? null,
+    ttsAuthClientPreparationStartedAt:
+      d.ttsAuthClientPreparationStartedAt ?? null,
+    ttsAuthClientPreparationCompletedAt:
+      d.ttsAuthClientPreparationCompletedAt ?? null,
+    ttsAuthUserLookupStartedAt: d.ttsAuthUserLookupStartedAt ?? null,
+    ttsAuthUserLookupCompletedAt: d.ttsAuthUserLookupCompletedAt ?? null,
+    ttsBodyReadStartedAt: d.ttsBodyReadStartedAt ?? null,
+    ttsBodyReadCompletedAt: d.ttsBodyReadCompletedAt ?? null,
+    ttsJsonParseStartedAt: d.ttsJsonParseStartedAt ?? null,
+    ttsJsonParseCompletedAt: d.ttsJsonParseCompletedAt ?? null,
+    ttsValidationStartedAt: d.ttsValidationStartedAt ?? null,
+    ttsValidationCompletedAt: d.ttsValidationCompletedAt ?? null,
+    ttsInputNormalizationStartedAt:
+      d.ttsInputNormalizationStartedAt ?? null,
+    ttsInputNormalizationCompletedAt:
+      d.ttsInputNormalizationCompletedAt ?? null,
+    ttsServiceEnteredAt: d.ttsServiceEnteredAt ?? null,
+    ttsInstructionPreparationStartedAt:
+      d.ttsInstructionPreparationStartedAt ?? null,
+    ttsInstructionPreparationCompletedAt:
+      d.ttsInstructionPreparationCompletedAt ?? null,
+    ttsOpenAiClientReadyAt: d.ttsOpenAiClientReadyAt ?? null,
     ttsServerRequestReceivedAt: d.ttsServerRequestReceivedAt ?? null,
     ttsServerParsingDoneAt: d.ttsServerParsingDoneAt ?? null,
     ttsOpenAiRequestStartedAt: d.ttsOpenAiRequestStartedAt ?? null,
@@ -485,6 +723,25 @@ function turnFromValues(input: {
       d.translationClientToServerMs ?? d.clientToTranslationServerMs,
     ),
     translationServerPreOpenAiMs: finite(d.translationServerPreOpenAiMs),
+    translationAuthMs: finite(d.translationAuthMs),
+    translationAuthClientPreparationMs: finite(
+      d.translationAuthClientPreparationMs,
+    ),
+    translationAuthUserLookupMs: finite(d.translationAuthUserLookupMs),
+    translationBodyReadMs: finite(d.translationBodyReadMs),
+    translationJsonParseMs: finite(d.translationJsonParseMs),
+    translationValidationMs: finite(d.translationValidationMs),
+    translationNormalizationMs: finite(d.translationNormalizationMs),
+    translationPromptPreparationMs: finite(
+      d.translationPromptPreparationMs,
+    ),
+    translationSchemaPreparationMs: finite(
+      d.translationSchemaPreparationMs,
+    ),
+    translationOpenAiClientPreparationMs: finite(
+      d.translationOpenAiClientPreparationMs,
+    ),
+    translationOtherPreOpenAiMs: finite(d.translationOtherPreOpenAiMs),
     translationOpenAiFirstResponseMs: finite(d.translationOpenAiFirstResponseMs),
     translationOpenAiTotalMs: finite(d.translationOpenAiTotalMs),
     translationServerPostOpenAiMs: finite(d.translationServerPostOpenAiMs),
@@ -504,6 +761,20 @@ function turnFromValues(input: {
     ),
     ttsClientToServerMs: finite(d.ttsClientToServerMs),
     ttsServerPreOpenAiMs: finite(d.ttsServerPreOpenAiMs),
+    ttsAuthMs: finite(d.ttsAuthMs),
+    ttsAuthClientPreparationMs: finite(d.ttsAuthClientPreparationMs),
+    ttsAuthUserLookupMs: finite(d.ttsAuthUserLookupMs),
+    ttsBodyReadMs: finite(d.ttsBodyReadMs),
+    ttsJsonParseMs: finite(d.ttsJsonParseMs),
+    ttsValidationMs: finite(d.ttsValidationMs),
+    ttsNormalizationMs: finite(d.ttsNormalizationMs),
+    ttsInstructionPreparationMs: finite(d.ttsInstructionPreparationMs),
+    ttsOpenAiClientPreparationMs: finite(d.ttsOpenAiClientPreparationMs),
+    ttsOtherPreOpenAiMs: finite(d.ttsOtherPreOpenAiMs),
+    combinedPreOpenAiMs: combinedPreOpenAiMs(
+      d.translationServerPreOpenAiMs,
+      d.ttsServerPreOpenAiMs,
+    ),
     ttsOpenAiTimeToFirstByteMs: finite(d.ttsOpenAiTimeToFirstByteMs),
     ttsOpenAiTotalMs: finite(d.ttsOpenAiTotalMs),
     ttsServerStreamingOverheadMs: finite(d.ttsServerStreamingOverheadMs),
@@ -693,6 +964,15 @@ export function buildClassicTranslatorReport(input: {
     sourceConnectionAttempts.find((attempt) => attempt.status === "success")
       ?.totalSetupMs,
   );
+  const translationPreOpenAi = metricSummary(
+    successful.map((turn) => turn.translationServerPreOpenAiMs),
+  );
+  const ttsPreOpenAi = metricSummary(
+    successful.map((turn) => turn.ttsServerPreOpenAiMs),
+  );
+  const combinedPreOpenAi = metricSummary(
+    successful.map((turn) => turn.combinedPreOpenAiMs),
+  );
 
   return {
     reportVersion: REPORT_VERSION,
@@ -700,6 +980,9 @@ export function buildClassicTranslatorReport(input: {
     translationStreamingEnabled: false,
     ttsStreamingEnabled: true,
     earlyTtsEnabled: false,
+    preOpenAiOptimizationEnabled: true,
+    translationPreOpenAiOptimized: true,
+    ttsPreOpenAiOptimized: true,
     reportId:
       input.reportId ??
       globalThis.crypto?.randomUUID?.() ??
@@ -746,12 +1029,32 @@ export function buildClassicTranslatorReport(input: {
     medianUserPerceivedPostStopLatencyMs: userPerceived.median,
     p90UserPerceivedPostStopLatencyMs:
       "p90" in userPerceived ? userPerceived.p90 : null,
+    medianTranslationServerPreOpenAiMs: translationPreOpenAi.median,
+    p90TranslationServerPreOpenAiMs:
+      "p90" in translationPreOpenAi ? translationPreOpenAi.p90 : null,
+    medianTtsServerPreOpenAiMs: ttsPreOpenAi.median,
+    p90TtsServerPreOpenAiMs:
+      "p90" in ttsPreOpenAi ? ttsPreOpenAi.p90 : null,
+    medianCombinedPreOpenAiMs: combinedPreOpenAi.median,
+    p90CombinedPreOpenAiMs:
+      "p90" in combinedPreOpenAi ? combinedPreOpenAi.p90 : null,
     performanceBudgets: {
       warmRecordClickToRecordingStartedMs: 100,
       stopToTranscriptFinalMs: 1_200,
       transcriptFinalToTranslationVisibleMs: 3_000,
       translationVisibleToFirstPlayableAudioMs: 1_500,
       stopToPlaybackStartedMs: 5_000,
+      translationAuthMs: 150,
+      translationValidationMs: 50,
+      translationPromptPreparationMs: 20,
+      translationOpenAiClientPreparationMs: 20,
+      translationServerPreOpenAiMs: 300,
+      ttsAuthMs: 150,
+      ttsValidationMs: 50,
+      ttsInstructionPreparationMs: 20,
+      ttsOpenAiClientPreparationMs: 20,
+      ttsServerPreOpenAiMs: 300,
+      combinedPreOpenAiMs: 600,
     },
     transcriptionModels,
     connectionAttempts,
@@ -764,6 +1067,12 @@ export function buildClassicTranslatorReport(input: {
       nonStreamingTtsTurns: performanceGroup(nonStreamingTtsTurns),
     },
     bottleneckSummary: bottleneckSummary(successful),
+    preOpenAiBottleneckSummary: preOpenAiBottleneckSummary(successful),
+    preOpenAiBottleneckSummaryByGroup: {
+      allSuccessfulTurns: preOpenAiBottleneckSummary(successful),
+      warmReusedRealtimeTurns: preOpenAiBottleneckSummary(warmRealtime),
+      audioUploadFallbackTurns: preOpenAiBottleneckSummary(fallback),
+    },
     turns,
   };
 }

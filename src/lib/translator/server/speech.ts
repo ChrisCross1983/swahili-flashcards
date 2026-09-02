@@ -12,10 +12,13 @@ export type TranslatorSpeechGateway = {
   ) => Promise<Response>;
 };
 
+const SPEECH_INSTRUCTIONS = {
+  sw: "Speak clearly, naturally and calmly in Tanzanian Kiswahili. Use a slightly slower conversational pace. Prioritize intelligibility and natural pronunciation. Do not separate syllables unnaturally.",
+  de: "Speak clearly, naturally and calmly in German. Use a slightly slower conversational pace. Prioritize intelligibility and natural pronunciation. Do not separate syllables unnaturally.",
+} as const;
+
 export function getSpeechInstructions(language: TranslationLanguage) {
-  return language === "sw"
-    ? "Speak clearly, naturally and calmly in Tanzanian Kiswahili. Use a slightly slower conversational pace. Prioritize intelligibility and natural pronunciation. Do not separate syllables unnaturally."
-    : "Speak clearly, naturally and calmly in German. Use a slightly slower conversational pace. Prioritize intelligibility and natural pronunciation. Do not separate syllables unnaturally.";
+  return SPEECH_INSTRUCTIONS[language];
 }
 
 export async function generateTranslatorSpeech(
