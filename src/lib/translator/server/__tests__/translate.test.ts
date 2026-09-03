@@ -309,7 +309,10 @@ describe("translator server pipeline", () => {
     );
     await expect(
       translateRecordedAudio(input, translationFailure),
-    ).rejects.toMatchObject({ code: "translation_failed" });
+    ).rejects.toMatchObject({
+      code: "translation_failed",
+      recognizedTranscript: "Tutakuja kesho asubuhi.",
+    });
 
     const autoTranslationFailure = createGateway();
     vi.mocked(autoTranslationFailure.autoTranslate).mockRejectedValue(

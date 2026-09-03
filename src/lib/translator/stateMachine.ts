@@ -6,6 +6,10 @@ import type {
   TranslationRequestDirection,
   TranslatorStatus,
 } from "@/lib/translator/types";
+import type {
+  TranslatorFailureCategory,
+  TranslatorHealthStatus,
+} from "@/lib/translator/reliability";
 
 export const TRANSLATION_DIRECTIONS = {
   swToDe: { sourceLanguage: "sw", targetLanguage: "de" },
@@ -36,21 +40,47 @@ export type TranslatorState = {
   entries: TranslationEntry[];
   activePlaybackEntryId: string | null;
   errorMessage: string | null;
+  failureCategory: TranslatorFailureCategory | null;
+  healthStatus: TranslatorHealthStatus;
 };
 
 export type TranslatorEvent =
   | { type: "SET_MODE"; mode: TranslationMode }
   | { type: "TOGGLE_AUTO_PLAY" }
   | { type: "START_RECORDING" }
-  | { type: "RECORDING_FAILED"; message: string }
+  | {
+      type: "RECORDING_FAILED";
+      message: string;
+      category?: TranslatorFailureCategory;
+      healthStatus?: TranslatorHealthStatus;
+      authRequired?: boolean;
+    }
   | { type: "STOP_AND_TRANSLATE" }
-  | { type: "PROCESSING_SUCCEEDED"; entry: TranslationEntry }
+  | {
+      type: "PROCESSING_SUCCEEDED";
+      entry: TranslationEntry;
+      healthStatus?: TranslatorHealthStatus;
+      notice?: string | null;
+      noticeCategory?: TranslatorFailureCategory | null;
+    }
   | {
       type: "UPDATE_ENTRY_DIAGNOSTICS";
       entryId: string;
       diagnostics: Partial<TranslationDiagnostics>;
     }
-  | { type: "PROCESSING_FAILED"; message: string }
+  | {
+      type: "PROCESSING_FAILED";
+      message: string;
+      category?: TranslatorFailureCategory;
+      healthStatus?: TranslatorHealthStatus;
+      authRequired?: boolean;
+    }
+  | {
+      type: "SET_HEALTH";
+      healthStatus: TranslatorHealthStatus;
+      message?: string | null;
+      category?: TranslatorFailureCategory | null;
+    }
   | { type: "START_PLAYBACK"; entryId: string }
   | { type: "PAUSE_PLAYBACK" }
   | { type: "RESUME_PLAYBACK" }
@@ -65,6 +95,8 @@ export const initialTranslatorState: TranslatorState = {
   entries: [],
   activePlaybackEntryId: null,
   errorMessage: null,
+  failureCategory: null,
+  healthStatus: "healthy",
 };
 
 export function translatorReducer(
@@ -84,11 +116,25 @@ export function translatorReducer(
 
     case "START_RECORDING":
       if (state.status !== "idle") return state;
-      return { ...state, status: "recording", errorMessage: null };
+      return {
+        ...state,
+        status: "recording",
+        errorMessage: null,
+        failureCategory: null,
+        healthStatus: state.healthStatus === "auth_required"
+          ? "auth_required"
+          : "healthy",
+      };
 
     case "RECORDING_FAILED":
       if (state.status !== "idle" && state.status !== "recording") return state;
-      return { ...state, status: "error", errorMessage: event.message };
+      return {
+        ...state,
+        status: event.authRequired ? "error" : "idle",
+        errorMessage: event.message,
+        failureCategory: event.category ?? "RECORDER",
+        healthStatus: event.healthStatus ?? "healthy",
+      };
 
     case "STOP_AND_TRANSLATE":
       if (state.status !== "recording") return state;
@@ -101,12 +147,33 @@ export function translatorReducer(
         status: state.autoPlay ? "playing" : "idle",
         entries: [event.entry, ...state.entries],
         activePlaybackEntryId: state.autoPlay ? event.entry.id : null,
-        errorMessage: null,
+        errorMessage: event.notice ?? null,
+        failureCategory: event.noticeCategory ?? null,
+        healthStatus: event.healthStatus ?? "healthy",
       };
 
     case "PROCESSING_FAILED":
       if (state.status !== "processing") return state;
-      return { ...state, status: "error", errorMessage: event.message };
+      return {
+        ...state,
+        status: event.authRequired ? "error" : "idle",
+        activePlaybackEntryId: null,
+        errorMessage: event.message,
+        failureCategory: event.category ?? "UNKNOWN",
+        healthStatus: event.healthStatus ?? "healthy",
+      };
+
+    case "SET_HEALTH":
+      return {
+        ...state,
+        healthStatus: event.healthStatus,
+        errorMessage: event.message === undefined
+          ? state.errorMessage
+          : event.message,
+        failureCategory: event.category === undefined
+          ? state.failureCategory
+          : event.category,
+      };
 
     case "UPDATE_ENTRY_DIAGNOSTICS":
       if (!state.entries.some((entry) => entry.id === event.entryId)) {
@@ -154,7 +221,13 @@ export function translatorReducer(
 
     case "RESET_ERROR":
       if (state.status !== "error") return state;
-      return { ...state, status: "idle", errorMessage: null };
+      return {
+        ...state,
+        status: "idle",
+        errorMessage: null,
+        failureCategory: null,
+        healthStatus: "healthy",
+      };
 
     case "CLEAR_HISTORY":
       if (state.status !== "idle" || state.entries.length === 0) return state;

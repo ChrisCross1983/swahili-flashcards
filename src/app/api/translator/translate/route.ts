@@ -10,7 +10,10 @@ import type {
   TranslationResult,
   TranslatorApiErrorCode,
 } from "@/lib/translator/types";
-import { getTranslatorPipelineErrorCode } from "@/lib/translator/server/errors";
+import {
+  getTranslatorPipelineErrorCode,
+  TranslatorPipelineError,
+} from "@/lib/translator/server/errors";
 import { createOpenAITranslatorGateway } from "@/lib/translator/server/openai";
 import {
   translateAuthoritativeText,
@@ -53,8 +56,13 @@ function errorResponse(
   status: number,
   code: TranslatorApiErrorCode,
   error: string,
+  recognizedTranscript: string | null = null,
 ) {
-  return NextResponse.json({ error, code }, { status });
+  return NextResponse.json({
+    error,
+    code,
+    ...(recognizedTranscript ? { recognizedTranscript } : {}),
+  }, { status });
 }
 
 function parseLanguage(value: FormDataEntryValue | null): TranslationLanguage | null {
@@ -282,6 +290,9 @@ async function translationResponse(
     });
   } catch (error) {
     const code = getTranslatorPipelineErrorCode(error) ?? "translation_failed";
+    const recognizedTranscript = error instanceof TranslatorPipelineError
+      ? error.recognizedTranscript
+      : null;
     console.error("[translator] request failed", { code });
 
     if (code === "no_speech") {
@@ -296,6 +307,7 @@ async function translationResponse(
         422,
         "unsupported_language",
         "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+        recognizedTranscript,
       );
     }
     if (code === "transcription_failed") {
@@ -316,6 +328,7 @@ async function translationResponse(
       502,
       "translation_failed",
       "Die Übersetzung konnte nicht erstellt werden.",
+      recognizedTranscript,
     );
   }
 }

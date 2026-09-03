@@ -58,7 +58,24 @@ describe("requireUser", () => {
     expect(result.response?.status).toBe(401);
     await expect(result.response?.json()).resolves.toEqual({
       error: "Unauthorized",
+      code: "auth_required",
+      authFailureType: "invalid_session",
     });
+    expect(result.authFailureType).toBe("invalid_session");
     expect(authMocks.getUser).toHaveBeenCalledOnce();
+  });
+
+  it("classifies a temporary auth transport failure without exposing details", async () => {
+    authMocks.getUser.mockResolvedValue({
+      data: { user: null },
+      error: new Error("fetch failed: network timeout"),
+    });
+    const result = await requireUser();
+    expect(result.authFailureType).toBe("auth_network_error");
+    await expect(result.response?.json()).resolves.toEqual({
+      error: "Unauthorized",
+      code: "auth_required",
+      authFailureType: "auth_network_error",
+    });
   });
 });

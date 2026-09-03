@@ -165,4 +165,37 @@ describe("translator components", () => {
 
     expect(html).toContain("Feedback gespeichert");
   });
+
+  it("renders the internal one-click STT review without changing the translation card", () => {
+    const entry: TranslationEntry = {
+      id: "speech-review", timestamp: 1_700_000_000_000,
+      sourceLanguage: "sw", targetLanguage: "de",
+      originalText: "Nyumba hii ni kubwa.", translatedText: "Dieses Haus ist groß.",
+      sourceWasDetected: true,
+    };
+    const html = renderToStaticMarkup(
+      <TranslationCard
+        entry={entry} isLatest playbackState="idle" playbackDisabled={false}
+        feedbackDisabled={false} feedbackSaved={false}
+        onPlay={vi.fn()} onPause={vi.fn()} onResume={vi.fn()} onStop={vi.fn()}
+        onFeedback={vi.fn()} recognitionReviewStatus="unreviewed"
+        onAcceptTranscript={vi.fn()} onSaveTranscriptCorrection={vi.fn()}
+      />,
+    );
+    expect(html).toContain("Richtig erkannt");
+    expect(html).toContain("Transkript korrigieren");
+    expect(html).toContain("Dieses Haus ist groß.");
+  });
+
+  it("keeps QA controls internal and states that no second STT call is started", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    expect(source).toContain('process.env.NODE_ENV !== "production"');
+    expect(source).toContain("Sprach-Qualitätsmodus (interner Test)");
+    expect(source).toContain("Es wird keine zusätzliche Spracherkennung gestartet.");
+    expect(source).toContain("Translation 503");
+    expect(source).toContain("TTS 503");
+  });
 });

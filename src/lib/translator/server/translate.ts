@@ -84,18 +84,21 @@ async function translateTranscript(
       throw new TranslatorPipelineError(
         "translation_failed",
         "Automatic translation failed",
+        originalText,
       );
     }
     if (autoResult.sourceLanguage === "unknown") {
       throw new TranslatorPipelineError(
         "unsupported_language",
         "Detected language is not supported",
+        originalText,
       );
     }
     if (!autoResult.translatedText.trim()) {
       throw new TranslatorPipelineError(
         "translation_failed",
         "Automatic translation returned empty output",
+        originalText,
       );
     }
     result = {
@@ -115,12 +118,14 @@ async function translateTranscript(
       throw new TranslatorPipelineError(
         "translation_failed",
         "Text translation failed",
+        originalText,
       );
     }
     if (!translatedText) {
       throw new TranslatorPipelineError(
         "translation_failed",
         "Translation returned empty output",
+        originalText,
       );
     }
     result = {

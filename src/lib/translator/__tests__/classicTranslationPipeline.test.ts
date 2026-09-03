@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { requestClassicTranslation } from "@/lib/translator/classicTranslationPipeline";
 import type { TranslationResult } from "@/lib/translator/types";
+import { TranslatorOperationError } from "@/lib/translator/reliability";
+import { TranslatorClientError } from "@/lib/translator/client";
 
 const direction = { sourceLanguage: "auto", targetLanguage: "auto" } as const;
 const result = {
@@ -20,6 +22,67 @@ const result = {
 } satisfies TranslationResult;
 
 describe("classic post-stop translation path", () => {
+  it("retries one safe 503 failure exactly once and then succeeds", async () => {
+    const temporary = new TranslatorOperationError({
+      category: "SERVICE_UNAVAILABLE", message: "temporary", healthStatus: "offline",
+      httpStatus: 503, apiErrorCode: "service_unavailable", retryable: true,
+      retryAfterMs: null, authFailureType: null,
+    });
+    const requestText = vi.fn()
+      .mockRejectedValueOnce(temporary)
+      .mockResolvedValueOnce(result);
+    const onRetry = vi.fn();
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Habari yako?" },
+      transcriptionMs: 900, getAudioBlob: vi.fn(), direction,
+      signal: new AbortController().signal, onRetry,
+    }, { requestText, wait: vi.fn(async () => undefined) })).resolves.toBe(result);
+    expect(requestText).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry validation or auth failures", async () => {
+    const invalid = new TranslatorOperationError({
+      category: "VALIDATION", message: "invalid", healthStatus: "healthy",
+      httpStatus: 400, apiErrorCode: "invalid_request", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    });
+    const requestText = vi.fn(async () => { throw invalid; });
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Habari" },
+      transcriptionMs: 900, getAudioBlob: vi.fn(), direction,
+      signal: new AbortController().signal,
+    }, { requestText })).rejects.toBe(invalid);
+    expect(requestText).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a completed STT transcript if the retry later fails before a response", async () => {
+    const first = new TranslatorClientError({
+      category: "SERVICE_UNAVAILABLE", message: "temporary", healthStatus: "degraded",
+      httpStatus: 503, apiErrorCode: "translation_failed", retryable: true,
+      retryAfterMs: null, authFailureType: null,
+    }, "Nyumba hii ni kubwa.");
+    const second = new TranslatorClientError({
+      category: "NETWORK", message: "offline", healthStatus: "offline",
+      httpStatus: null, apiErrorCode: "network_error", retryable: true,
+      retryAfterMs: null, authFailureType: null,
+    });
+    const requestAudio = vi.fn().mockRejectedValueOnce(first).mockRejectedValueOnce(second);
+    const request = requestClassicTranslation({
+      realtimeResult: { ok: false, fallbackReason: "session_error" },
+      transcriptionMs: undefined,
+      getAudioBlob: vi.fn(async () => new Blob(["audio"])), direction,
+      signal: new AbortController().signal,
+    }, { requestAudio, wait: vi.fn(async () => undefined) });
+    await request.catch((error) => {
+      expect(error).toMatchObject({
+        recognizedTranscript: "Nyumba hii ni kubwa.",
+        failure: { category: "NETWORK" },
+      });
+    });
+    expect(requestAudio).toHaveBeenCalledTimes(2);
+  });
+
   it("uses realtime text and skips audio upload STT in the normal path", async () => {
     const requestText = vi.fn(async () => result);
     const requestAudio = vi.fn(async () => result);

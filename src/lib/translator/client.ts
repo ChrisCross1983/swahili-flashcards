@@ -15,9 +15,29 @@ import {
   TRANSLATION_TIMING_HEADER,
   TRANSLATOR_CORRELATION_HEADER,
 } from "@/lib/translator/performanceHeaders";
+import {
+  applyAuthFailureType,
+  failureFromHttp,
+  networkFailure,
+  TranslatorOperationError,
+  type TranslatorFailure,
+} from "@/lib/translator/reliability";
 
 const NETWORK_ERROR =
   "Die Übersetzung konnte nicht geladen werden. Bitte versuche es erneut.";
+
+function translationProtocolFailure(): TranslatorFailure {
+  return {
+    category: "TRANSLATION",
+    message: "Die Übersetzung konnte gerade nicht erstellt werden. Bitte versuche es erneut.",
+    healthStatus: "healthy",
+    httpStatus: null,
+    apiErrorCode: "invalid_translation_response",
+    retryable: false,
+    retryAfterMs: null,
+    authFailureType: null,
+  };
+}
 
 const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   invalid_request: "Die Aufnahme konnte nicht verarbeitet werden.",
@@ -32,11 +52,30 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   service_unavailable: "Die Übersetzung konnte nicht erstellt werden.",
 };
 
-export class TranslatorClientError extends Error {
-  constructor(message: string) {
-    super(message);
+export class TranslatorClientError extends TranslatorOperationError {
+  readonly recognizedTranscript: string | null;
+
+  constructor(
+    failure: ConstructorParameters<typeof TranslatorOperationError>[0],
+    recognizedTranscript: string | null = null,
+  ) {
+    super(failure);
     this.name = "TranslatorClientError";
+    this.recognizedTranscript = recognizedTranscript;
   }
+}
+
+function retryAfterMs(response: Response) {
+  const value = response.headers.get("Retry-After")?.trim();
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(5_000, Math.round(seconds * 1_000));
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date)
+    ? Math.min(5_000, Math.max(0, date - Date.now()))
+    : null;
 }
 
 type RequestOptions = {
@@ -139,7 +178,7 @@ async function readTranslationResponse(
     ) {
       throw error;
     }
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(networkFailure("translation"));
   }
   let body: unknown = null;
   try {
@@ -155,15 +194,41 @@ async function readTranslationResponse(
       errorBody && typeof errorBody.code === "string"
         ? (errorBody.code as TranslatorApiErrorCode)
         : null;
-    throw new TranslatorClientError(
-      code && Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, code)
-        ? API_ERROR_MESSAGES[code]
-        : NETWORK_ERROR,
-    );
+    const failure = failureFromHttp({
+      status: response.status,
+      apiErrorCode: code,
+      stage: "translation",
+      retryAfterMs: retryAfterMs(response),
+    });
+    const authFailureType = errorBody &&
+      typeof errorBody.authFailureType === "string" &&
+      [
+        "missing_session",
+        "invalid_session",
+        "auth_network_error",
+        "auth_upstream_error",
+        "unknown_auth_error",
+      ].includes(errorBody.authFailureType)
+      ? errorBody.authFailureType as TranslatorFailure["authFailureType"]
+      : null;
+    const recognizedTranscript = errorBody &&
+      typeof errorBody.recognizedTranscript === "string" &&
+      errorBody.recognizedTranscript.trim() &&
+      errorBody.recognizedTranscript.length <= 10_000
+      ? errorBody.recognizedTranscript
+      : null;
+    throw new TranslatorClientError(applyAuthFailureType({
+      ...failure,
+      message:
+        code &&
+        Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, code)
+          ? API_ERROR_MESSAGES[code]
+          : failure.message,
+    }, authFailureType), recognizedTranscript);
   }
 
   if (!isTranslationResult(body)) {
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(translationProtocolFailure());
   }
   const result: TranslationResult = {
     originalText: body.originalText,
@@ -191,17 +256,17 @@ async function readTranslationResponse(
     (direction.sourceLanguage !== "auto" &&
       result.diagnostics.translationMs === undefined)
   ) {
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(translationProtocolFailure());
   }
   if (
     direction.sourceLanguage !== "auto" &&
     (result.sourceLanguage !== direction.sourceLanguage ||
       result.targetLanguage !== direction.targetLanguage)
   ) {
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(translationProtocolFailure());
   }
   if (result.sourceLanguage === result.targetLanguage) {
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(translationProtocolFailure());
   }
 
   return result;
@@ -215,12 +280,26 @@ export async function requestAudioTranslation(
   const requestStartedAt = new Date().toISOString();
   const correlationId = options.correlationId ?? createCorrelationId("translation");
   if (audioBlob.size > MAX_TRANSLATION_AUDIO_BYTES) {
-    throw new TranslatorClientError(API_ERROR_MESSAGES.audio_too_large);
+    throw new TranslatorClientError({
+      ...failureFromHttp({
+        status: 413,
+        apiErrorCode: "audio_too_large",
+        stage: "translation",
+      }),
+      message: API_ERROR_MESSAGES.audio_too_large,
+    });
   }
 
   const format = getSupportedAudioFormat(audioBlob.type);
   if (!format) {
-    throw new TranslatorClientError(API_ERROR_MESSAGES.invalid_audio_format);
+    throw new TranslatorClientError({
+      ...failureFromHttp({
+        status: 400,
+        apiErrorCode: "invalid_audio_format",
+        stage: "translation",
+      }),
+      message: API_ERROR_MESSAGES.invalid_audio_format,
+    });
   }
 
   const formData = new FormData();
@@ -243,7 +322,7 @@ export async function requestAudioTranslation(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(networkFailure("translation"));
   }
 
   return readTranslationResponse(
@@ -281,7 +360,7 @@ export async function requestTextTranslation(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new TranslatorClientError(NETWORK_ERROR);
+    throw new TranslatorClientError(networkFailure("translation"));
   }
 
   return readTranslationResponse(
@@ -320,5 +399,5 @@ export function createTranslationEntry(
 }
 
 export function getTranslatorClientErrorMessage(error: unknown) {
-  return error instanceof TranslatorClientError ? error.message : NETWORK_ERROR;
+  return error instanceof TranslatorOperationError ? error.message : NETWORK_ERROR;
 }

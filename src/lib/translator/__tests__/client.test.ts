@@ -164,7 +164,25 @@ describe("translator client", () => {
         type: "PROCESSING_FAILED",
         message: "Die Aufnahme konnte nicht verarbeitet werden.",
       }),
-    ).toMatchObject({ status: "error" });
+    ).toMatchObject({ status: "idle" });
+  });
+
+  it("preserves a completed STT transcript when translation fails afterwards", async () => {
+    const request = requestAudioTranslation(
+      new Blob(["audio"], { type: "audio/webm" }),
+      direction,
+      { fetcher: vi.fn(async () => Response.json({
+        code: "translation_failed",
+        error: "generic",
+        recognizedTranscript: "Nyumba hii ni kubwa.",
+      }, { status: 502 })) },
+    );
+    await request.catch((error) => {
+      expect(error).toMatchObject({
+        recognizedTranscript: "Nyumba hii ni kubwa.",
+        failure: { category: "SERVICE_UNAVAILABLE" },
+      });
+    });
   });
 
   it("preserves a client abort while reading a translation response", async () => {
@@ -182,5 +200,31 @@ describe("translator client", () => {
     await expect(
       requestTextTranslation("Habari", direction, 100, { fetcher }),
     ).rejects.toBe(abortError);
+  });
+
+  it("distinguishes recoverable auth network errors from expired sessions", async () => {
+    const networkRequest = requestTextTranslation("Habari", direction, 100, {
+      fetcher: vi.fn(async () => Response.json({
+        code: "auth_required", authFailureType: "auth_network_error",
+      }, { status: 401 })),
+    });
+    await networkRequest.catch((error) => {
+      expect(error).toMatchObject({ failure: {
+        category: "NETWORK", healthStatus: "offline", retryable: true,
+        authFailureType: "auth_network_error",
+      } });
+    });
+
+    const expiredRequest = requestTextTranslation("Habari", direction, 100, {
+      fetcher: vi.fn(async () => Response.json({
+        code: "auth_required", authFailureType: "invalid_session",
+      }, { status: 401 })),
+    });
+    await expiredRequest.catch((error) => {
+      expect(error).toMatchObject({ failure: {
+        category: "AUTH", healthStatus: "auth_required", retryable: false,
+        authFailureType: "invalid_session",
+      } });
+    });
   });
 });

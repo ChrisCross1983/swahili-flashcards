@@ -5,6 +5,13 @@ import {
   SPEECH_TIMING_HEADER,
   TRANSLATOR_CORRELATION_HEADER,
 } from "@/lib/translator/performanceHeaders";
+import {
+  applyAuthFailureType,
+  failureFromHttp,
+  networkFailure,
+  TranslatorOperationError,
+  type TranslatorFailure,
+} from "@/lib/translator/reliability";
 
 const SPEECH_ERROR_MESSAGE = "Die Sprachausgabe konnte nicht erstellt werden.";
 const SPEECH_READY_MESSAGE =
@@ -75,9 +82,14 @@ export type TranslatorSpeechAsset = {
   serverDiagnostics?: Promise<Partial<TranslatorSpeechGenerationDiagnostics> | null>;
 };
 
-export class TranslatorSpeechClientError extends Error {
-  constructor(message = SPEECH_ERROR_MESSAGE) {
-    super(message);
+export class TranslatorSpeechClientError extends TranslatorOperationError {
+  constructor(
+    failure = {
+      ...networkFailure("tts"),
+      message: SPEECH_ERROR_MESSAGE,
+    },
+  ) {
+    super(failure);
     this.name = "TranslatorSpeechClientError";
   }
 }
@@ -110,7 +122,12 @@ export function getTranslatorSpeechFailure(
   automatic: boolean,
 ): { kind: TranslatorSpeechFailureKind; message: string } {
   if (error instanceof TranslatorSpeechClientError) {
-    return { kind: "generation", message: SPEECH_ERROR_MESSAGE };
+    return {
+      kind: "generation",
+      message: error.failure.category === "AUTH"
+        ? error.message
+        : SPEECH_ERROR_MESSAGE,
+    };
   }
   if (automatic && isSpeechPlaybackBlockedError(error)) {
     return { kind: "autoplay-blocked", message: SPEECH_READY_MESSAGE };
@@ -147,11 +164,42 @@ export async function requestTranslatorSpeech(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new TranslatorSpeechClientError();
+    throw new TranslatorSpeechClientError(networkFailure("tts"));
   }
 
   if (!response.ok) {
-    throw new TranslatorSpeechClientError();
+    let apiErrorCode: string | null = null;
+    let authFailureType: TranslatorFailure["authFailureType"] = null;
+    try {
+      const errorBody = await response.clone().json();
+      apiErrorCode = errorBody && typeof errorBody === "object" &&
+        "code" in errorBody && typeof errorBody.code === "string"
+        ? errorBody.code
+        : null;
+      authFailureType = errorBody && typeof errorBody === "object" &&
+        "authFailureType" in errorBody &&
+        typeof errorBody.authFailureType === "string" &&
+        [
+          "missing_session", "invalid_session", "auth_network_error",
+          "auth_upstream_error", "unknown_auth_error",
+        ].includes(errorBody.authFailureType)
+        ? errorBody.authFailureType as TranslatorFailure["authFailureType"]
+        : null;
+    } catch {
+      apiErrorCode = null;
+    }
+    const retryAfter = response.headers.get("Retry-After")?.trim();
+    const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
+    throw new TranslatorSpeechClientError(applyAuthFailureType({
+      ...failureFromHttp({
+      status: response.status,
+      apiErrorCode,
+      stage: "tts",
+      retryAfterMs: Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+        ? Math.min(5_000, Math.round(retryAfterSeconds * 1_000))
+        : null,
+      }),
+    }, authFailureType));
   }
 
   const responseHeadersReceivedMono = performance.now();
@@ -179,10 +227,19 @@ export async function requestTranslatorSpeech(
     }
   } catch (error) {
     if (getSpeechErrorName(error) === "AbortError") throw error;
-    throw new TranslatorSpeechClientError();
+    throw new TranslatorSpeechClientError(networkFailure("tts"));
   }
   if (audio.size === 0) {
-    throw new TranslatorSpeechClientError();
+    throw new TranslatorSpeechClientError({
+      ...failureFromHttp({
+        status: 502,
+        apiErrorCode: "empty_speech_audio",
+        stage: "tts",
+      }),
+      category: "TTS",
+      message: SPEECH_ERROR_MESSAGE,
+      retryable: false,
+    });
   }
   const responseCompletedAt = new Date().toISOString();
   const responseCompletedMono = performance.now();

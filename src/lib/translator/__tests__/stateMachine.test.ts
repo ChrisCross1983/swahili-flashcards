@@ -46,19 +46,38 @@ describe("translator state machine", () => {
     expect(processing.status).toBe("processing");
   });
 
-  it("moves a microphone failure to error without entering processing", () => {
+  it("returns a recoverable microphone failure to idle without entering processing", () => {
     const failed = translatorReducer(initialTranslatorState, {
       type: "RECORDING_FAILED",
       message: "Mikrofonzugriff wurde nicht erlaubt.",
     });
 
     expect(failed).toMatchObject({
-      status: "error",
+      status: "idle",
       errorMessage: "Mikrofonzugriff wurde nicht erlaubt.",
     });
     expect(
       translatorReducer(failed, { type: "STOP_AND_TRANSLATE" }),
     ).toBe(failed);
+    expect(translatorReducer(failed, { type: "START_RECORDING" })).toMatchObject({
+      status: "recording",
+      errorMessage: null,
+    });
+  });
+
+  it("keeps a non-recoverable auth failure blocked", () => {
+    const failed = translatorReducer(initialTranslatorState, {
+      type: "RECORDING_FAILED",
+      message: "Sitzung abgelaufen",
+      category: "AUTH",
+      healthStatus: "auth_required",
+      authRequired: true,
+    });
+    expect(failed).toMatchObject({
+      status: "error",
+      failureCategory: "AUTH",
+      healthStatus: "auth_required",
+    });
   });
 
   it("stores a successful API result as a TranslationEntry", () => {
@@ -107,13 +126,45 @@ describe("translator state machine", () => {
     });
 
     expect(failed).toMatchObject({
-      status: "error",
+      status: "idle",
       errorMessage: "Mock-Fehler",
     });
-    expect(translatorReducer(failed, { type: "RESET_ERROR" })).toMatchObject({
-      status: "idle",
+    expect(translatorReducer(failed, { type: "START_RECORDING" })).toMatchObject({
+      status: "recording",
       errorMessage: null,
     });
+  });
+
+  it("supports SUCCESS to FAILURE to SUCCESS without a refresh", () => {
+    const first = translatorReducer(
+      translatorReducer(
+        translatorReducer(initialTranslatorState, { type: "START_RECORDING" }),
+        { type: "STOP_AND_TRANSLATE" },
+      ),
+      { type: "PROCESSING_SUCCEEDED", entry: swToDeEntry },
+    );
+    const failed = translatorReducer(
+      translatorReducer(
+        translatorReducer(first, { type: "START_RECORDING" }),
+        { type: "STOP_AND_TRANSLATE" },
+      ),
+      { type: "PROCESSING_FAILED", message: "Temporärer Fehler", category: "NETWORK" },
+    );
+    const secondEntry = { ...swToDeEntry, id: "second" };
+    const recovered = translatorReducer(
+      translatorReducer(
+        translatorReducer(failed, { type: "START_RECORDING" }),
+        { type: "STOP_AND_TRANSLATE" },
+      ),
+      { type: "PROCESSING_SUCCEEDED", entry: secondEntry },
+    );
+    expect(failed.status).toBe("idle");
+    expect(recovered).toMatchObject({
+      status: "idle",
+      errorMessage: null,
+      healthStatus: "healthy",
+    });
+    expect(recovered.entries.map((entry) => entry.id)).toEqual(["second", swToDeEntry.id]);
   });
 
   it("keeps auto play off by default and returns to idle with visible text", () => {

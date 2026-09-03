@@ -8,11 +8,17 @@ export type TranslatorPipelineErrorCode =
 
 export class TranslatorPipelineError extends Error {
   readonly code: TranslatorPipelineErrorCode;
+  readonly recognizedTranscript: string | null;
 
-  constructor(code: TranslatorPipelineErrorCode, message: string) {
+  constructor(
+    code: TranslatorPipelineErrorCode,
+    message: string,
+    recognizedTranscript: string | null = null,
+  ) {
     super(message);
     this.name = "TranslatorPipelineError";
     this.code = code;
+    this.recognizedTranscript = recognizedTranscript;
   }
 }
 

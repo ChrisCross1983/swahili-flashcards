@@ -7,15 +7,52 @@ import type {
   TranslationMode,
   TranscriptionPath,
 } from "@/lib/translator/types";
+import type { TranslatorBuildMetadata } from "@/lib/translator/diagnosticMetadata";
+import type { TranslatorDiagnosticsSettings } from "@/lib/translator/diagnosticsSettings";
+import type {
+  TranslatorAuthFailureType,
+  TranslatorFailureCategory,
+  TranslatorHealthStatus,
+  TranslatorRecoveryAction,
+} from "@/lib/translator/reliability";
+import type { TranslatorSpeechQualitySample } from "@/lib/translator/speechQuality";
+import type { RecognitionReviewStatus } from "@/lib/translator/speechQuality";
+import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQuality";
+import { UNAVAILABLE_AUDIO_QUALITY } from "@/lib/translator/audioQuality";
+import type {
+  TranslatorDiagnosticEvent,
+} from "@/lib/translator/diagnosticEvents";
+import {
+  expectedFallbackKind,
+  primaryDiagnosticEvent,
+} from "@/lib/translator/diagnosticEvents";
+import type {
+  TranslatorConsentEvent,
+  TranslatorConsentSnapshot,
+  TranslatorTurnConsent,
+} from "@/lib/translator/turnConsent";
+import { speechAudioEligibleForTurn } from "@/lib/translator/turnConsent";
 
-const REPORT_VERSION = 4;
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-pre-openai-v4";
+const REPORT_VERSION = 5;
+const REPORT_REVISION = "5.1";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-stability-observability-v5.1";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
 export type ClassicTranslatorAudioMetadata = {
   audioMimeType: string | null;
   audioSize: number | null;
+  durationMs?: number | null;
+  sampleRate?: number | null;
+  channelCount?: number | null;
+  audioQualityMetrics?: TranslatorAudioQualityMetrics;
+};
+
+export type TranslatorRouteAuthDiagnostic = {
+  attempted: boolean;
+  succeeded: boolean | null;
+  failureType: TranslatorAuthFailureType | null;
+  durationMs: number | null;
 };
 
 export type ClassicTranslatorLocalFeedback = {
@@ -43,6 +80,66 @@ export type ClassicTranslatorFailedTurn = {
   errorStage: string;
   errorType?: string | null;
   sanitizedErrorMessage: string;
+  stateBeforeRecording?: string | null;
+  stateAtFailure?: string | null;
+  stateAfterCleanup?: string | null;
+  recorderStatusBefore?: string | null;
+  recorderStatusAtFailure?: string | null;
+  recorderStatusAfterCleanup?: string | null;
+  realtimeManagerStateBefore?: string | null;
+  realtimeManagerStateAtFailure?: string | null;
+  realtimeManagerStateAfterCleanup?: string | null;
+  endpoint?: string | null;
+  httpStatus?: number | null;
+  apiErrorCode?: string | null;
+  failureCategory?: TranslatorFailureCategory | null;
+  retryable?: boolean;
+  recoveryAction?: TranslatorRecoveryAction;
+  recoverySucceeded?: boolean | null;
+  audioBlobAvailable?: boolean;
+  authCheckAttempted?: boolean;
+  authCheckSucceeded?: boolean | null;
+  authFailureType?: TranslatorAuthFailureType | null;
+  diagnosticEvents?: TranslatorDiagnosticEvent[];
+};
+
+export type ClassicTranslatorRecoveryRecord = {
+  failureCategory: TranslatorFailureCategory;
+  errorStage: string;
+  endpoint: string | null;
+  httpStatus: number | null;
+  apiErrorCode: string | null;
+  retryable: boolean;
+  recoveryAction: TranslatorRecoveryAction;
+  recoverySucceeded: boolean | null;
+  healthStatus: TranslatorHealthStatus;
+  authCheckAttempted: boolean;
+  authCheckSucceeded: boolean | null;
+  authFailureType: TranslatorAuthFailureType | null;
+};
+
+type ClassicTranslatorIncident = {
+  errorStage?: string | null;
+  stateBeforeRecording?: string | null;
+  stateAtFailure?: string | null;
+  stateAfterCleanup?: string | null;
+  recorderStatusBefore?: string | null;
+  recorderStatusAtFailure?: string | null;
+  recorderStatusAfterCleanup?: string | null;
+  realtimeManagerStateBefore?: string | null;
+  realtimeManagerStateAtFailure?: string | null;
+  realtimeManagerStateAfterCleanup?: string | null;
+  endpoint?: string | null;
+  httpStatus?: number | null;
+  apiErrorCode?: string | null;
+  failureCategory?: TranslatorFailureCategory | null;
+  retryable?: boolean;
+  recoveryAction?: TranslatorRecoveryAction;
+  recoverySucceeded?: boolean | null;
+  audioBlobAvailable?: boolean;
+  authCheckAttempted?: boolean;
+  authCheckSucceeded?: boolean | null;
+  authFailureType?: TranslatorAuthFailureType | null;
 };
 
 const PERFORMANCE_METRICS = [
@@ -310,6 +407,48 @@ export type ClassicTranslatorReportTurn = {
   errorType: string | null;
   errorCode: string | null;
   sanitizedErrorMessage: string | null;
+  stateBeforeRecording: string | null;
+  stateAtFailure: string | null;
+  stateAfterCleanup: string | null;
+  recorderStatusBefore: string | null;
+  recorderStatusAtFailure: string | null;
+  recorderStatusAfterCleanup: string | null;
+  realtimeManagerStateBefore: string | null;
+  realtimeManagerStateAtFailure: string | null;
+  realtimeManagerStateAfterCleanup: string | null;
+  endpoint: string | null;
+  httpStatus: number | null;
+  apiErrorCode: string | null;
+  failureCategory: TranslatorFailureCategory | null;
+  retryable: boolean;
+  recoveryAction: TranslatorRecoveryAction;
+  recoverySucceeded: boolean | null;
+  audioBlobAvailable: boolean;
+  authCheckAttempted: boolean;
+  authCheckSucceeded: boolean | null;
+  authFailureType: TranslatorAuthFailureType | null;
+  recognizedTranscript: string | null;
+  correctedTranscript: string | null;
+  transcriptCorrected: boolean;
+  correctedTranslation: string | null;
+  audioIncludedInDiagnosticBundle: boolean;
+  audioSharedRemotely: boolean;
+  diagnosticEvents: TranslatorDiagnosticEvent[];
+  consentAtRecordingStart: TranslatorConsentSnapshot | null;
+  consentAtTurnFinalization: TranslatorConsentSnapshot | null;
+  translationAuthDiagnostic: TranslatorRouteAuthDiagnostic;
+  ttsAuthDiagnostic: TranslatorRouteAuthDiagnostic;
+  recognitionReviewStatus: RecognitionReviewStatus | null;
+  speechQualitySampleId: string | null;
+  speechAudioEligibleForTurn: boolean;
+  audioMetadata: {
+    mimeType: string | null;
+    sizeBytes: number | null;
+    durationMs: number | null;
+    sampleRate: number | null;
+    channelCount: number | null;
+  };
+  audioQualityMetrics: TranslatorAudioQualityMetrics;
 };
 
 function finite(value: unknown) {
@@ -554,6 +693,69 @@ function budgetViolations(d: Partial<TranslationDiagnostics>) {
   });
 }
 
+function routeAuthDiagnostic(input: {
+  route: "translation" | "tts";
+  diagnostics: Partial<TranslationDiagnostics>;
+  events: readonly TranslatorDiagnosticEvent[];
+}) : TranslatorRouteAuthDiagnostic {
+  const prefix = input.route === "translation" ? "translation" : "tts";
+  const duration = finite(
+    prefix === "translation"
+      ? input.diagnostics.translationAuthMs
+      : input.diagnostics.ttsAuthMs,
+  );
+  const startedAt = prefix === "translation"
+    ? input.diagnostics.translationAuthStartedAt
+    : input.diagnostics.ttsAuthStartedAt;
+  const endpoint = prefix === "translation"
+    ? "/api/translator/translate"
+    : "/api/translator/speech";
+  const organicRouteEvent = input.events.find(
+    (event) => event.eventOrigin === "organic_runtime" && event.endpoint === endpoint,
+  );
+  const attempted = duration !== null || typeof startedAt === "string" ||
+    (organicRouteEvent?.httpStatus !== null && organicRouteEvent?.httpStatus !== undefined);
+  const failureType = organicRouteEvent?.authFailureType ?? null;
+  return {
+    attempted,
+    succeeded: !attempted ? null : failureType ? false : true,
+    failureType,
+    durationMs: duration,
+  };
+}
+
+function legacyDiagnosticEvent(input: {
+  turnId: string;
+  at: string;
+  status: "success" | "failed";
+  incident: ClassicTranslatorIncident;
+}): TranslatorDiagnosticEvent {
+  const qaScenarioId = input.incident.apiErrorCode?.startsWith("qa_")
+    ? input.incident.apiErrorCode
+    : null;
+  const eventKind = input.status === "failed"
+    ? "failure" as const
+    : input.incident.failureCategory === "REALTIME"
+      ? expectedFallbackKind(input.incident.apiErrorCode)
+      : "degradation" as const;
+  return {
+    eventId: `legacy-${input.turnId}`,
+    at: input.at,
+    eventOrigin: qaScenarioId ? "qa_simulation" : "organic_runtime",
+    eventKind,
+    category: input.incident.failureCategory ?? "UNKNOWN",
+    stage: input.incident.errorStage ?? "unknown",
+    endpoint: input.incident.endpoint ?? null,
+    httpStatus: input.incident.httpStatus ?? null,
+    apiCode: input.incident.apiErrorCode ?? null,
+    retryable: input.incident.retryable === true,
+    recoveryAction: input.incident.recoveryAction ?? "none",
+    recoverySucceeded: input.incident.recoverySucceeded ?? null,
+    qaScenarioId,
+    authFailureType: input.incident.authFailureType ?? null,
+  };
+}
+
 function turnFromValues(input: {
   turnId: string;
   createdAt: string;
@@ -574,11 +776,31 @@ function turnFromValues(input: {
   errorType: string | null;
   errorCode: string | null;
   sanitizedErrorMessage: string | null;
+  incident?: ClassicTranslatorIncident | null;
+  quality?: TranslatorSpeechQualitySample | null;
+  audioIncludedInDiagnosticBundle?: boolean;
+  audioBlobAvailable?: boolean;
+  diagnosticEvents?: TranslatorDiagnosticEvent[];
+  consent?: TranslatorTurnConsent | null;
 }): ClassicTranslatorReportTurn {
   const d = input.diagnostics;
   const path = d.transcriptionPath ?? null;
   const text = input.originalText;
   const translated = input.translatedText;
+  const diagnosticEvents = input.diagnosticEvents ?? [];
+  const primaryEvent = primaryDiagnosticEvent(diagnosticEvents);
+  const translationAuthDiagnostic = routeAuthDiagnostic({
+    route: "translation",
+    diagnostics: d,
+    events: diagnosticEvents,
+  });
+  const ttsAuthDiagnostic = routeAuthDiagnostic({
+    route: "tts",
+    diagnostics: d,
+    events: diagnosticEvents,
+  });
+  const attemptedAuth = [translationAuthDiagnostic, ttsAuthDiagnostic]
+    .filter((auth) => auth.attempted);
   return {
     turnId: input.turnId,
     createdAt: input.createdAt,
@@ -819,12 +1041,68 @@ function turnFromValues(input: {
       ? [...input.feedback.feedbackCategories]
       : null,
     feedbackComment: input.feedback?.feedbackComment ?? null,
-    errorStage: input.errorStage,
+    errorStage: primaryEvent?.stage ?? input.errorStage,
     errorType: input.errorType,
     errorCode: input.errorCode,
     sanitizedErrorMessage: input.sanitizedErrorMessage
       ? sanitizeClassicReportError(input.sanitizedErrorMessage)
       : null,
+    stateBeforeRecording: input.incident?.stateBeforeRecording ?? null,
+    stateAtFailure: input.incident?.stateAtFailure ?? null,
+    stateAfterCleanup: input.incident?.stateAfterCleanup ?? null,
+    recorderStatusBefore: input.incident?.recorderStatusBefore ?? null,
+    recorderStatusAtFailure: input.incident?.recorderStatusAtFailure ?? null,
+    recorderStatusAfterCleanup: input.incident?.recorderStatusAfterCleanup ?? null,
+    realtimeManagerStateBefore: input.incident?.realtimeManagerStateBefore ?? null,
+    realtimeManagerStateAtFailure: input.incident?.realtimeManagerStateAtFailure ?? null,
+    realtimeManagerStateAfterCleanup: input.incident?.realtimeManagerStateAfterCleanup ?? null,
+    endpoint: primaryEvent?.endpoint ?? input.incident?.endpoint ?? null,
+    httpStatus: finite(primaryEvent?.httpStatus ?? input.incident?.httpStatus),
+    apiErrorCode: primaryEvent?.apiCode ?? input.incident?.apiErrorCode ?? null,
+    failureCategory: primaryEvent?.category ?? input.incident?.failureCategory ?? null,
+    retryable: primaryEvent?.retryable ?? input.incident?.retryable === true,
+    recoveryAction: primaryEvent?.recoveryAction ?? input.incident?.recoveryAction ?? "none",
+    recoverySucceeded: primaryEvent?.recoverySucceeded ?? input.incident?.recoverySucceeded ?? null,
+    audioBlobAvailable:
+      input.audioBlobAvailable === true || input.incident?.audioBlobAvailable === true,
+    authCheckAttempted: attemptedAuth.length > 0,
+    authCheckSucceeded: attemptedAuth.length === 0
+      ? null
+      : attemptedAuth.every((auth) => auth.succeeded === true),
+    authFailureType:
+      attemptedAuth.find((auth) => auth.failureType)?.failureType ?? null,
+    recognizedTranscript: input.quality?.recognizedTranscript ?? null,
+    correctedTranscript: input.quality?.correctedTranscript ?? null,
+    transcriptCorrected: input.quality?.transcriptCorrected === true,
+    correctedTranslation: input.quality?.correctedTranslation ?? null,
+    audioIncludedInDiagnosticBundle:
+      input.audioIncludedInDiagnosticBundle === true ||
+      input.quality?.audioIncludedInDiagnosticBundle === true,
+    audioSharedRemotely: false,
+    diagnosticEvents,
+    consentAtRecordingStart: input.consent?.consentAtRecordingStart ?? null,
+    consentAtTurnFinalization: input.consent?.consentAtTurnFinalization ?? null,
+    translationAuthDiagnostic,
+    ttsAuthDiagnostic,
+    recognitionReviewStatus: input.quality?.recognitionReviewStatus ?? null,
+    speechQualitySampleId: input.quality?.sampleId ?? null,
+    speechAudioEligibleForTurn: input.consent
+      ? speechAudioEligibleForTurn(input.consent)
+      : input.quality?.audioEligible === true,
+    audioMetadata: {
+      mimeType: input.quality?.audioMetadata.mimeType ?? input.audio.audioMimeType,
+      sizeBytes: input.quality?.audioMetadata.sizeBytes ?? input.audio.audioSize,
+      durationMs:
+        input.quality?.audioMetadata.durationMs ??
+        finite(input.audio.durationMs ?? d.recordingDurationMs),
+      sampleRate: input.quality?.audioMetadata.sampleRate ?? input.audio.sampleRate ?? null,
+      channelCount:
+        input.quality?.audioMetadata.channelCount ?? input.audio.channelCount ?? null,
+    },
+    audioQualityMetrics:
+      input.quality?.audioQualityMetrics ??
+      input.audio.audioQualityMetrics ??
+      UNAVAILABLE_AUDIO_QUALITY,
   };
 }
 
@@ -845,10 +1123,31 @@ export function buildClassicTranslatorReport(input: {
   connectionSuccesses?: number;
   connectionFailures?: number;
   reconnectCount?: number;
+  buildMetadata?: TranslatorBuildMetadata;
+  diagnosticsSettings?: TranslatorDiagnosticsSettings;
+  installationId?: string | null;
+  sessionId?: string | null;
+  qualityByTurn?: ReadonlyMap<string, TranslatorSpeechQualitySample>;
+  recoveryByTurn?: ReadonlyMap<string, ClassicTranslatorRecoveryRecord>;
+  audioIncludedInDiagnosticBundleByTurn?: ReadonlySet<string>;
+  audioBlobAvailableByTurn?: ReadonlySet<string>;
+  diagnosticEventsByTurn?: ReadonlyMap<string, TranslatorDiagnosticEvent[]>;
+  consentByTurn?: ReadonlyMap<string, TranslatorTurnConsent>;
+  consentEvents?: TranslatorConsentEvent[];
 }) {
   const sourceConnectionAttempts = input.connectionAttempts ?? [];
   const successfulTurns = input.entries.map((entry) => {
     const diagnostics: Partial<TranslationDiagnostics> = entry.diagnostics ?? {};
+    const legacyRecovery = input.recoveryByTurn?.get(entry.id) ?? null;
+    const diagnosticEvents = input.diagnosticEventsByTurn?.get(entry.id) ??
+      (legacyRecovery
+        ? [legacyDiagnosticEvent({
+            turnId: entry.id,
+            at: new Date(entry.timestamp).toISOString(),
+            status: "success",
+            incident: legacyRecovery,
+          })]
+        : []);
     return turnFromValues({
       turnId: entry.id,
       createdAt: new Date(entry.timestamp).toISOString(),
@@ -872,9 +1171,31 @@ export function buildClassicTranslatorReport(input: {
       errorType: null,
       errorCode: null,
       sanitizedErrorMessage: null,
+      incident: input.recoveryByTurn?.get(entry.id) ?? null,
+      quality: input.qualityByTurn?.get(entry.id) ?? null,
+      audioIncludedInDiagnosticBundle:
+        input.audioIncludedInDiagnosticBundleByTurn?.has(entry.id) === true,
+      audioBlobAvailable: input.audioBlobAvailableByTurn?.has(entry.id) === true,
+      diagnosticEvents,
+      consent: input.consentByTurn?.get(entry.id) ?? null,
     });
   });
   const failedTurns = input.failedTurns.map((turn) => {
+    const incident = {
+      ...turn,
+      failureCategory: turn.failureCategory ?? "UNKNOWN",
+      apiErrorCode: turn.apiErrorCode ?? turn.errorCode,
+      retryable: turn.retryable ?? false,
+      recoveryAction: turn.recoveryAction ?? "reset_to_idle",
+      recoverySucceeded: turn.recoverySucceeded ?? null,
+    };
+    const diagnosticEvents = input.diagnosticEventsByTurn?.get(turn.turnId) ??
+      turn.diagnosticEvents ?? [legacyDiagnosticEvent({
+        turnId: turn.turnId,
+        at: turn.createdAt,
+        status: "failed",
+        incident,
+      })];
     return turnFromValues({
       turnId: turn.turnId,
       createdAt: turn.createdAt,
@@ -885,7 +1206,7 @@ export function buildClassicTranslatorReport(input: {
       originalText: turn.originalText ?? null,
       translatedText: turn.translatedText ?? null,
       diagnostics: turn.diagnostics,
-      audio: {
+      audio: input.audioMetadataByTurn?.get(turn.turnId) ?? {
         audioMimeType: turn.audioMimeType ?? null,
         audioSize: turn.audioSize ?? null,
       },
@@ -900,6 +1221,15 @@ export function buildClassicTranslatorReport(input: {
       errorType: turn.errorType ?? "Error",
       errorCode: turn.errorCode,
       sanitizedErrorMessage: turn.sanitizedErrorMessage,
+      incident,
+      quality: input.qualityByTurn?.get(turn.turnId) ?? null,
+      audioIncludedInDiagnosticBundle:
+        input.audioIncludedInDiagnosticBundleByTurn?.has(turn.turnId) === true,
+      audioBlobAvailable:
+        input.audioBlobAvailableByTurn?.has(turn.turnId) === true ||
+        turn.audioBlobAvailable === true,
+      diagnosticEvents,
+      consent: input.consentByTurn?.get(turn.turnId) ?? null,
     });
   });
   const turns = [...successfulTurns, ...failedTurns].sort((left, right) =>
@@ -973,9 +1303,59 @@ export function buildClassicTranslatorReport(input: {
   const combinedPreOpenAi = metricSummary(
     successful.map((turn) => turn.combinedPreOpenAiMs),
   );
+  const diagnosticEvents = turns.flatMap((turn) => turn.diagnosticEvents);
+  const failureEvents = diagnosticEvents.filter((event) => event.eventKind === "failure");
+  const countEventsBy = (
+    events: TranslatorDiagnosticEvent[],
+    selector: (event: TranslatorDiagnosticEvent) => string | null,
+  ) => events.reduce<Record<string, number>>((counts, event) => {
+      const key = selector(event);
+      if (key) counts[key] = (counts[key] ?? 0) + 1;
+      return counts;
+    }, {});
+  const recoveryAttempts = diagnosticEvents.filter(
+    (event) => event.recoveryAction !== "none",
+  ).length;
+  const reviewedQualityTurns = turns.filter((turn) =>
+    turn.recognitionReviewStatus === "accepted" ||
+    turn.recognitionReviewStatus === "corrected",
+  );
+  const qaScenariosTriggered = Array.from(new Set(diagnosticEvents
+    .filter((event) => event.eventOrigin === "qa_simulation" && event.qaScenarioId)
+    .map((event) => event.qaScenarioId as string)));
+  const qaScenariosRecovered = Array.from(new Set(diagnosticEvents
+    .filter((event) =>
+      event.eventOrigin === "qa_simulation" &&
+      event.qaScenarioId &&
+      event.recoverySucceeded === true,
+    )
+    .map((event) => event.qaScenarioId as string)));
+  const organicTurns = turns.filter((turn) =>
+    !turn.diagnosticEvents.some((event) => event.eventOrigin === "qa_simulation"),
+  );
+  const organicFailedTurns = organicTurns.filter((turn) =>
+    turn.status === "failed" &&
+    turn.diagnosticEvents.some((event) =>
+      event.eventOrigin === "organic_runtime" && event.eventKind === "failure",
+    ),
+  );
+  const buildMetadata = input.buildMetadata ?? {
+    appVersion: "unknown",
+    buildVersion: "unknown",
+    gitCommitSha: null,
+    environment: "development" as const,
+  };
+  const settings = input.diagnosticsSettings ?? {
+    diagnosticsSharingEnabled: false,
+    qualityContentSharingEnabled: false,
+    speechSampleSharingEnabled: false,
+    internalQaModeEnabled: false,
+  };
 
   return {
     reportVersion: REPORT_VERSION,
+    reportRevision: REPORT_REVISION,
+    stabilityObservabilityVersion: PERFORMANCE_OPTIMIZATION_VERSION,
     performanceOptimizationVersion: PERFORMANCE_OPTIMIZATION_VERSION,
     translationStreamingEnabled: false,
     ttsStreamingEnabled: true,
@@ -983,6 +1363,15 @@ export function buildClassicTranslatorReport(input: {
     preOpenAiOptimizationEnabled: true,
     translationPreOpenAiOptimized: true,
     ttsPreOpenAiOptimized: true,
+    appVersion: buildMetadata.appVersion,
+    buildVersion: buildMetadata.buildVersion,
+    gitCommitSha: buildMetadata.gitCommitSha,
+    environment: buildMetadata.environment,
+    diagnosticsSharingEnabled: settings.diagnosticsSharingEnabled,
+    qualityContentSharingEnabled: settings.qualityContentSharingEnabled,
+    speechSampleSharingEnabled: settings.speechSampleSharingEnabled,
+    installationId: input.installationId ?? null,
+    sessionId: input.sessionId ?? null,
     reportId:
       input.reportId ??
       globalThis.crypto?.randomUUID?.() ??
@@ -1001,6 +1390,57 @@ export function buildClassicTranslatorReport(input: {
     totalTurns: turns.length,
     successfulTurns: successful.length,
     failedTurns: failedTurns.length,
+    failureCount: failedTurns.length,
+    diagnosticEventCount: diagnosticEvents.length,
+    organicRuntimeFailureCount: diagnosticEvents.filter((event) =>
+      event.eventOrigin === "organic_runtime" && event.eventKind === "failure").length,
+    qaSimulationEventCount: diagnosticEvents.filter((event) =>
+      event.eventOrigin === "qa_simulation").length,
+    degradationCount: diagnosticEvents.filter((event) =>
+      event.eventKind === "degradation").length,
+    expectedFallbackCount: diagnosticEvents.filter((event) =>
+      event.eventKind === "expected_fallback").length,
+    organicRuntimeDegradationCount: diagnosticEvents.filter((event) =>
+      event.eventOrigin === "organic_runtime" && event.eventKind === "degradation").length,
+    qaSimulationFailureCount: diagnosticEvents.filter((event) =>
+      event.eventOrigin === "qa_simulation" && event.eventKind === "failure").length,
+    qaSimulationDegradationCount: diagnosticEvents.filter((event) =>
+      event.eventOrigin === "qa_simulation" && event.eventKind === "degradation").length,
+    eventsByOrigin: countEventsBy(diagnosticEvents, (event) => event.eventOrigin),
+    eventsByKind: countEventsBy(diagnosticEvents, (event) => event.eventKind),
+    eventsByCategory: countEventsBy(diagnosticEvents, (event) => event.category),
+    eventsByStage: countEventsBy(diagnosticEvents, (event) => event.stage),
+    eventsByHttpStatus: countEventsBy(diagnosticEvents, (event) =>
+      event.httpStatus === null ? null : String(event.httpStatus)),
+    eventsByApiCode: countEventsBy(diagnosticEvents, (event) => event.apiCode),
+    failuresByCategory: countEventsBy(failureEvents, (event) => event.category),
+    failuresByStage: countEventsBy(failureEvents, (event) => event.stage),
+    failuresByHttpStatus: countEventsBy(failureEvents, (event) =>
+      event.httpStatus === null ? null : String(event.httpStatus)),
+    failuresByApiCode: countEventsBy(failureEvents, (event) => event.apiCode),
+    recoveryAttempts,
+    successfulRecoveries: diagnosticEvents.filter(
+      (event) => event.recoverySucceeded === true,
+    ).length,
+    qaScenariosTriggered,
+    qaScenariosRecovered,
+    sttAcceptedCount: turns.filter((turn) =>
+      turn.recognitionReviewStatus === "accepted").length,
+    sttCorrectionCount: turns.filter((turn) =>
+      turn.recognitionReviewStatus === "corrected").length,
+    sttUnreviewedCount: turns.filter((turn) =>
+      turn.recognitionReviewStatus === "unreviewed").length,
+    speechQualitySampleCount: reviewedQualityTurns.length,
+    correctionRate: rate(
+      turns.filter((turn) => turn.recognitionReviewStatus === "corrected").length,
+      reviewedQualityTurns.length,
+    ),
+    audioEligibleTurnCount: turns.filter((turn) =>
+      turn.speechAudioEligibleForTurn).length,
+    audioIncludedTurnCount: turns.filter((turn) =>
+      turn.audioIncludedInDiagnosticBundle).length,
+    organicFailureRate: rate(organicFailedTurns.length, organicTurns.length),
+    consentEvents: input.consentEvents ?? [],
     realtimeTurns: realtimeAll.length,
     fallbackTurns: fallbackAll.length,
     realtimeRate: rate(realtimeAll.length, pathDecidedTurns),

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { TranslationEntry } from "@/lib/translator/types";
+import type { RecognitionReviewStatus } from "@/lib/translator/speechQuality";
 
 const LANGUAGE_LABELS = {
   de: "Deutsch",
@@ -17,6 +19,10 @@ type Props = {
   onResume: () => void;
   onStop: () => void;
   onFeedback: () => void;
+  correctedTranscript?: string | null;
+  onSaveTranscriptCorrection?: (correctedTranscript: string) => void;
+  recognitionReviewStatus?: RecognitionReviewStatus | null;
+  onAcceptTranscript?: () => void;
 };
 
 export default function TranslationCard({
@@ -31,7 +37,15 @@ export default function TranslationCard({
   onResume,
   onStop,
   onFeedback,
+  correctedTranscript = null,
+  onSaveTranscriptCorrection,
+  recognitionReviewStatus = null,
+  onAcceptTranscript,
 }: Props) {
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionText, setCorrectionText] = useState(
+    correctedTranscript ?? entry.originalText,
+  );
   const isActive = playbackState !== "idle";
   const directionLabel = `${LANGUAGE_LABELS[entry.sourceLanguage]}${
     entry.sourceWasDetected ? " erkannt" : ""
@@ -71,6 +85,79 @@ export default function TranslationCard({
         </p>
         <p className="mt-2 text-xl font-semibold leading-8 text-primary">{entry.translatedText}</p>
       </div>
+
+      {onSaveTranscriptCorrection ? (
+        <div className="mt-4 border-t border-soft pt-3">
+          {!correctionOpen ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {recognitionReviewStatus === "unreviewed" && onAcceptTranscript ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost min-h-10 px-3 text-sm"
+                  onClick={onAcceptTranscript}
+                >
+                  Richtig erkannt
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost min-h-10 px-3 text-sm"
+                onClick={() => {
+                  setCorrectionText(correctedTranscript ?? entry.originalText);
+                  setCorrectionOpen(true);
+                }}
+              >
+                Transkript korrigieren
+              </button>
+            </div>
+          ) : (
+            <div>
+              <label className="text-sm font-medium text-primary" htmlFor={`correction-${entry.id}`}>
+                Erkannten Text korrigieren
+              </label>
+              <textarea
+                id={`correction-${entry.id}`}
+                className="mt-2 min-h-24 w-full rounded-xl border border-soft bg-surface p-3 text-base text-primary"
+                value={correctionText}
+                onChange={(event) => setCorrectionText(event.target.value)}
+              />
+              <p className="mt-1 text-xs text-muted">
+                Die vorhandene Übersetzung wird dadurch nicht verändert.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary min-h-11"
+                  onClick={() => setCorrectionOpen(false)}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary min-h-11"
+                  disabled={!correctionText.trim()}
+                  onClick={() => {
+                    onSaveTranscriptCorrection(correctionText.trim());
+                    setCorrectionOpen(false);
+                  }}
+                >
+                  Korrektur speichern
+                </button>
+              </div>
+            </div>
+          )}
+          {recognitionReviewStatus === "accepted" && !correctionOpen ? (
+            <p className="mt-1 text-xs text-accent-success-strong" role="status">
+              Als richtig erkannt markiert
+            </p>
+          ) : null}
+          {recognitionReviewStatus === "corrected" && !correctionOpen ? (
+            <p className="mt-1 text-xs text-accent-success-strong" role="status">
+              Korrektur lokal gespeichert
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-5" aria-live="polite">
         {playbackState === "idle" ? (

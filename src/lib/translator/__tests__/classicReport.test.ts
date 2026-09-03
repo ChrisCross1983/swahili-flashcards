@@ -5,6 +5,33 @@ import {
   downloadClassicTranslatorReport,
 } from "@/lib/translator/classicReport";
 import type { TranslationEntry } from "@/lib/translator/types";
+import {
+  acceptSpeechQualityRecord,
+  createSpeechQualitySample,
+  createUnreviewedSpeechQualityRecord,
+} from "@/lib/translator/speechQuality";
+import { createTranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
+import type { TranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
+
+function diagnosticEvent(
+  overrides: Partial<TranslatorDiagnosticEvent> = {},
+): TranslatorDiagnosticEvent {
+  return createTranslatorDiagnosticEvent({
+    eventOrigin: "organic_runtime",
+    eventKind: "failure",
+    category: "TRANSLATION",
+    stage: "translation",
+    endpoint: "/api/translator/translate",
+    httpStatus: 503,
+    apiCode: "service_unavailable",
+    retryable: true,
+    recoveryAction: "reset_to_idle",
+    recoverySucceeded: false,
+    qaScenarioId: null,
+    authFailureType: null,
+    ...overrides,
+  });
+}
 
 function entry(
   id: string,
@@ -282,8 +309,9 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 4,
-      performanceOptimizationVersion: "classic-pre-openai-v4",
+      reportVersion: 5,
+      reportRevision: "5.1",
+      performanceOptimizationVersion: "classic-stability-observability-v5.1",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -342,6 +370,12 @@ describe("classic translator QA report", () => {
         ttsAuthMs: 30,
         ttsAuthUserLookupMs: 25,
         combinedPreOpenAiMs: 180,
+        translationAuthDiagnostic: {
+          attempted: true, succeeded: true, failureType: null, durationMs: 40,
+        },
+        ttsAuthDiagnostic: {
+          attempted: true, succeeded: true, failureType: null, durationMs: 30,
+        },
         firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
       });
     expect(realtimeReportTurn?.ttsClientFirstByteAt).not.toBe(
@@ -421,7 +455,7 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 4,
+      reportVersion: 5,
       realtimeTurns: 3,
       fallbackTurns: 0,
       realtimeRate: 1,
@@ -511,7 +545,7 @@ describe("classic translator QA report", () => {
     });
 
     expect(report).toMatchObject({
-      reportVersion: 4,
+      reportVersion: 5,
       totalTurns: 0,
       realtimeRate: null,
       fallbackRate: null,
@@ -548,5 +582,210 @@ describe("classic translator QA report", () => {
     expect(anchor.remove).toHaveBeenCalledOnce();
     vi.runAllTimers();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:classic-report");
+  });
+
+  it("reports V5 consent, recovery, failures and STT corrections", () => {
+    const corrected = createSpeechQualitySample({
+      turnId: "warm", recognizedTranscript: "kupwa", correctedTranscript: "kubwa",
+      sourceLanguage: "sw", transcriptionModel: "gpt-live-transcribe",
+      transcriptionPath: "realtime", appVersion: "1.2.3",
+    });
+    const report = buildClassicTranslatorReport({
+      reportId: "v5", startedAt: "2026-09-02T00:00:00.000Z", userAgent: "QA",
+      platform: "QA", currentMode: "auto", ttsSpeed: 1, entries: [entry("warm", "realtime")],
+      failedTurns: [], qualityByTurn: new Map([["warm", corrected]]),
+      recoveryByTurn: new Map([["warm", {
+        failureCategory: "REALTIME", errorStage: "transcription", endpoint: null,
+        httpStatus: null, apiErrorCode: "connection_failure", retryable: true,
+        recoveryAction: "audio_upload_fallback", recoverySucceeded: true,
+        healthStatus: "degraded", authCheckAttempted: false,
+        authCheckSucceeded: null, authFailureType: null,
+      }]]),
+      buildMetadata: {
+        appVersion: "1.2.3", buildVersion: "99", gitCommitSha: "abc",
+        environment: "preview",
+      },
+      diagnosticsSettings: {
+        diagnosticsSharingEnabled: true, qualityContentSharingEnabled: true,
+        speechSampleSharingEnabled: false, internalQaModeEnabled: false,
+      },
+    });
+    expect(report).toMatchObject({
+      reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
+      diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
+      reportRevision: "5.1", failureCount: 0, failuresByCategory: {},
+      degradationCount: 1, expectedFallbackCount: 0,
+      recoveryAttempts: 1, successfulRecoveries: 1,
+      sttCorrectionCount: 1, speechQualitySampleCount: 1,
+    });
+    expect(report.turns[0]).toMatchObject({
+      recognizedTranscript: "kupwa", correctedTranscript: "kubwa",
+      transcriptCorrected: true, recoveryAction: "audio_upload_fallback",
+      recoverySucceeded: true, audioSharedRemotely: false,
+    });
+  });
+
+  it("separates turn failures, expected fallbacks, degradations and QA events exactly", () => {
+    const normal = entry("normal", "realtime");
+    const expected = entry("expected", "audio_upload_fallback");
+    const degraded = entry("degraded", "audio_upload_fallback");
+    const failedBase = {
+      createdAt: "2026-09-02T00:00:10.000Z",
+      mode: "auto" as const,
+      diagnostics: {},
+      transcriptionModel: "gpt-live-transcribe",
+      translationModel: "gpt-5.6-terra",
+      ttsSpeed: 1,
+      errorCode: "processing_failed",
+      errorStage: "translation",
+      sanitizedErrorMessage: "Temporärer Fehler",
+    };
+    const report = buildClassicTranslatorReport({
+      reportId: "event-semantics",
+      startedAt: "2026-09-02T00:00:00.000Z",
+      userAgent: "QA", platform: "QA", currentMode: "auto", ttsSpeed: 1,
+      entries: [normal, expected, degraded],
+      failedTurns: [
+        { ...failedBase, turnId: "qa-failed" },
+        { ...failedBase, turnId: "organic-failed" },
+      ],
+      diagnosticEventsByTurn: new Map([
+        ["expected", [diagnosticEvent({
+          eventKind: "expected_fallback", category: "REALTIME",
+          stage: "transcription_path_decision", endpoint: null, httpStatus: null,
+          apiCode: "realtime_not_ready_at_recording_start",
+          recoveryAction: "audio_upload_fallback", recoverySucceeded: true,
+        })]],
+        ["degraded", [diagnosticEvent({
+          eventKind: "degradation", category: "REALTIME", stage: "transcription",
+          endpoint: null, httpStatus: null, apiCode: "connection_failure",
+          recoveryAction: "audio_upload_fallback", recoverySucceeded: true,
+        })]],
+        ["qa-failed", [diagnosticEvent({
+          eventOrigin: "qa_simulation", qaScenarioId: "qa_translation_503",
+          apiCode: "qa_translation_failure",
+        })]],
+        ["organic-failed", [diagnosticEvent()]],
+      ]),
+    });
+
+    expect(report).toMatchObject({
+      totalTurns: 5, successfulTurns: 3, failedTurns: 2, failureCount: 2,
+      diagnosticEventCount: 4, organicRuntimeFailureCount: 1,
+      qaSimulationEventCount: 1, degradationCount: 1, expectedFallbackCount: 1,
+      eventsByOrigin: { organic_runtime: 3, qa_simulation: 1 },
+      eventsByKind: { expected_fallback: 1, degradation: 1, failure: 2 },
+      failuresByCategory: { TRANSLATION: 2 },
+      failuresByStage: { translation: 2 },
+      organicFailureRate: 0.25,
+      qaScenariosTriggered: ["qa_translation_503"],
+    });
+  });
+
+  it("reports route auth only when the real route ran", () => {
+    const success = entry("auth-success", "realtime");
+    const failedBase = {
+      createdAt: "2026-09-02T00:00:10.000Z", mode: "auto" as const,
+      diagnostics: {}, transcriptionModel: "gpt-live-transcribe",
+      translationModel: "gpt-5.6-terra", ttsSpeed: 1,
+      errorCode: "processing_failed", errorStage: "translation",
+      sanitizedErrorMessage: "Fehler",
+    };
+    const report = buildClassicTranslatorReport({
+      reportId: "auth-semantics", startedAt: "2026-09-02T00:00:00.000Z",
+      userAgent: "QA", platform: "QA", currentMode: "auto", ttsSpeed: 1,
+      entries: [success],
+      failedTurns: [
+        { ...failedBase, turnId: "qa-before-route" },
+        { ...failedBase, turnId: "auth-401" },
+      ],
+      diagnosticEventsByTurn: new Map([
+        ["qa-before-route", [diagnosticEvent({
+          eventOrigin: "qa_simulation", qaScenarioId: "qa_translation_503",
+          endpoint: null, apiCode: "qa_translation_failure",
+        })]],
+        ["auth-401", [diagnosticEvent({
+          category: "AUTH", httpStatus: 401, apiCode: "auth_required",
+          retryable: false, recoveryAction: "reauthenticate",
+          authFailureType: "invalid_session",
+        })]],
+      ]),
+    });
+    const qa = report.turns.find((turn) => turn.turnId === "qa-before-route");
+    const auth401 = report.turns.find((turn) => turn.turnId === "auth-401");
+    expect(qa).toMatchObject({
+      translationAuthDiagnostic: { attempted: false, succeeded: null },
+      ttsAuthDiagnostic: { attempted: false, succeeded: null },
+      authCheckAttempted: false, authCheckSucceeded: null,
+    });
+    expect(auth401).toMatchObject({
+      translationAuthDiagnostic: {
+        attempted: true, succeeded: false, failureType: "invalid_session",
+        durationMs: null,
+      },
+      authCheckAttempted: true, authCheckSucceeded: false,
+      authFailureType: "invalid_session",
+    });
+  });
+
+  it("keeps per-turn consent and a reviewed STT sample after translation failure", () => {
+    const startConsent = {
+      diagnosticsSharingEnabled: true, qualityContentSharingEnabled: false,
+      speechSampleSharingEnabled: true, internalSpeechDiagnosticsEnabled: true,
+    };
+    const failedSample = acceptSpeechQualityRecord(createUnreviewedSpeechQualityRecord({
+      turnId: "failed-after-stt", recognizedTranscript: "Nyumba hii ni kubwa.",
+      sourceLanguage: "sw", transcriptionModel: "gpt-live-transcribe",
+      transcriptionPath: "realtime", appVersion: "1.0", audioEligible: true,
+      consentAtRecordingStart: startConsent,
+      audioMetadata: {
+        mimeType: "audio/webm", sizeBytes: 5_000, durationMs: 1_500,
+        sampleRate: 48_000, channelCount: 1,
+      },
+      audioQualityMetrics: {
+        source: "realtime_analyser", rmsDbfs: -18, peakDbfs: -2,
+        clippingRatio: 0.001, silenceRatio: 0.2, speechActivityRatio: 0.7,
+      },
+    }));
+    const report = buildClassicTranslatorReport({
+      reportId: "speech-after-failure", startedAt: "2026-09-02T00:00:00.000Z",
+      userAgent: "QA", platform: "QA", currentMode: "auto", ttsSpeed: 1,
+      entries: [],
+      failedTurns: [{
+        turnId: "failed-after-stt", createdAt: "2026-09-02T00:00:10.000Z",
+        mode: "auto", diagnostics: { transcriptionPath: "realtime" },
+        transcriptionModel: "gpt-live-transcribe", translationModel: "gpt-5.6-terra",
+        ttsSpeed: 1, errorCode: "processing_failed", errorStage: "translation",
+        sanitizedErrorMessage: "Übersetzung nicht verfügbar",
+      }],
+      qualityByTurn: new Map([["failed-after-stt", failedSample]]),
+      consentByTurn: new Map([["failed-after-stt", {
+        consentAtRecordingStart: startConsent,
+        consentAtTurnFinalization: startConsent,
+      }]]),
+      consentEvents: [{
+        at: "2026-09-02T00:00:01.000Z", setting: "speechSampleSharingEnabled",
+        previousValue: false, newValue: true,
+      }],
+      audioBlobAvailableByTurn: new Set(["failed-after-stt"]),
+      audioIncludedInDiagnosticBundleByTurn: new Set(["failed-after-stt"]),
+    });
+    expect(report).toMatchObject({
+      speechQualitySampleCount: 1, sttAcceptedCount: 1, sttCorrectionCount: 0,
+      audioEligibleTurnCount: 1, audioIncludedTurnCount: 1,
+      consentEvents: [{ setting: "speechSampleSharingEnabled", previousValue: false, newValue: true }],
+    });
+    expect(report.turns[0]).toMatchObject({
+      status: "failed", recognizedTranscript: "Nyumba hii ni kubwa.",
+      recognitionReviewStatus: "accepted", correctedTranscript: null,
+      speechAudioEligibleForTurn: true, audioBlobAvailable: true,
+      audioIncludedInDiagnosticBundle: true, audioSharedRemotely: false,
+      consentAtRecordingStart: startConsent, consentAtTurnFinalization: startConsent,
+      audioMetadata: {
+        mimeType: "audio/webm", sizeBytes: 5_000, durationMs: 1_500,
+        sampleRate: 48_000, channelCount: 1,
+      },
+      audioQualityMetrics: { source: "realtime_analyser", rmsDbfs: -18 },
+    });
   });
 });

@@ -315,9 +315,25 @@ describe("POST /api/translator/translate", () => {
       code: "unsupported_language",
       error:
         "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+      recognizedTranscript: "Hello there",
     });
     expect(translateMock).not.toHaveBeenCalled();
     expect(autoTranslateMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns the recognized transcript when translation fails after STT", async () => {
+    transcribeMock.mockResolvedValue({
+      text: "Nyumba hii ni kubwa.", detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe", fallbackUsed: false,
+    });
+    translateMock.mockRejectedValue(new Error("temporary upstream failure"));
+    const response = await post(createFormData());
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      code: "translation_failed",
+      error: "Die Übersetzung konnte nicht erstellt werden.",
+      recognizedTranscript: "Nyumba hii ni kubwa.",
+    });
   });
 
   it("does not leak raw OpenAI errors", async () => {
