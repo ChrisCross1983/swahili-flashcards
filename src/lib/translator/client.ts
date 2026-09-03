@@ -22,6 +22,10 @@ import {
   TranslatorOperationError,
   type TranslatorFailure,
 } from "@/lib/translator/reliability";
+import {
+  isUsableRecordedAudio,
+  type RecordedAudioDiagnostics,
+} from "@/lib/translator/recordedAudio";
 
 const NETWORK_ERROR =
   "Die Übersetzung konnte nicht geladen werden. Bitte versuche es erneut.";
@@ -44,6 +48,8 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   invalid_direction: "Die gewählte Übersetzungsrichtung ist ungültig.",
   invalid_audio_format: "Dieses Audioformat wird nicht unterstützt.",
   audio_too_large: "Die Aufnahme ist zu groß. Bitte nimm einen kürzeren Abschnitt auf.",
+  invalid_audio_capture: "Es wurde keine Sprache aufgenommen. Bitte versuche es noch einmal.",
+  no_audio_captured: "Es wurde keine Sprache aufgenommen. Bitte versuche es noch einmal.",
   no_speech: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
   unsupported_language:
     "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
@@ -83,6 +89,8 @@ type RequestOptions = {
   signal?: AbortSignal;
   correlationId?: string;
   onResponseCompleted?: (now: number) => void;
+  requestAttempt?: number;
+  recordedAudioDiagnostics?: RecordedAudioDiagnostics;
 };
 
 function isNonNegativeNumber(value: unknown) {
@@ -194,12 +202,21 @@ async function readTranslationResponse(
       errorBody && typeof errorBody.code === "string"
         ? (errorBody.code as TranslatorApiErrorCode)
         : null;
-    const failure = failureFromHttp({
+    let failure = failureFromHttp({
       status: response.status,
       apiErrorCode: code,
       stage: "translation",
       retryAfterMs: retryAfterMs(response),
     });
+    if (code === "invalid_audio_capture" || code === "no_audio_captured") {
+      failure = {
+        ...failure,
+        category: "RECORDER",
+        message: API_ERROR_MESSAGES[code],
+        healthStatus: "healthy",
+        retryable: false,
+      };
+    }
     const authFailureType = errorBody &&
       typeof errorBody.authFailureType === "string" &&
       [
@@ -279,6 +296,22 @@ export async function requestAudioTranslation(
 ): Promise<TranslationResult> {
   const requestStartedAt = new Date().toISOString();
   const correlationId = options.correlationId ?? createCorrelationId("translation");
+  const validation = isUsableRecordedAudio(
+    audioBlob,
+    options.recordedAudioDiagnostics,
+  );
+  if (!validation.usable) {
+    throw new TranslatorClientError({
+      category: "RECORDER",
+      message: API_ERROR_MESSAGES[validation.code],
+      healthStatus: "healthy",
+      httpStatus: 422,
+      apiErrorCode: validation.code,
+      retryable: false,
+      retryAfterMs: null,
+      authFailureType: null,
+    });
+  }
   if (audioBlob.size > MAX_TRANSLATION_AUDIO_BYTES) {
     throw new TranslatorClientError({
       ...failureFromHttp({
@@ -311,12 +344,25 @@ export async function requestAudioTranslation(
   );
   formData.append("sourceLanguage", direction.sourceLanguage);
   formData.append("targetLanguage", direction.targetLanguage);
+  const audioDiagnostics = options.recordedAudioDiagnostics;
+  if (typeof audioDiagnostics?.recordingDurationMs === "number") {
+    formData.append("recordingDurationMs", String(audioDiagnostics.recordingDurationMs));
+  }
+  if (typeof audioDiagnostics?.chunkCount === "number") {
+    formData.append("chunkCount", String(audioDiagnostics.chunkCount));
+  }
+  if (typeof audioDiagnostics?.totalChunkBytes === "number") {
+    formData.append("totalChunkBytes", String(audioDiagnostics.totalChunkBytes));
+  }
 
   let response: Response;
   try {
     response = await (options.fetcher ?? fetch)("/api/translator/translate", {
       method: "POST",
-      headers: { [TRANSLATOR_CORRELATION_HEADER]: correlationId },
+      headers: {
+        [TRANSLATOR_CORRELATION_HEADER]: correlationId,
+        "X-Translator-Request-Attempt": String(options.requestAttempt ?? 0),
+      },
       body: formData,
       signal: options.signal,
     });
@@ -349,6 +395,7 @@ export async function requestTextTranslation(
       headers: {
         "Content-Type": "application/json",
         [TRANSLATOR_CORRELATION_HEADER]: correlationId,
+        "X-Translator-Request-Attempt": String(options.requestAttempt ?? 0),
       },
       body: JSON.stringify({
         authoritativeTranscript,

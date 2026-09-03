@@ -67,6 +67,27 @@ type ClientPerformanceDiagnostics = Pick<
   | "realtimeConnectionReused"
   | "realtimeConnectionAgeAtRecordingStartMs"
   | "warmStart"
+  | "microphoneAcquisitionAttemptId"
+  | "microphoneAcquisitionStartedAt"
+  | "microphoneAcquisitionCompletedAt"
+  | "microphoneAcquisitionMs"
+  | "microphoneAcquisitionOutcome"
+  | "captureGeneration"
+  | "freshStreamRequested"
+  | "streamReused"
+  | "trackReadyStateAtAcquisition"
+  | "trackEnabledAtAcquisition"
+  | "trackMutedAtAcquisition"
+  | "mediaRecorderChunkCount"
+  | "mediaRecorderTotalChunkBytes"
+  | "audioBlobSize"
+  | "audioSignalObserved"
+  | "realtimeTransportReady"
+  | "realtimeInputTrackGeneration"
+  | "realtimeFirstDeltaObserved"
+  | "realtimeFinalTranscriptReceived"
+  | "capturePathOutcome"
+  | "translationRequestCorrelationId"
 >;
 
 type TurnTimepointName =
@@ -210,6 +231,10 @@ export class TranslatorTurnPerformance {
     if (value !== null && value !== undefined && validTime(value)) {
       this.realtimeSetupOverrideMs = Math.round(value);
     }
+  }
+
+  setCaptureDiagnostics(diagnostics: Partial<ClientPerformanceDiagnostics>) {
+    this.pathContext = { ...this.pathContext, ...diagnostics };
   }
 
   markRecordingStarted(now = performance.now()) {

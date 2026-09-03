@@ -72,6 +72,26 @@ function entry(
       recordingStartedAt: "2023-11-14T22:13:20.000Z",
       recordingStoppedAt: "2023-11-14T22:13:21.000Z",
       recordingDurationMs: 1_000,
+      microphoneAcquisitionAttemptId: `mic-${id}`,
+      microphoneAcquisitionMs: 50,
+      microphoneAcquisitionOutcome: "success",
+      captureGeneration: realtime ? 2 : 1,
+      freshStreamRequested: !realtime,
+      streamReused: realtime,
+      trackReadyStateAtAcquisition: "live",
+      trackEnabledAtAcquisition: true,
+      trackMutedAtAcquisition: false,
+      mediaRecorderChunkCount: 2,
+      mediaRecorderTotalChunkBytes: 2048,
+      audioBlobSize: 2048,
+      audioSignalObserved: true,
+      realtimeTransportReady: realtime,
+      realtimeInputTrackGeneration: realtime ? 2 : null,
+      realtimeFirstDeltaObserved: realtime,
+      realtimeFinalTranscriptReceived: realtime,
+      capturePathOutcome: realtime
+        ? "realtime_success"
+        : "audio_fallback_success",
       firstTranscriptDeltaAt: realtime
         ? "2023-11-14T22:13:20.400Z"
         : undefined,
@@ -310,8 +330,8 @@ describe("classic translator QA report", () => {
 
     expect(report).toMatchObject({
       reportVersion: 5,
-      reportRevision: "5.1",
-      performanceOptimizationVersion: "classic-stability-observability-v5.1",
+      reportRevision: "5.2",
+      performanceOptimizationVersion: "classic-capture-reliability-v5.2",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -341,6 +361,10 @@ describe("classic translator QA report", () => {
       ttsModel: "gpt-4o-mini-tts",
       connectionAttemptsTotal: 1,
       connectionSuccesses: 1,
+      microphoneAcquisitionAttempts: 2,
+      freshStreamCount: 1,
+      reusedStreamCount: 1,
+      audioFallbackSuccessCount: 1,
       ttsStreamingTurns: 2,
       streamingFallbackTurns: 0,
     });
@@ -613,7 +637,7 @@ describe("classic translator QA report", () => {
     expect(report).toMatchObject({
       reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
       diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
-      reportRevision: "5.1", failureCount: 0, failuresByCategory: {},
+      reportRevision: "5.2", failureCount: 0, failuresByCategory: {},
       degradationCount: 1, expectedFallbackCount: 0,
       recoveryAttempts: 1, successfulRecoveries: 1,
       sttCorrectionCount: 1, speechQualitySampleCount: 1,

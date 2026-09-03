@@ -85,7 +85,7 @@ describe("translator components", () => {
       "await startPreparedRecording()",
     );
     const backgroundWarmIndex = source.indexOf(
-      "getRealtimeManager().recordingStarted(realtimeTurn, stream)",
+      "await getRealtimeManager().recordingStarted(",
     );
 
     expect(microphoneIndex).toBeGreaterThan(-1);
@@ -192,10 +192,22 @@ describe("translator components", () => {
       path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
       "utf8",
     );
-    expect(source).toContain('process.env.NODE_ENV !== "production"');
+    expect(source).toContain("INTERNAL_TRANSLATOR_QA_ENABLED");
     expect(source).toContain("Sprach-Qualitätsmodus (interner Test)");
     expect(source).toContain("Es wird keine zusätzliche Spracherkennung gestartet.");
     expect(source).toContain("Translation 503");
     expect(source).toContain("TTS 503");
+  });
+
+  it("keeps diagnostics collapsed after the conversation in the mobile flow", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("<details");
+    expect(source).toContain("⚙ Erweiterte Einstellungen");
+    expect(source.indexOf('className="order-1 mt-7"'))
+      .toBeGreaterThan(source.indexOf("<details"));
+    expect(source).toContain("Letzte Diagnose exportieren");
   });
 });

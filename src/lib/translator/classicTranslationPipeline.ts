@@ -12,6 +12,7 @@ import {
   isUserAbort,
   TranslatorOperationError,
 } from "@/lib/translator/reliability";
+import type { RecordedAudioDiagnostics } from "@/lib/translator/recordedAudio";
 
 type ClassicTranslationPipelineDependencies = {
   requestText?: typeof requestTextTranslation;
@@ -42,6 +43,7 @@ export async function requestClassicTranslation(
     signal: AbortSignal;
     correlationId?: string;
     onResponseCompleted?: (now: number) => void;
+    recordedAudioDiagnostics?: RecordedAudioDiagnostics;
     onRetry?: (context: {
       attempt: number;
       reason: string;
@@ -50,7 +52,7 @@ export async function requestClassicTranslation(
   },
   dependencies: ClassicTranslationPipelineDependencies = {},
 ): Promise<TranslationResult> {
-  const request = async () => {
+  const request = async (requestAttempt: number) => {
     if (input.realtimeResult.ok && input.transcriptionMs !== undefined) {
       return (dependencies.requestText ?? requestTextTranslation)(
         input.realtimeResult.authoritativeTranscript,
@@ -60,6 +62,7 @@ export async function requestClassicTranslation(
           signal: input.signal,
           correlationId: input.correlationId,
           onResponseCompleted: input.onResponseCompleted,
+          requestAttempt,
         },
       );
     }
@@ -70,12 +73,14 @@ export async function requestClassicTranslation(
         signal: input.signal,
         correlationId: input.correlationId,
         onResponseCompleted: input.onResponseCompleted,
+        requestAttempt,
+        recordedAudioDiagnostics: input.recordedAudioDiagnostics,
       },
     );
   };
 
   try {
-    return await request();
+    return await request(0);
   } catch (error) {
     if (
       isUserAbort(error) ||
@@ -95,7 +100,7 @@ export async function requestClassicTranslation(
     });
     await (dependencies.wait ?? waitForRetry)(delayMs, input.signal);
     try {
-      return await request();
+      return await request(1);
     } catch (retryError) {
       if (
         recognizedTranscript &&

@@ -7,6 +7,9 @@ export type ClassicTranscriptionFallbackReason =
   | "transcript_not_finalized"
   | "session_error"
   | "transcript_timeout"
+  | "realtime_circuit_breaker"
+  | "realtime_disabled"
+  | "realtime_track_rebind_failed"
   | "timeout";
 
 export type ClassicRealtimeTranscriptionResult =

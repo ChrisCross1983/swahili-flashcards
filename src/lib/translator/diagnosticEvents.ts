@@ -61,8 +61,8 @@ export function primaryDiagnosticEvent(
 }
 
 export function expectedFallbackKind(reason: string | null | undefined) {
-  return reason === "realtime_not_ready_at_recording_start"
+  return reason === "realtime_not_ready_at_recording_start" ||
+    reason === "realtime_disabled"
     ? "expected_fallback" as const
     : "degradation" as const;
 }
-

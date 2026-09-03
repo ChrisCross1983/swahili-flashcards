@@ -5,6 +5,7 @@ import {
   AudioRecorderController,
   type AudioRecorderSnapshot,
 } from "@/lib/translator/audioRecorder";
+import { shouldReuseClassicCaptureStream } from "@/lib/translator/capturePolicy";
 
 const INITIAL_SNAPSHOT: AudioRecorderSnapshot = {
   status: "idle",
@@ -40,6 +41,9 @@ export function useAudioRecorder() {
       isTypeSupported: MediaRecorderApi?.isTypeSupported
         ? (mimeType) => MediaRecorderApi.isTypeSupported(mimeType)
         : undefined,
+      shouldReuseStream: () =>
+        typeof navigator === "undefined" ||
+        shouldReuseClassicCaptureStream(navigator.userAgent),
       onChange: (nextSnapshot) => {
         if (mountedRef.current) setSnapshot(nextSnapshot);
       },
@@ -88,6 +92,21 @@ export function useAudioRecorder() {
     [],
   );
 
+  const poisonCurrentStream = useCallback(
+    () => controllerRef.current?.poisonCurrentStream() ?? false,
+    [],
+  );
+
+  const abortPendingAcquisition = useCallback(
+    () => controllerRef.current?.abortPendingAcquisition() ?? false,
+    [],
+  );
+
+  const getCaptureDiagnostics = useCallback(
+    () => controllerRef.current?.getCaptureDiagnostics() ?? null,
+    [],
+  );
+
   const clearError = useCallback(() => {
     if (controllerRef.current) {
       controllerRef.current.clearError();
@@ -121,6 +140,9 @@ export function useAudioRecorder() {
     getMediaStream,
     suspendMicrophone,
     releaseMicrophone,
+    poisonCurrentStream,
+    abortPendingAcquisition,
+    getCaptureDiagnostics,
     error: snapshot.error,
     audioBlob: snapshot.audioBlob,
     mimeType: snapshot.mimeType,

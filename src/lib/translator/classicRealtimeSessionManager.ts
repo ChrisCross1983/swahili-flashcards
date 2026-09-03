@@ -8,6 +8,8 @@ import type { TranscriptionPath } from "@/lib/translator/types";
 export const CLASSIC_REALTIME_IDLE_TTL_MS = 120_000;
 export const CLASSIC_REALTIME_RECONNECT_DELAY_MS = 1_000;
 export const CLASSIC_REALTIME_FINAL_TIMEOUT_MS = 3_000;
+export const CLASSIC_REALTIME_FINALIZATION_FAILURE_THRESHOLD = 2;
+export const CLASSIC_REALTIME_CIRCUIT_BREAKER_TURNS = 2;
 
 export type ClassicRealtimeSessionState =
   | "idle"
@@ -52,10 +54,11 @@ export type ClassicRealtimeConnectionAttempt = {
 };
 
 type RealtimeTransport = {
-  connect: (stream: MediaStream) => Promise<void>;
+  connect: (stream: MediaStream, captureGeneration?: number) => Promise<void>;
   finalizeTurn: () => Promise<string>;
   clearTurn: () => void;
   setInputEnabled: (enabled: boolean) => Promise<void>;
+  replaceInputStream: (stream: MediaStream, captureGeneration: number) => Promise<void>;
   disconnect: (reason?: string) => void;
 };
 
@@ -76,6 +79,9 @@ type ManagerDependencies = {
   idleTtlMs?: number;
   reconnectDelayMs?: number;
   finalTimeoutMs?: number;
+  realtimeEnabled?: boolean;
+  finalizationFailureThreshold?: number;
+  circuitBreakerTurns?: number;
 };
 
 export type ClassicRealtimeTurnHandle = {
@@ -85,7 +91,8 @@ export type ClassicRealtimeTurnHandle = {
   transcriptionPathDecisionAt: string;
   transcriptionPathDecisionReason:
     | "warm_realtime_ready"
-    | "realtime_not_ready_at_recording_start";
+    | "realtime_not_ready_at_recording_start"
+    | "realtime_temporarily_bypassed";
   connectionId: string | null;
   realtimeConnectionReadyAtRecordingStart: string | null;
   realtimeConnectionReused: boolean;
@@ -96,6 +103,11 @@ export type ClassicRealtimeTurnHandle = {
   firstDeltaSeen: boolean;
   backgroundConnectionAttemptId: string | null;
   realtimeSetupMs: number | null;
+  realtimeTransportReady: boolean;
+  realtimeInputTrackGeneration: number | null;
+  realtimeInputTrackBound: boolean;
+  circuitBreakerBypassed: boolean;
+  activationPromise: Promise<void> | null;
 };
 
 type InternalAttempt = ClassicRealtimeConnectionAttempt & {
@@ -122,6 +134,7 @@ export class ClassicRealtimeSessionManager {
   private transport: RealtimeTransport | null = null;
   private connectionPromise: Promise<void> | null = null;
   private stream: MediaStream | null = null;
+  private captureGeneration = 0;
   private activeTurn: ClassicRealtimeTurnHandle | null = null;
   private connectionId: string | null = null;
   private connectionReadyAt: string | null = null;
@@ -133,6 +146,10 @@ export class ClassicRealtimeSessionManager {
   private reconnectCount = 0;
   private lastCloseReason: string | null = null;
   private disposed = false;
+  private consecutiveFinalizationFailures = 0;
+  private finalizationFailureCount = 0;
+  private circuitBreakerTurnsRemaining = 0;
+  private circuitBreakerTrips = 0;
 
   constructor(private readonly dependencies: ManagerDependencies) {}
 
@@ -149,7 +166,17 @@ export class ClassicRealtimeSessionManager {
     this.cancelIdleTimer();
     this.stream = stream;
     const decisionAt = this.isoNow();
-    const ready = this.state === "ready" && Boolean(this.transport && this.connectionId);
+    const realtimeEnabled = this.dependencies.realtimeEnabled !== false;
+    const circuitBreakerBypassed = this.circuitBreakerTurnsRemaining > 0;
+    const ready = realtimeEnabled && !circuitBreakerBypassed &&
+      this.state === "ready" && Boolean(this.transport && this.connectionId);
+    const fallbackReason: ClassicTranscriptionFallbackReason | null = ready
+      ? null
+      : !realtimeEnabled
+        ? "realtime_disabled"
+        : circuitBreakerBypassed
+          ? "realtime_circuit_breaker"
+          : "realtime_not_ready_at_recording_start";
     const connectionAge =
       ready && this.connectionReadyMonotonic !== null
         ? this.now() - this.connectionReadyMonotonic
@@ -157,11 +184,13 @@ export class ClassicRealtimeSessionManager {
     const handle: ClassicRealtimeTurnHandle = {
       turnToken: this.id(),
       transcriptionPath: ready ? "realtime" : "audio_upload_fallback",
-      fallbackReason: ready ? null : "realtime_not_ready_at_recording_start",
+      fallbackReason,
       transcriptionPathDecisionAt: decisionAt,
       transcriptionPathDecisionReason: ready
         ? "warm_realtime_ready"
-        : "realtime_not_ready_at_recording_start",
+        : circuitBreakerBypassed || !realtimeEnabled
+          ? "realtime_temporarily_bypassed"
+          : "realtime_not_ready_at_recording_start",
       connectionId: ready ? this.connectionId : null,
       realtimeConnectionReadyAtRecordingStart: ready
         ? this.connectionReadyAt
@@ -179,32 +208,63 @@ export class ClassicRealtimeSessionManager {
       // Warm turns reuse an existing connection; its one-time setup cost belongs
       // to the connection attempt, not to every subsequent turn.
       realtimeSetupMs: null,
+      realtimeTransportReady: ready,
+      realtimeInputTrackGeneration: null,
+      realtimeInputTrackBound: false,
+      circuitBreakerBypassed,
+      activationPromise: null,
     };
     this.activeTurn = handle;
     this.state = "recording";
 
-    if (ready) {
-      try {
-        this.transport?.clearTurn();
-        await this.transport?.setInputEnabled(true);
-      } catch {
-        handle.transcriptionPath = "audio_upload_fallback";
-        handle.fallbackReason = "connection_lost_during_recording";
-        handle.transcriptionPathDecisionReason =
-          "realtime_not_ready_at_recording_start";
-        handle.connectionLostDuringRecording = true;
-        this.invalidateConnection("classic_turn_activation_failed", true);
-      }
-    }
+    if (ready) this.transport?.clearTurn();
     return handle;
   }
 
-  recordingStarted(handle: ClassicRealtimeTurnHandle, stream: MediaStream) {
+  recordingStarted(
+    handle: ClassicRealtimeTurnHandle,
+    stream: MediaStream,
+    captureGeneration = 0,
+  ) {
     this.assertActive(handle);
+    if (handle.activationPromise) return handle.activationPromise;
     this.stream = stream;
-    if (handle.transcriptionPath === "audio_upload_fallback") {
-      void this.ensureConnected(this.connectionReason()).catch(() => undefined);
+    this.captureGeneration = captureGeneration;
+    if (handle.transcriptionPath === "realtime") {
+      const transport = this.transport;
+      handle.activationPromise = (async () => {
+        try {
+          if (!transport || transport !== this.transport) {
+            throw new Error("transcription_transport_unavailable");
+          }
+          await transport.replaceInputStream(stream, captureGeneration);
+          handle.realtimeInputTrackGeneration = captureGeneration;
+          handle.realtimeInputTrackBound = true;
+          await transport.setInputEnabled(true);
+        } catch {
+          handle.transcriptionPath = "audio_upload_fallback";
+          handle.fallbackReason = "realtime_track_rebind_failed";
+          handle.transcriptionPathDecisionReason = "realtime_temporarily_bypassed";
+          handle.connectionLostDuringRecording = true;
+          this.invalidateConnection("classic_turn_track_rebind_failed", true);
+        }
+      })();
+      return handle.activationPromise;
     }
+    if (handle.transcriptionPath === "audio_upload_fallback") {
+      if (!handle.circuitBreakerBypassed && this.dependencies.realtimeEnabled !== false) {
+        const connectingAttempt = [...this.attempts]
+          .reverse()
+          .find((attempt) => attempt.status === "connecting");
+        if (connectingAttempt) {
+          handle.backgroundConnectionAttemptId =
+            connectingAttempt.connectionAttemptId;
+        }
+        void this.ensureConnected(this.connectionReason()).catch(() => undefined);
+      }
+    }
+    handle.activationPromise = Promise.resolve();
+    return handle.activationPromise;
   }
 
   async abortTurn(handle: ClassicRealtimeTurnHandle) {
@@ -226,6 +286,7 @@ export class ClassicRealtimeSessionManager {
     handle: ClassicRealtimeTurnHandle,
   ): Promise<ClassicRealtimeTranscriptionResult> {
     this.assertActive(handle);
+    await handle.activationPromise;
     if (
       handle.transcriptionPath !== "realtime" ||
       handle.connectionLostDuringRecording ||
@@ -257,8 +318,13 @@ export class ClassicRealtimeSessionManager {
       this.state = "ready";
       this.scheduleIdleTimer();
       if (!transcript || !hasTranscriptContent(transcript)) {
+        const tripped = this.recordFinalizationFailure();
+        if (tripped) {
+          this.invalidateConnection("classic_turn_empty_transcript", false);
+        }
         return { ok: false, fallbackReason: "empty_transcript" };
       }
+      this.consecutiveFinalizationFailures = 0;
       return { ok: true, authoritativeTranscript: transcript };
     } catch (error) {
       const fallbackReason: ClassicTranscriptionFallbackReason =
@@ -267,7 +333,8 @@ export class ClassicRealtimeSessionManager {
           : "transcript_not_finalized";
       handle.connectionLostDuringRecording = true;
       this.activeTurn = null;
-      this.invalidateConnection("classic_turn_finalization_failed", true);
+      const tripped = this.recordFinalizationFailure();
+      this.invalidateConnection("classic_turn_finalization_failed", !tripped);
       this.scheduleIdleTimer();
       return { ok: false, fallbackReason };
     }
@@ -285,6 +352,9 @@ export class ClassicRealtimeSessionManager {
       connectionSuccesses: attempts.filter((attempt) => attempt.status === "success").length,
       connectionFailures: attempts.filter((attempt) => attempt.status === "failed").length,
       reconnectCount: this.reconnectCount,
+      realtimeFinalizationFailureCount: this.finalizationFailureCount,
+      realtimeCircuitBreakerTrips: this.circuitBreakerTrips,
+      realtimeCircuitBreakerTurnsRemaining: this.circuitBreakerTurnsRemaining,
     };
   }
 
@@ -320,6 +390,12 @@ export class ClassicRealtimeSessionManager {
       }
     }
     this.activeTurn = null;
+    if (handle.circuitBreakerBypassed && this.circuitBreakerTurnsRemaining > 0) {
+      this.circuitBreakerTurnsRemaining -= 1;
+      if (this.circuitBreakerTurnsRemaining === 0 && this.dependencies.realtimeEnabled !== false) {
+        void this.ensureConnected("reconnect").catch(() => undefined);
+      }
+    }
     this.state = this.transport && this.connectionId
       ? "ready"
       : this.connectionPromise
@@ -329,7 +405,12 @@ export class ClassicRealtimeSessionManager {
   }
 
   private ensureConnected(reason: ClassicRealtimeConnectionReason) {
-    if (this.disposed || !this.stream) return Promise.resolve();
+    if (
+      this.disposed ||
+      !this.stream ||
+      this.dependencies.realtimeEnabled === false ||
+      this.circuitBreakerTurnsRemaining > 0
+    ) return Promise.resolve();
     if (this.transport && this.connectionId) return Promise.resolve();
     if (this.connectionPromise) return this.connectionPromise;
     this.cancelReconnectTimer();
@@ -377,8 +458,17 @@ export class ClassicRealtimeSessionManager {
         this.recordDiagnostic(generation, attempt, event),
     });
     this.transport = transport;
-    const promise = transport.connect(this.stream).then(async () => {
+    const connectionStream = this.stream;
+    const connectionCaptureGeneration = this.captureGeneration;
+    const promise = transport.connect(connectionStream, connectionCaptureGeneration).then(async () => {
       if (!this.isCurrent(generation, transport)) return;
+      if (
+        this.stream &&
+        (this.stream !== connectionStream ||
+          this.captureGeneration !== connectionCaptureGeneration)
+      ) {
+        await transport.replaceInputStream(this.stream, this.captureGeneration);
+      }
       this.connectionId = connectionId;
       this.connectionReadyAt = this.isoNow();
       this.connectionReadyMonotonic = this.now();
@@ -390,6 +480,9 @@ export class ClassicRealtimeSessionManager {
         this.activeTurn?.backgroundConnectionAttemptId === connectionAttemptId
       ) {
         this.activeTurn.realtimeSetupMs = attempt.totalSetupMs;
+        this.activeTurn.realtimeTransportReady = true;
+        this.activeTurn.realtimeInputTrackGeneration = this.captureGeneration;
+        this.activeTurn.realtimeInputTrackBound = true;
       }
 
       const currentTurnUsesConnection =
@@ -448,6 +541,7 @@ export class ClassicRealtimeSessionManager {
   }
 
   private invalidateConnection(reason: string, reconnect: boolean) {
+    this.cancelReconnectTimer();
     this.connectionGeneration += 1;
     this.transport?.disconnect(reason);
     this.transport = null;
@@ -460,7 +554,13 @@ export class ClassicRealtimeSessionManager {
   }
 
   private scheduleReconnect() {
-    if (this.disposed || !this.stream || this.reconnectTimer) return;
+    if (
+      this.disposed ||
+      !this.stream ||
+      this.reconnectTimer ||
+      this.dependencies.realtimeEnabled === false ||
+      this.circuitBreakerTurnsRemaining > 0
+    ) return;
     const setTimer = this.dependencies.setTimer ?? setTimeout;
     this.reconnectTimer = setTimer(() => {
       this.reconnectTimer = null;
@@ -529,6 +629,7 @@ export class ClassicRealtimeSessionManager {
       case "remote_description_set": attempt.remoteDescriptionSetAt = at; break;
       case "data_channel_open": attempt.dataChannelOpenedAt = at; break;
       case "connection_ready": attempt.connectionReadyAt = at; break;
+      case "input_track_bound": break;
       case "connection_error":
         attempt.errorStage = event.errorStage ?? "connection_sequence";
         attempt.errorType = event.errorType ?? null;
@@ -546,6 +647,19 @@ export class ClassicRealtimeSessionManager {
       attempt.endedAt = this.isoNow();
       attempt.totalSetupMs = this.elapsedSince(attempt.startedMonotonic);
     }
+  }
+
+  private recordFinalizationFailure() {
+    this.finalizationFailureCount += 1;
+    this.consecutiveFinalizationFailures += 1;
+    const threshold = this.dependencies.finalizationFailureThreshold ??
+      CLASSIC_REALTIME_FINALIZATION_FAILURE_THRESHOLD;
+    if (this.consecutiveFinalizationFailures < threshold) return false;
+    this.circuitBreakerTrips += 1;
+    this.circuitBreakerTurnsRemaining = this.dependencies.circuitBreakerTurns ??
+      CLASSIC_REALTIME_CIRCUIT_BREAKER_TURNS;
+    this.consecutiveFinalizationFailures = 0;
+    return true;
   }
 
   private assertActive(handle: ClassicRealtimeTurnHandle) {

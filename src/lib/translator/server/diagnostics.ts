@@ -26,6 +26,13 @@ function nullableMetric(value: unknown) {
     : undefined;
 }
 
+function nullableCount(value: unknown, max = 30_000_000) {
+  return value === null || value === undefined ||
+    (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max)
+    ? value ?? null
+    : null;
+}
+
 function consentSnapshot(value: unknown) {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -140,6 +147,28 @@ export function parseTechnicalDiagnosticEvent(value: unknown): TranslatorTechnic
     warmStart: item.warmStart === true,
     realtimeConnectionReused: item.realtimeConnectionReused === true,
     fallbackReason: nullableString(item.fallbackReason, 150) ?? null,
+    microphoneAcquisitionAttemptId:
+      nullableString(item.microphoneAcquisitionAttemptId, 150) ?? null,
+    microphoneAcquisitionMs:
+      nullableMetric(item.microphoneAcquisitionMs ?? null) as number | null,
+    microphoneAcquisitionOutcome:
+      nullableString(item.microphoneAcquisitionOutcome, 80) ?? null,
+    captureGeneration: nullableCount(item.captureGeneration, 1_000_000),
+    freshStreamRequested: item.freshStreamRequested === true,
+    streamReused: item.streamReused === true,
+    mediaRecorderChunkCount:
+      nullableCount(item.mediaRecorderChunkCount, 100_000),
+    mediaRecorderTotalChunkBytes:
+      nullableCount(item.mediaRecorderTotalChunkBytes),
+    audioBlobSize: nullableCount(item.audioBlobSize),
+    audioSignalObserved:
+      typeof item.audioSignalObserved === "boolean" ? item.audioSignalObserved : null,
+    realtimeTransportReady: item.realtimeTransportReady === true,
+    realtimeInputTrackGeneration:
+      nullableCount(item.realtimeInputTrackGeneration, 1_000_000),
+    realtimeFirstDeltaObserved: item.realtimeFirstDeltaObserved === true,
+    realtimeFinalTranscriptReceived: item.realtimeFinalTranscriptReceived === true,
+    capturePathOutcome: nullableString(item.capturePathOutcome, 100) ?? null,
     recordClickToRecordingStartedMs: nullableMetric(item.recordClickToRecordingStartedMs) as number | null,
     stopToTranscriptFinalMs: nullableMetric(item.stopToTranscriptFinalMs) as number | null,
     transcriptFinalToTranslationVisibleMs: nullableMetric(item.transcriptFinalToTranslationVisibleMs) as number | null,

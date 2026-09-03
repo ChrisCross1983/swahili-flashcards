@@ -390,4 +390,28 @@ describe("RealtimeTranscriptionClientV2", () => {
     expect(peers).toHaveLength(1);
     client.disconnect();
   });
+
+  it("rebinds a fresh capture track on the warm peer before enabling input", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_rebind")));
+    const original = new FakeStream();
+    const fresh = new FakeStream();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError: vi.fn(),
+    });
+    await client.connect(original as unknown as MediaStream);
+    await client.setInputEnabled(false);
+
+    await client.replaceInputStream(fresh as unknown as MediaStream, 2);
+    await client.setInputEnabled(true);
+
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(2, null);
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(3, fresh.track);
+    expect(peers[0].sender.replaceTrack).not.toHaveBeenCalledWith(original.track);
+    expect(client.getInputTrackGeneration()).toBe(2);
+    expect(peers).toHaveLength(1);
+    client.disconnect();
+  });
 });

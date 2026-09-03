@@ -1,4 +1,4 @@
-type DiagnosticAudioFile = {
+export type DiagnosticAudioFile = {
   turnId: string;
   blob: Blob;
   consentEligible?: boolean;
@@ -82,9 +82,23 @@ export async function createTranslatorDiagnosticBundle(input: {
       },
     };
   });
+  const reportMetadata = input.report && typeof input.report === "object"
+    ? input.report as Record<string, unknown>
+    : {};
   const manifestBytes = encoder.encode(JSON.stringify({
-    bundleVersion: "5.1",
+    bundleVersion: "5.2",
     exportedAt: input.exportedAt ?? new Date().toISOString(),
+    sessionId: typeof reportMetadata.sessionId === "string"
+      ? reportMetadata.sessionId : null,
+    reportId: typeof reportMetadata.reportId === "string"
+      ? reportMetadata.reportId : null,
+    createdAt: typeof reportMetadata.startedAt === "string"
+      ? reportMetadata.startedAt : null,
+    expiresAt: typeof reportMetadata.incidentExpiresAt === "string"
+      ? reportMetadata.incidentExpiresAt : null,
+    turnCount: Array.isArray(reportMetadata.turns)
+      ? reportMetadata.turns.length : null,
+    audioCount: manifestEntries.length,
     audio: manifestEntries,
   }, null, 2));
   const files: Array<{ name: string; data: Uint8Array }> = [

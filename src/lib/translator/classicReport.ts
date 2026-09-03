@@ -34,8 +34,8 @@ import type {
 import { speechAudioEligibleForTurn } from "@/lib/translator/turnConsent";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.1";
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-stability-observability-v5.1";
+const REPORT_REVISION = "5.2";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-capture-reliability-v5.2";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -329,6 +329,26 @@ export type ClassicTranslatorReportTurn = {
   getUserMediaToRecordingStartedMs: number | null;
   realtimeSetupMs: number | null;
   recordingDurationMs: number | null;
+  microphoneAcquisitionAttemptId: string | null;
+  microphoneAcquisitionStartedAt: string | null;
+  microphoneAcquisitionCompletedAt: string | null;
+  microphoneAcquisitionMs: number | null;
+  microphoneAcquisitionOutcome: string | null;
+  captureGeneration: number | null;
+  freshStreamRequested: boolean;
+  streamReused: boolean;
+  trackReadyStateAtAcquisition: string | null;
+  trackEnabledAtAcquisition: boolean | null;
+  trackMutedAtAcquisition: boolean | null;
+  mediaRecorderChunkCount: number;
+  mediaRecorderTotalChunkBytes: number;
+  audioBlobSize: number | null;
+  audioSignalObserved: boolean | null;
+  realtimeTransportReady: boolean;
+  realtimeInputTrackGeneration: number | null;
+  realtimeFirstDeltaObserved: boolean;
+  realtimeFinalTranscriptReceived: boolean;
+  capturePathOutcome: string | null;
   stopToTranscriptFinalMs: number | null;
   transcriptFinalToTranslationReadyMs: number | null;
   clientToTranslationServerMs: number | null;
@@ -936,6 +956,31 @@ function turnFromValues(input: {
     getUserMediaToRecordingStartedMs: finite(d.getUserMediaToRecordingStartedMs),
     realtimeSetupMs: finite(d.realtimeSetupMs),
     recordingDurationMs: finite(d.recordingDurationMs),
+    microphoneAcquisitionAttemptId: d.microphoneAcquisitionAttemptId ?? null,
+    microphoneAcquisitionStartedAt: d.microphoneAcquisitionStartedAt ?? null,
+    microphoneAcquisitionCompletedAt: d.microphoneAcquisitionCompletedAt ?? null,
+    microphoneAcquisitionMs: finite(d.microphoneAcquisitionMs),
+    microphoneAcquisitionOutcome: d.microphoneAcquisitionOutcome ?? null,
+    captureGeneration: finite(d.captureGeneration),
+    freshStreamRequested: d.freshStreamRequested === true,
+    streamReused: d.streamReused === true,
+    trackReadyStateAtAcquisition: d.trackReadyStateAtAcquisition ?? null,
+    trackEnabledAtAcquisition:
+      typeof d.trackEnabledAtAcquisition === "boolean"
+        ? d.trackEnabledAtAcquisition : null,
+    trackMutedAtAcquisition:
+      typeof d.trackMutedAtAcquisition === "boolean"
+        ? d.trackMutedAtAcquisition : null,
+    mediaRecorderChunkCount: finite(d.mediaRecorderChunkCount) ?? 0,
+    mediaRecorderTotalChunkBytes: finite(d.mediaRecorderTotalChunkBytes) ?? 0,
+    audioBlobSize: finite(d.audioBlobSize),
+    audioSignalObserved:
+      typeof d.audioSignalObserved === "boolean" ? d.audioSignalObserved : null,
+    realtimeTransportReady: d.realtimeTransportReady === true,
+    realtimeInputTrackGeneration: finite(d.realtimeInputTrackGeneration),
+    realtimeFirstDeltaObserved: d.realtimeFirstDeltaObserved === true,
+    realtimeFinalTranscriptReceived: d.realtimeFinalTranscriptReceived === true,
+    capturePathOutcome: d.capturePathOutcome ?? null,
     stopToTranscriptFinalMs: finite(d.stopToTranscriptFinalMs),
     transcriptFinalToTranslationReadyMs: finite(
       d.transcriptFinalToTranslationReadyMs,
@@ -1123,6 +1168,8 @@ export function buildClassicTranslatorReport(input: {
   connectionSuccesses?: number;
   connectionFailures?: number;
   reconnectCount?: number;
+  realtimeFinalizationFailureCount?: number;
+  realtimeCircuitBreakerTrips?: number;
   buildMetadata?: TranslatorBuildMetadata;
   diagnosticsSettings?: TranslatorDiagnosticsSettings;
   installationId?: string | null;
@@ -1459,6 +1506,23 @@ export function buildClassicTranslatorReport(input: {
       sourceConnectionAttempts.filter((attempt) => attempt.status === "failed").length,
     reconnectCount: input.reconnectCount ??
       sourceConnectionAttempts.filter((attempt) => attempt.reason === "reconnect").length,
+    microphoneAcquisitionAttempts: turns.filter((turn) =>
+      turn.microphoneAcquisitionAttemptId !== null).length,
+    microphoneAcquisitionTimeouts: turns.filter((turn) =>
+      turn.microphoneAcquisitionOutcome === "timeout").length,
+    freshStreamCount: turns.filter((turn) => turn.freshStreamRequested).length,
+    reusedStreamCount: turns.filter((turn) => turn.streamReused).length,
+    invalidAudioCaptureCount: turns.filter((turn) =>
+      turn.capturePathOutcome === "invalid_audio_capture").length,
+    poisonedStreamCount: turns.filter((turn) =>
+      turn.capturePathOutcome === "invalid_audio_capture").length,
+    realtimeFinalizationFailureCount:
+      input.realtimeFinalizationFailureCount ?? turns.filter((turn) =>
+        ["empty_transcript", "transcript_timeout", "transcript_not_finalized"]
+          .includes(turn.fallbackReason ?? "")).length,
+    realtimeCircuitBreakerTrips: input.realtimeCircuitBreakerTrips ?? 0,
+    audioFallbackSuccessCount: successful.filter((turn) =>
+      turn.capturePathOutcome === "audio_fallback_success").length,
     fallbackReasons,
     translationStreamingTurns: successful.filter(
       (turn) => turn.translationStreamingUsed,

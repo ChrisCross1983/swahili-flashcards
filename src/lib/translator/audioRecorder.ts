@@ -21,18 +21,66 @@ export type AudioRecorderSnapshot = {
   mimeType: string | null;
 };
 
+export const MICROPHONE_ACQUISITION_TIMEOUT_MS = 12_000;
+export const MEDIA_RECORDER_TIMESLICE_MS = 1_000;
+
+export type MicrophoneAcquisitionOutcome =
+  | "success"
+  | "timeout"
+  | "permission_denied"
+  | "device_unavailable"
+  | "aborted"
+  | "stale_result"
+  | "unknown_failure";
+
+export type MicrophoneAcquisitionState =
+  | "idle"
+  | "requesting_permission_or_device"
+  | "acquired"
+  | "timed_out"
+  | "permission_denied"
+  | "device_unavailable"
+  | "aborted"
+  | "stale_result";
+
+export type AudioRecorderCaptureDiagnostics = {
+  microphoneAcquisitionAttemptId: string | null;
+  microphoneAcquisitionStartedAt: string | null;
+  microphoneAcquisitionCompletedAt: string | null;
+  microphoneAcquisitionMs: number | null;
+  microphoneAcquisitionOutcome: MicrophoneAcquisitionOutcome | null;
+  freshStreamRequested: boolean;
+  streamReused: boolean;
+  captureGeneration: number | null;
+  trackReadyStateAtAcquisition: MediaStreamTrackState | null;
+  trackEnabledAtAcquisition: boolean | null;
+  trackMutedAtAcquisition: boolean | null;
+  mediaRecorderChunkCount: number;
+  mediaRecorderTotalChunkBytes: number;
+};
+
 type AudioRecorderDependencies = {
   getUserMedia?: () => Promise<MediaStream>;
   createRecorder?: (stream: MediaStream, mimeType: string) => MediaRecorder;
   isTypeSupported?: (mimeType: string) => boolean;
   onChange?: (snapshot: AudioRecorderSnapshot) => void;
+  shouldReuseStream?: (stream: MediaStream) => boolean;
+  acquisitionTimeoutMs?: number;
+  recorderTimesliceMs?: number;
+  now?: () => number;
+  wallNow?: () => number;
+  randomId?: () => string;
+  setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
 };
 
 const ERROR_MESSAGES = {
-  permission: "Mikrofonzugriff wurde nicht erlaubt.",
+  permission: "Mikrofonzugriff ist nicht erlaubt. Bitte erlaube den Mikrofonzugriff in den Browser-Einstellungen.",
   noDevice: "Es wurde kein verfügbares Mikrofon gefunden.",
   unsupported: "Die Audioaufnahme wird von diesem Browser nicht unterstützt.",
-  unavailable: "Das Mikrofon konnte nicht geöffnet werden.",
+  unavailable: "Das Mikrofon ist gerade nicht verfügbar. Schließe andere Audio-Aufnahmen und versuche es erneut.",
+  timeout: "Das Mikrofon konnte nicht geöffnet werden. Bitte versuche es erneut.",
+  noAudio: "Es wurde keine Sprache aufgenommen. Bitte versuche es noch einmal.",
   start: "Die Aufnahme konnte nicht gestartet werden.",
   stop: "Die Aufnahme konnte nicht beendet werden.",
 } as const;
@@ -77,8 +125,11 @@ export function getAudioRecorderErrorMessage(error: unknown) {
   }
 }
 
-class AudioRecorderError extends Error {
-  constructor(message: string) {
+export class AudioRecorderError extends Error {
+  constructor(
+    message: string,
+    readonly code: string = "recording_failed",
+  ) {
     super(message);
     this.name = "AudioRecorderError";
   }
@@ -102,6 +153,29 @@ export class AudioRecorderController {
   private resolveStop: ((blob: Blob) => void) | null = null;
   private rejectStop: ((error: Error) => void) | null = null;
   private disposed = false;
+  private acquisitionGeneration = 0;
+  private activeAcquisitionGeneration = 0;
+  private cancelAcquisition: (() => void) | null = null;
+  private captureGeneration = 0;
+  private streamPoisoned = false;
+  private acquisitionState: MicrophoneAcquisitionState = "idle";
+  private chunkCount = 0;
+  private chunkBytes = 0;
+  private captureDiagnostics: AudioRecorderCaptureDiagnostics = {
+    microphoneAcquisitionAttemptId: null,
+    microphoneAcquisitionStartedAt: null,
+    microphoneAcquisitionCompletedAt: null,
+    microphoneAcquisitionMs: null,
+    microphoneAcquisitionOutcome: null,
+    freshStreamRequested: false,
+    streamReused: false,
+    captureGeneration: null,
+    trackReadyStateAtAcquisition: null,
+    trackEnabledAtAcquisition: null,
+    trackMutedAtAcquisition: null,
+    mediaRecorderChunkCount: 0,
+    mediaRecorderTotalChunkBytes: 0,
+  };
 
   constructor(dependencies: AudioRecorderDependencies) {
     this.dependencies = dependencies;
@@ -115,14 +189,45 @@ export class AudioRecorderController {
     return this.stream;
   }
 
+  getCaptureDiagnostics() {
+    return { ...this.captureDiagnostics };
+  }
+
+  getMicrophoneAcquisitionState() {
+    return this.acquisitionState;
+  }
+
+  hasPendingAcquisition() {
+    return this.acquirePromise !== null;
+  }
+
   clearError() {
-    if (this.snapshot.status !== "error") return;
+    if (!this.snapshot.error) return;
     this.update({ status: "idle", error: null });
   }
 
   acquireMicrophone() {
-    if (this.stream && this.isStreamUsable(this.stream)) {
+    if (
+      this.stream &&
+      !this.streamPoisoned &&
+      this.isStreamUsable(this.stream) &&
+      (this.dependencies.shouldReuseStream?.(this.stream) ?? true)
+    ) {
+      const started = this.now();
       this.setTracksEnabled(this.stream, true);
+      this.acquisitionState = "acquired";
+      this.captureDiagnostics = {
+        ...this.captureDiagnostics,
+        microphoneAcquisitionAttemptId: this.id(),
+        microphoneAcquisitionStartedAt: this.isoNow(),
+        microphoneAcquisitionCompletedAt: this.isoNow(),
+        microphoneAcquisitionMs: Math.max(0, Math.round(this.now() - started)),
+        microphoneAcquisitionOutcome: "success",
+        freshStreamRequested: false,
+        streamReused: true,
+        captureGeneration: this.captureGeneration,
+        ...this.trackDiagnostics(this.stream),
+      };
       return Promise.resolve(this.stream);
     }
     if (this.acquirePromise) return this.acquirePromise;
@@ -142,7 +247,10 @@ export class AudioRecorderController {
       audioBlob: null,
       mimeType: null,
     });
-    const promise = this.acquire();
+    const generation = ++this.acquisitionGeneration;
+    this.activeAcquisitionGeneration = generation;
+    this.acquisitionState = "requesting_permission_or_device";
+    const promise = this.acquire(generation);
     this.acquirePromise = promise;
     void promise.then(
       () => {
@@ -217,7 +325,9 @@ export class AudioRecorderController {
     }
 
     try {
-      this.recorder.start();
+      this.recorder.start(
+        this.dependencies.recorderTimesliceMs ?? MEDIA_RECORDER_TIMESLICE_MS,
+      );
       this.update({
         status: "recording",
         error: null,
@@ -227,14 +337,20 @@ export class AudioRecorderController {
     } catch {
       this.stopTracks(this.stream);
       this.stream = null;
+      this.streamPoisoned = true;
       this.releaseRecorder();
-      this.update({ status: "error", error: ERROR_MESSAGES.start });
+      this.update({ status: "idle", error: ERROR_MESSAGES.start });
       throw new AudioRecorderError(ERROR_MESSAGES.start);
     }
   }
 
   suspendMicrophone() {
     if (this.snapshot.status === "recording") return false;
+    if (this.stream && !(this.dependencies.shouldReuseStream?.(this.stream) ?? true)) {
+      this.stopTracks(this.stream);
+      this.stream = null;
+      return true;
+    }
     this.setTracksEnabled(this.stream, false);
     return Boolean(this.stream);
   }
@@ -248,27 +364,138 @@ export class AudioRecorderController {
     }
     this.stopTracks(this.stream);
     this.stream = null;
+    this.streamPoisoned = false;
+    this.acquisitionState = "idle";
     return true;
   }
 
-  private async acquire() {
+  poisonCurrentStream() {
+    this.streamPoisoned = true;
+    this.stopTracks(this.stream);
+    this.stream = null;
+    this.acquisitionState = "idle";
+    return true;
+  }
+
+  abortPendingAcquisition() {
+    if (!this.acquirePromise) return false;
+    this.activeAcquisitionGeneration = 0;
+    this.cancelAcquisition?.();
+    this.cancelAcquisition = null;
+    this.acquisitionState = "aborted";
+    return true;
+  }
+
+  private async acquire(generation: number) {
     let stream: MediaStream | null = null;
+    const startedMono = this.now();
+    const attemptId = this.id();
+    const startedAt = this.isoNow();
+    this.stopTracks(this.stream);
+    this.stream = null;
+    this.streamPoisoned = false;
+    this.captureDiagnostics = {
+      ...this.captureDiagnostics,
+      microphoneAcquisitionAttemptId: attemptId,
+      microphoneAcquisitionStartedAt: startedAt,
+      microphoneAcquisitionCompletedAt: null,
+      microphoneAcquisitionMs: null,
+      microphoneAcquisitionOutcome: null,
+      freshStreamRequested: true,
+      streamReused: false,
+      captureGeneration: null,
+      trackReadyStateAtAcquisition: null,
+      trackEnabledAtAcquisition: null,
+      trackMutedAtAcquisition: null,
+    };
+    let rawPromise: Promise<MediaStream | null>;
     try {
-      stream = await this.dependencies.getUserMedia?.() ?? null;
+      rawPromise = Promise.resolve(
+        this.dependencies.getUserMedia?.() ?? null,
+      );
+    } catch (error) {
+      rawPromise = Promise.reject(error);
+    }
+    void rawPromise.then((lateStream) => {
+      if (
+        lateStream &&
+        (this.disposed || this.activeAcquisitionGeneration !== generation)
+      ) {
+        this.stopTracks(lateStream);
+      }
+    }, () => undefined);
+    let rejectWatchdog!: (error: AudioRecorderError) => void;
+    const watchdog = new Promise<never>((_resolve, reject) => {
+      rejectWatchdog = reject;
+    });
+    this.cancelAcquisition = () => rejectWatchdog(
+      new AudioRecorderError(ERROR_MESSAGES.start, "microphone_acquisition_aborted"),
+    );
+    const setTimer = this.dependencies.setTimer ?? setTimeout;
+    const clearTimer = this.dependencies.clearTimer ?? clearTimeout;
+    const timer = setTimer(() => {
+      if (this.activeAcquisitionGeneration !== generation) return;
+      this.activeAcquisitionGeneration = 0;
+      rejectWatchdog(new AudioRecorderError(
+        ERROR_MESSAGES.timeout,
+        "microphone_acquisition_timeout",
+      ));
+    }, this.dependencies.acquisitionTimeoutMs ?? MICROPHONE_ACQUISITION_TIMEOUT_MS);
+    try {
+      stream = await Promise.race([rawPromise, watchdog]);
       if (!stream) throw new AudioRecorderError(ERROR_MESSAGES.noDevice);
-      if (this.disposed) {
+      if (this.disposed || this.activeAcquisitionGeneration !== generation) {
         this.stopTracks(stream);
         stream = null;
-        throw new AudioRecorderError(ERROR_MESSAGES.start);
+        throw new AudioRecorderError(ERROR_MESSAGES.start, "stale_microphone_acquisition");
       }
+      this.activeAcquisitionGeneration = 0;
+      this.cancelAcquisition = null;
       this.stream = stream;
+      this.acquisitionState = "acquired";
       this.setTracksEnabled(stream, true);
+      this.captureGeneration += 1;
+      this.captureDiagnostics = {
+        ...this.captureDiagnostics,
+        microphoneAcquisitionCompletedAt: this.isoNow(),
+        microphoneAcquisitionMs: Math.max(0, Math.round(this.now() - startedMono)),
+        microphoneAcquisitionOutcome: "success",
+        captureGeneration: this.captureGeneration,
+        ...this.trackDiagnostics(stream),
+      };
       return stream;
     } catch (error) {
       if (stream) this.stopTracks(stream);
       const message = getAudioRecorderErrorMessage(error);
-      this.update({ status: "error", error: message });
-      throw new AudioRecorderError(message);
+      const code = error instanceof AudioRecorderError
+        ? error.code
+        : this.acquisitionErrorCode(error);
+      const outcome = this.acquisitionOutcome(error);
+      this.acquisitionState = outcome === "timeout"
+        ? "timed_out"
+        : outcome === "success"
+          ? "acquired"
+        : outcome === "unknown_failure"
+          ? "device_unavailable"
+          : outcome;
+      if (this.captureDiagnostics.microphoneAcquisitionAttemptId === attemptId) {
+        this.captureDiagnostics = {
+          ...this.captureDiagnostics,
+          microphoneAcquisitionCompletedAt: this.isoNow(),
+          microphoneAcquisitionMs: Math.max(0, Math.round(this.now() - startedMono)),
+          microphoneAcquisitionOutcome: outcome,
+        };
+      }
+      // Acquisition failures are recoverable. Keep the message, but never leave
+      // the recorder in a state that blocks the next explicit user attempt.
+      this.update({ status: "idle", error: message });
+      throw new AudioRecorderError(message, code);
+    } finally {
+      clearTimer(timer);
+      if (this.activeAcquisitionGeneration === generation) {
+        this.activeAcquisitionGeneration = 0;
+      }
+      this.cancelAcquisition = null;
     }
   }
 
@@ -300,6 +527,8 @@ export class AudioRecorderController {
       this.stream = stream;
       this.recorder = recorder;
       this.chunks = [];
+      this.chunkCount = 0;
+      this.chunkBytes = 0;
       recorder.addEventListener("dataavailable", this.handleDataAvailable);
       recorder.addEventListener("stop", this.handleStop);
       recorder.addEventListener("error", this.handleRecorderError);
@@ -312,10 +541,26 @@ export class AudioRecorderController {
       });
       return stream;
     } catch (error) {
+      if (stream) {
+        this.stopTracks(stream);
+        if (this.stream === stream) this.stream = null;
+        this.streamPoisoned = true;
+      }
       this.releaseRecorder();
       const message = getAudioRecorderErrorMessage(error);
-      this.update({ status: "error", error: message });
-      throw new AudioRecorderError(message);
+      const recoverableAcquisitionError = error instanceof AudioRecorderError &&
+        (error.code.startsWith("microphone_") || [
+          "stale_microphone_acquisition",
+          "unknown_failure",
+          "recording_failed",
+        ].includes(error.code));
+      this.update({
+        status: recoverableAcquisitionError ? "idle" : "error",
+        error: message,
+      });
+      throw error instanceof AudioRecorderError
+        ? error
+        : new AudioRecorderError(message);
     }
   }
 
@@ -355,11 +600,16 @@ export class AudioRecorderController {
     }
 
     this.stopTracks(this.stream);
+    this.activeAcquisitionGeneration = 0;
+    this.acquisitionGeneration += 1;
+    this.cancelAcquisition?.();
+    this.cancelAcquisition = null;
     this.removeRecorderListeners();
     this.rejectStop?.(new AudioRecorderError(ERROR_MESSAGES.stop));
     this.clearStopPromise();
     this.recorder = null;
     this.stream = null;
+    this.acquisitionState = "idle";
     this.chunks = [];
     this.acquirePromise = null;
     this.preparePromise = null;
@@ -367,7 +617,16 @@ export class AudioRecorderController {
   }
 
   private handleDataAvailable = (event: BlobEvent) => {
-    if (event.data?.size > 0) this.chunks.push(event.data);
+    if (event.data?.size > 0) {
+      this.chunks.push(event.data);
+      this.chunkCount += 1;
+      this.chunkBytes += event.data.size;
+      this.captureDiagnostics = {
+        ...this.captureDiagnostics,
+        mediaRecorderChunkCount: this.chunkCount,
+        mediaRecorderTotalChunkBytes: this.chunkBytes,
+      };
+    }
   };
 
   private handleStop = () => {
@@ -412,8 +671,9 @@ export class AudioRecorderController {
     }
     this.stopTracks(this.stream);
     this.stream = null;
+    this.streamPoisoned = true;
     this.releaseRecorder();
-    this.update({ status: "error", error: error.message });
+    this.update({ status: "idle", error: error.message });
     this.rejectStop?.(error);
     this.clearStopPromise();
   }
@@ -441,11 +701,65 @@ export class AudioRecorderController {
   }
 
   private isStreamUsable(stream: MediaStream) {
-    const tracks = stream.getTracks();
+    const tracks = stream.getAudioTracks?.() ?? stream.getTracks();
     return (
       tracks.length > 0 &&
       tracks.every((track) => track.readyState === undefined || track.readyState !== "ended")
     );
+  }
+
+  private trackDiagnostics(stream: MediaStream) {
+    const track = (stream.getAudioTracks?.() ?? stream.getTracks())[0];
+    return {
+      trackReadyStateAtAcquisition: track?.readyState ?? null,
+      trackEnabledAtAcquisition: typeof track?.enabled === "boolean" ? track.enabled : null,
+      trackMutedAtAcquisition: typeof track?.muted === "boolean" ? track.muted : null,
+    };
+  }
+
+  private acquisitionOutcome(error: unknown): MicrophoneAcquisitionOutcome {
+    if (error instanceof AudioRecorderError) {
+      if (error.code === "microphone_acquisition_timeout") return "timeout";
+      if (error.code === "microphone_acquisition_aborted") return "aborted";
+      if (error.code === "stale_microphone_acquisition") return "stale_result";
+    }
+    switch (errorName(error)) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+      case "SecurityError": return "permission_denied";
+      case "NotFoundError":
+      case "DevicesNotFoundError":
+      case "NotReadableError":
+      case "TrackStartError": return "device_unavailable";
+      default: return "unknown_failure";
+    }
+  }
+
+  private acquisitionErrorCode(error: unknown) {
+    switch (errorName(error)) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+      case "SecurityError": return "microphone_permission_denied";
+      case "NotFoundError":
+      case "DevicesNotFoundError":
+      case "NotReadableError":
+      case "TrackStartError": return "microphone_device_unavailable";
+      default: return "unknown_failure";
+    }
+  }
+
+  private now() {
+    return (this.dependencies.now ?? (() => performance.now()))();
+  }
+
+  private isoNow() {
+    return new Date((this.dependencies.wallNow ?? Date.now)()).toISOString();
+  }
+
+  private id() {
+    return this.dependencies.randomId?.() ??
+      globalThis.crypto?.randomUUID?.() ??
+      `mic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
   private clearStopPromise() {

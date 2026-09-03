@@ -191,6 +191,26 @@ export type TranslationDiagnostics = {
   ttsStreamingUsed?: boolean;
   earlyTtsUsed?: boolean;
   streamingFallbackReason?: string;
+  microphoneAcquisitionAttemptId?: string | null;
+  microphoneAcquisitionStartedAt?: string | null;
+  microphoneAcquisitionCompletedAt?: string | null;
+  microphoneAcquisitionMs?: number | null;
+  microphoneAcquisitionOutcome?: string | null;
+  captureGeneration?: number | null;
+  freshStreamRequested?: boolean;
+  streamReused?: boolean;
+  trackReadyStateAtAcquisition?: string | null;
+  trackEnabledAtAcquisition?: boolean | null;
+  trackMutedAtAcquisition?: boolean | null;
+  mediaRecorderChunkCount?: number;
+  mediaRecorderTotalChunkBytes?: number;
+  audioBlobSize?: number | null;
+  audioSignalObserved?: boolean | null;
+  realtimeTransportReady?: boolean;
+  realtimeInputTrackGeneration?: number | null;
+  realtimeFirstDeltaObserved?: boolean;
+  realtimeFinalTranscriptReceived?: boolean;
+  capturePathOutcome?: string | null;
 };
 
 export type TranslationEntry = {
@@ -217,6 +237,8 @@ export type TranslatorApiErrorCode =
   | "invalid_direction"
   | "invalid_audio_format"
   | "audio_too_large"
+  | "invalid_audio_capture"
+  | "no_audio_captured"
   | "no_speech"
   | "unsupported_language"
   | "transcription_failed"

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestClassicTranslation } from "@/lib/translator/classicTranslationPipeline";
 import type { TranslationResult } from "@/lib/translator/types";
 import { TranslatorOperationError } from "@/lib/translator/reliability";
@@ -22,6 +22,32 @@ const result = {
 } satisfies TranslationResult;
 
 describe("classic post-stop translation path", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("never uploads or retries an invalid multi-second backup recording", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: false, fallbackReason: "transcript_not_finalized" },
+      transcriptionMs: undefined,
+      getAudioBlob: vi.fn(async () =>
+        new Blob(["12345"], { type: "audio/webm" })),
+      recordedAudioDiagnostics: {
+        recordingDurationMs: 4_000,
+        chunkCount: 1,
+        totalChunkBytes: 5,
+      },
+      direction,
+      signal: new AbortController().signal,
+      onRetry: vi.fn(),
+    })).rejects.toMatchObject({
+      failure: {
+        apiErrorCode: "invalid_audio_capture",
+        retryable: false,
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("retries one safe 503 failure exactly once and then succeeds", async () => {
     const temporary = new TranslatorOperationError({
       category: "SERVICE_UNAVAILABLE", message: "temporary", healthStatus: "offline",
@@ -125,6 +151,9 @@ describe("classic post-stop translation path", () => {
     "transcript_not_finalized",
     "session_error",
     "transcript_timeout",
+    "realtime_circuit_breaker",
+    "realtime_disabled",
+    "realtime_track_rebind_failed",
     "timeout",
   ] as const)("uses the preserved audio upload fallback for %s", async (fallbackReason) => {
     const fallbackResult = {

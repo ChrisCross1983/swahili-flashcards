@@ -102,6 +102,14 @@ import {
   type TranslatorAudioCaptureMetadata,
   type TranslatorAudioQualityMetrics,
 } from "@/lib/translator/audioQuality";
+import {
+  INTERNAL_TRANSLATOR_QA_ENABLED,
+  isClassicRealtimeEnabledForUserAgent,
+} from "@/lib/translator/capturePolicy";
+import {
+  createBrowserTranslatorIncidentStore,
+  type PersistedTranslatorIncident,
+} from "@/lib/translator/incidentPersistence";
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
@@ -119,7 +127,11 @@ export default function TranslatorView() {
       DEFAULT_TRANSLATOR_DIAGNOSTICS_SETTINGS,
     );
   const diagnosticsSettingsRef = useRef(diagnosticsSettings);
-  const [, setQualityRevision] = useState(0);
+  const [qualityRevision, setQualityRevision] = useState(0);
+  const [lastIncident, setLastIncident] =
+    useState<PersistedTranslatorIncident | null>(null);
+  const incidentStoreRef =
+    useRef<ReturnType<typeof createBrowserTranslatorIncidentStore>>(null);
   const [qaNextFailure, setQaNextFailure] = useState<
     "realtime" | "translation" | "tts" | "network" | null
   >(null);
@@ -165,6 +177,9 @@ export default function TranslatorView() {
     stopRecording,
     suspendMicrophone,
     releaseMicrophone,
+    poisonCurrentStream,
+    abortPendingAcquisition,
+    getCaptureDiagnostics,
     disposeRecorder,
     error: recorderError,
     clearError: clearRecorderError,
@@ -194,10 +209,17 @@ export default function TranslatorView() {
   const feedbackByTurnRef = useRef(new Map<string, SavedTranslatorFeedback>());
 
   useEffect(() => {
+    let active = true;
     const settings = loadTranslatorDiagnosticsSettings(localStorage);
     diagnosticsSettingsRef.current = settings;
     setDiagnosticsSettings(settings);
     installationIdRef.current = getOrCreateInstallationId(localStorage);
+    incidentStoreRef.current = createBrowserTranslatorIncidentStore();
+    void incidentStoreRef.current?.latest(sessionIdRef.current)
+      .then((incident) => {
+        if (active) setLastIncident(incident);
+      })
+      .catch(() => undefined);
     telemetryQueueRef.current = new TranslatorTelemetryQueue({
       storage: localStorage,
       isEnabled: () =>
@@ -209,7 +231,10 @@ export default function TranslatorView() {
     }
     const flushOnline = () => void telemetryQueueRef.current?.flush();
     window.addEventListener("online", flushOnline);
-    return () => window.removeEventListener("online", flushOnline);
+    return () => {
+      active = false;
+      window.removeEventListener("online", flushOnline);
+    };
   }, []);
 
   const updateDiagnosticsSetting = useCallback(<K extends keyof TranslatorDiagnosticsSettings>(
@@ -236,6 +261,8 @@ export default function TranslatorView() {
           audioBlobByTurnRef.current.delete(turnId);
         }
       }
+      void incidentStoreRef.current?.purgeIneligibleAudio()
+        .catch(() => undefined);
     }
   }, []);
 
@@ -247,6 +274,9 @@ export default function TranslatorView() {
       releaseMicrophone: () => {
         releaseMicrophone();
       },
+      realtimeEnabled:
+        typeof navigator !== "undefined" &&
+        isClassicRealtimeEnabledForUserAgent(navigator.userAgent),
     });
     realtimeManagerRef.current = manager;
     return manager;
@@ -258,12 +288,13 @@ export default function TranslatorView() {
     activeRealtimeTurnRef.current = null;
     translationInFlightRef.current = false;
     recordingStartInFlightRef.current = false;
+    abortPendingAcquisition();
     suspendMicrophone();
     clearRecorderError();
     if (recorderStatus === "error") disposeRecorder();
     audioQualityMonitorRef.current?.stop();
     audioQualityMonitorRef.current = null;
-  }, [clearRecorderError, disposeRecorder, recorderStatus, suspendMicrophone]);
+  }, [abortPendingAcquisition, clearRecorderError, disposeRecorder, recorderStatus, suspendMicrophone]);
 
   const rememberDiagnosticEvent = useCallback((
     turnId: string,
@@ -301,6 +332,7 @@ export default function TranslatorView() {
       if (typeof oldestTurnId !== "string") break;
       audioBlobByTurnRef.current.delete(oldestTurnId);
     }
+    setQualityRevision((current) => current + 1);
   }, []);
 
   const finalizeTurnConsent = useCallback((turnId: string) => {
@@ -383,6 +415,22 @@ export default function TranslatorView() {
       warmStart: d?.warmStart === true,
       realtimeConnectionReused: d?.realtimeConnectionReused === true,
       fallbackReason: d?.fallbackReason ?? null,
+      microphoneAcquisitionAttemptId: d?.microphoneAcquisitionAttemptId ?? null,
+      microphoneAcquisitionMs: finite(d?.microphoneAcquisitionMs),
+      microphoneAcquisitionOutcome: d?.microphoneAcquisitionOutcome ?? null,
+      captureGeneration: finite(d?.captureGeneration),
+      freshStreamRequested: d?.freshStreamRequested === true,
+      streamReused: d?.streamReused === true,
+      mediaRecorderChunkCount: finite(d?.mediaRecorderChunkCount),
+      mediaRecorderTotalChunkBytes: finite(d?.mediaRecorderTotalChunkBytes),
+      audioBlobSize: finite(d?.audioBlobSize),
+      audioSignalObserved:
+        typeof d?.audioSignalObserved === "boolean" ? d.audioSignalObserved : null,
+      realtimeTransportReady: d?.realtimeTransportReady === true,
+      realtimeInputTrackGeneration: finite(d?.realtimeInputTrackGeneration),
+      realtimeFirstDeltaObserved: d?.realtimeFirstDeltaObserved === true,
+      realtimeFinalTranscriptReceived: d?.realtimeFinalTranscriptReceived === true,
+      capturePathOutcome: d?.capturePathOutcome ?? null,
       recordClickToRecordingStartedMs: finite(d?.recordClickToRecordingStartedMs),
       stopToTranscriptFinalMs: finite(d?.stopToTranscriptFinalMs),
       transcriptFinalToTranslationVisibleMs: finite(d?.transcriptFinalToTranslationVisibleMs),
@@ -594,6 +642,7 @@ export default function TranslatorView() {
   useEffect(() => {
     const handlePageHide = () => {
       requestAbortRef.current?.abort();
+      abortPendingAcquisition();
       stopPlayback();
       realtimeManagerRef.current?.close("classic_page_hide");
       realtimeManagerRef.current = null;
@@ -605,7 +654,18 @@ export default function TranslatorView() {
     };
     window.addEventListener("pagehide", handlePageHide);
     return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [disposeRecorder, stopPlayback]);
+  }, [abortPendingAcquisition, disposeRecorder, stopPlayback]);
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) return;
+      // getUserMedia cannot be cancelled portably. Invalidating the attempt is
+      // enough; a late result is stopped by the recorder generation guard.
+      abortPendingAcquisition();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [abortPendingAcquisition]);
   useEffect(
     () => () => {
       mountedRef.current = false;
@@ -659,6 +719,8 @@ export default function TranslatorView() {
       turnPerformance.markGetUserMediaReady();
       await prepareRecording();
       turnPerformance.markMediaRecorderPrepared();
+      const captureDiagnostics = getCaptureDiagnostics();
+      if (captureDiagnostics) turnPerformance.setCaptureDiagnostics(captureDiagnostics);
       realtimeTurn = await getRealtimeManager().prepareTurn(
         stream,
         () => turnPerformance.markFirstTranscriptDelta(),
@@ -669,7 +731,15 @@ export default function TranslatorView() {
       await startPreparedRecording();
       turnPerformance.markRecordingStarted();
       dispatch({ type: "START_RECORDING" });
-      getRealtimeManager().recordingStarted(realtimeTurn, stream);
+      await getRealtimeManager().recordingStarted(
+        realtimeTurn,
+        stream,
+        captureDiagnostics?.captureGeneration ?? 0,
+      );
+      turnPerformance.setCaptureDiagnostics({
+        realtimeTransportReady: realtimeTurn.realtimeTransportReady,
+        realtimeInputTrackGeneration: realtimeTurn.realtimeInputTrackGeneration,
+      });
       const recordingConsent = consentByTurnRef.current.get(
         activeTurnIdRef.current ?? "",
       )?.consentAtRecordingStart;
@@ -697,6 +767,13 @@ export default function TranslatorView() {
       }
       activeRealtimeTurnRef.current = null;
       const failure = classifyTranslatorFailure(error, "recording_setup");
+      turnPerformance.setCaptureDiagnostics({
+        ...(getCaptureDiagnostics() ?? {}),
+        capturePathOutcome:
+          failure.apiErrorCode === "microphone_acquisition_timeout"
+            ? "microphone_acquisition_timeout"
+            : "recording_failed",
+      });
       const message = failure.category === "RECORDER"
         ? getAudioRecorderErrorMessage(error)
         : failure.message;
@@ -735,7 +812,7 @@ export default function TranslatorView() {
           translationModel: "gpt-5.6-terra",
           ttsModel: "gpt-4o-mini-tts",
           ttsSpeed: speechSpeed,
-          errorCode: "recording_failed",
+          errorCode: failure.apiErrorCode ?? "recording_failed",
           errorStage: "recording_setup",
           errorType: error instanceof Error ? error.name : "UnknownError",
           sanitizedErrorMessage: message,
@@ -744,7 +821,7 @@ export default function TranslatorView() {
           stateAfterCleanup: failure.category === "AUTH" ? "error" : "idle",
           recorderStatusBefore,
           recorderStatusAtFailure: recorderStatus,
-          recorderStatusAfterCleanup: null,
+          recorderStatusAfterCleanup: "idle",
           realtimeManagerStateBefore,
           realtimeManagerStateAtFailure:
             realtimeManagerRef.current?.getState() ?? "idle",
@@ -805,7 +882,7 @@ export default function TranslatorView() {
     }
 
     try {
-      if (qaNextFailure === "tts" && process.env.NODE_ENV !== "production") {
+      if (qaNextFailure === "tts" && INTERNAL_TRANSLATOR_QA_ENABLED) {
         setQaNextFailure(null);
         throw new TranslatorOperationError({
           category: "TTS", message: "Simulierter TTS-Fehler", healthStatus: "degraded",
@@ -1028,12 +1105,27 @@ export default function TranslatorView() {
             fallbackReason:
               "realtime_not_ready_at_recording_start" as const,
           };
-      if (qaNextFailure === "realtime" && process.env.NODE_ENV !== "production") {
+      if (qaNextFailure === "realtime" && INTERNAL_TRANSLATOR_QA_ENABLED) {
         realtimeResult = { ok: false, fallbackReason: "session_error" };
         qaRealtimeScenarioId = "qa_realtime_failure";
         setQaNextFailure(null);
       }
       turnPerformance.setRealtimeSetupDuration(realtimeTurn?.realtimeSetupMs);
+      let captureDiagnostics = getCaptureDiagnostics();
+      if (captureDiagnostics) {
+        turnPerformance.setCaptureDiagnostics({
+          ...captureDiagnostics,
+          realtimeTransportReady: realtimeTurn?.realtimeTransportReady ?? false,
+          realtimeInputTrackGeneration:
+            realtimeTurn?.realtimeInputTrackGeneration ?? null,
+          realtimeFirstDeltaObserved: realtimeTurn?.firstDeltaSeen ?? false,
+          realtimeFinalTranscriptReceived: realtimeResult.ok,
+          audioSignalObserved:
+            typeof monitorResult.metrics.speechActivityRatio === "number"
+              ? monitorResult.metrics.speechActivityRatio > 0
+              : null,
+        });
+      }
       suspendMicrophone();
 
       let transcriptionMs: number | undefined;
@@ -1053,11 +1145,27 @@ export default function TranslatorView() {
         );
       }
       const usedAudioFallback = !(realtimeResult.ok && transcriptionMs !== undefined);
+      let completedFallbackAudio: Awaited<typeof audioBlobResult> | null = null;
+      if (usedAudioFallback) {
+        completedFallbackAudio = await audioBlobResult;
+        captureDiagnostics = getCaptureDiagnostics();
+        if (captureDiagnostics) {
+          turnPerformance.setCaptureDiagnostics(captureDiagnostics);
+        }
+      }
       turnPerformance.markTranslationRequestStarted();
+      const translationCorrelationId = activeTurnIdRef.current
+        ? `translation-${activeTurnIdRef.current}`
+        : undefined;
+      if (translationCorrelationId) {
+        turnPerformance.setCaptureDiagnostics({
+          translationRequestCorrelationId: translationCorrelationId,
+        });
+      }
       errorStage = "translation";
       if (
         (qaNextFailure === "translation" || qaNextFailure === "network") &&
-        process.env.NODE_ENV !== "production"
+        INTERNAL_TRANSLATOR_QA_ENABLED
       ) {
         const simulated = qaNextFailure;
         setQaNextFailure(null);
@@ -1085,9 +1193,14 @@ export default function TranslatorView() {
         },
         direction,
         signal: abortController.signal,
-        correlationId: activeTurnIdRef.current
-          ? `translation-${activeTurnIdRef.current}`
-          : undefined,
+        correlationId: translationCorrelationId,
+        recordedAudioDiagnostics: {
+          recordingDurationMs:
+            turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+          chunkCount: captureDiagnostics?.mediaRecorderChunkCount ?? null,
+          totalChunkBytes:
+            captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
+        },
         onResponseCompleted: (now) =>
           turnPerformance.markTranslationClientResponseCompleted(now),
         onRetry: ({ failure }) => {
@@ -1098,6 +1211,15 @@ export default function TranslatorView() {
       if (usedAudioFallback) {
         turnPerformance.setFallbackServerTimings(result.diagnostics);
       }
+      turnPerformance.setCaptureDiagnostics({
+        audioBlobSize:
+          completedFallbackAudio?.ok === true
+            ? completedFallbackAudio.audioBlob.size
+            : null,
+        capturePathOutcome: usedAudioFallback
+          ? "audio_fallback_success"
+          : "realtime_success",
+      });
       const finalizedConsent = finalizeTurnConsent(activeTurnId);
       if (finalizedConsent) {
         createSpeechReviewCandidate({
@@ -1127,6 +1249,14 @@ export default function TranslatorView() {
       );
       void audioBlobResult.then((recordedAudio) => {
         if (!recordedAudio.ok) return;
+        turnPerformance.setCaptureDiagnostics({
+          audioBlobSize: recordedAudio.audioBlob.size,
+        });
+        updateEntryDiagnostics(
+          entry,
+          { audioBlobSize: recordedAudio.audioBlob.size },
+          "audioBackupFinalized",
+        );
         audioMetadataByTurnRef.current.set(entry.id, {
           audioMimeType: recordedAudio.audioBlob.type || null,
           audioSize: recordedAudio.audioBlob.size,
@@ -1218,9 +1348,21 @@ export default function TranslatorView() {
         const failure = recordedAudio.ok
           ? classifyTranslatorFailure(error, errorStage)
           : classifyTranslatorFailure(recordedAudio.error, "recording_stop");
+        const invalidCapture =
+          failure.apiErrorCode === "invalid_audio_capture" ||
+          failure.apiErrorCode === "no_audio_captured";
+        if (invalidCapture) {
+          poisonCurrentStream();
+          turnPerformance.setCaptureDiagnostics({
+            audioBlobSize: recordedAudio.ok ? recordedAudio.audioBlob.size : null,
+            capturePathOutcome: "invalid_audio_capture",
+          });
+        }
         const message = recordedAudio.ok
           ? failure.message || getTranslatorClientErrorMessage(error)
           : getAudioRecorderErrorMessage(recordedAudio.error);
+        const failureStage = invalidCapture ? "recording_stop" :
+          recordedAudio.ok ? errorStage : "recording_stop";
         const diagnostics = turnPerformance.getDiagnostics();
         const turnId =
           activeTurnIdRef.current ??
@@ -1255,11 +1397,12 @@ export default function TranslatorView() {
         const failureEvent = rememberDiagnosticEvent(
           turnId,
           failure,
-          recordedAudio.ok ? errorStage : "recording_stop",
+          failureStage,
           "failure",
           recoveryAction,
           failure.category === "AUTH" ? false : true,
-          recordedAudio.ok && !qaScenarioId ? "/api/translator/translate" : null,
+          recordedAudio.ok && !invalidCapture && !qaScenarioId
+            ? "/api/translator/translate" : null,
           qaScenarioId,
         );
         setFailedReportTurns((current) => [
@@ -1293,10 +1436,10 @@ export default function TranslatorView() {
             audioSize: recordedAudio.ok
               ? recordedAudio.audioBlob.size
               : null,
-            errorCode: recordedAudio.ok
+            errorCode: failure.apiErrorCode ?? (recordedAudio.ok
               ? "processing_failed"
-              : "recording_failed",
-            errorStage: recordedAudio.ok ? errorStage : "recording_stop",
+              : "recording_failed"),
+            errorStage: failureStage,
             errorType: error instanceof Error ? error.name : "UnknownError",
             sanitizedErrorMessage: message,
             stateBeforeRecording: activeTurnStateBeforeRecordingRef.current,
@@ -1304,7 +1447,7 @@ export default function TranslatorView() {
             stateAfterCleanup: failure.category === "AUTH" ? "error" : "idle",
             recorderStatusBefore: recorderStatusBeforeStop,
             recorderStatusAtFailure: recorderStatus,
-            recorderStatusAfterCleanup: null,
+            recorderStatusAfterCleanup: "idle",
             realtimeManagerStateBefore: realtimeManagerStateBeforeStop,
             realtimeManagerStateAtFailure:
               realtimeManagerRef.current?.getState() ?? "idle",
@@ -1321,8 +1464,17 @@ export default function TranslatorView() {
               recordedAudio.ok &&
               finalizedConsent !== null &&
               speechAudioEligibleForTurn(finalizedConsent),
-            authCheckAttempted: recordedAudio.ok,
-            authCheckSucceeded: failure.authFailureType !== null ? false : true,
+            authCheckAttempted:
+              recordedAudio.ok &&
+              !qaScenarioId &&
+              failure.apiErrorCode !== "invalid_audio_capture" &&
+              failure.apiErrorCode !== "no_audio_captured",
+            authCheckSucceeded:
+              !recordedAudio.ok || qaScenarioId ||
+              failure.apiErrorCode === "invalid_audio_capture" ||
+              failure.apiErrorCode === "no_audio_captured"
+                ? null
+                : failure.authFailureType !== null ? false : true,
             authFailureType: failure.authFailureType,
           },
         ]);
@@ -1344,7 +1496,7 @@ export default function TranslatorView() {
             });
           }
           const turnConsent = consentByTurnRef.current.get(turnId);
-          if (turnConsent && speechAudioEligibleForTurn(turnConsent)) {
+          if (!invalidCapture && turnConsent && speechAudioEligibleForTurn(turnConsent)) {
             rememberLocalAudio(turnId, recordedAudio.audioBlob);
           }
         }
@@ -1352,7 +1504,7 @@ export default function TranslatorView() {
           turnId,
           failure,
           diagnosticEvent: failureEvent,
-          errorStage: recordedAudio.ok ? errorStage : "recording_stop",
+          errorStage: failureStage,
           recoveryAction,
           recoverySucceeded: failure.category !== "AUTH",
         });
@@ -1502,6 +1654,67 @@ export default function TranslatorView() {
     downloadTranslatorDiagnosticBundle(bundle);
   }
 
+  useEffect(() => {
+    if (failedReportTurns.length === 0 || !incidentStoreRef.current) return;
+    const report = buildCurrentReport();
+    const audio = Array.from(audioBlobByTurnRef.current, ([turnId, blob]) => ({
+      turnId,
+      blob,
+      durationMs:
+        audioCaptureByTurnRef.current.get(turnId)?.metadata.durationMs ?? null,
+      recognitionReviewStatus:
+        qualityByTurnRef.current.get(turnId)?.recognitionReviewStatus ?? null,
+      audioQualityMetrics:
+        audioCaptureByTurnRef.current.get(turnId)?.metrics ??
+        UNAVAILABLE_AUDIO_QUALITY,
+    }));
+    void incidentStoreRef.current.save({
+      sessionId: sessionIdRef.current,
+      reportId: reportIdRef.current,
+      createdAt: new Date().toISOString(),
+      turnCount: report.turns.length,
+      report,
+      audio,
+    }).then((saved) => setLastIncident(saved)).catch(() => undefined);
+    // Refs hold the privacy-filtered audio/quality snapshot. The revision is
+    // intentionally the trigger for their non-React mutations.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failedReportTurns, qualityRevision, state.entries]);
+
+  async function handleExportLastIncident() {
+    if (!lastIncident) return;
+    const included = new Set(lastIncident.audio.map((audio) => audio.turnId));
+    const base = lastIncident.report && typeof lastIncident.report === "object"
+      ? lastIncident.report as Record<string, unknown>
+      : {};
+    const turns = Array.isArray(base.turns)
+      ? base.turns.map((turn) => {
+          if (!turn || typeof turn !== "object") return turn;
+          const record = turn as Record<string, unknown>;
+          return {
+            ...record,
+            audioIncludedInDiagnosticBundle:
+              typeof record.turnId === "string" && included.has(record.turnId),
+          };
+        })
+      : [];
+    const report = {
+      ...base,
+      turns,
+      audioIncludedTurnCount: included.size,
+      incidentExpiresAt: lastIncident.expiresAt,
+    };
+    const bundle = await createTranslatorDiagnosticBundle({
+      report,
+      includeAudio: true,
+      audioFiles: lastIncident.audio.map((audio) => ({
+        ...audio,
+        consentEligible: true,
+      })),
+    });
+    downloadTranslatorDiagnosticBundle(bundle);
+  }
+
   function handleTranscriptCorrection(entry: TranslationEntry, correctedTranscript: string) {
     const current = qualityByTurnRef.current.get(entry.id);
     if (!current) return;
@@ -1542,7 +1755,7 @@ export default function TranslatorView() {
 
   return (
     <main className="min-h-screen bg-base px-4 pb-[max(5rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:p-6">
-      <div className="mx-auto w-full max-w-xl">
+      <div className="mx-auto flex w-full max-w-xl flex-col">
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-semibold text-primary">Übersetzer</h1>
@@ -1750,7 +1963,14 @@ export default function TranslatorView() {
           </div>
         </section>
 
-        <section className="panel mt-5 p-5" aria-labelledby="diagnostics-heading">
+        <details className="order-2 mt-5 rounded-xl border border-soft bg-surface">
+          <summary className="flex min-h-12 cursor-pointer items-center justify-between px-4 py-3 font-medium text-primary">
+            <span>⚙ Erweiterte Einstellungen</span>
+            {diagnosticsSettings.diagnosticsSharingEnabled ? (
+              <span className="text-xs font-normal text-muted">Diagnose aktiviert</span>
+            ) : null}
+          </summary>
+          <section className="border-t border-soft p-5" aria-labelledby="diagnostics-heading">
           <h2 id="diagnostics-heading" className="text-lg font-semibold text-primary">
             Datenschutz &amp; Diagnose
           </h2>
@@ -1829,7 +2049,7 @@ export default function TranslatorView() {
               />
             </div>
           </div>
-          {process.env.NODE_ENV !== "production" ? (
+          {INTERNAL_TRANSLATOR_QA_ENABLED ? (
             <div className="mt-4 border-t border-soft pt-4">
               <label className="flex items-center gap-3 font-medium text-primary">
                 <input
@@ -1881,9 +2101,10 @@ export default function TranslatorView() {
               ) : null}
             </div>
           ) : null}
-        </section>
+          </section>
+        </details>
 
-        <section className="mt-7" aria-labelledby="conversation-heading">
+        <section className="order-1 mt-7" aria-labelledby="conversation-heading">
           <div className="flex items-center justify-between gap-4">
             <h2 id="conversation-heading" className="text-xl font-semibold">Gespräch</h2>
             <button
@@ -1916,7 +2137,7 @@ export default function TranslatorView() {
                       : "preparing";
                 const speechReview = qualityByTurnRef.current.get(entry.id) ?? null;
                 const speechReviewEnabled =
-                  process.env.NODE_ENV !== "production" && speechReview !== null;
+                  INTERNAL_TRANSLATOR_QA_ENABLED && speechReview !== null;
 
                 return (
                   <TranslationCard
@@ -1952,7 +2173,7 @@ export default function TranslatorView() {
               })}
             </div>
           )}
-          {process.env.NODE_ENV !== "production" &&
+          {INTERNAL_TRANSLATOR_QA_ENABLED &&
           diagnosticsSettings.internalQaModeEnabled &&
           failedSpeechReviewTurnIds.length > 0 ? (
             <div className="mt-4 space-y-2" aria-label="Sprachqualität fehlgeschlagener Turns">
@@ -1987,6 +2208,15 @@ export default function TranslatorView() {
               >
                 Diagnosepaket exportieren
               </button>
+              {state.entries.length === 0 && failedReportTurns.length === 0 && lastIncident ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary mt-2 min-h-12 w-full"
+                  onClick={() => void handleExportLastIncident()}
+                >
+                  Letzte Diagnose exportieren
+                </button>
+              ) : null}
               {process.env.NODE_ENV === "development" ? (
                 <p className="mt-2 text-center text-xs text-muted">
                   Enthält Gespräch, Performance und technische Diagnostik – kein Audio.

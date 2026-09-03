@@ -101,6 +101,22 @@ export function classifyTranslatorFailure(
 ): TranslatorFailure {
   const existing = errorFailure(error);
   if (existing) return existing;
+  const recorderCode = error && typeof error === "object" && "code" in error &&
+    typeof error.code === "string" ? error.code : null;
+  if (recorderCode?.startsWith("microphone_") ||
+      recorderCode === "stale_microphone_acquisition") {
+    const permissionDenied = recorderCode === "microphone_permission_denied";
+    return {
+      category: "RECORDER",
+      message: error instanceof Error ? error.message : MESSAGES.RECORDER,
+      healthStatus: "healthy",
+      httpStatus: null,
+      apiErrorCode: recorderCode,
+      retryable: !permissionDenied,
+      retryAfterMs: null,
+      authFailureType: null,
+    };
+  }
   if (error instanceof DOMException && error.name === "AbortError") {
     return {
       category: "UNKNOWN",

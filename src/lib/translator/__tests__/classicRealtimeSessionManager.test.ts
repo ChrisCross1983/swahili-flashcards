@@ -21,7 +21,10 @@ type Handlers = {
   onDiagnosticEvent?: (event: RealtimeTranscriptionDiagnosticEvent) => void;
 };
 
-function createHarness() {
+function createHarness(options: {
+  finalizationFailureThreshold?: number;
+  circuitBreakerTurns?: number;
+} = {}) {
   let monotonic = 0;
   let wall = Date.parse("2026-08-31T06:00:00.000Z");
   let id = 0;
@@ -34,6 +37,7 @@ function createHarness() {
     finalizeTurn: ReturnType<typeof vi.fn>;
     clearTurn: ReturnType<typeof vi.fn>;
     setInputEnabled: ReturnType<typeof vi.fn>;
+    replaceInputStream: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
     operations: string[];
   }> = [];
@@ -75,6 +79,9 @@ function createHarness() {
         setInputEnabled: vi.fn(async (enabled: boolean) => {
           operations.push(enabled ? "sender_on" : "sender_off");
         }),
+        replaceInputStream: vi.fn(async (_stream: MediaStream, generation: number) => {
+          operations.push(`bind_${generation}`);
+        }),
         disconnect: vi.fn(),
       };
       transports.push(transport);
@@ -84,6 +91,8 @@ function createHarness() {
     now: () => monotonic,
     wallNow: () => wall,
     randomId: () => `id-${++id}`,
+    finalizationFailureThreshold: options.finalizationFailureThreshold,
+    circuitBreakerTurns: options.circuitBreakerTurns,
   });
   const stream = {} as MediaStream;
   const advanceClock = (ms: number) => {
@@ -126,7 +135,7 @@ describe("ClassicRealtimeSessionManager", () => {
       warmStart: true,
       connectionId: "id-2",
     });
-    harness.manager.recordingStarted(second, harness.stream);
+    await harness.manager.recordingStarted(second, harness.stream, 2);
     const secondFinal = harness.manager.finishTurn(second);
     harness.transports[0].transcript.resolve("Habari yako?");
     await expect(secondFinal).resolves.toEqual({
@@ -135,7 +144,7 @@ describe("ClassicRealtimeSessionManager", () => {
     });
 
     const third = await harness.manager.prepareTurn(harness.stream);
-    harness.manager.recordingStarted(third, harness.stream);
+    await harness.manager.recordingStarted(third, harness.stream, 3);
     const thirdFinal = harness.manager.finishTurn(third);
     harness.transports[0].transcript = deferred<string>();
     // finalizeTurn captured the previous resolved promise; it still represents one commit.
@@ -156,13 +165,14 @@ describe("ClassicRealtimeSessionManager", () => {
     harness.transports[0].operations.length = 0;
 
     const warm = await harness.manager.prepareTurn(harness.stream);
-    harness.manager.recordingStarted(warm, harness.stream);
+    await harness.manager.recordingStarted(warm, harness.stream, 2);
     const final = harness.manager.finishTurn(warm);
     harness.transports[0].transcript.resolve("Guten Morgen.");
     await final;
 
     expect(harness.transports[0].operations).toEqual([
       "clear",
+      "bind_2",
       "sender_on",
       "sender_off",
       "commit",
@@ -180,7 +190,7 @@ describe("ClassicRealtimeSessionManager", () => {
     await harness.manager.finishTurn(cold);
 
     const warm = await harness.manager.prepareTurn(harness.stream);
-    harness.manager.recordingStarted(warm, harness.stream);
+    await harness.manager.recordingStarted(warm, harness.stream, 2);
     harness.transports[0].handlers.onError();
     await expect(harness.manager.finishTurn(warm)).resolves.toEqual({
       ok: false,
@@ -234,7 +244,7 @@ describe("ClassicRealtimeSessionManager", () => {
     await harness.manager.finishTurn(cold);
 
     const warm = await harness.manager.prepareTurn(harness.stream);
-    harness.manager.recordingStarted(warm, harness.stream);
+    await harness.manager.recordingStarted(warm, harness.stream, 2);
     const final = harness.manager.finishTurn(warm);
     await vi.advanceTimersByTimeAsync(3_000);
 
@@ -296,5 +306,83 @@ describe("ClassicRealtimeSessionManager", () => {
       connectionFailures: 1,
     });
     harness.manager.close("test_cleanup");
+  });
+
+  it("binds the current capture generation before enabling a warm sender", async () => {
+    const harness = createHarness();
+    const first = await harness.manager.prepareTurn(harness.stream);
+    await harness.manager.recordingStarted(first, harness.stream, 1);
+    harness.transports[0].connection.resolve();
+    await flush();
+    await harness.manager.finishTurn(first);
+    harness.transports[0].operations.length = 0;
+
+    const nextStream = {} as MediaStream;
+    const warm = await harness.manager.prepareTurn(nextStream);
+    expect(harness.transports[0].operations).toEqual(["clear"]);
+
+    await harness.manager.recordingStarted(warm, nextStream, 2);
+
+    expect(harness.transports[0].replaceInputStream)
+      .toHaveBeenCalledWith(nextStream, 2);
+    expect(harness.transports[0].operations).toEqual([
+      "clear",
+      "bind_2",
+      "sender_on",
+    ]);
+    expect(warm.realtimeInputTrackGeneration).toBe(2);
+  });
+
+  it("rebinds a newer capture generation when a background connection resolves late", async () => {
+    const harness = createHarness();
+    const firstStream = {} as MediaStream;
+    const secondStream = {} as MediaStream;
+    const first = await harness.manager.prepareTurn(firstStream);
+    await harness.manager.recordingStarted(first, firstStream, 1);
+    await harness.manager.finishTurn(first);
+
+    const second = await harness.manager.prepareTurn(secondStream);
+    await harness.manager.recordingStarted(second, secondStream, 2);
+    harness.transports[0].connection.resolve();
+    await flush();
+
+    expect(harness.transports[0].replaceInputStream)
+      .toHaveBeenCalledWith(secondStream, 2);
+    expect(second.realtimeInputTrackGeneration).toBe(2);
+    expect(second.realtimeTransportReady).toBe(true);
+    await harness.manager.finishTurn(second);
+  });
+
+  it("temporarily bypasses realtime after the configured finalization threshold", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      finalizationFailureThreshold: 1,
+      circuitBreakerTurns: 2,
+    });
+    const cold = await harness.manager.prepareTurn(harness.stream);
+    await harness.manager.recordingStarted(cold, harness.stream, 1);
+    harness.transports[0].connection.resolve();
+    await flush();
+    await harness.manager.finishTurn(cold);
+
+    const warm = await harness.manager.prepareTurn(harness.stream);
+    await harness.manager.recordingStarted(warm, harness.stream, 2);
+    const final = harness.manager.finishTurn(warm);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(final).resolves.toMatchObject({ ok: false });
+
+    const bypassed = await harness.manager.prepareTurn(harness.stream);
+    expect(bypassed).toMatchObject({
+      transcriptionPath: "audio_upload_fallback",
+      fallbackReason: "realtime_circuit_breaker",
+      circuitBreakerBypassed: true,
+    });
+    await harness.manager.recordingStarted(bypassed, harness.stream, 3);
+    expect(harness.transports).toHaveLength(1);
+    await harness.manager.finishTurn(bypassed);
+    expect(harness.manager.getConnectionDiagnostics()).toMatchObject({
+      realtimeCircuitBreakerTrips: 1,
+      realtimeCircuitBreakerTurnsRemaining: 1,
+    });
   });
 });

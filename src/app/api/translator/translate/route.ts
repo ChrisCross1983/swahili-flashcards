@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/api/auth";
 import {
   getSupportedAudioFormat,
   MAX_TRANSLATION_AUDIO_BYTES,
+  normalizeAudioMimeType,
 } from "@/lib/translator/audioFormats";
 import type {
   TranslationLanguage,
@@ -31,6 +32,7 @@ import {
   TRANSLATOR_CORRELATION_HEADER,
   validCorrelationId,
 } from "@/lib/translator/performanceHeaders";
+import { isUsableRecordedAudio } from "@/lib/translator/recordedAudio";
 
 export const runtime = "nodejs";
 
@@ -57,12 +59,21 @@ function errorResponse(
   code: TranslatorApiErrorCode,
   error: string,
   recognizedTranscript: string | null = null,
+  correlationId: string | null = null,
 ) {
-  return NextResponse.json({
+  const response = NextResponse.json({
     error,
     code,
     ...(recognizedTranscript ? { recognizedTranscript } : {}),
   }, { status });
+  if (correlationId) response.headers.set(TRANSLATOR_CORRELATION_HEADER, correlationId);
+  return response;
+}
+
+function finiteFormNumber(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function parseLanguage(value: FormDataEntryValue | null): TranslationLanguage | null {
@@ -104,6 +115,11 @@ async function translationResponse(
   operation: (
     gateway: ReturnType<typeof createOpenAITranslatorGateway>,
   ) => Promise<TranslationResult>,
+  requestMetadata: {
+    audioBytes: number | null;
+    normalizedMimeType: string | null;
+    retryAttempt: number;
+  },
 ) {
   let openAiStartedAt: string | null = null;
   let openAiStartedMono: number | null = null;
@@ -293,13 +309,31 @@ async function translationResponse(
     const recognizedTranscript = error instanceof TranslatorPipelineError
       ? error.recognizedTranscript
       : null;
-    console.error("[translator] request failed", { code });
+    const httpStatus = code === "no_speech" || code === "unsupported_language"
+      ? 422
+      : code === "configuration" ? 503 : 502;
+    console.error("[translator] request failed", {
+      correlationId,
+      apiCode: code,
+      stage: code === "transcription_failed" ? "transcription" : "translation",
+      httpStatus,
+      audioBytes: requestMetadata.audioBytes,
+      normalizedMimeType: requestMetadata.normalizedMimeType,
+      transcriptionModel: requestMetadata.audioBytes === null
+        ? null
+        : "gpt-4o-mini-transcribe",
+      upstreamHttpStatus: null,
+      upstreamRequestId: null,
+      retryAttempt: requestMetadata.retryAttempt,
+    });
 
     if (code === "no_speech") {
       return errorResponse(
         422,
         "no_speech",
         "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
+        null,
+        correlationId,
       );
     }
     if (code === "unsupported_language") {
@@ -308,6 +342,7 @@ async function translationResponse(
         "unsupported_language",
         "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
         recognizedTranscript,
+        correlationId,
       );
     }
     if (code === "transcription_failed") {
@@ -315,6 +350,8 @@ async function translationResponse(
         502,
         "transcription_failed",
         "Die Aufnahme konnte nicht verarbeitet werden.",
+        null,
+        correlationId,
       );
     }
     if (code === "configuration") {
@@ -322,6 +359,8 @@ async function translationResponse(
         503,
         "service_unavailable",
         "Der Übersetzungsdienst ist nicht verfügbar.",
+        null,
+        correlationId,
       );
     }
     return errorResponse(
@@ -329,6 +368,7 @@ async function translationResponse(
       "translation_failed",
       "Die Übersetzung konnte nicht erstellt werden.",
       recognizedTranscript,
+      correlationId,
     );
   }
 }
@@ -344,6 +384,10 @@ export async function POST(request: Request) {
   const correlationId = validCorrelationId(
     request.headers.get(TRANSLATOR_CORRELATION_HEADER),
   );
+  const retryAttempt = Math.max(0, Math.min(1, Number.parseInt(
+    request.headers.get("X-Translator-Request-Attempt") ?? "0",
+    10,
+  ) || 0));
   timingContext.stages.start("auth");
   const { response } = await requireUser({
     onClientPreparationStarted: () => {
@@ -360,7 +404,16 @@ export async function POST(request: Request) {
     },
   });
   timingContext.stages.complete("auth");
-  if (response) return response;
+  if (response) {
+    if (!correlationId) return response;
+    const headers = new Headers(response.headers);
+    headers.set(TRANSLATOR_CORRELATION_HEADER, correlationId);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
 
   if (request.headers.get("content-type")?.includes("application/json")) {
     let bodyText: string;
@@ -369,7 +422,7 @@ export async function POST(request: Request) {
       bodyText = await request.text();
     } catch {
       timingContext.stages.complete("bodyRead");
-      return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
+      return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
     }
     timingContext.stages.complete("bodyRead");
     let body: unknown;
@@ -378,7 +431,7 @@ export async function POST(request: Request) {
       body = JSON.parse(bodyText);
     } catch {
       timingContext.stages.complete("jsonParse");
-      return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
+      return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
     }
     timingContext.stages.complete("jsonParse");
     timingContext.stages.start("normalization");
@@ -397,7 +450,7 @@ export async function POST(request: Request) {
     timingContext.stages.start("validation");
     if (!body || typeof body !== "object") {
       timingContext.stages.complete("validation");
-      return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
+      return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
     }
     const direction = directionFromValues(
       values?.sourceLanguage,
@@ -405,7 +458,7 @@ export async function POST(request: Request) {
     );
     if (!direction) {
       timingContext.stages.complete("validation");
-      return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.");
+      return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.", null, correlationId);
     }
     if (
       !authoritativeTranscript ||
@@ -416,7 +469,7 @@ export async function POST(request: Request) {
       transcriptionMs > 3_600_000
     ) {
       timingContext.stages.complete("validation");
-      return errorResponse(400, "invalid_request", "Ungültiges Transkript.");
+      return errorResponse(400, "invalid_request", "Ungültiges Transkript.", null, correlationId);
     }
     timingContext.stages.complete("validation");
 
@@ -437,6 +490,7 @@ export async function POST(request: Request) {
         gateway,
       );
       },
+      { audioBytes: null, normalizedMimeType: null, retryAttempt },
     );
   }
 
@@ -446,7 +500,7 @@ export async function POST(request: Request) {
     formData = await request.formData();
   } catch {
     timingContext.stages.complete("bodyRead");
-    return errorResponse(400, "invalid_request", "Ungültige Anfrage.");
+    return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
   }
   timingContext.stages.complete("bodyRead");
 
@@ -454,6 +508,9 @@ export async function POST(request: Request) {
   const audio = formData.get("audio");
   const sourceValue = formData.get("sourceLanguage");
   const targetValue = formData.get("targetLanguage");
+  const recordingDurationMs = finiteFormNumber(formData.get("recordingDurationMs"));
+  const chunkCount = finiteFormNumber(formData.get("chunkCount"));
+  const totalChunkBytes = finiteFormNumber(formData.get("totalChunkBytes"));
   const autoDirection = sourceValue === "auto" && targetValue === "auto";
   const sourceLanguage = parseLanguage(sourceValue);
   const targetLanguage = parseLanguage(targetValue);
@@ -466,22 +523,47 @@ export async function POST(request: Request) {
   timingContext.stages.complete("normalization");
   timingContext.stages.start("validation");
 
-  if (!(audio instanceof Blob) || audio.size === 0) {
+  if (!(audio instanceof Blob)) {
     timingContext.stages.complete("validation");
-    return errorResponse(400, "invalid_request", "Audioaufnahme fehlt.");
+    return errorResponse(400, "invalid_request", "Audioaufnahme fehlt.", null, correlationId);
+  }
+  const audioValidation = isUsableRecordedAudio(audio, {
+    recordingDurationMs,
+    chunkCount,
+    totalChunkBytes,
+  });
+  if (!audioValidation.usable) {
+    timingContext.stages.complete("validation");
+    console.warn("[translator] invalid audio capture", {
+      correlationId,
+      apiCode: audioValidation.code,
+      stage: "audio_validation",
+      httpStatus: 422,
+      audioBytes: audio.size,
+      normalizedMimeType: audio.type ? normalizeAudioMimeType(audio.type) : null,
+      transcriptionModel: "gpt-4o-mini-transcribe",
+      retryAttempt,
+    });
+    return errorResponse(
+      422,
+      audioValidation.code,
+      "Es wurde keine Sprache aufgenommen. Bitte versuche es noch einmal.",
+      null,
+      correlationId,
+    );
   }
   if (!autoDirection && (!sourceLanguage || !targetLanguage)) {
     timingContext.stages.complete("validation");
-    return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.");
+    return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.", null, correlationId);
   }
 
   if (!isAllowedDirection(direction)) {
     timingContext.stages.complete("validation");
-    return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.");
+    return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.", null, correlationId);
   }
   if (audio.size > MAX_TRANSLATION_AUDIO_BYTES) {
     timingContext.stages.complete("validation");
-    return errorResponse(413, "audio_too_large", "Die Audioaufnahme ist zu groß.");
+    return errorResponse(413, "audio_too_large", "Die Audioaufnahme ist zu groß.", null, correlationId);
   }
 
   const format = getSupportedAudioFormat(audio.type);
@@ -491,6 +573,8 @@ export async function POST(request: Request) {
       400,
       "invalid_audio_format",
       "Dieses Audioformat wird nicht unterstützt.",
+      null,
+      correlationId,
     );
   }
   timingContext.stages.complete("validation");
@@ -506,6 +590,11 @@ export async function POST(request: Request) {
       { audio, format, direction },
       gateway,
     );
+    },
+    {
+      audioBytes: audio.size,
+      normalizedMimeType: format.mimeType,
+      retryAttempt,
     },
   );
 }

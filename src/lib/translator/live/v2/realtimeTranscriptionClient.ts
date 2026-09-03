@@ -33,6 +33,7 @@ export type RealtimeTranscriptionDiagnosticEvent = {
     | "remote_description_set"
     | "data_channel_open"
     | "connection_ready"
+    | "input_track_bound"
     | "connection_error";
   attempt?: number;
   durationMs?: number;
@@ -42,6 +43,7 @@ export type RealtimeTranscriptionDiagnosticEvent = {
   errorType?: string;
   errorCode?: string;
   sanitizedErrorMessage?: string;
+  captureGeneration?: number;
 };
 
 type TranscriptionEvent = {
@@ -134,6 +136,7 @@ export class RealtimeTranscriptionClientV2 {
   private abortController: AbortController | null = null;
   private connectionAttemptId: string | null = null;
   private inputTrack: MediaStreamTrack | null = null;
+  private inputTrackGeneration: number | null = null;
   private sender: RTCRtpSender | null = null;
   private finalWaiter: {
     resolve: (transcript: string) => void;
@@ -143,7 +146,7 @@ export class RealtimeTranscriptionClientV2 {
 
   constructor(private readonly handlers: TranscriptionHandlers) {}
 
-  async connect(stream: MediaStream) {
+  async connect(stream: MediaStream, captureGeneration: number | null = null) {
     if (this.abortController || this.peer) {
       throw new Error("transcription_session_already_connected");
     }
@@ -174,6 +177,7 @@ export class RealtimeTranscriptionClientV2 {
         this.ensureCurrent(abortController, connectionAttemptId);
         const resources = this.createPeerAttempt(
           stream,
+          captureGeneration,
           abortController,
           connectionAttemptId,
           attempt,
@@ -434,6 +438,32 @@ export class RealtimeTranscriptionClientV2 {
     await sender.replaceTrack(enabled ? this.inputTrack : null);
   }
 
+  async replaceInputStream(stream: MediaStream, captureGeneration: number) {
+    const tracks = stream.getAudioTracks();
+    if (tracks.length !== 1 || tracks[0].readyState === "ended") {
+      throw new Error("single_live_audio_track_required");
+    }
+    const sender = this.sender;
+    if (!sender) throw new Error("transcription_sender_unavailable");
+    const nextTrack = tracks[0];
+    // Keep the sender gated while changing ownership. The following explicit
+    // setInputEnabled(true) is the only operation that starts sending audio.
+    await sender.replaceTrack(null);
+    if (sender !== this.sender || !this.peer) {
+      throw new ConnectionCancelled();
+    }
+    this.inputTrack = nextTrack;
+    this.inputTrackGeneration = captureGeneration;
+    this.emitDiagnostic({
+      stage: "input_track_bound",
+      captureGeneration,
+    });
+  }
+
+  getInputTrackGeneration() {
+    return this.inputTrackGeneration;
+  }
+
   disconnect(reason = "client_disconnect") {
     const connectionAttemptId = this.connectionAttemptId;
     this.connectionAttemptId = null;
@@ -450,6 +480,7 @@ export class RealtimeTranscriptionClientV2 {
     this.events = null;
     this.sender = null;
     this.inputTrack = null;
+    this.inputTrackGeneration = null;
     if (events) {
       events.onopen = null;
       events.onmessage = null;
@@ -470,6 +501,7 @@ export class RealtimeTranscriptionClientV2 {
 
   private createPeerAttempt(
     stream: MediaStream,
+    captureGeneration: number | null,
     abortController: AbortController,
     connectionAttemptId: string,
     attempt: number,
@@ -481,6 +513,7 @@ export class RealtimeTranscriptionClientV2 {
       throw new Error("single_audio_track_required");
     }
     this.inputTrack = audioTracks[0];
+    this.inputTrackGeneration = captureGeneration;
     const sender = peer.addTrack(audioTracks[0], stream);
     const events = peer.createDataChannel("oai-events");
     this.peer = peer;

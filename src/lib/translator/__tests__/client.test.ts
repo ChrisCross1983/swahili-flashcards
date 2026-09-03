@@ -39,7 +39,7 @@ describe("translator client", () => {
 
     await expect(
       requestAudioTranslation(
-        new Blob(["audio"], { type: "audio/webm;codecs=opus" }),
+        new Blob([new Uint8Array(256)], { type: "audio/webm;codecs=opus" }),
         direction,
         { fetcher },
       ),
@@ -52,6 +52,7 @@ describe("translator client", () => {
       expect(init?.headers).toEqual({
         "Content-Type": "application/json",
         "X-Translator-Correlation-Id": "translation-turn-1",
+        "X-Translator-Request-Attempt": "0",
       });
       expect(init?.body).toBe(
         JSON.stringify({
@@ -126,7 +127,7 @@ describe("translator client", () => {
 
     await expect(
       requestAudioTranslation(
-        new Blob(["audio"], { type: "audio/webm" }),
+        new Blob([new Uint8Array(256)], { type: "audio/webm" }),
         { sourceLanguage: "auto", targetLanguage: "auto" },
         { fetcher },
       ),
@@ -149,7 +150,7 @@ describe("translator client", () => {
 
     await expect(
       requestAudioTranslation(
-        new Blob(["audio"], { type: "audio/webm" }),
+        new Blob([new Uint8Array(256)], { type: "audio/webm" }),
         direction,
         { fetcher },
       ),
@@ -169,7 +170,7 @@ describe("translator client", () => {
 
   it("preserves a completed STT transcript when translation fails afterwards", async () => {
     const request = requestAudioTranslation(
-      new Blob(["audio"], { type: "audio/webm" }),
+      new Blob([new Uint8Array(256)], { type: "audio/webm" }),
       direction,
       { fetcher: vi.fn(async () => Response.json({
         code: "translation_failed",
@@ -200,6 +201,30 @@ describe("translator client", () => {
     await expect(
       requestTextTranslation("Habari", direction, 100, { fetcher }),
     ).rejects.toBe(abortError);
+  });
+
+  it("does not upload or retry an obviously invalid recorded blob", async () => {
+    const fetcher = vi.fn();
+
+    await expect(requestAudioTranslation(
+      new Blob(["12345"], { type: "audio/webm" }),
+      direction,
+      {
+        fetcher,
+        recordedAudioDiagnostics: {
+          recordingDurationMs: 4_000,
+          chunkCount: 1,
+          totalChunkBytes: 5,
+        },
+      },
+    )).rejects.toMatchObject({
+      failure: {
+        category: "RECORDER",
+        apiErrorCode: "invalid_audio_capture",
+        retryable: false,
+      },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("distinguishes recoverable auth network errors from expired sessions", async () => {

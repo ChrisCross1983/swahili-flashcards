@@ -54,7 +54,7 @@ function createFormData(options?: {
   if (options?.audio !== null) {
     formData.append(
       "audio",
-      options?.audio ?? new Blob(["audio"], { type: "audio/webm" }),
+      options?.audio ?? new Blob([new Uint8Array(256)], { type: "audio/webm" }),
       "recording.webm",
     );
   }
@@ -63,11 +63,12 @@ function createFormData(options?: {
   return formData;
 }
 
-async function post(formData: FormData) {
+async function post(formData: FormData, headers?: HeadersInit) {
   const { POST } = await import("../route");
   return POST(
     new Request("http://localhost/api/translator/translate", {
       method: "POST",
+      headers,
       body: formData,
     }),
   );
@@ -146,9 +147,34 @@ describe("POST /api/translator/translate", () => {
     });
   });
 
+  it("rejects an obviously invalid multi-second capture before OpenAI", async () => {
+    const formData = createFormData({
+      audio: new Blob(["12345"], { type: "audio/webm" }),
+    });
+    formData.append("recordingDurationMs", "4000");
+    formData.append("chunkCount", "1");
+    formData.append("totalChunkBytes", "5");
+
+    const response = await post(formData, {
+      "X-Translator-Correlation-Id": "translation-invalid-capture",
+      "X-Translator-Request-Attempt": "1",
+    });
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get("X-Translator-Correlation-Id"))
+      .toBe("translation-invalid-capture");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "invalid_audio_capture",
+    });
+    expect(createGatewayMock).not.toHaveBeenCalled();
+    expect(transcribeMock).not.toHaveBeenCalled();
+  });
+
   it("rejects unsupported audio formats", async () => {
     const response = await post(
-      createFormData({ audio: new Blob(["audio"], { type: "audio/ogg" }) }),
+      createFormData({
+        audio: new Blob([new Uint8Array(256)], { type: "audio/ogg" }),
+      }),
     );
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({

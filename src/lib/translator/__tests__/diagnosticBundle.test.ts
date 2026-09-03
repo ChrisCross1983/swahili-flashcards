@@ -8,15 +8,24 @@ function archiveText(blob: Blob) {
 describe("translator diagnostic ZIP", () => {
   it("always includes report.json and excludes audio without permission", async () => {
     const bundle = await createTranslatorDiagnosticBundle({
-      report: { reportVersion: 5 },
+      report: {
+        reportVersion: 5,
+        reportId: "report-1",
+        sessionId: "session-1",
+        startedAt: "2026-09-03T10:00:00.000Z",
+        turns: [],
+      },
       includeAudio: false,
       audioFiles: [{ turnId: "unsafe/../turn", blob: new Blob(["audio"], { type: "audio/webm" }) }],
     });
     const text = await archiveText(bundle);
     expect(text).toContain("report.json");
     expect(text).toContain("manifest.json");
-    expect(text).toContain('"bundleVersion": "5.1"');
+    expect(text).toContain('"bundleVersion": "5.2"');
     expect(text).toContain('"reportVersion": 5');
+    expect(text).toContain('"sessionId": "session-1"');
+    expect(text).toContain('"reportId": "report-1"');
+    expect(text).toContain('"audioCount": 0');
     expect(text).not.toContain("audio/");
   });
 
