@@ -319,7 +319,7 @@ describe("POST /api/translator/translate", () => {
     expect(autoTranslateMock).not.toHaveBeenCalled();
   });
 
-  it("asks for manual selection when AUTO detects another language", async () => {
+  it("returns a retryable-by-user message when AUTO cannot identify a supported language", async () => {
     transcribeMock.mockResolvedValue({
       text: "Hello there",
       detectedLanguage: null,
@@ -340,7 +340,7 @@ describe("POST /api/translator/translate", () => {
     await expect(response.json()).resolves.toEqual({
       code: "unsupported_language",
       error:
-        "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+        "Ich konnte die Sprache nicht sicher erkennen. Bitte sprich den Satz noch einmal.",
       recognizedTranscript: "Hello there",
     });
     expect(translateMock).not.toHaveBeenCalled();

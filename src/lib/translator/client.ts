@@ -52,7 +52,7 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   no_audio_captured: "Es wurde keine Sprache aufgenommen. Bitte versuche es noch einmal.",
   no_speech: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
   unsupported_language:
-    "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+    "Ich konnte die Sprache nicht sicher erkennen. Bitte sprich den Satz noch einmal.",
   transcription_failed: "Die Aufnahme konnte nicht verarbeitet werden.",
   translation_failed: "Die Übersetzung konnte nicht erstellt werden.",
   service_unavailable: "Die Übersetzung konnte nicht erstellt werden.",
@@ -90,6 +90,7 @@ type RequestOptions = {
   correlationId?: string;
   onResponseCompleted?: (now: number) => void;
   requestAttempt?: number;
+  requestPhase?: "primary" | "semantic_rescue";
   recordedAudioDiagnostics?: RecordedAudioDiagnostics;
 };
 
@@ -362,6 +363,7 @@ export async function requestAudioTranslation(
       headers: {
         [TRANSLATOR_CORRELATION_HEADER]: correlationId,
         "X-Translator-Request-Attempt": String(options.requestAttempt ?? 0),
+        "X-Translator-Request-Phase": options.requestPhase ?? "primary",
       },
       body: formData,
       signal: options.signal,
@@ -396,6 +398,7 @@ export async function requestTextTranslation(
         "Content-Type": "application/json",
         [TRANSLATOR_CORRELATION_HEADER]: correlationId,
         "X-Translator-Request-Attempt": String(options.requestAttempt ?? 0),
+        "X-Translator-Request-Phase": options.requestPhase ?? "primary",
       },
       body: JSON.stringify({
         authoritativeTranscript,

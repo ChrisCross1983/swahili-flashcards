@@ -32,10 +32,16 @@ import type {
   TranslatorTurnConsent,
 } from "@/lib/translator/turnConsent";
 import { speechAudioEligibleForTurn } from "@/lib/translator/turnConsent";
+import {
+  learningSignalQuality,
+  type SttCandidateComparison,
+  type SttRoutingDecision,
+  type TranslatorLearningSignal,
+} from "@/lib/translator/sttRouting";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.2";
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-capture-reliability-v5.2";
+const REPORT_REVISION = "5.2.1";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-stt-rescue-observability-v5.2.1";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -147,6 +153,10 @@ const PERFORMANCE_METRICS = [
   "recordClickToRecordingStartedMs",
   "realtimeSetupMs",
   "recordingDurationMs",
+  "primaryFailureToRescueStartMs",
+  "rescueTranscriptionMs",
+  "rescueTranscriptToTranslationReadyMs",
+  "semanticRescueTotalMs",
   "stopToTranscriptFinalMs",
   "transcriptFinalToTranslationRequestStartMs",
   "translationClientToServerMs",
@@ -349,6 +359,23 @@ export type ClassicTranslatorReportTurn = {
   realtimeFirstDeltaObserved: boolean;
   realtimeFinalTranscriptReceived: boolean;
   capturePathOutcome: string | null;
+  sttRoutingDecision: SttRoutingDecision | null;
+  primaryTranscript: string | null;
+  primaryTranscriptionPath: TranscriptionPath | null;
+  primaryTranscriptionModel: string | null;
+  rescueTranscript: string | null;
+  rescueTranscriptionPath: TranscriptionPath | null;
+  rescueTranscriptionModel: string | null;
+  finalTranscript: string | null;
+  finalTranscriptionPath: TranscriptionPath | null;
+  finalTranscriptionModel: string | null;
+  primaryFailureToRescueStartMs: number | null;
+  rescueTranscriptionMs: number | null;
+  rescueTranscriptToTranslationReadyMs: number | null;
+  semanticRescueTotalMs: number | null;
+  transcriptScriptAnomalyDetected: boolean;
+  sttCandidateComparison: SttCandidateComparison | null;
+  learningSignal: TranslatorLearningSignal | null;
   stopToTranscriptFinalMs: number | null;
   transcriptFinalToTranslationReadyMs: number | null;
   clientToTranslationServerMs: number | null;
@@ -802,6 +829,8 @@ function turnFromValues(input: {
   audioBlobAvailable?: boolean;
   diagnosticEvents?: TranslatorDiagnosticEvent[];
   consent?: TranslatorTurnConsent | null;
+  sttRoutingDecision?: SttRoutingDecision | null;
+  sttCandidateComparison?: SttCandidateComparison | null;
 }): ClassicTranslatorReportTurn {
   const d = input.diagnostics;
   const path = d.transcriptionPath ?? null;
@@ -821,6 +850,30 @@ function turnFromValues(input: {
   });
   const attemptedAuth = [translationAuthDiagnostic, ttsAuthDiagnostic]
     .filter((auth) => auth.attempted);
+  const contentAllowed = Boolean(
+    input.consent &&
+    ((input.consent.consentAtRecordingStart.qualityContentSharingEnabled &&
+      input.consent.consentAtTurnFinalization?.qualityContentSharingEnabled) ||
+      (input.consent.consentAtRecordingStart.internalSpeechDiagnosticsEnabled &&
+        input.consent.consentAtTurnFinalization?.internalSpeechDiagnosticsEnabled)),
+  );
+  const sttCandidateComparison = input.sttCandidateComparison
+    ? {
+        ...input.sttCandidateComparison,
+        primary: {
+          ...input.sttCandidateComparison.primary,
+          transcript: contentAllowed
+            ? input.sttCandidateComparison.primary.transcript : null,
+        },
+        rescue: input.sttCandidateComparison.rescue
+          ? {
+              ...input.sttCandidateComparison.rescue,
+              transcript: contentAllowed
+                ? input.sttCandidateComparison.rescue.transcript : null,
+            }
+          : null,
+      }
+    : null;
   return {
     turnId: input.turnId,
     createdAt: input.createdAt,
@@ -981,6 +1034,29 @@ function turnFromValues(input: {
     realtimeFirstDeltaObserved: d.realtimeFirstDeltaObserved === true,
     realtimeFinalTranscriptReceived: d.realtimeFinalTranscriptReceived === true,
     capturePathOutcome: d.capturePathOutcome ?? null,
+    sttRoutingDecision: input.sttRoutingDecision ?? d.sttRoutingDecision ?? null,
+    primaryTranscript: sttCandidateComparison
+      ? sttCandidateComparison.primary.transcript
+      : d.primaryTranscript ?? null,
+    primaryTranscriptionPath: d.primaryTranscriptionPath ?? null,
+    primaryTranscriptionModel: d.primaryTranscriptionModel ?? null,
+    rescueTranscript: sttCandidateComparison
+      ? sttCandidateComparison.rescue?.transcript ?? null
+      : d.rescueTranscript ?? null,
+    rescueTranscriptionPath: d.rescueTranscriptionPath ?? null,
+    rescueTranscriptionModel: d.rescueTranscriptionModel ?? null,
+    finalTranscript: d.finalTranscript ?? input.originalText,
+    finalTranscriptionPath: d.finalTranscriptionPath ?? path,
+    finalTranscriptionModel: d.finalTranscriptionModel ?? input.transcriptionModel,
+    primaryFailureToRescueStartMs: finite(d.primaryFailureToRescueStartMs),
+    rescueTranscriptionMs: finite(d.rescueTranscriptionMs),
+    rescueTranscriptToTranslationReadyMs: finite(
+      d.rescueTranscriptToTranslationReadyMs,
+    ),
+    semanticRescueTotalMs: finite(d.semanticRescueTotalMs),
+    transcriptScriptAnomalyDetected: d.transcriptScriptAnomalyDetected === true,
+    sttCandidateComparison,
+    learningSignal: null,
     stopToTranscriptFinalMs: finite(d.stopToTranscriptFinalMs),
     transcriptFinalToTranslationReadyMs: finite(
       d.transcriptFinalToTranslationReadyMs,
@@ -1170,6 +1246,10 @@ export function buildClassicTranslatorReport(input: {
   reconnectCount?: number;
   realtimeFinalizationFailureCount?: number;
   realtimeCircuitBreakerTrips?: number;
+  realtimeSemanticFailureStreak?: number;
+  realtimeSemanticCircuitBreakerTrips?: number;
+  realtimeSemanticCircuitBreakerTurnsRemaining?: number;
+  realtimeSemanticProbePending?: boolean;
   buildMetadata?: TranslatorBuildMetadata;
   diagnosticsSettings?: TranslatorDiagnosticsSettings;
   installationId?: string | null;
@@ -1181,6 +1261,11 @@ export function buildClassicTranslatorReport(input: {
   diagnosticEventsByTurn?: ReadonlyMap<string, TranslatorDiagnosticEvent[]>;
   consentByTurn?: ReadonlyMap<string, TranslatorTurnConsent>;
   consentEvents?: TranslatorConsentEvent[];
+  sttRoutingByTurn?: ReadonlyMap<string, SttRoutingDecision>;
+  sttComparisonsByTurn?: ReadonlyMap<string, SttCandidateComparison>;
+  persistedSnapshotUsed?: boolean;
+  droppedTelemetryEvents?: number;
+  audioManifestConsistent?: boolean | null;
 }) {
   const sourceConnectionAttempts = input.connectionAttempts ?? [];
   const successfulTurns = input.entries.map((entry) => {
@@ -1225,6 +1310,8 @@ export function buildClassicTranslatorReport(input: {
       audioBlobAvailable: input.audioBlobAvailableByTurn?.has(entry.id) === true,
       diagnosticEvents,
       consent: input.consentByTurn?.get(entry.id) ?? null,
+      sttRoutingDecision: input.sttRoutingByTurn?.get(entry.id) ?? null,
+      sttCandidateComparison: input.sttComparisonsByTurn?.get(entry.id) ?? null,
     });
   });
   const failedTurns = input.failedTurns.map((turn) => {
@@ -1277,6 +1364,8 @@ export function buildClassicTranslatorReport(input: {
         turn.audioBlobAvailable === true,
       diagnosticEvents,
       consent: input.consentByTurn?.get(turn.turnId) ?? null,
+      sttRoutingDecision: input.sttRoutingByTurn?.get(turn.turnId) ?? null,
+      sttCandidateComparison: input.sttComparisonsByTurn?.get(turn.turnId) ?? null,
     });
   });
   const turns = [...successfulTurns, ...failedTurns].sort((left, right) =>
@@ -1390,6 +1479,11 @@ export function buildClassicTranslatorReport(input: {
     appVersion: "unknown",
     buildVersion: "unknown",
     gitCommitSha: null,
+    deploymentId: null,
+    vercelEnvironment: null,
+    frontendRuntimeEnvironment: "development" as const,
+    frontendOriginKind: "unknown" as const,
+    backendEnvironmentLabel: "unknown" as const,
     environment: "development" as const,
   };
   const settings = input.diagnosticsSettings ?? {
@@ -1398,6 +1492,93 @@ export function buildClassicTranslatorReport(input: {
     speechSampleSharingEnabled: false,
     internalQaModeEnabled: false,
   };
+  const comparisons = turns.flatMap((turn) =>
+    turn.sttCandidateComparison ? [turn.sttCandidateComparison] : []);
+  for (const turn of turns) {
+    const comparison = turn.sttCandidateComparison;
+    const sameAudioComparisonAvailable = Boolean(comparison?.rescue);
+    const audioAvailable = turn.audioBlobAvailable;
+    const signalQuality = learningSignalQuality({
+      sameAudioComparisonAvailable,
+      reviewStatus: turn.recognitionReviewStatus,
+      audioAvailable,
+    });
+    turn.learningSignal = {
+      turnId: turn.turnId,
+      createdAt: turn.createdAt,
+      buildMetadata,
+      sourceLanguage: turn.sourceLanguage,
+      targetLanguage: turn.targetLanguage,
+      routingDecision: turn.sttRoutingDecision ??
+        (turn.transcriptionPath === "realtime" ? "realtime_primary" : "audio_fallback_cold"),
+      primaryModel: turn.primaryTranscriptionModel ?? turn.transcriptionModel,
+      primaryPath: turn.primaryTranscriptionPath ?? turn.transcriptionPath,
+      rescueModel: turn.rescueTranscriptionModel,
+      rescuePath: turn.rescueTranscriptionPath,
+      diagnosticCodes: turn.diagnosticEvents.flatMap((event) =>
+        event.apiCode ? [event.apiCode] : []),
+      audioQualityMetrics: turn.audioQualityMetrics,
+      recognitionReviewStatus: turn.recognitionReviewStatus,
+      correctionAvailable: turn.correctedTranscript !== null,
+      sameAudioComparisonAvailable,
+      userFeedbackAvailable: turn.feedbackRating !== null,
+      consentSnapshot: turn.consentAtRecordingStart,
+      signalQuality,
+      benchmarkReadySameAudioSample: signalQuality === "high",
+    };
+  }
+  const semanticRescueTurns = turns.filter((turn) =>
+    turn.sttRoutingDecision === "audio_rescue_semantic_failure");
+  const semanticRescueSuccesses = semanticRescueTurns.filter((turn) =>
+    turn.status === "success").length;
+  const safePathTurns = turns.filter((turn) =>
+    turn.sttRoutingDecision === "audio_safe_mode_circuit_breaker");
+  const organicUnsupportedLanguageEvents = diagnosticEvents.filter((event) =>
+    event.eventOrigin === "organic_runtime" &&
+    event.apiCode === "unsupported_language" &&
+    event.eventKind === "degradation" &&
+    event.stage === "semantic_translation_validation");
+  const organicFailureCodes = organicFailedTurns.flatMap((turn) => {
+    const event = turn.diagnosticEvents.find((candidate) =>
+      candidate.eventOrigin === "organic_runtime" && candidate.eventKind === "failure");
+    return event?.apiCode ? [event.apiCode] : [];
+  });
+  const topOrganicFailureCode = Object.entries(
+    organicFailureCodes.reduce<Record<string, number>>((counts, code) => {
+      counts[code] = (counts[code] ?? 0) + 1;
+      return counts;
+    }, {}),
+  ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
+  const recommendedQaFocus = [
+    ...(turns.some((turn) => turn.microphoneAcquisitionOutcome === "timeout")
+      ? ["microphone_acquisition"] : []),
+    ...(turns.some((turn) => turn.capturePathOutcome === "invalid_audio_capture")
+      ? ["audio_capture_integrity"] : []),
+    ...(organicUnsupportedLanguageEvents.length > 0
+      ? ["realtime_semantic_accuracy"] : []),
+    ...(semanticRescueTurns.length > semanticRescueSuccesses
+      ? ["semantic_rescue_failures"] : []),
+  ];
+  const incidentTimeline = turns.flatMap((turn) =>
+    turn.diagnosticEvents.flatMap((event) => {
+      const code = event.apiCode ?? "";
+      const relevant = event.eventKind !== "expected_fallback" ||
+        code === "realtime_not_ready_at_recording_start" ||
+        /timeout|invalid_audio|realtime|rescue|unsupported_language|tts|translation/.test(code);
+      return relevant ? [{
+        turnId: turn.turnId,
+        at: event.at,
+        eventId: event.eventId,
+        eventOrigin: event.eventOrigin,
+        eventKind: event.eventKind,
+        stage: event.stage,
+        apiCode: event.apiCode,
+        recoveryAction: event.recoveryAction,
+        recoverySucceeded: event.recoverySucceeded,
+        qaScenarioId: event.qaScenarioId,
+      }] : [];
+    }))
+    .sort((left, right) => left.at.localeCompare(right.at));
 
   return {
     reportVersion: REPORT_VERSION,
@@ -1414,6 +1595,11 @@ export function buildClassicTranslatorReport(input: {
     buildVersion: buildMetadata.buildVersion,
     gitCommitSha: buildMetadata.gitCommitSha,
     environment: buildMetadata.environment,
+    deploymentId: buildMetadata.deploymentId,
+    vercelEnvironment: buildMetadata.vercelEnvironment,
+    frontendRuntimeEnvironment: buildMetadata.frontendRuntimeEnvironment,
+    frontendOriginKind: buildMetadata.frontendOriginKind,
+    backendEnvironmentLabel: buildMetadata.backendEnvironmentLabel,
     diagnosticsSharingEnabled: settings.diagnosticsSharingEnabled,
     qualityContentSharingEnabled: settings.qualityContentSharingEnabled,
     speechSampleSharingEnabled: settings.speechSampleSharingEnabled,
@@ -1487,6 +1673,93 @@ export function buildClassicTranslatorReport(input: {
     audioIncludedTurnCount: turns.filter((turn) =>
       turn.audioIncludedInDiagnosticBundle).length,
     organicFailureRate: rate(organicFailedTurns.length, organicTurns.length),
+    executiveSummary: {
+      overallHealth: organicFailedTurns.length > 0
+        ? "problematic" as const
+        : diagnosticEvents.some((event) =>
+            event.eventOrigin === "organic_runtime" &&
+            event.eventKind === "degradation") ||
+            safePathTurns.length > 0
+          ? "degraded" as const
+          : "healthy" as const,
+      turns: turns.length,
+      successful: successful.length,
+      terminalFailures: failedTurns.length,
+      organicFailures: organicFailedTurns.length,
+      recoveredTurns: semanticRescueSuccesses,
+      realtimeSuccessRate: rate(
+        successful.filter((turn) => turn.sttRoutingDecision === "realtime_primary").length,
+        turns.filter((turn) => turn.sttRoutingDecision === "realtime_primary").length,
+      ),
+      audioFallbackSuccessRate: rate(fallback.length, fallbackAll.length),
+      sttRescueAttempts: semanticRescueTurns.length,
+      sttRescueSuccessRate: rate(semanticRescueSuccesses, semanticRescueTurns.length),
+      micTimeouts: turns.filter((turn) =>
+        turn.microphoneAcquisitionOutcome === "timeout").length,
+      invalidAudioCaptures: turns.filter((turn) =>
+        turn.capturePathOutcome === "invalid_audio_capture").length,
+      topOrganicFailureCode,
+      recommendedQaFocus,
+    },
+    learningSummary: {
+      reviewedSpeechSamples: reviewedQualityTurns.length,
+      acceptedSpeechSamples: turns.filter((turn) =>
+        turn.recognitionReviewStatus === "accepted").length,
+      correctedSpeechSamples: turns.filter((turn) =>
+        turn.recognitionReviewStatus === "corrected").length,
+      sameAudioComparisonCount: comparisons.filter((comparison) =>
+        comparison.rescue !== null).length,
+      realtimeToRescueTranscriptDisagreementCount: comparisons.filter((comparison) =>
+        comparison.didTranscriptChange === true).length,
+      semanticRescueAttempts: semanticRescueTurns.length,
+      semanticRescueSuccesses,
+      semanticRescueFailures: semanticRescueTurns.length - semanticRescueSuccesses,
+      semanticCircuitBreakerTrips: input.realtimeSemanticCircuitBreakerTrips ?? 0,
+      organicUnsupportedLanguageCount: organicUnsupportedLanguageEvents.length,
+      fallbackPreferredDueToCircuitBreakerCount: safePathTurns.length,
+      benchmarkReadySameAudioSampleCount: turns.filter((turn) =>
+        turn.learningSignal?.benchmarkReadySameAudioSample).length,
+    },
+    sttRoutingSummary: {
+      realtimePrimaryTurns: turns.filter((turn) =>
+        turn.sttRoutingDecision === "realtime_primary").length,
+      realtimePrimarySuccesses: successful.filter((turn) =>
+        turn.sttRoutingDecision === "realtime_primary").length,
+      coldFallbackTurns: turns.filter((turn) =>
+        turn.sttRoutingDecision === "audio_fallback_cold").length,
+      coldFallbackSuccesses: successful.filter((turn) =>
+        turn.sttRoutingDecision === "audio_fallback_cold").length,
+      semanticRescueAttempts: semanticRescueTurns.length,
+      semanticRescueSuccesses,
+      circuitBreakerSafePathTurns: safePathTurns.length,
+      circuitBreakerSafePathSuccesses: safePathTurns.filter((turn) =>
+        turn.status === "success").length,
+      qaForcedFallbackTurns: turns.filter((turn) =>
+        turn.diagnosticEvents.some((event) =>
+          event.eventOrigin === "qa_simulation") &&
+        turn.sttRoutingDecision !== "realtime_primary").length,
+      terminalSttFailures: turns.filter((turn) =>
+        turn.status === "failed" &&
+        (turn.failureCategory === "TRANSCRIPTION" || turn.failureCategory === "REALTIME" ||
+          turn.apiErrorCode === "unsupported_language")).length,
+    },
+    incidentTimeline,
+    reportIntegrity: {
+      schemaVersion: "translator-report-v5.2.1",
+      reportRevision: REPORT_REVISION,
+      sessionComplete: false,
+      persistedSnapshotUsed: input.persistedSnapshotUsed === true,
+      droppedTelemetryEvents: input.droppedTelemetryEvents ?? 0,
+      audioManifestConsistent: input.audioManifestConsistent ?? null,
+      consentSnapshotComplete: turns.every((turn) =>
+        turn.consentAtRecordingStart !== null &&
+        turn.consentAtTurnFinalization !== null),
+      buildMetadataComplete:
+        buildMetadata.appVersion !== "unknown" &&
+        buildMetadata.buildVersion !== "unknown" &&
+        buildMetadata.frontendRuntimeEnvironment !== "unknown" &&
+        buildMetadata.backendEnvironmentLabel !== "unknown",
+    },
     consentEvents: input.consentEvents ?? [],
     realtimeTurns: realtimeAll.length,
     fallbackTurns: fallbackAll.length,

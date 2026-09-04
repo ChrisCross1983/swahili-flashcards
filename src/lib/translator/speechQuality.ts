@@ -26,6 +26,9 @@ export type TranslatorSpeechQualitySample = {
   audioQualityMetrics: TranslatorAudioQualityMetrics;
   audioIncludedInDiagnosticBundle: boolean;
   audioSharedRemotely: false;
+  primaryTranscriptAvailable: boolean;
+  rescueTranscriptAvailable: boolean;
+  benchmarkReadySameAudioSample: boolean;
 };
 
 export const KISWAHILI_STT_REGRESSION_CASES = [
@@ -82,6 +85,9 @@ export function createUnreviewedSpeechQualityRecord(input: {
     audioQualityMetrics: input.audioQualityMetrics ?? UNAVAILABLE_AUDIO_QUALITY,
     audioIncludedInDiagnosticBundle: false,
     audioSharedRemotely: false,
+    primaryTranscriptAvailable: false,
+    rescueTranscriptAvailable: false,
+    benchmarkReadySameAudioSample: false,
   };
 }
 

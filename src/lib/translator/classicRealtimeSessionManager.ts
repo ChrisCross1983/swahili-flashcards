@@ -10,6 +10,8 @@ export const CLASSIC_REALTIME_RECONNECT_DELAY_MS = 1_000;
 export const CLASSIC_REALTIME_FINAL_TIMEOUT_MS = 3_000;
 export const CLASSIC_REALTIME_FINALIZATION_FAILURE_THRESHOLD = 2;
 export const CLASSIC_REALTIME_CIRCUIT_BREAKER_TURNS = 2;
+export const CLASSIC_REALTIME_SEMANTIC_FAILURE_THRESHOLD = 2;
+export const CLASSIC_REALTIME_SEMANTIC_CIRCUIT_BREAKER_TURNS = 2;
 
 export type ClassicRealtimeSessionState =
   | "idle"
@@ -82,6 +84,8 @@ type ManagerDependencies = {
   realtimeEnabled?: boolean;
   finalizationFailureThreshold?: number;
   circuitBreakerTurns?: number;
+  semanticFailureThreshold?: number;
+  semanticCircuitBreakerTurns?: number;
 };
 
 export type ClassicRealtimeTurnHandle = {
@@ -107,6 +111,8 @@ export type ClassicRealtimeTurnHandle = {
   realtimeInputTrackGeneration: number | null;
   realtimeInputTrackBound: boolean;
   circuitBreakerBypassed: boolean;
+  semanticCircuitBreakerBypassed: boolean;
+  semanticCircuitBreakerProbe: boolean;
   activationPromise: Promise<void> | null;
 };
 
@@ -150,6 +156,10 @@ export class ClassicRealtimeSessionManager {
   private finalizationFailureCount = 0;
   private circuitBreakerTurnsRemaining = 0;
   private circuitBreakerTrips = 0;
+  private consecutiveSemanticFailures = 0;
+  private semanticCircuitBreakerTurnsRemaining = 0;
+  private semanticCircuitBreakerTrips = 0;
+  private semanticProbePending = false;
 
   constructor(private readonly dependencies: ManagerDependencies) {}
 
@@ -168,12 +178,17 @@ export class ClassicRealtimeSessionManager {
     const decisionAt = this.isoNow();
     const realtimeEnabled = this.dependencies.realtimeEnabled !== false;
     const circuitBreakerBypassed = this.circuitBreakerTurnsRemaining > 0;
+    const semanticCircuitBreakerBypassed =
+      this.semanticCircuitBreakerTurnsRemaining > 0;
     const ready = realtimeEnabled && !circuitBreakerBypassed &&
+      !semanticCircuitBreakerBypassed &&
       this.state === "ready" && Boolean(this.transport && this.connectionId);
     const fallbackReason: ClassicTranscriptionFallbackReason | null = ready
       ? null
       : !realtimeEnabled
         ? "realtime_disabled"
+        : semanticCircuitBreakerBypassed
+          ? "realtime_semantic_circuit_breaker"
         : circuitBreakerBypassed
           ? "realtime_circuit_breaker"
           : "realtime_not_ready_at_recording_start";
@@ -188,7 +203,7 @@ export class ClassicRealtimeSessionManager {
       transcriptionPathDecisionAt: decisionAt,
       transcriptionPathDecisionReason: ready
         ? "warm_realtime_ready"
-        : circuitBreakerBypassed || !realtimeEnabled
+        : circuitBreakerBypassed || semanticCircuitBreakerBypassed || !realtimeEnabled
           ? "realtime_temporarily_bypassed"
           : "realtime_not_ready_at_recording_start",
       connectionId: ready ? this.connectionId : null,
@@ -212,6 +227,8 @@ export class ClassicRealtimeSessionManager {
       realtimeInputTrackGeneration: null,
       realtimeInputTrackBound: false,
       circuitBreakerBypassed,
+      semanticCircuitBreakerBypassed,
+      semanticCircuitBreakerProbe: ready && this.semanticProbePending,
       activationPromise: null,
     };
     this.activeTurn = handle;
@@ -355,7 +372,48 @@ export class ClassicRealtimeSessionManager {
       realtimeFinalizationFailureCount: this.finalizationFailureCount,
       realtimeCircuitBreakerTrips: this.circuitBreakerTrips,
       realtimeCircuitBreakerTurnsRemaining: this.circuitBreakerTurnsRemaining,
+      realtimeSemanticFailureStreak: this.consecutiveSemanticFailures,
+      realtimeSemanticCircuitBreakerTrips: this.semanticCircuitBreakerTrips,
+      realtimeSemanticCircuitBreakerTurnsRemaining:
+        this.semanticCircuitBreakerTurnsRemaining,
+      realtimeSemanticProbePending: this.semanticProbePending,
     };
+  }
+
+  recordSemanticFailure(
+    handle: ClassicRealtimeTurnHandle,
+    options: { organic: boolean },
+  ) {
+    if (!options.organic || handle.transcriptionPath !== "realtime") {
+      return { tripped: false, probe: false };
+    }
+    const probe = handle.semanticCircuitBreakerProbe;
+    this.semanticProbePending = false;
+    this.consecutiveSemanticFailures += 1;
+    const threshold = this.dependencies.semanticFailureThreshold ??
+      CLASSIC_REALTIME_SEMANTIC_FAILURE_THRESHOLD;
+    if (!probe && this.consecutiveSemanticFailures < threshold) {
+      return { tripped: false, probe: false };
+    }
+    this.semanticCircuitBreakerTrips += 1;
+    this.semanticCircuitBreakerTurnsRemaining =
+      this.dependencies.semanticCircuitBreakerTurns ??
+      CLASSIC_REALTIME_SEMANTIC_CIRCUIT_BREAKER_TURNS;
+    this.consecutiveSemanticFailures = 0;
+    return { tripped: true, probe };
+  }
+
+  recordSemanticSuccess(
+    handle: ClassicRealtimeTurnHandle,
+    options: { organic: boolean },
+  ) {
+    if (!options.organic || handle.transcriptionPath !== "realtime") {
+      return { recoveredProbe: false };
+    }
+    const recoveredProbe = handle.semanticCircuitBreakerProbe;
+    this.consecutiveSemanticFailures = 0;
+    this.semanticProbePending = false;
+    return { recoveredProbe };
   }
 
   close(reason = "classic_manager_close") {
@@ -394,6 +452,15 @@ export class ClassicRealtimeSessionManager {
       this.circuitBreakerTurnsRemaining -= 1;
       if (this.circuitBreakerTurnsRemaining === 0 && this.dependencies.realtimeEnabled !== false) {
         void this.ensureConnected("reconnect").catch(() => undefined);
+      }
+    }
+    if (
+      handle.semanticCircuitBreakerBypassed &&
+      this.semanticCircuitBreakerTurnsRemaining > 0
+    ) {
+      this.semanticCircuitBreakerTurnsRemaining -= 1;
+      if (this.semanticCircuitBreakerTurnsRemaining === 0) {
+        this.semanticProbePending = true;
       }
     }
     this.state = this.transport && this.connectionId

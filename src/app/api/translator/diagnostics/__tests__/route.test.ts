@@ -50,7 +50,7 @@ describe("translator diagnostics route", () => {
     expect(from).toHaveBeenCalledWith("translator_diagnostic_turns");
     const rows = upsert.mock.calls[1][0];
     expect(rows[0].technical_payload).not.toHaveProperty("authorization");
-    expect(rows[0]).toMatchObject({ report_revision: "5.1", diagnostic_events: [] });
+    expect(rows[0]).toMatchObject({ report_revision: "5.2.1", diagnostic_events: [] });
   });
 
   it("returns the auth failure without touching storage", async () => {

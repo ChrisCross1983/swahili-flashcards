@@ -211,6 +211,21 @@ export type TranslationDiagnostics = {
   realtimeFirstDeltaObserved?: boolean;
   realtimeFinalTranscriptReceived?: boolean;
   capturePathOutcome?: string | null;
+  sttRoutingDecision?: import("@/lib/translator/sttRouting").SttRoutingDecision;
+  primaryTranscript?: string | null;
+  primaryTranscriptionPath?: TranscriptionPath | null;
+  primaryTranscriptionModel?: string | null;
+  rescueTranscript?: string | null;
+  rescueTranscriptionPath?: "audio_upload_fallback" | null;
+  rescueTranscriptionModel?: string | null;
+  finalTranscript?: string | null;
+  finalTranscriptionPath?: TranscriptionPath | null;
+  finalTranscriptionModel?: string | null;
+  primaryFailureToRescueStartMs?: number | null;
+  rescueTranscriptionMs?: number | null;
+  rescueTranscriptToTranslationReadyMs?: number | null;
+  semanticRescueTotalMs?: number | null;
+  transcriptScriptAnomalyDetected?: boolean;
 };
 
 export type TranslationEntry = {

@@ -86,7 +86,7 @@ export async function createTranslatorDiagnosticBundle(input: {
     ? input.report as Record<string, unknown>
     : {};
   const manifestBytes = encoder.encode(JSON.stringify({
-    bundleVersion: "5.2",
+    bundleVersion: "5.2.1",
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     sessionId: typeof reportMetadata.sessionId === "string"
       ? reportMetadata.sessionId : null,

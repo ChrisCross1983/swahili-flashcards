@@ -15,6 +15,9 @@ const event: TranslatorTechnicalEvent = {
   installationId: "installation-123", sessionId: "session-123", turnId: "turn-123",
   timestamp: "2026-09-02T00:00:00.000Z", appVersion: "1.0", buildVersion: "42",
   gitCommitSha: "abc", environment: "development", platform: "web",
+  deploymentId: null, vercelEnvironment: null,
+  frontendRuntimeEnvironment: "development", frontendOriginKind: "localhost",
+  backendEnvironmentLabel: "production",
   browserFamily: "Safari", browserVersion: "18", osFamily: "iOS",
   translatorMode: "auto", sourceLanguage: "sw", targetLanguage: "de",
   transcriptionPath: "realtime", transcriptionModel: "gpt-live-transcribe",
@@ -51,6 +54,17 @@ describe("translator telemetry queue", () => {
     expect(queue.pendingCount()).toBe(1);
   });
 
+  it("reports events dropped by the bounded non-blocking queue", () => {
+    const queue = new TranslatorTelemetryQueue({
+      storage: storage(), isEnabled: () => true, maxEvents: 1,
+      schedule: () => undefined,
+    });
+    queue.enqueue({ ...event, turnId: "turn-1" });
+    queue.enqueue({ ...event, turnId: "turn-2" });
+    expect(queue.pendingCount()).toBe(1);
+    expect(queue.getDroppedEventCount()).toBe(1);
+  });
+
   it("allowlists technical fields and drops secrets/content/audio", () => {
     const parsed = parseTechnicalDiagnosticEvent({
       ...event,
@@ -65,11 +79,19 @@ describe("translator telemetry queue", () => {
       }],
       authorization: "Bearer secret",
       originalText: "private sentence",
+      translatedText: "private translation",
+      primaryTranscript: "private primary transcript",
+      rescueTranscript: "private rescue transcript",
+      correctedTranscript: "private correction",
       audio: "base64-data",
     });
     expect(parsed).not.toBeNull();
     expect(parsed).not.toHaveProperty("authorization");
     expect(parsed).not.toHaveProperty("originalText");
+    expect(parsed).not.toHaveProperty("translatedText");
+    expect(parsed).not.toHaveProperty("primaryTranscript");
+    expect(parsed).not.toHaveProperty("rescueTranscript");
+    expect(parsed).not.toHaveProperty("correctedTranscript");
     expect(parsed).not.toHaveProperty("audio");
     expect(parsed?.diagnosticEvents).toEqual([
       expect.objectContaining({

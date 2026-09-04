@@ -142,6 +142,112 @@ describe("classic post-stop translation path", () => {
     expect(getAudioBlob).not.toHaveBeenCalled();
   });
 
+  it("rescues realtime unsupported_language once with the same turn audio", async () => {
+    const unsupported = new TranslatorClientError({
+      category: "VALIDATION", message: "unsupported", healthStatus: "healthy",
+      httpStatus: 422, apiErrorCode: "unsupported_language", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    }, "Nie Bgani");
+    const rescued = {
+      ...result,
+      originalText: "Ni bei gani?",
+      translatedText: "Wie viel kostet es?",
+      diagnostics: {
+        ...result.diagnostics,
+        transcriptionModel: "gpt-4o-mini-transcribe",
+        transcriptionFallbackUsed: true,
+      },
+    };
+    const requestText = vi.fn().mockRejectedValue(unsupported);
+    const requestAudio = vi.fn().mockResolvedValue(rescued);
+    const audio = new Blob(["same-turn-audio"], { type: "audio/webm" });
+    const getAudioBlob = vi.fn(async () => audio);
+    const onSucceeded = vi.fn();
+    let time = 0;
+
+    const rescuedResult = await requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Nie Bgani" },
+      transcriptionMs: 500,
+      getAudioBlob,
+      direction,
+      signal: new AbortController().signal,
+      onSemanticRescueSucceeded: onSucceeded,
+    }, { requestText, requestAudio, now: () => ++time * 10 });
+
+    expect(requestText).toHaveBeenCalledOnce();
+    expect(requestAudio).toHaveBeenCalledOnce();
+    expect(requestAudio).toHaveBeenCalledWith(audio, direction, expect.objectContaining({
+      requestPhase: "semantic_rescue",
+      requestAttempt: 0,
+    }));
+    expect(getAudioBlob).toHaveBeenCalledOnce();
+    expect(rescuedResult).toMatchObject({
+      originalText: "Ni bei gani?",
+      diagnostics: {
+        sttRoutingDecision: "audio_rescue_semantic_failure",
+        primaryTranscript: "Nie Bgani",
+        rescueTranscript: "Ni bei gani?",
+        finalTranscript: "Ni bei gani?",
+      },
+    });
+    expect(onSucceeded).toHaveBeenCalledOnce();
+  });
+
+  it("never rescues auth, unrelated 422, abort, or invalid backup audio", async () => {
+    const unrelated = new TranslatorClientError({
+      category: "VALIDATION", message: "invalid", healthStatus: "healthy",
+      httpStatus: 422, apiErrorCode: "invalid_request", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    });
+    const requestText = vi.fn().mockRejectedValue(unrelated);
+    const requestAudio = vi.fn();
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Nie Bgani" },
+      transcriptionMs: 500,
+      getAudioBlob: vi.fn(), direction,
+      signal: new AbortController().signal,
+    }, { requestText, requestAudio })).rejects.toBe(unrelated);
+    expect(requestAudio).not.toHaveBeenCalled();
+
+    const unsupported = new TranslatorClientError({
+      category: "VALIDATION", message: "unsupported", healthStatus: "healthy",
+      httpStatus: 422, apiErrorCode: "unsupported_language", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    });
+    requestText.mockRejectedValue(unsupported);
+    requestAudio.mockRejectedValue(new TranslatorClientError({
+      category: "RECORDER", message: "invalid audio", healthStatus: "healthy",
+      httpStatus: 422, apiErrorCode: "invalid_audio_capture", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    }));
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Nie Bgani" },
+      transcriptionMs: 500,
+      getAudioBlob: vi.fn(async () => new Blob(["bad"])), direction,
+      signal: new AbortController().signal,
+    }, { requestText, requestAudio })).rejects.toMatchObject({
+      failure: { apiErrorCode: "invalid_audio_capture" },
+    });
+    expect(requestAudio).toHaveBeenCalledOnce();
+  });
+
+  it("attempts semantic rescue only once when the rescue translation also fails", async () => {
+    const unsupported = () => new TranslatorClientError({
+      category: "VALIDATION", message: "unsupported", healthStatus: "healthy",
+      httpStatus: 422, apiErrorCode: "unsupported_language", retryable: false,
+      retryAfterMs: null, authFailureType: null,
+    });
+    const requestAudio = vi.fn().mockRejectedValue(unsupported());
+    await expect(requestClassicTranslation({
+      realtimeResult: { ok: true, authoritativeTranscript: "Nie Bgani" },
+      transcriptionMs: 500,
+      getAudioBlob: vi.fn(async () => new Blob(["audio"])), direction,
+      signal: new AbortController().signal,
+    }, { requestText: vi.fn().mockRejectedValue(unsupported()), requestAudio }))
+      .rejects.toMatchObject({ failure: { apiErrorCode: "unsupported_language" } });
+    expect(requestAudio).toHaveBeenCalledOnce();
+  });
+
   it.each([
     "connection_failure",
     "connection_timeout",
@@ -152,6 +258,7 @@ describe("classic post-stop translation path", () => {
     "session_error",
     "transcript_timeout",
     "realtime_circuit_breaker",
+    "realtime_semantic_circuit_breaker",
     "realtime_disabled",
     "realtime_track_rebind_failed",
     "timeout",

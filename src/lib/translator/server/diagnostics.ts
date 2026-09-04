@@ -7,7 +7,7 @@ const CATEGORIES = new Set([
 const EVENT_ORIGINS = new Set(["organic_runtime", "qa_simulation"]);
 const EVENT_KINDS = new Set(["failure", "degradation", "expected_fallback", "info"]);
 const RECOVERY_ACTIONS = new Set([
-  "none", "reset_to_idle", "audio_upload_fallback", "retry_translation_once",
+  "none", "reset_to_idle", "audio_upload_fallback", "audio_transcription_rescue", "retry_translation_once",
   "keep_translation_without_tts", "reauthenticate",
 ]);
 const AUTH_FAILURE_TYPES = new Set([
@@ -132,6 +132,32 @@ export function parseTechnicalDiagnosticEvent(value: unknown): TranslatorTechnic
     appVersion: String(item.appVersion),
     buildVersion: String(item.buildVersion),
     gitCommitSha: nullableString(item.gitCommitSha, 100) ?? null,
+    deploymentId: nullableString(item.deploymentId, 150) ?? null,
+    vercelEnvironment:
+      item.vercelEnvironment === "development" ||
+      item.vercelEnvironment === "preview" ||
+      item.vercelEnvironment === "production"
+        ? item.vercelEnvironment
+        : null,
+    frontendRuntimeEnvironment:
+      item.frontendRuntimeEnvironment === "development" ||
+      item.frontendRuntimeEnvironment === "preview" ||
+      item.frontendRuntimeEnvironment === "production"
+        ? item.frontendRuntimeEnvironment
+        : "unknown",
+    frontendOriginKind:
+      item.frontendOriginKind === "localhost" ||
+      item.frontendOriginKind === "vercel_preview" ||
+      item.frontendOriginKind === "vercel_production" ||
+      item.frontendOriginKind === "custom_domain"
+        ? item.frontendOriginKind
+        : "unknown",
+    backendEnvironmentLabel:
+      item.backendEnvironmentLabel === "development" ||
+      item.backendEnvironmentLabel === "staging" ||
+      item.backendEnvironmentLabel === "production"
+        ? item.backendEnvironmentLabel
+        : "unknown",
     environment: item.environment as TranslatorTechnicalEvent["environment"],
     platform: "web",
     browserFamily: String(item.browserFamily),
@@ -169,6 +195,25 @@ export function parseTechnicalDiagnosticEvent(value: unknown): TranslatorTechnic
     realtimeFirstDeltaObserved: item.realtimeFirstDeltaObserved === true,
     realtimeFinalTranscriptReceived: item.realtimeFinalTranscriptReceived === true,
     capturePathOutcome: nullableString(item.capturePathOutcome, 100) ?? null,
+    sttRoutingDecision: [
+      "realtime_primary", "audio_fallback_cold",
+      "audio_rescue_semantic_failure", "audio_safe_mode_circuit_breaker",
+      "audio_safe_mode_feature_flag",
+    ].includes(String(item.sttRoutingDecision))
+      ? item.sttRoutingDecision as TranslatorTechnicalEvent["sttRoutingDecision"]
+      : null,
+    semanticRescueAttempted: item.semanticRescueAttempted === true,
+    semanticRescueSucceeded: item.semanticRescueSucceeded === true,
+    sameAudioComparisonAvailable: item.sameAudioComparisonAvailable === true,
+    transcriptScriptAnomalyDetected: item.transcriptScriptAnomalyDetected === true,
+    primaryFailureToRescueStartMs:
+      nullableMetric(item.primaryFailureToRescueStartMs ?? null) as number | null,
+    rescueTranscriptionMs:
+      nullableMetric(item.rescueTranscriptionMs ?? null) as number | null,
+    rescueTranscriptToTranslationReadyMs:
+      nullableMetric(item.rescueTranscriptToTranslationReadyMs ?? null) as number | null,
+    semanticRescueTotalMs:
+      nullableMetric(item.semanticRescueTotalMs ?? null) as number | null,
     recordClickToRecordingStartedMs: nullableMetric(item.recordClickToRecordingStartedMs) as number | null,
     stopToTranscriptFinalMs: nullableMetric(item.stopToTranscriptFinalMs) as number | null,
     transcriptFinalToTranslationVisibleMs: nullableMetric(item.transcriptFinalToTranslationVisibleMs) as number | null,

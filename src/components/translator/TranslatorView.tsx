@@ -35,7 +35,10 @@ import {
   ClassicRealtimeSessionManager,
   type ClassicRealtimeTurnHandle,
 } from "@/lib/translator/classicRealtimeSessionManager";
-import { requestClassicTranslation } from "@/lib/translator/classicTranslationPipeline";
+import {
+  requestClassicTranslation,
+  type SemanticRescueContext,
+} from "@/lib/translator/classicTranslationPipeline";
 import {
   buildClassicTranslatorReport,
   downloadClassicTranslatorReport,
@@ -110,6 +113,11 @@ import {
   createBrowserTranslatorIncidentStore,
   type PersistedTranslatorIncident,
 } from "@/lib/translator/incidentPersistence";
+import {
+  transcriptScriptAnomalyDetected,
+  type SttCandidateComparison,
+  type SttRoutingDecision,
+} from "@/lib/translator/sttRouting";
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
@@ -133,8 +141,9 @@ export default function TranslatorView() {
   const incidentStoreRef =
     useRef<ReturnType<typeof createBrowserTranslatorIncidentStore>>(null);
   const [qaNextFailure, setQaNextFailure] = useState<
-    "realtime" | "translation" | "tts" | "network" | null
+    "realtime" | "semantic" | "translation" | "tts" | "network" | null
   >(null);
+  const [processingPhase, setProcessingPhase] = useState<"translation" | "semantic_rescue">("translation");
   const buildMetadataRef = useRef(getTranslatorBuildMetadata());
   const sessionIdRef = useRef(createTranslatorSessionId());
   const installationIdRef = useRef<string | null>(null);
@@ -145,6 +154,8 @@ export default function TranslatorView() {
   const diagnosticEventsByTurnRef = useRef(new Map<string, TranslatorDiagnosticEvent[]>());
   const consentByTurnRef = useRef(new Map<string, TranslatorTurnConsent>());
   const consentEventsRef = useRef<TranslatorConsentEvent[]>([]);
+  const sttRoutingByTurnRef = useRef(new Map<string, SttRoutingDecision>());
+  const sttComparisonsByTurnRef = useRef(new Map<string, SttCandidateComparison>());
   const audioQualityMonitorRef = useRef<TranslatorAudioQualityMonitor | null>(null);
   const audioCaptureByTurnRef = useRef(new Map<string, {
     metadata: TranslatorAudioCaptureMetadata;
@@ -364,7 +375,8 @@ export default function TranslatorView() {
       return null;
     }
     const capture = audioCaptureByTurnRef.current.get(input.turnId);
-    const record = createUnreviewedSpeechQualityRecord({
+    const comparison = sttComparisonsByTurnRef.current.get(input.turnId);
+    const baseRecord = createUnreviewedSpeechQualityRecord({
       turnId: input.turnId,
       createdAt: activeTurnCreatedAtRef.current ?? new Date().toISOString(),
       recognizedTranscript: input.recognizedTranscript,
@@ -377,6 +389,12 @@ export default function TranslatorView() {
       audioMetadata: capture?.metadata,
       audioQualityMetrics: capture?.metrics ?? UNAVAILABLE_AUDIO_QUALITY,
     });
+    const record: TranslatorSpeechQualitySample = {
+      ...baseRecord,
+      primaryTranscriptAvailable: comparison !== undefined,
+      rescueTranscriptAvailable: comparison?.rescue !== null && comparison !== undefined,
+      benchmarkReadySameAudioSample: false,
+    };
     qualityByTurnRef.current.set(input.turnId, record);
     setQualityRevision((current) => current + 1);
     return record;
@@ -431,6 +449,20 @@ export default function TranslatorView() {
       realtimeFirstDeltaObserved: d?.realtimeFirstDeltaObserved === true,
       realtimeFinalTranscriptReceived: d?.realtimeFinalTranscriptReceived === true,
       capturePathOutcome: d?.capturePathOutcome ?? null,
+      sttRoutingDecision: d?.sttRoutingDecision ??
+        sttRoutingByTurnRef.current.get(input.turnId) ?? null,
+      semanticRescueAttempted: sttComparisonsByTurnRef.current.has(input.turnId),
+      semanticRescueSucceeded:
+        d?.sttRoutingDecision === "audio_rescue_semantic_failure" &&
+        input.entry !== undefined,
+      sameAudioComparisonAvailable: sttComparisonsByTurnRef.current.has(input.turnId),
+      transcriptScriptAnomalyDetected: d?.transcriptScriptAnomalyDetected === true,
+      primaryFailureToRescueStartMs: finite(d?.primaryFailureToRescueStartMs),
+      rescueTranscriptionMs: finite(d?.rescueTranscriptionMs),
+      rescueTranscriptToTranslationReadyMs: finite(
+        d?.rescueTranscriptToTranslationReadyMs,
+      ),
+      semanticRescueTotalMs: finite(d?.semanticRescueTotalMs),
       recordClickToRecordingStartedMs: finite(d?.recordClickToRecordingStartedMs),
       stopToTranscriptFinalMs: finite(d?.stopToTranscriptFinalMs),
       transcriptFinalToTranslationVisibleMs: finite(d?.transcriptFinalToTranslationVisibleMs),
@@ -1088,15 +1120,21 @@ export default function TranslatorView() {
       (error: unknown) => ({ ok: false as const, error }),
     );
     dispatch({ type: "STOP_AND_TRANSLATE" });
+    setProcessingPhase("translation");
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
     let authoritativeTranscript: string | null = null;
     let errorStage = "transcription";
     const retryState: { failure: TranslatorFailure | null } = { failure: null };
     let qaRealtimeScenarioId: string | null = null;
+    let semanticRescueContext: SemanticRescueContext | null = null;
+    let semanticRescueSucceeded = false;
+    let qaSemanticScenarioId: string | null = null;
+    let finishedRealtimeTurn: ClassicRealtimeTurnHandle | null = null;
 
     try {
       const realtimeTurn = activeRealtimeTurnRef.current;
+      finishedRealtimeTurn = realtimeTurn;
       activeRealtimeTurnRef.current = null;
       let realtimeResult = realtimeTurn
         ? await getRealtimeManager().finishTurn(realtimeTurn)
@@ -1136,6 +1174,26 @@ export default function TranslatorView() {
       }
       if (realtimeResult.ok && transcriptionMs !== undefined) {
         turnPerformance.setTranscriptionOutcome("realtime");
+        if (realtimeTurn?.semanticCircuitBreakerProbe) {
+          rememberDiagnosticEvent(
+            activeTurnId,
+            {
+              category: "REALTIME",
+              message: "Realtime semantic probe started",
+              healthStatus: "degraded",
+              httpStatus: null,
+              apiErrorCode: "realtime_semantic_circuit_breaker_probe",
+              retryable: false,
+              retryAfterMs: null,
+              authFailureType: null,
+            },
+            "semantic_circuit_breaker",
+            "info",
+            "none",
+            null,
+            null,
+          );
+        }
       } else {
         turnPerformance.setTranscriptionOutcome(
           "audio_upload_fallback",
@@ -1145,6 +1203,14 @@ export default function TranslatorView() {
         );
       }
       const usedAudioFallback = !(realtimeResult.ok && transcriptionMs !== undefined);
+      const initialRoutingDecision: SttRoutingDecision = usedAudioFallback
+        ? realtimeTurn?.fallbackReason === "realtime_semantic_circuit_breaker"
+          ? "audio_safe_mode_circuit_breaker"
+          : realtimeTurn?.fallbackReason === "realtime_disabled"
+            ? "audio_safe_mode_feature_flag"
+            : "audio_fallback_cold"
+        : "realtime_primary";
+      sttRoutingByTurnRef.current.set(activeTurnId, initialRoutingDecision);
       let completedFallbackAudio: Awaited<typeof audioBlobResult> | null = null;
       if (usedAudioFallback) {
         completedFallbackAudio = await audioBlobResult;
@@ -1163,6 +1229,10 @@ export default function TranslatorView() {
         });
       }
       errorStage = "translation";
+      if (qaNextFailure === "semantic" && INTERNAL_TRANSLATOR_QA_ENABLED) {
+        qaSemanticScenarioId = "qa_semantic_unsupported_language";
+        setQaNextFailure(null);
+      }
       if (
         (qaNextFailure === "translation" || qaNextFailure === "network") &&
         INTERNAL_TRANSLATOR_QA_ENABLED
@@ -1201,22 +1271,165 @@ export default function TranslatorView() {
           totalChunkBytes:
             captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
         },
+        simulatePrimaryUnsupportedLanguage: qaSemanticScenarioId !== null,
+        onSemanticRescueStarted: ({ primaryFailure }) => {
+          setProcessingPhase("semantic_rescue");
+          rememberDiagnosticEvent(
+            activeTurnId,
+            { ...primaryFailure, category: "TRANSCRIPTION", retryable: false },
+            "semantic_rescue",
+            "info",
+            "none",
+            null,
+            "/api/translator/translate",
+            qaSemanticScenarioId,
+          );
+        },
+        onSemanticRescueSucceeded: (context) => {
+          semanticRescueContext = context;
+          semanticRescueSucceeded = true;
+        },
+        onSemanticRescueFailed: (context) => {
+          semanticRescueContext = context;
+        },
         onResponseCompleted: (now) =>
           turnPerformance.markTranslationClientResponseCompleted(now),
         onRetry: ({ failure }) => {
           retryState.failure = failure;
         },
       });
+      setProcessingPhase("translation");
+      result.diagnostics.sttRoutingDecision ??=
+        sttRoutingByTurnRef.current.get(activeTurnId) ?? initialRoutingDecision;
+      result.diagnostics.finalTranscript = result.originalText;
+      result.diagnostics.finalTranscriptionPath = semanticRescueSucceeded || usedAudioFallback
+        ? "audio_upload_fallback"
+        : "realtime";
+      result.diagnostics.finalTranscriptionModel = result.diagnostics.transcriptionModel;
+      result.diagnostics.transcriptScriptAnomalyDetected =
+        transcriptScriptAnomalyDetected(result.originalText);
+      if (!semanticRescueSucceeded) {
+        result.diagnostics.primaryTranscript = realtimeResult.ok
+          ? realtimeResult.authoritativeTranscript
+          : result.originalText;
+        result.diagnostics.primaryTranscriptionPath = usedAudioFallback
+          ? "audio_upload_fallback"
+          : "realtime";
+        result.diagnostics.primaryTranscriptionModel = result.diagnostics.transcriptionModel;
+      }
       turnPerformance.markTranslationCompleted();
-      if (usedAudioFallback) {
+      if (usedAudioFallback || semanticRescueSucceeded) {
         turnPerformance.setFallbackServerTimings(result.diagnostics);
+      }
+      if (semanticRescueSucceeded) {
+        completedFallbackAudio = await audioBlobResult;
+        sttRoutingByTurnRef.current.set(activeTurnId, "audio_rescue_semantic_failure");
+        turnPerformance.setTranscriptionOutcome(
+          "audio_upload_fallback",
+          "unsupported_language",
+        );
+        const semanticOutcome = realtimeTurn
+          ? getRealtimeManager().recordSemanticFailure(realtimeTurn, {
+              organic: qaSemanticScenarioId === null,
+            })
+          : { tripped: false, probe: false };
+        const context = semanticRescueContext as unknown as SemanticRescueContext;
+        const startConsent = consentByTurnRef.current.get(activeTurnId)
+          ?.consentAtRecordingStart;
+        const allowLocalCandidateContent = Boolean(
+          (startConsent?.internalSpeechDiagnosticsEnabled &&
+            diagnosticsSettingsRef.current.internalQaModeEnabled) ||
+          (startConsent?.qualityContentSharingEnabled &&
+            diagnosticsSettingsRef.current.qualityContentSharingEnabled),
+        );
+        sttComparisonsByTurnRef.current.set(activeTurnId, {
+          turnId: activeTurnId,
+          createdAt: new Date().toISOString(),
+          audioFingerprintSessionLocal: `audio-${activeTurnId}`,
+          primary: {
+            model: context.primaryModel,
+            path: "realtime",
+            transcript: allowLocalCandidateContent ? context.primaryTranscript : null,
+            transcriptLength: context.primaryTranscript.length,
+          },
+          rescue: {
+            model: context.rescueModel ?? "gpt-4o-mini-transcribe",
+            path: "audio_upload_fallback",
+            transcript: allowLocalCandidateContent ? context.rescueTranscript : null,
+            transcriptLength: context.rescueTranscript?.length ?? 0,
+          },
+          didTranscriptChange: context.rescueTranscript === null
+            ? null
+            : context.primaryTranscript !== context.rescueTranscript,
+          finalPath: "audio_rescue_semantic_failure",
+          rescueReason: "unsupported_language",
+          translationOutcomeBeforeRescue: "unsupported_language",
+          translationOutcomeAfterRescue: "success",
+          primaryFailureToRescueStartMs: context.primaryFailureToRescueStartMs,
+          semanticRescueTotalMs: context.semanticRescueTotalMs,
+        });
+        const rescueFailure: TranslatorFailure = {
+          ...context.primaryFailure,
+          category: "TRANSCRIPTION",
+          message: "Die Live-Erkennung war unsicher. Die sichere Spracherkennung wurde verwendet.",
+          healthStatus: "degraded",
+          retryable: false,
+        };
+        rememberDiagnosticEvent(
+          activeTurnId,
+          rescueFailure,
+          "semantic_translation_validation",
+          "degradation",
+          "audio_transcription_rescue",
+          true,
+          "/api/translator/translate",
+          qaSemanticScenarioId,
+        );
+        if (semanticOutcome.tripped) {
+          rememberDiagnosticEvent(
+            activeTurnId,
+            { ...rescueFailure, apiErrorCode: "realtime_semantic_circuit_breaker_activated" },
+            "semantic_circuit_breaker",
+            "info",
+            "audio_upload_fallback",
+            true,
+            null,
+          );
+        }
+      } else if (realtimeResult.ok && realtimeTurn) {
+        const semanticOutcome = getRealtimeManager().recordSemanticSuccess(
+          realtimeTurn,
+          { organic: qaRealtimeScenarioId === null },
+        );
+        if (semanticOutcome.recoveredProbe) {
+          rememberDiagnosticEvent(
+            activeTurnId,
+            {
+              category: "REALTIME",
+              message: "Realtime semantic probe recovered",
+              healthStatus: "healthy",
+              httpStatus: null,
+              apiErrorCode: "realtime_semantic_circuit_breaker_recovered",
+              retryable: false,
+              retryAfterMs: null,
+              authFailureType: null,
+            },
+            "semantic_circuit_breaker",
+            "info",
+            "none",
+            true,
+            null,
+          );
+        }
       }
       turnPerformance.setCaptureDiagnostics({
         audioBlobSize:
           completedFallbackAudio?.ok === true
             ? completedFallbackAudio.audioBlob.size
             : null,
-        capturePathOutcome: usedAudioFallback
+        capturePathOutcome: semanticRescueSucceeded
+          ? "semantic_rescue_success"
+          : usedAudioFallback
           ? "audio_fallback_success"
           : "realtime_success",
       });
@@ -1227,7 +1440,7 @@ export default function TranslatorView() {
           recognizedTranscript: result.originalText,
           sourceLanguage: result.sourceLanguage,
           transcriptionModel: result.diagnostics.transcriptionModel,
-          transcriptionPath: usedAudioFallback
+          transcriptionPath: usedAudioFallback || semanticRescueSucceeded
             ? "audio_upload_fallback"
             : "realtime",
           consent: finalizedConsent,
@@ -1288,14 +1501,15 @@ export default function TranslatorView() {
       dispatch({
         type: "PROCESSING_SUCCEEDED",
         entry,
-        ...(!usedAudioFallback
+        ...(!usedAudioFallback && !semanticRescueSucceeded
           ? {}
           : {
               healthStatus: qaRealtimeScenarioId
                 ? "healthy" as const
                 : "degraded" as const,
-              notice:
-                "Die Live-Spracherkennung ist gerade nicht verfügbar. Die sichere Erkennung wurde verwendet.",
+              notice: semanticRescueSucceeded
+                ? "Die Live-Erkennung war unsicher. Die sichere Spracherkennung wurde verwendet."
+                : "Die Live-Spracherkennung ist gerade nicht verfügbar. Die sichere Erkennung wurde verwendet.",
               noticeCategory: "REALTIME" as const,
             }),
       });
@@ -1341,6 +1555,76 @@ export default function TranslatorView() {
       if (state.autoPlay) void handlePlayback(entry, true);
     } catch (error) {
       if (!isUserAbort(error)) {
+        setProcessingPhase("translation");
+        const failedRescueContext = semanticRescueContext as unknown as
+          SemanticRescueContext | null;
+        if (failedRescueContext) {
+          if (finishedRealtimeTurn) {
+            getRealtimeManager().recordSemanticFailure(
+              finishedRealtimeTurn,
+              { organic: qaSemanticScenarioId === null },
+            );
+          }
+          const startConsent = consentByTurnRef.current.get(activeTurnId)
+            ?.consentAtRecordingStart;
+          const allowLocalCandidateContent = Boolean(
+            (startConsent?.internalSpeechDiagnosticsEnabled &&
+              diagnosticsSettingsRef.current.internalQaModeEnabled) ||
+            (startConsent?.qualityContentSharingEnabled &&
+              diagnosticsSettingsRef.current.qualityContentSharingEnabled),
+          );
+          sttRoutingByTurnRef.current.set(activeTurnId, "audio_rescue_semantic_failure");
+          sttComparisonsByTurnRef.current.set(activeTurnId, {
+            turnId: activeTurnId,
+            createdAt: new Date().toISOString(),
+            audioFingerprintSessionLocal: `audio-${activeTurnId}`,
+            primary: {
+              model: failedRescueContext.primaryModel,
+              path: "realtime",
+              transcript: allowLocalCandidateContent
+                ? failedRescueContext.primaryTranscript : null,
+              transcriptLength: failedRescueContext.primaryTranscript.length,
+            },
+            rescue: failedRescueContext.rescueTranscript === null ? null : {
+              model: failedRescueContext.rescueModel ?? "gpt-4o-mini-transcribe",
+              path: "audio_upload_fallback",
+              transcript: allowLocalCandidateContent
+                ? failedRescueContext.rescueTranscript : null,
+              transcriptLength: failedRescueContext.rescueTranscript.length,
+            },
+            didTranscriptChange: failedRescueContext.rescueTranscript === null
+              ? null
+              : failedRescueContext.primaryTranscript !==
+                failedRescueContext.rescueTranscript,
+            finalPath: "audio_rescue_semantic_failure",
+            rescueReason: "unsupported_language",
+            translationOutcomeBeforeRescue: "unsupported_language",
+            translationOutcomeAfterRescue:
+              failedRescueContext.rescueFailure?.apiErrorCode === "unsupported_language"
+                ? "unsupported_language"
+                : "failure",
+            primaryFailureToRescueStartMs:
+              failedRescueContext.primaryFailureToRescueStartMs,
+            semanticRescueTotalMs: failedRescueContext.semanticRescueTotalMs,
+          });
+          rememberDiagnosticEvent(
+            activeTurnId,
+            {
+              ...failedRescueContext.primaryFailure,
+              category: "TRANSCRIPTION",
+              healthStatus: "degraded",
+              retryable: false,
+            },
+            "semantic_translation_validation",
+            "degradation",
+            "audio_transcription_rescue",
+            false,
+            "/api/translator/translate",
+            qaSemanticScenarioId,
+          );
+          authoritativeTranscript = failedRescueContext.rescueTranscript ??
+            failedRescueContext.primaryTranscript;
+        }
         if (!authoritativeTranscript && error instanceof TranslatorClientError) {
           authoritativeTranscript = error.recognizedTranscript;
         }
@@ -1393,7 +1677,7 @@ export default function TranslatorView() {
           : "reset_to_idle" as const;
         const qaScenarioId = failure.apiErrorCode?.startsWith("qa_")
           ? failure.apiErrorCode
-          : null;
+          : qaSemanticScenarioId;
         const failureEvent = rememberDiagnosticEvent(
           turnId,
           failure,
@@ -1518,6 +1802,7 @@ export default function TranslatorView() {
         });
       }
     } finally {
+      setProcessingPhase("translation");
       suspendMicrophone();
       requestAbortRef.current = null;
       translationInFlightRef.current = false;
@@ -1547,6 +1832,8 @@ export default function TranslatorView() {
     audioBlobByTurnRef.current.clear();
     audioIncludedInBundleTurnIdsRef.current.clear();
     diagnosticEventsByTurnRef.current.clear();
+    sttRoutingByTurnRef.current.clear();
+    sttComparisonsByTurnRef.current.clear();
     consentByTurnRef.current.clear();
     consentEventsRef.current = [];
     audioCaptureByTurnRef.current.clear();
@@ -1567,6 +1854,7 @@ export default function TranslatorView() {
     qualityByTurn = qualityByTurnRef.current,
     audioIncludedInDiagnosticBundleByTurn: ReadonlySet<string> =
       audioIncludedInBundleTurnIdsRef.current,
+    bundleSnapshot = false,
   ) {
     const connectionDiagnostics =
       realtimeManagerRef.current?.getConnectionDiagnostics() ?? {
@@ -1603,12 +1891,17 @@ export default function TranslatorView() {
         diagnosticEventsByTurn: diagnosticEventsByTurnRef.current,
         consentByTurn: consentByTurnRef.current,
         consentEvents: consentEventsRef.current,
+        sttRoutingByTurn: sttRoutingByTurnRef.current,
+        sttComparisonsByTurn: sttComparisonsByTurnRef.current,
         audioBlobAvailableByTurn: new Set(audioBlobByTurnRef.current.keys()),
         audioIncludedInDiagnosticBundleByTurn,
         buildMetadata: buildMetadataRef.current,
         diagnosticsSettings,
         installationId: installationIdRef.current,
         sessionId: sessionIdRef.current,
+        audioManifestConsistent: bundleSnapshot ? true : null,
+        droppedTelemetryEvents:
+          telemetryQueueRef.current?.getDroppedEventCount() ?? 0,
         ...connectionDiagnostics,
       });
   }
@@ -1634,7 +1927,7 @@ export default function TranslatorView() {
       }
     }
     const bundle = await createTranslatorDiagnosticBundle({
-      report: buildCurrentReport(qualityForExport, includedTurnIds),
+      report: buildCurrentReport(qualityForExport, includedTurnIds, true),
       includeAudio: true,
       audioFiles: Array.from(audioBlobByTurnRef.current, ([turnId, blob]) => ({
         turnId,
@@ -1703,6 +1996,13 @@ export default function TranslatorView() {
       turns,
       audioIncludedTurnCount: included.size,
       incidentExpiresAt: lastIncident.expiresAt,
+      reportIntegrity: {
+        ...(base.reportIntegrity && typeof base.reportIntegrity === "object"
+          ? base.reportIntegrity : {}),
+        sessionComplete: true,
+        persistedSnapshotUsed: true,
+        audioManifestConsistent: true,
+      },
     };
     const bundle = await createTranslatorDiagnosticBundle({
       report,
@@ -1720,7 +2020,12 @@ export default function TranslatorView() {
     if (!current) return;
     qualityByTurnRef.current.set(
       entry.id,
-      correctSpeechQualityRecord(current, correctedTranscript),
+      {
+        ...correctSpeechQualityRecord(current, correctedTranscript),
+        benchmarkReadySameAudioSample:
+          sttComparisonsByTurnRef.current.has(entry.id) &&
+          audioBlobByTurnRef.current.has(entry.id),
+      },
     );
     setQualityRevision((current) => current + 1);
   }
@@ -1728,7 +2033,12 @@ export default function TranslatorView() {
   function handleAcceptTranscript(turnId: string) {
     const current = qualityByTurnRef.current.get(turnId);
     if (!current) return;
-    qualityByTurnRef.current.set(turnId, acceptSpeechQualityRecord(current));
+    qualityByTurnRef.current.set(turnId, {
+      ...acceptSpeechQualityRecord(current),
+      benchmarkReadySameAudioSample:
+        sttComparisonsByTurnRef.current.has(turnId) &&
+        audioBlobByTurnRef.current.has(turnId),
+    });
     setQualityRevision((revision) => revision + 1);
   }
 
@@ -1740,7 +2050,12 @@ export default function TranslatorView() {
     if (!current) return;
     qualityByTurnRef.current.set(
       turnId,
-      correctSpeechQualityRecord(current, correctedTranscript),
+      {
+        ...correctSpeechQualityRecord(current, correctedTranscript),
+        benchmarkReadySameAudioSample:
+          sttComparisonsByTurnRef.current.has(turnId) &&
+          audioBlobByTurnRef.current.has(turnId),
+      },
     );
     setQualityRevision((revision) => revision + 1);
   }
@@ -1825,7 +2140,11 @@ export default function TranslatorView() {
           {state.status === "processing" ? (
             <div className="flex min-h-24 flex-col items-center justify-center text-center">
               <span className="h-8 w-8 rounded-full border-4 border-soft border-t-[color:var(--accent-cta)] motion-safe:animate-spin" aria-hidden="true" />
-              <p className="mt-4 font-semibold">Wird übersetzt …</p>
+              <p className="mt-4 font-semibold">
+                {processingPhase === "semantic_rescue"
+                  ? "Ich prüfe die Aufnahme noch einmal …"
+                  : "Wird übersetzt …"}
+              </p>
             </div>
           ) : null}
 
@@ -2074,6 +2393,7 @@ export default function TranslatorView() {
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {([
                       ["realtime", "Realtime"],
+                      ["semantic", "Semantischer Rescue"],
                       ["translation", "Translation 503"],
                       ["tts", "TTS 503"],
                       ["network", "Netzwerk"],

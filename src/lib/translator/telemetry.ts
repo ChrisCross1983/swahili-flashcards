@@ -10,6 +10,7 @@ import type {
   TranslatorDiagnosticEventOrigin,
 } from "@/lib/translator/diagnosticEvents";
 import type { TranslatorConsentSnapshot } from "@/lib/translator/turnConsent";
+import type { SttRoutingDecision } from "@/lib/translator/sttRouting";
 
 export type TranslatorTechnicalEvent = TranslatorBuildMetadata &
   TranslatorPlatformMetadata & {
@@ -42,6 +43,15 @@ export type TranslatorTechnicalEvent = TranslatorBuildMetadata &
     realtimeFirstDeltaObserved?: boolean;
     realtimeFinalTranscriptReceived?: boolean;
     capturePathOutcome?: string | null;
+    sttRoutingDecision?: SttRoutingDecision | null;
+    semanticRescueAttempted?: boolean;
+    semanticRescueSucceeded?: boolean;
+    sameAudioComparisonAvailable?: boolean;
+    transcriptScriptAnomalyDetected?: boolean;
+    primaryFailureToRescueStartMs?: number | null;
+    rescueTranscriptionMs?: number | null;
+    rescueTranscriptToTranslationReadyMs?: number | null;
+    semanticRescueTotalMs?: number | null;
     recordClickToRecordingStartedMs: number | null;
     stopToTranscriptFinalMs: number | null;
     transcriptFinalToTranslationVisibleMs: number | null;
@@ -95,6 +105,7 @@ function readQueue(storage: StorageLike): TranslatorTechnicalEvent[] {
 
 export class TranslatorTelemetryQueue {
   private flushing = false;
+  private droppedEvents = 0;
   private readonly fetcher: typeof fetch;
   private readonly schedule: (callback: () => void) => void;
   private readonly maxEvents: number;
@@ -109,12 +120,14 @@ export class TranslatorTelemetryQueue {
 
   enqueue(event: TranslatorTechnicalEvent) {
     if (!this.options.isEnabled()) return false;
-    const queue = [
+    const pending = [
       ...readQueue(this.options.storage).filter((current) =>
         current.sessionId !== event.sessionId || current.turnId !== event.turnId,
       ),
       event,
-    ].slice(-this.maxEvents);
+    ];
+    this.droppedEvents += Math.max(0, pending.length - this.maxEvents);
+    const queue = pending.slice(-this.maxEvents);
     this.options.storage.setItem(QUEUE_KEY, JSON.stringify(queue));
     this.schedule(() => void this.flush());
     return true;
@@ -126,6 +139,10 @@ export class TranslatorTelemetryQueue {
 
   pendingCount() {
     return readQueue(this.options.storage).length;
+  }
+
+  getDroppedEventCount() {
+    return this.droppedEvents;
   }
 
   async flush() {

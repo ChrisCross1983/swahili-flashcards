@@ -53,6 +53,7 @@ describe("translator client", () => {
         "Content-Type": "application/json",
         "X-Translator-Correlation-Id": "translation-turn-1",
         "X-Translator-Request-Attempt": "0",
+        "X-Translator-Request-Phase": "primary",
       });
       expect(init?.body).toBe(
         JSON.stringify({

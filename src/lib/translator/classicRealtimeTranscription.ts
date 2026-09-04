@@ -8,6 +8,7 @@ export type ClassicTranscriptionFallbackReason =
   | "session_error"
   | "transcript_timeout"
   | "realtime_circuit_breaker"
+  | "realtime_semantic_circuit_breaker"
   | "realtime_disabled"
   | "realtime_track_rebind_failed"
   | "timeout";

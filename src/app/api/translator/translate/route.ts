@@ -119,6 +119,7 @@ async function translationResponse(
     audioBytes: number | null;
     normalizedMimeType: string | null;
     retryAttempt: number;
+    requestPhase: "primary" | "semantic_rescue";
   },
 ) {
   let openAiStartedAt: string | null = null;
@@ -325,6 +326,7 @@ async function translationResponse(
       upstreamHttpStatus: null,
       upstreamRequestId: null,
       retryAttempt: requestMetadata.retryAttempt,
+      requestPhase: requestMetadata.requestPhase,
     });
 
     if (code === "no_speech") {
@@ -340,7 +342,7 @@ async function translationResponse(
       return errorResponse(
         422,
         "unsupported_language",
-        "Es wurde weder Deutsch noch Kiswahili erkannt. Bitte wähle die Sprache manuell.",
+        "Ich konnte die Sprache nicht sicher erkennen. Bitte sprich den Satz noch einmal.",
         recognizedTranscript,
         correlationId,
       );
@@ -388,6 +390,8 @@ export async function POST(request: Request) {
     request.headers.get("X-Translator-Request-Attempt") ?? "0",
     10,
   ) || 0));
+  const requestPhase = request.headers.get("X-Translator-Request-Phase") ===
+    "semantic_rescue" ? "semantic_rescue" as const : "primary" as const;
   timingContext.stages.start("auth");
   const { response } = await requireUser({
     onClientPreparationStarted: () => {
@@ -490,7 +494,7 @@ export async function POST(request: Request) {
         gateway,
       );
       },
-      { audioBytes: null, normalizedMimeType: null, retryAttempt },
+      { audioBytes: null, normalizedMimeType: null, retryAttempt, requestPhase },
     );
   }
 
@@ -543,6 +547,7 @@ export async function POST(request: Request) {
       normalizedMimeType: audio.type ? normalizeAudioMimeType(audio.type) : null,
       transcriptionModel: "gpt-4o-mini-transcribe",
       retryAttempt,
+      requestPhase,
     });
     return errorResponse(
       422,
@@ -595,6 +600,7 @@ export async function POST(request: Request) {
       audioBytes: audio.size,
       normalizedMimeType: format.mimeType,
       retryAttempt,
+      requestPhase,
     },
   );
 }

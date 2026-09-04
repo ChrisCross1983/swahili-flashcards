@@ -330,8 +330,8 @@ describe("classic translator QA report", () => {
 
     expect(report).toMatchObject({
       reportVersion: 5,
-      reportRevision: "5.2",
-      performanceOptimizationVersion: "classic-capture-reliability-v5.2",
+      reportRevision: "5.2.1",
+      performanceOptimizationVersion: "classic-stt-rescue-observability-v5.2.1",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -627,7 +627,9 @@ describe("classic translator QA report", () => {
       }]]),
       buildMetadata: {
         appVersion: "1.2.3", buildVersion: "99", gitCommitSha: "abc",
-        environment: "preview",
+        environment: "preview", deploymentId: "dpl_99", vercelEnvironment: "preview",
+        frontendRuntimeEnvironment: "preview", frontendOriginKind: "vercel_preview",
+        backendEnvironmentLabel: "staging",
       },
       diagnosticsSettings: {
         diagnosticsSharingEnabled: true, qualityContentSharingEnabled: true,
@@ -637,7 +639,7 @@ describe("classic translator QA report", () => {
     expect(report).toMatchObject({
       reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
       diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
-      reportRevision: "5.2", failureCount: 0, failuresByCategory: {},
+      reportRevision: "5.2.1", failureCount: 0, failuresByCategory: {},
       degradationCount: 1, expectedFallbackCount: 0,
       recoveryAttempts: 1, successfulRecoveries: 1,
       sttCorrectionCount: 1, speechQualitySampleCount: 1,
@@ -810,6 +812,67 @@ describe("classic translator QA report", () => {
         sampleRate: 48_000, channelCount: 1,
       },
       audioQualityMetrics: { source: "realtime_analyser", rmsDbfs: -18 },
+    });
+  });
+
+  it("derives rescue, routing, learning, timeline, and integrity summaries without double-counting", () => {
+    const rescued = entry("rescued", "audio_upload_fallback");
+    rescued.diagnostics = {
+      ...rescued.diagnostics!,
+      sttRoutingDecision: "audio_rescue_semantic_failure",
+      primaryTranscriptionPath: "realtime",
+      primaryTranscriptionModel: "gpt-live-transcribe",
+      rescueTranscriptionPath: "audio_upload_fallback",
+      rescueTranscriptionModel: "gpt-4o-mini-transcribe",
+      finalTranscriptionPath: "audio_upload_fallback",
+      finalTranscriptionModel: "gpt-4o-mini-transcribe",
+      primaryFailureToRescueStartMs: 12,
+      rescueTranscriptionMs: 600,
+      semanticRescueTotalMs: 950,
+    };
+    const event = diagnosticEvent({
+      eventKind: "degradation",
+      category: "TRANSCRIPTION",
+      httpStatus: 422,
+      apiCode: "unsupported_language",
+      recoveryAction: "audio_transcription_rescue",
+      recoverySucceeded: true,
+    });
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-04T00:00:00.000Z", userAgent: "QA", platform: "QA",
+      currentMode: "auto", ttsSpeed: 1, entries: [rescued], failedTurns: [],
+      diagnosticEventsByTurn: new Map([[rescued.id, [event]]]),
+      sttRoutingByTurn: new Map([[rescued.id, "audio_rescue_semantic_failure"]]),
+      sttComparisonsByTurn: new Map([[rescued.id, {
+        turnId: rescued.id, createdAt: "2026-09-04T00:00:01.000Z",
+        audioFingerprintSessionLocal: "audio-rescued",
+        primary: { model: "gpt-live-transcribe", path: "realtime", transcript: "Nie Bgani", transcriptLength: 9 },
+        rescue: { model: "gpt-4o-mini-transcribe", path: "audio_upload_fallback", transcript: "Ni bei gani?", transcriptLength: 12 },
+        didTranscriptChange: true, finalPath: "audio_rescue_semantic_failure",
+        rescueReason: "unsupported_language", translationOutcomeBeforeRescue: "unsupported_language",
+        translationOutcomeAfterRescue: "success", primaryFailureToRescueStartMs: 12,
+        semanticRescueTotalMs: 950,
+      }]]),
+      realtimeSemanticCircuitBreakerTrips: 1,
+    });
+    expect(report.executiveSummary).toMatchObject({
+      successful: 1, terminalFailures: 0, recoveredTurns: 1,
+      sttRescueAttempts: 1, sttRescueSuccessRate: 1,
+    });
+    expect(report.learningSummary).toMatchObject({
+      sameAudioComparisonCount: 1, realtimeToRescueTranscriptDisagreementCount: 1,
+      semanticRescueAttempts: 1, semanticRescueSuccesses: 1,
+      semanticCircuitBreakerTrips: 1,
+    });
+    expect(report.sttRoutingSummary.semanticRescueSuccesses).toBe(1);
+    expect(report.failureCount).toBe(0);
+    expect(report.degradationCount).toBe(1);
+    expect(report.incidentTimeline).toHaveLength(1);
+    expect(report.turns[0].sttCandidateComparison).toMatchObject({
+      primary: { transcript: null }, rescue: { transcript: null },
+    });
+    expect(report.reportIntegrity).toMatchObject({
+      schemaVersion: "translator-report-v5.2.1", reportRevision: "5.2.1",
     });
   });
 });

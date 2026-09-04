@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     environment: event!.environment,
     status: event!.status,
     failure_category: event!.failureCategory,
-    report_revision: "5.1",
+    report_revision: "5.2.1",
     event_origin: event!.eventOrigin,
     event_kind: event!.eventKind,
     qa_scenario_id: event!.qaScenarioId,
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       build_version: event!.buildVersion,
       git_commit_sha: event!.gitCommitSha,
       environment: event!.environment,
-      report_revision: "5.1",
+      report_revision: "5.2.1",
       updated_at: new Date().toISOString(),
     },
   ])).values());

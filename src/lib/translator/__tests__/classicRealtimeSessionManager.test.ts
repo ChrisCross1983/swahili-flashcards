@@ -24,6 +24,8 @@ type Handlers = {
 function createHarness(options: {
   finalizationFailureThreshold?: number;
   circuitBreakerTurns?: number;
+  semanticFailureThreshold?: number;
+  semanticCircuitBreakerTurns?: number;
 } = {}) {
   let monotonic = 0;
   let wall = Date.parse("2026-08-31T06:00:00.000Z");
@@ -93,6 +95,8 @@ function createHarness(options: {
     randomId: () => `id-${++id}`,
     finalizationFailureThreshold: options.finalizationFailureThreshold,
     circuitBreakerTurns: options.circuitBreakerTurns,
+    semanticFailureThreshold: options.semanticFailureThreshold,
+    semanticCircuitBreakerTurns: options.semanticCircuitBreakerTurns,
   });
   const stream = {} as MediaStream;
   const advanceClock = (ms: number) => {
@@ -109,6 +113,105 @@ async function flush() {
 describe("ClassicRealtimeSessionManager", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("bypasses two turns after two organic semantic failures and closes on a successful probe", async () => {
+    const harness = createHarness({
+      semanticFailureThreshold: 2,
+      semanticCircuitBreakerTurns: 2,
+    });
+    const cold = await harness.manager.prepareTurn(harness.stream);
+    harness.manager.recordingStarted(cold, harness.stream);
+    harness.transports[0].connection.resolve();
+    await flush();
+    await harness.manager.finishTurn(cold);
+
+    for (let index = 0; index < 2; index += 1) {
+      const turn = await harness.manager.prepareTurn(harness.stream);
+      await harness.manager.recordingStarted(turn, harness.stream, index + 2);
+      const final = harness.manager.finishTurn(turn);
+      harness.transports[0].transcript.resolve(`Nie Bgani ${index}`);
+      await final;
+      expect(harness.manager.recordSemanticFailure(turn, { organic: true }).tripped)
+        .toBe(index === 1);
+      harness.transports[0].transcript = deferred<string>();
+    }
+
+    for (let index = 0; index < 2; index += 1) {
+      const safe = await harness.manager.prepareTurn(harness.stream);
+      expect(safe).toMatchObject({
+        transcriptionPath: "audio_upload_fallback",
+        fallbackReason: "realtime_semantic_circuit_breaker",
+        semanticCircuitBreakerBypassed: true,
+      });
+      await harness.manager.recordingStarted(safe, harness.stream, index + 4);
+      await harness.manager.finishTurn(safe);
+    }
+
+    const probe = await harness.manager.prepareTurn(harness.stream);
+    expect(probe).toMatchObject({
+      transcriptionPath: "realtime",
+      semanticCircuitBreakerProbe: true,
+    });
+    await harness.manager.recordingStarted(probe, harness.stream, 6);
+    const probeFinal = harness.manager.finishTurn(probe);
+    harness.transports[0].transcript.resolve("Ni bei gani?");
+    await probeFinal;
+    expect(harness.manager.recordSemanticSuccess(probe, { organic: true }))
+      .toEqual({ recoveredProbe: true });
+    expect(harness.manager.getConnectionDiagnostics()).toMatchObject({
+      realtimeSemanticCircuitBreakerTrips: 1,
+      realtimeSemanticFailureStreak: 0,
+      realtimeSemanticProbePending: false,
+    });
+  });
+
+  it("excludes QA semantic outcomes and reopens immediately when a probe fails", async () => {
+    const harness = createHarness({
+      semanticFailureThreshold: 1,
+      semanticCircuitBreakerTurns: 1,
+    });
+    const cold = await harness.manager.prepareTurn(harness.stream);
+    harness.manager.recordingStarted(cold, harness.stream);
+    harness.transports[0].connection.resolve();
+    await flush();
+    await harness.manager.finishTurn(cold);
+    const qa = await harness.manager.prepareTurn(harness.stream);
+    expect(harness.manager.recordSemanticFailure(qa, { organic: false }).tripped).toBe(false);
+    await harness.manager.abortTurn(qa);
+    expect(harness.manager.getConnectionDiagnostics().realtimeSemanticCircuitBreakerTrips).toBe(0);
+
+    const organic = await harness.manager.prepareTurn(harness.stream);
+    expect(harness.manager.recordSemanticFailure(organic, { organic: true }))
+      .toEqual({ tripped: true, probe: false });
+    await harness.manager.abortTurn(organic);
+    const safe = await harness.manager.prepareTurn(harness.stream);
+    expect(safe.fallbackReason).toBe("realtime_semantic_circuit_breaker");
+    await harness.manager.finishTurn(safe);
+    const probe = await harness.manager.prepareTurn(harness.stream);
+    expect(probe.semanticCircuitBreakerProbe).toBe(true);
+    expect(harness.manager.recordSemanticFailure(probe, { organic: true }))
+      .toEqual({ tripped: true, probe: true });
+    expect(harness.manager.getConnectionDiagnostics()
+      .realtimeSemanticCircuitBreakerTrips).toBe(2);
+    await harness.manager.abortTurn(probe);
+  });
+
+  it("resets a non-probe semantic streak after an organic realtime success", async () => {
+    const harness = createHarness({ semanticFailureThreshold: 2 });
+    const cold = await harness.manager.prepareTurn(harness.stream);
+    harness.manager.recordingStarted(cold, harness.stream);
+    harness.transports[0].connection.resolve();
+    await flush();
+    await harness.manager.finishTurn(cold);
+    const first = await harness.manager.prepareTurn(harness.stream);
+    harness.manager.recordSemanticFailure(first, { organic: true });
+    harness.manager.recordSemanticSuccess(first, { organic: true });
+    expect(harness.manager.getConnectionDiagnostics()).toMatchObject({
+      realtimeSemanticFailureStreak: 0,
+      realtimeSemanticCircuitBreakerTrips: 0,
+    });
+    await harness.manager.abortTurn(first);
   });
 
   it("warms in the background, then reuses one connection for turns two and three", async () => {
