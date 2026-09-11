@@ -325,4 +325,38 @@ describe("POST /api/translator/feedback", () => {
       affectedColumn: null,
     });
   });
+
+  it("maps fallback_reason to the realtime feedback migration without a false remote save", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    singleMock.mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST204",
+        message: "Could not find the 'fallback_reason' column in the schema cache",
+      },
+    });
+
+    const response = await post({
+      ...validFeedback,
+      diagnostics: { ...validFeedback.diagnostics, fallbackReason: "realtime_disabled" },
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "feedback_storage_unavailable",
+    });
+    expect(upsertMock).toHaveBeenCalledWith(expect.objectContaining({
+      fallback_reason: "realtime_disabled",
+      recording_started_at: validFeedback.diagnostics.recordingStartedAt,
+      server_translation_total_ms: validFeedback.diagnostics.serverTranslationTotalMs,
+    }), { onConflict: "owner_key,translation_entry_id" });
+    expect(errorSpy).toHaveBeenCalledWith("[translator] feedback write failed", {
+      code: "PGRST204",
+      reason: "feedback_columns_missing",
+      requiredMigrations: [
+        "supabase/migrations/20260829000000_translator_realtime_performance.sql",
+      ],
+      affectedColumn: "fallback_reason",
+    });
+  });
 });

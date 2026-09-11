@@ -7,6 +7,7 @@ import {
   KISWAHILI_STT_REGRESSION_CASES,
   normalizeTranscriptForComparison,
   reviewSameAudioComparison,
+  SAFE_STT_PARITY_VERSION,
   summarizeSpeechBenchmarks,
   wordErrorRate,
   type SameAudioBenchmarkComparison,
@@ -135,5 +136,27 @@ describe("same-audio benchmark scoring", () => {
       { status: "equivalent" },
     ));
     expect(summarizeSpeechBenchmarks(reviewed).benchmarkEvidenceLevel).toBe("useful");
+  });
+
+  it("retains pre-parity evidence as legacy and reports only matching parity metrics", () => {
+    const legacy = reviewSameAudioComparison(
+      comparison("Habari", "Habari"),
+      { status: "equivalent" },
+    );
+    const current = reviewSameAudioComparison({
+      ...comparison("Habari", "Hapari"),
+      comparisonId: "current", turnId: "current",
+      benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
+    }, { status: "accepted_primary" });
+    expect(summarizeSpeechBenchmarks([legacy, current])).toMatchObject({
+      benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
+      sameAudioGroundTruthReviewed: 2,
+      legacyReviewedSamples: 1,
+      reviewedSamplesCurrentParity: 1,
+      currentParityRealtimeWins: 1,
+      currentParityAudioWins: 0,
+      currentParityTies: 0,
+      currentParityEvidenceLevel: "insufficient",
+    });
   });
 });

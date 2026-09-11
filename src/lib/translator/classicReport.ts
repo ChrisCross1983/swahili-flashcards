@@ -52,8 +52,8 @@ import {
 } from "@/lib/translator/recordingStartDiagnostics";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.2.5";
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-speech-quality-feedback-v5.2.5";
+const REPORT_REVISION = "5.2.6";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-benchmark-parity-v5.2.6";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -2017,12 +2017,16 @@ export function buildClassicTranslatorReport(input: {
     ...(summaryGeneratedTurns.length > 0 ? ["summary_available"] : []),
     ...(ttsGenerationFailures.length > 0 ? ["tts_unavailable"] : []),
     ...(ttsPlaybackBlockedTurns.length > 0 ? ["tts_playback_blocked"] : []),
-    ...(benchmarkComparisons.length > 0 && speechBenchmarkSummary.sameAudioGroundTruthReviewed < 5
+    ...(benchmarkComparisons.some((comparison) =>
+      comparison.benchmarkParityVersion === speechBenchmarkSummary.benchmarkParityVersion) &&
+      speechBenchmarkSummary.reviewedSamplesCurrentParity < 5
       ? ["speech_benchmark_insufficient_evidence"] : []),
     ...(benchmarkComparisons.some((comparison) =>
+      comparison.benchmarkParityVersion === speechBenchmarkSummary.benchmarkParityVersion &&
       comparison.benchmarkStatus === "pending")
       ? ["speech_benchmark_collecting"] : []),
     ...(benchmarkComparisons.some((comparison) =>
+      comparison.benchmarkParityVersion === speechBenchmarkSummary.benchmarkParityVersion &&
       comparison.benchmarkStatus === "completed" && comparison.groundTruthStatus === "unreviewed")
       ? ["speech_benchmark_ready_for_review"] : []),
   ];
@@ -2303,7 +2307,7 @@ export function buildClassicTranslatorReport(input: {
     },
     incidentTimeline,
     reportIntegrity: {
-      schemaVersion: "translator-report-v5.2.5",
+      schemaVersion: "translator-report-v5.2.6",
       reportRevision: REPORT_REVISION,
       sessionComplete: false,
       persistedSnapshotUsed: input.persistedSnapshotUsed === true,

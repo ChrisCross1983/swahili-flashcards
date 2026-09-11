@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { SameAudioBenchmarkRunner } from "@/lib/translator/sameAudioBenchmark";
+import { SAFE_STT_PARITY_VERSION } from "@/lib/translator/speechQuality";
+import { TranslatorOperationError } from "@/lib/translator/reliability";
 
 const eligibleInput = {
   turnId: "turn-1",
@@ -8,7 +10,7 @@ const eligibleInput = {
   primaryCompletedAt: "2026-09-10T10:00:00.000Z",
   primaryEngine: "gpt-live-transcribe",
   primaryRoute: "realtime" as const,
-  direction: { sourceLanguage: "sw" as const, targetLanguage: "de" as const },
+  fallbackDirection: { sourceLanguage: "sw" as const, targetLanguage: "de" as const },
   recordingDurationMs: 1_000,
   consent: {
     consentAtRecordingStart: {
@@ -25,7 +27,13 @@ const eligibleInput = {
 
 describe("SameAudioBenchmarkRunner", () => {
   it("claims a turn exactly once even when called twice like React Strict Mode", async () => {
-    const request = vi.fn(async (audio: Blob) => {
+    const request = vi.fn(async (
+      audio: Blob,
+      _direction: unknown,
+      _options: unknown,
+    ) => {
+      void _direction;
+      void _options;
       expect(audio).toBe(eligibleInput.audioBlob);
       return {
       transcript: "Unaitwa nani?", model: "gpt-4o-mini-transcribe",
@@ -38,7 +46,50 @@ describe("SameAudioBenchmarkRunner", () => {
     expect(runner.run(eligibleInput, updates)).toBe(false);
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     expect(request.mock.calls[0][0]).toBe(eligibleInput.audioBlob);
+    expect(request.mock.calls[0][1]).toEqual(eligibleInput.fallbackDirection);
+    expect(updates.mock.calls[0][0]).toEqual(expect.objectContaining({
+      benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
+    }));
     await vi.waitFor(() => expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ benchmarkStatus: "completed" })));
+  });
+
+  it("keeps AUTO language detection when the product fallback would use AUTO", async () => {
+    const request = vi.fn(async (_audio: Blob, direction: unknown) => {
+      expect(direction).toEqual({ sourceLanguage: "auto", targetLanguage: "auto" });
+      return {
+        transcript: "Unaitwa nani?", model: "gpt-4o-mini-transcribe",
+        fallbackUsed: false, transcriptionMs: 400, completedAt: new Date().toISOString(),
+      };
+    });
+    const runner = new SameAudioBenchmarkRunner(request);
+    runner.run({
+      ...eligibleInput,
+      fallbackDirection: { sourceLanguage: "auto", targetLanguage: "auto" },
+    }, vi.fn());
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+  });
+
+  it("uses the product fallback's one retry for a retryable safe-STT request", async () => {
+    const request = vi.fn()
+      .mockRejectedValueOnce(new TranslatorOperationError({
+        category: "SERVICE_UNAVAILABLE", message: "temporarily unavailable",
+        healthStatus: "offline", httpStatus: 503, apiErrorCode: "transcription_failed",
+        retryable: true, retryAfterMs: 12, authFailureType: null,
+      }))
+      .mockResolvedValueOnce({
+        transcript: "Unaitwa nani?", model: "gpt-4o-mini-transcribe",
+        fallbackUsed: false, transcriptionMs: 400, completedAt: new Date().toISOString(),
+      });
+    const wait = vi.fn(async () => undefined);
+    const runner = new SameAudioBenchmarkRunner(request, wait);
+    const updates = vi.fn();
+    runner.run(eligibleInput, updates);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(wait).toHaveBeenCalledWith(12, expect.any(AbortSignal));
+    expect(request.mock.calls.map(([, , options]) => options.requestAttempt)).toEqual([0, 1]);
+    await vi.waitFor(() => expect(updates).toHaveBeenLastCalledWith(
+      expect.objectContaining({ benchmarkStatus: "completed" }),
+    ));
   });
 
   it("does not request secondary STT when internal QA or consent is off", () => {

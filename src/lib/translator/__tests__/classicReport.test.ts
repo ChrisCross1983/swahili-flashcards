@@ -10,6 +10,7 @@ import {
   createSpeechQualitySample,
   createUnreviewedSpeechQualityRecord,
   reviewSameAudioComparison,
+  SAFE_STT_PARITY_VERSION,
   type SameAudioBenchmarkComparison,
 } from "@/lib/translator/speechQuality";
 import { createTranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
@@ -342,8 +343,8 @@ describe("classic translator QA report", () => {
 
     expect(report).toMatchObject({
       reportVersion: 5,
-      reportRevision: "5.2.5",
-      performanceOptimizationVersion: "classic-speech-quality-feedback-v5.2.5",
+      reportRevision: "5.2.6",
+      performanceOptimizationVersion: "classic-benchmark-parity-v5.2.6",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -651,7 +652,7 @@ describe("classic translator QA report", () => {
     expect(report).toMatchObject({
       reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
       diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
-      reportRevision: "5.2.5", failureCount: 0, failuresByCategory: {},
+      reportRevision: "5.2.6", failureCount: 0, failuresByCategory: {},
       degradationCount: 1, expectedFallbackCount: 0,
       recoveryAttempts: 1, successfulRecoveries: 1,
       sttCorrectionCount: 1, speechQualitySampleCount: 1,
@@ -886,7 +887,7 @@ describe("classic translator QA report", () => {
       primary: { transcript: null }, rescue: { transcript: null },
     });
     expect(report.reportIntegrity).toMatchObject({
-      schemaVersion: "translator-report-v5.2.5", reportRevision: "5.2.5",
+      schemaVersion: "translator-report-v5.2.6", reportRevision: "5.2.6",
     });
   });
 
@@ -1223,6 +1224,7 @@ describe("classic translator QA report", () => {
       benchmarkFailure: null, secondaryTranscriptionMs: 800,
       primaryNormalizedExactMatch: null, secondaryNormalizedExactMatch: null,
       primaryWer: null, secondaryWer: null,
+      benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
     } satisfies SameAudioBenchmarkComparison, { status: "accepted_secondary" });
     const benchmarkEntry = entry("benchmark-turn", "realtime");
     const report = buildClassicTranslatorReport({
@@ -1233,7 +1235,7 @@ describe("classic translator QA report", () => {
       qualityByTurn: new Map([[benchmarkEntry.id, createSpeechQualitySample({
         turnId: benchmarkEntry.id, recognizedTranscript: benchmarkEntry.originalText,
         sourceLanguage: "sw", transcriptionModel: "gpt-live-transcribe",
-        transcriptionPath: "realtime", appVersion: "5.2.5",
+        transcriptionPath: "realtime", appVersion: "5.2.6",
       })]]),
       feedbackByTurn: new Map([[benchmarkEntry.id, {
         feedbackRating: "good", feedbackCategories: [], feedbackComment: null,

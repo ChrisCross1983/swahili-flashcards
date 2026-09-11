@@ -102,7 +102,7 @@ history; the application never applies or promotes them automatically.
 
 ## Classic translator functional diagnostics
 
-Report revision `5.2.5` evaluates product health from organic turns and keeps
+Report revision `5.2.6` evaluates product health from organic turns and keeps
 intentional QA simulations in a separate QA summary. Legacy session totals stay
 available for diagnostic compatibility. TTS reports generation and browser
 playback separately, including disabled, blocked, aborted, and cached replay
@@ -116,3 +116,9 @@ transcribe-only benchmark runs after the product result has been committed and
 never changes translation, TTS, routing, product health, or public-user cost.
 Confirmed ground truth and deterministic exact-match/WER metrics remain in the
 local consented QA report and incident store.
+
+Same-audio engine metrics are comparable only within their recorded benchmark
+parity version. `safe-stt-parity-v1` sends the original product fallback
+direction (including `auto` language detection) through the shared safe audio
+STT core. Earlier samples are retained as legacy diagnostics but are excluded
+from current-parity WER and win-rate decisions.

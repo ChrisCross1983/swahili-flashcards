@@ -418,6 +418,30 @@ describe("translator server pipeline", () => {
     expect(gateway.autoTranslate).not.toHaveBeenCalled();
   });
 
+  it("uses identical safe-STT input for product fallback and the secondary benchmark", async () => {
+    const gateway = createGateway();
+    const fallbackInput = {
+      ...input,
+      direction: { sourceLanguage: "auto", targetLanguage: "auto" } as const,
+    };
+
+    await translateRecordedAudio(fallbackInput, gateway);
+    await transcribeRecordedAudio(fallbackInput, gateway);
+
+    const transcribe = vi.mocked(gateway.transcribe);
+    expect(transcribe).toHaveBeenCalledTimes(2);
+    const normalizedCalls = transcribe.mock.calls.map(([value]) => ({
+      ...value,
+      bytes: Array.from(value.bytes),
+    }));
+    expect(normalizedCalls[1]).toEqual(normalizedCalls[0]);
+    expect(normalizedCalls[0]).toMatchObject({
+      language: null,
+      fileName: "recording.webm",
+      normalizedMimeType: "audio/webm",
+    });
+  });
+
   it("drops only an insufficiently compressed essence", async () => {
     const gateway = createGateway();
     const longText = Array.from({ length: 50 }, () => "maelezo").join(" ");

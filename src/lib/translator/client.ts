@@ -102,6 +102,14 @@ export type AudioTranscriptionBenchmarkResult = {
   completedAt: string;
 };
 
+export type AudioTranscriptionBenchmarkOptions = {
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+  correlationId?: string;
+  recordedAudioDiagnostics?: RecordedAudioDiagnostics;
+  requestAttempt?: number;
+};
+
 function isNonNegativeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -158,6 +166,33 @@ function isTranslationResult(value: unknown): value is TranslationResult {
     (result.targetLanguage === "de" || result.targetLanguage === "sw") &&
     isTranslationDiagnostics(result.diagnostics)
   );
+}
+
+function createSafeAudioFormData(
+  audioBlob: Blob,
+  direction: TranslationRequestDirection,
+  format: NonNullable<ReturnType<typeof getSupportedAudioFormat>>,
+  diagnostics: RecordedAudioDiagnostics | undefined,
+) {
+  const formData = new FormData();
+  formData.append(
+    "audio",
+    new File([audioBlob], `recording.${format.extension}`, {
+      type: audioBlob.type,
+    }),
+  );
+  formData.append("sourceLanguage", direction.sourceLanguage);
+  formData.append("targetLanguage", direction.targetLanguage);
+  if (typeof diagnostics?.recordingDurationMs === "number") {
+    formData.append("recordingDurationMs", String(diagnostics.recordingDurationMs));
+  }
+  if (typeof diagnostics?.chunkCount === "number") {
+    formData.append("chunkCount", String(diagnostics.chunkCount));
+  }
+  if (typeof diagnostics?.totalChunkBytes === "number") {
+    formData.append("totalChunkBytes", String(diagnostics.totalChunkBytes));
+  }
+  return formData;
 }
 
 async function readTranslationResponse(
@@ -349,25 +384,12 @@ export async function requestAudioTranslation(
     });
   }
 
-  const formData = new FormData();
-  formData.append(
-    "audio",
-    new File([audioBlob], `recording.${format.extension}`, {
-      type: audioBlob.type,
-    }),
+  const formData = createSafeAudioFormData(
+    audioBlob,
+    direction,
+    format,
+    options.recordedAudioDiagnostics,
   );
-  formData.append("sourceLanguage", direction.sourceLanguage);
-  formData.append("targetLanguage", direction.targetLanguage);
-  const audioDiagnostics = options.recordedAudioDiagnostics;
-  if (typeof audioDiagnostics?.recordingDurationMs === "number") {
-    formData.append("recordingDurationMs", String(audioDiagnostics.recordingDurationMs));
-  }
-  if (typeof audioDiagnostics?.chunkCount === "number") {
-    formData.append("chunkCount", String(audioDiagnostics.chunkCount));
-  }
-  if (typeof audioDiagnostics?.totalChunkBytes === "number") {
-    formData.append("totalChunkBytes", String(audioDiagnostics.totalChunkBytes));
-  }
 
   let response: Response;
   try {
@@ -398,40 +420,53 @@ export async function requestAudioTranslation(
 export async function requestAudioTranscriptionBenchmark(
   audioBlob: Blob,
   direction: TranslationRequestDirection,
-  options: Pick<RequestOptions, "fetcher" | "signal" | "recordedAudioDiagnostics"> = {},
+  options: AudioTranscriptionBenchmarkOptions = {},
 ): Promise<AudioTranscriptionBenchmarkResult> {
+  const correlationId = options.correlationId ?? createCorrelationId("translation");
   const validation = isUsableRecordedAudio(audioBlob, options.recordedAudioDiagnostics);
   if (!validation.usable) throw new Error(validation.code);
   if (audioBlob.size > MAX_TRANSLATION_AUDIO_BYTES) throw new Error("audio_too_large");
   const format = getSupportedAudioFormat(audioBlob.type);
   if (!format) throw new Error("invalid_audio_format");
-  const formData = new FormData();
-  formData.append("audio", new File([audioBlob], `recording.${format.extension}`, {
-    type: audioBlob.type,
-  }));
-  formData.append("sourceLanguage", direction.sourceLanguage);
-  formData.append("targetLanguage", direction.targetLanguage);
-  const diagnostics = options.recordedAudioDiagnostics;
-  if (typeof diagnostics?.recordingDurationMs === "number") {
-    formData.append("recordingDurationMs", String(diagnostics.recordingDurationMs));
+  const formData = createSafeAudioFormData(
+    audioBlob,
+    direction,
+    format,
+    options.recordedAudioDiagnostics,
+  );
+  let response: Response;
+  try {
+    response = await (options.fetcher ?? fetch)("/api/translator/transcribe", {
+      method: "POST",
+      headers: {
+        "X-Translator-Request-Phase": "internal_benchmark",
+        "X-Translator-Request-Attempt": String(options.requestAttempt ?? 0),
+        [TRANSLATOR_CORRELATION_HEADER]: correlationId,
+      },
+      body: formData,
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new TranslatorClientError(networkFailure("translation"));
   }
-  if (typeof diagnostics?.chunkCount === "number") {
-    formData.append("chunkCount", String(diagnostics.chunkCount));
-  }
-  if (typeof diagnostics?.totalChunkBytes === "number") {
-    formData.append("totalChunkBytes", String(diagnostics.totalChunkBytes));
-  }
-  const response = await (options.fetcher ?? fetch)("/api/translator/transcribe", {
-    method: "POST",
-    headers: { "X-Translator-Request-Phase": "internal_benchmark" },
-    body: formData,
-    signal: options.signal,
-  });
   const body = await response.json().catch(() => null) as Partial<AudioTranscriptionBenchmarkResult> | null;
-  if (!response.ok || !body || typeof body.transcript !== "string" ||
+  if (!response.ok) {
+    const errorBody = body as { code?: unknown } | null;
+    const code = typeof errorBody?.code === "string"
+      ? errorBody.code as TranslatorApiErrorCode
+      : null;
+    throw new TranslatorClientError(failureFromHttp({
+      status: response.status,
+      apiErrorCode: code,
+      stage: "translation",
+      retryAfterMs: retryAfterMs(response),
+    }));
+  }
+  if (!body || typeof body.transcript !== "string" ||
     typeof body.model !== "string" || typeof body.fallbackUsed !== "boolean" ||
     typeof body.transcriptionMs !== "number" || typeof body.completedAt !== "string") {
-    throw new Error("benchmark_transcription_failed");
+    throw new TranslatorClientError(translationProtocolFailure());
   }
   return body as AudioTranscriptionBenchmarkResult;
 }

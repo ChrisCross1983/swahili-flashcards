@@ -91,7 +91,10 @@ describe("translator client", () => {
   it("uses the transcribe-only internal benchmark endpoint", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(url).toBe("/api/translator/transcribe");
-      expect(init?.headers).toEqual({ "X-Translator-Request-Phase": "internal_benchmark" });
+      expect(init?.headers).toEqual(expect.objectContaining({
+        "X-Translator-Request-Phase": "internal_benchmark",
+        "X-Translator-Request-Attempt": "0",
+      }));
       const formData = init?.body as FormData;
       expect(formData.get("audio")).toBeInstanceOf(Blob);
       return Response.json({

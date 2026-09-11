@@ -1,12 +1,19 @@
 import type { TranslationRequestDirection } from "@/lib/translator/types";
 import type { TranslatorTurnConsent } from "@/lib/translator/turnConsent";
 import { speechAudioEligibleForTurn } from "@/lib/translator/turnConsent";
-import type { SameAudioBenchmarkComparison } from "@/lib/translator/speechQuality";
+import {
+  SAFE_STT_PARITY_VERSION,
+  type SameAudioBenchmarkComparison,
+} from "@/lib/translator/speechQuality";
 import {
   requestAudioTranscriptionBenchmark,
   type AudioTranscriptionBenchmarkResult,
 } from "@/lib/translator/client";
 import type { RecordedAudioDiagnostics } from "@/lib/translator/recordedAudio";
+import {
+  isUserAbort,
+  TranslatorOperationError,
+} from "@/lib/translator/reliability";
 
 type BenchmarkInput = {
   turnId: string;
@@ -15,7 +22,8 @@ type BenchmarkInput = {
   primaryCompletedAt: string;
   primaryEngine: string;
   primaryRoute: "realtime";
-  direction: TranslationRequestDirection;
+  /** The original product-fallback direction, including auto-language policy. */
+  fallbackDirection: TranslationRequestDirection;
   recordingDurationMs: number | null;
   consent: TranslatorTurnConsent;
   internalQaEnabled: boolean;
@@ -25,8 +33,25 @@ type BenchmarkInput = {
 type RequestBenchmark = (
   audioBlob: Blob,
   direction: TranslationRequestDirection,
-  options: { signal: AbortSignal; recordedAudioDiagnostics?: RecordedAudioDiagnostics },
+  options: {
+    signal: AbortSignal;
+    requestAttempt: number;
+    recordedAudioDiagnostics?: RecordedAudioDiagnostics;
+  },
 ) => Promise<AudioTranscriptionBenchmarkResult>;
+
+type Wait = (delayMs: number, signal: AbortSignal) => Promise<void>;
+
+function waitForRetry(delayMs: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException("Request aborted", "AbortError"));
+    const timer = setTimeout(resolve, delayMs);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Request aborted", "AbortError"));
+    }, { once: true });
+  });
+}
 
 function comparisonId(turnId: string) {
   return globalThis.crypto?.randomUUID?.() ?? `comparison-${turnId}-${Date.now()}`;
@@ -37,7 +62,10 @@ export class SameAudioBenchmarkRunner {
   private readonly controllers = new Map<string, AbortController>();
   private generation = 0;
 
-  constructor(private readonly request: RequestBenchmark = requestAudioTranscriptionBenchmark) {}
+  constructor(
+    private readonly request: RequestBenchmark = requestAudioTranscriptionBenchmark,
+    private readonly wait: Wait = waitForRetry,
+  ) {}
 
   isEligible(input: BenchmarkInput) {
     return input.internalQaEnabled &&
@@ -81,12 +109,10 @@ export class SameAudioBenchmarkRunner {
       secondaryNormalizedExactMatch: null,
       primaryWer: null,
       secondaryWer: null,
+      benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
     };
     onUpdate(pending);
-    void this.request(input.audioBlob, input.direction, {
-      signal: controller.signal,
-      recordedAudioDiagnostics: input.recordedAudioDiagnostics,
-    }).then((result) => {
+    void this.requestWithProductFallbackRetry(input, controller.signal).then((result) => {
       if (controller.signal.aborted || runGeneration !== this.generation) return;
       onUpdate({
         ...pending,
@@ -110,6 +136,33 @@ export class SameAudioBenchmarkRunner {
       }
     });
     return true;
+  }
+
+  private async requestWithProductFallbackRetry(
+    input: BenchmarkInput,
+    signal: AbortSignal,
+  ) {
+    try {
+      return await this.request(input.audioBlob, input.fallbackDirection, {
+        signal,
+        requestAttempt: 0,
+        recordedAudioDiagnostics: input.recordedAudioDiagnostics,
+      });
+    } catch (error) {
+      if (
+        isUserAbort(error) ||
+        !(error instanceof TranslatorOperationError) ||
+        !error.failure.retryable
+      ) {
+        throw error;
+      }
+      await this.wait(error.failure.retryAfterMs ?? 0, signal);
+      return this.request(input.audioBlob, input.fallbackDirection, {
+        signal,
+        requestAttempt: 1,
+        recordedAudioDiagnostics: input.recordedAudioDiagnostics,
+      });
+    }
   }
 
   cancelTurn(turnId: string) {

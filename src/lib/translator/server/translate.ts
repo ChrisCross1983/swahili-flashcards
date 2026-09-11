@@ -74,6 +74,18 @@ type TranslateRecordedAudioInput = {
   recordingDurationMs?: number | null;
 };
 
+export type SafeAudioTranscriptionInput = Pick<
+  TranslateRecordedAudioInput,
+  "audio" | "format" | "direction"
+>;
+
+export type SafeAudioTranscriptionResult = {
+  transcript: string;
+  output: TranscriptionOutput;
+  transcriptionMs: number;
+  transcriptFinalAt: string;
+};
+
 export type AudioTranscriptionResult = {
   transcript: string;
   model: string;
@@ -92,6 +104,48 @@ type TranslateAuthoritativeTextInput = {
 
 function containsSpeechText(text: string) {
   return /[\p{L}\p{N}]/u.test(text);
+}
+
+/**
+ * Shared product/QA safe audio-STT core. The language policy is derived only
+ * from the original request direction, never from a successful realtime turn.
+ */
+export async function transcribeSafeAudio(
+  input: SafeAudioTranscriptionInput,
+  gateway: TranslatorAiGateway,
+): Promise<SafeAudioTranscriptionResult> {
+  const transcriptionStartedAt = Date.now();
+  let output: TranscriptionOutput;
+  try {
+    output = await gateway.transcribe({
+      bytes: new Uint8Array(await input.audio.arrayBuffer()),
+      fileName: `recording.${input.format.extension}`,
+      extension: input.format.extension,
+      originalMimeType: input.audio.type,
+      normalizedMimeType: input.format.mimeType,
+      language: input.direction.sourceLanguage === "auto"
+        ? null
+        : input.direction.sourceLanguage,
+    });
+  } catch (error) {
+    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") {
+      throw error;
+    }
+    throw new TranslatorPipelineError(
+      "transcription_failed",
+      "Audio transcription failed",
+    );
+  }
+  const transcript = output.text.trim();
+  if (!transcript || !containsSpeechText(transcript)) {
+    throw new TranslatorPipelineError("no_speech", "No speech detected");
+  }
+  return {
+    transcript,
+    output,
+    transcriptionMs: Date.now() - transcriptionStartedAt,
+    transcriptFinalAt: new Date().toISOString(),
+  };
 }
 
 async function translateTranscript(
@@ -297,83 +351,31 @@ export async function translateRecordedAudio(
   gateway: TranslatorAiGateway,
 ): Promise<TranslationResult> {
   const startedAt = Date.now();
-  const transcriptionStartedAt = Date.now();
-  let originalText: string;
-  let transcriptionOutput: TranscriptionOutput;
-
-  try {
-    const bytes = new Uint8Array(await input.audio.arrayBuffer());
-    transcriptionOutput = await gateway.transcribe({
-      bytes,
-      fileName: `recording.${input.format.extension}`,
-      extension: input.format.extension,
-      originalMimeType: input.audio.type,
-      normalizedMimeType: input.format.mimeType,
-      language:
-        input.direction.sourceLanguage === "auto"
-          ? null
-          : input.direction.sourceLanguage,
-    });
-    originalText = transcriptionOutput.text.trim();
-  } catch (error) {
-    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") {
-      throw error;
-    }
-    throw new TranslatorPipelineError(
-      "transcription_failed",
-      "Audio transcription failed",
-    );
-  }
-
-  const transcriptionMs = Date.now() - transcriptionStartedAt;
-  if (!originalText || !containsSpeechText(originalText)) {
-    throw new TranslatorPipelineError("no_speech", "No speech detected");
-  }
-  const transcriptFinalAt = new Date().toISOString();
+  const safeTranscription = await transcribeSafeAudio(input, gateway);
 
   return translateTranscript(
-    originalText,
+    safeTranscription.transcript,
     input.direction,
-    transcriptionOutput,
-    transcriptionMs,
+    safeTranscription.output,
+    safeTranscription.transcriptionMs,
     startedAt,
     gateway,
-    transcriptFinalAt,
+    safeTranscription.transcriptFinalAt,
     input.recordingDurationMs,
   );
 }
 
 /** Uses the established safe audio-STT gateway without starting a translation. */
 export async function transcribeRecordedAudio(
-  input: Omit<TranslateRecordedAudioInput, "recordingDurationMs">,
+  input: SafeAudioTranscriptionInput,
   gateway: TranslatorAiGateway,
 ): Promise<AudioTranscriptionResult> {
-  const startedAt = Date.now();
-  let output: TranscriptionOutput;
-  try {
-    output = await gateway.transcribe({
-      bytes: new Uint8Array(await input.audio.arrayBuffer()),
-      fileName: `recording.${input.format.extension}`,
-      extension: input.format.extension,
-      originalMimeType: input.audio.type,
-      normalizedMimeType: input.format.mimeType,
-      language: input.direction.sourceLanguage === "auto"
-        ? null
-        : input.direction.sourceLanguage,
-    });
-  } catch (error) {
-    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") throw error;
-    throw new TranslatorPipelineError("transcription_failed", "Audio transcription failed");
-  }
-  const transcript = output.text.trim();
-  if (!transcript || !containsSpeechText(transcript)) {
-    throw new TranslatorPipelineError("no_speech", "No speech detected");
-  }
+  const safeTranscription = await transcribeSafeAudio(input, gateway);
   return {
-    transcript,
-    model: output.model,
-    fallbackUsed: output.fallbackUsed,
-    transcriptionMs: Date.now() - startedAt,
-    completedAt: new Date().toISOString(),
+    transcript: safeTranscription.transcript,
+    model: safeTranscription.output.model,
+    fallbackUsed: safeTranscription.output.fallbackUsed,
+    transcriptionMs: safeTranscription.transcriptionMs,
+    completedAt: safeTranscription.transcriptFinalAt,
   };
 }

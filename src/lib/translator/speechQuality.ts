@@ -13,6 +13,8 @@ export type BenchmarkGroundTruthStatus =
   | "equivalent"
   | "uncertain";
 
+export const SAFE_STT_PARITY_VERSION = "safe-stt-parity-v1";
+
 export type SameAudioBenchmarkComparison = {
   comparisonId: string;
   turnId: string;
@@ -36,9 +38,12 @@ export type SameAudioBenchmarkComparison = {
   secondaryNormalizedExactMatch: boolean | null;
   primaryWer: number | null;
   secondaryWer: number | null;
+  /** Missing on V5.2.5 snapshots, which are retained as legacy evidence. */
+  benchmarkParityVersion?: string | null;
 };
 
 export type SpeechBenchmarkSummary = {
+  benchmarkParityVersion: typeof SAFE_STT_PARITY_VERSION;
   sameAudioEligibleTurns: number;
   sameAudioComparisonAttempts: number;
   sameAudioComparisonCompleted: number;
@@ -54,6 +59,14 @@ export type SpeechBenchmarkSummary = {
   realtimeMedianWer: number | null;
   audioSttMedianWer: number | null;
   benchmarkEvidenceLevel: "insufficient" | "early" | "useful";
+  reviewedSamplesCurrentParity: number;
+  legacyReviewedSamples: number;
+  currentParityRealtimeWins: number;
+  currentParityAudioWins: number;
+  currentParityTies: number;
+  currentParityRealtimeMeanWer: number | null;
+  currentParityAudioMeanWer: number | null;
+  currentParityEvidenceLevel: "insufficient" | "early" | "useful";
 };
 
 export function normalizeTranscriptForComparison(value: string) {
@@ -161,6 +174,14 @@ function median(values: number[]) {
     : sorted[middle];
 }
 
+function evidenceLevel(reviewedSamples: number) {
+  return reviewedSamples < 5
+    ? "insufficient" as const
+    : reviewedSamples < 20
+      ? "early" as const
+      : "useful" as const;
+}
+
 export function summarizeSpeechBenchmarks(
   comparisons: readonly SameAudioBenchmarkComparison[],
   eligibleTurns = comparisons.length,
@@ -176,7 +197,19 @@ export function summarizeSpeechBenchmarks(
   const realtimeWins = reviewed.filter((item) => (item.primaryWer as number) < (item.secondaryWer as number)).length;
   const audioSttWins = reviewed.filter((item) => (item.secondaryWer as number) < (item.primaryWer as number)).length;
   const ties = reviewed.length - realtimeWins - audioSttWins;
+  const currentParityReviewed = reviewed.filter((item) =>
+    item.benchmarkParityVersion === SAFE_STT_PARITY_VERSION,
+  );
+  const currentPrimaryWers = currentParityReviewed.map((item) => item.primaryWer as number);
+  const currentSecondaryWers = currentParityReviewed.map((item) => item.secondaryWer as number);
+  const currentParityRealtimeWins = currentParityReviewed.filter((item) =>
+    (item.primaryWer as number) < (item.secondaryWer as number),
+  ).length;
+  const currentParityAudioWins = currentParityReviewed.filter((item) =>
+    (item.secondaryWer as number) < (item.primaryWer as number),
+  ).length;
   return {
+    benchmarkParityVersion: SAFE_STT_PARITY_VERSION,
     sameAudioEligibleTurns: eligibleTurns,
     sameAudioComparisonAttempts: comparisons.length,
     sameAudioComparisonCompleted: completed.length,
@@ -193,11 +226,16 @@ export function summarizeSpeechBenchmarks(
     audioSttMeanWer: average(secondaryWers),
     realtimeMedianWer: median(primaryWers),
     audioSttMedianWer: median(secondaryWers),
-    benchmarkEvidenceLevel: reviewed.length < 5
-      ? "insufficient"
-      : reviewed.length < 20
-        ? "early"
-        : "useful",
+    benchmarkEvidenceLevel: evidenceLevel(reviewed.length),
+    reviewedSamplesCurrentParity: currentParityReviewed.length,
+    legacyReviewedSamples: reviewed.length - currentParityReviewed.length,
+    currentParityRealtimeWins,
+    currentParityAudioWins,
+    currentParityTies:
+      currentParityReviewed.length - currentParityRealtimeWins - currentParityAudioWins,
+    currentParityRealtimeMeanWer: average(currentPrimaryWers),
+    currentParityAudioMeanWer: average(currentSecondaryWers),
+    currentParityEvidenceLevel: evidenceLevel(currentParityReviewed.length),
   };
 }
 

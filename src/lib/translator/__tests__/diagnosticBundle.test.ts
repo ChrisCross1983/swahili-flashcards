@@ -21,7 +21,7 @@ describe("translator diagnostic ZIP", () => {
     const text = await archiveText(bundle);
     expect(text).toContain("report.json");
     expect(text).toContain("manifest.json");
-    expect(text).toContain('"bundleVersion": "5.2.5"');
+    expect(text).toContain('"bundleVersion": "5.2.6"');
     expect(text).toContain('"reportVersion": 5');
     expect(text).toContain('"sessionId": "session-1"');
     expect(text).toContain('"reportId": "report-1"');

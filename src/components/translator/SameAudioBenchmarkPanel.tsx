@@ -11,6 +11,9 @@ export default function SameAudioBenchmarkPanel({ comparison, onReview }: {
   const [value, setValue] = useState(comparison.groundTruthTranscript ?? "");
   return <aside className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3" aria-label="Interner Same-Audio-Vergleich">
     <p className="text-xs font-semibold uppercase text-muted">Interne Qualitätsprüfung · gleiche Aufnahme</p>
+    <p className="mt-1 text-[11px] text-muted">
+      Vergleichsversion: {comparison.benchmarkParityVersion ?? "Legacy vor Paritätsnachweis"}
+    </p>
     {comparison.benchmarkStatus === "pending" ?
       <p className="mt-2 text-sm text-muted">Sichere Erkennung wird im Hintergrund verglichen …</p> : null}
     {comparison.benchmarkStatus === "failed" ?

@@ -1785,10 +1785,7 @@ export default function TranslatorView() {
             result.diagnostics.transcriptFinalAt ?? new Date().toISOString(),
           primaryEngine: "gpt-live-transcribe",
           primaryRoute: "realtime" as const,
-          direction: {
-            sourceLanguage: result.sourceLanguage,
-            targetLanguage: result.targetLanguage,
-          },
+          fallbackDirection: direction,
           recordingDurationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
           consent: turnConsent,
           internalQaEnabled: INTERNAL_TRANSLATOR_QA_ENABLED &&
