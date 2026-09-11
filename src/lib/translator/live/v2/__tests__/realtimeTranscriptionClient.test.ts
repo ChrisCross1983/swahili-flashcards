@@ -18,10 +18,19 @@ const peers: FakePeer[] = [];
 class FakePeer {
   connectionState: RTCPeerConnectionState = "connecting";
   iceConnectionState: RTCIceConnectionState = "checking";
+  signalingState: RTCSignalingState = "stable";
   onconnectionstatechange: (() => void) | null = null;
   channel = new FakeChannel();
-  sender = { replaceTrack: vi.fn(async () => undefined) };
-  addTrack = vi.fn(() => this.sender);
+  sender: { track: FakeTrack | null; replaceTrack: ReturnType<typeof vi.fn> } = {
+    track: null,
+    replaceTrack: vi.fn(async (track: FakeTrack | null) => {
+      this.sender.track = track;
+    }),
+  };
+  addTrack = vi.fn((track: FakeTrack) => {
+    this.sender.track = track;
+    return this.sender;
+  });
   createDataChannel = vi.fn(() => this.channel);
   createOffer = vi.fn(async () => ({ type: "offer", sdp: "offer-sdp" }));
   setLocalDescription = vi.fn(async () => undefined);
@@ -397,9 +406,11 @@ describe("RealtimeTranscriptionClientV2", () => {
       .mockResolvedValueOnce(sdpResponse(201, "req_rebind")));
     const original = new FakeStream();
     const fresh = new FakeStream();
+    const onDiagnosticEvent = vi.fn();
     const client = new RealtimeTranscriptionClientV2({
       onDelta: vi.fn(),
       onError: vi.fn(),
+      onDiagnosticEvent,
     });
     await client.connect(original as unknown as MediaStream);
     await client.setInputEnabled(false);
@@ -407,11 +418,122 @@ describe("RealtimeTranscriptionClientV2", () => {
     await client.replaceInputStream(fresh as unknown as MediaStream, 2);
     await client.setInputEnabled(true);
 
-    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(2, null);
-    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(3, fresh.track);
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(1, null);
+    expect(peers[0].sender.replaceTrack).toHaveBeenNthCalledWith(2, fresh.track);
     expect(peers[0].sender.replaceTrack).not.toHaveBeenCalledWith(original.track);
     expect(client.getInputTrackGeneration()).toBe(2);
+    expect(onDiagnosticEvent).toHaveBeenCalledWith(expect.objectContaining({
+      stage: "track_rebind_completed",
+      captureGeneration: 2,
+      trackRebindOutcome: "success",
+    }));
     expect(peers).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it("keeps a transient disconnected state alive through the grace period", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_disconnect_recovered")));
+    const onError = vi.fn();
+    const diagnostics = vi.fn();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError,
+      onDiagnosticEvent: diagnostics,
+    });
+    await client.connect(new FakeStream() as unknown as MediaStream);
+
+    peers[0].connectionState = "disconnected";
+    peers[0].iceConnectionState = "disconnected";
+    peers[0].onconnectionstatechange?.();
+    await vi.advanceTimersByTimeAsync(500);
+    peers[0].connectionState = "connected";
+    peers[0].iceConnectionState = "connected";
+    peers[0].onconnectionstatechange?.();
+    await vi.advanceTimersByTimeAsync(
+      RealtimeTranscriptionClientV2.DISCONNECT_GRACE_PERIOD_MS,
+    );
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(diagnostics.mock.calls.map(([event]) => event.stage)).toEqual(
+      expect.arrayContaining(["temporary_disconnect", "disconnect_recovered"]),
+    );
+    client.disconnect();
+  });
+
+  it("times out a hanging track rebind without closing the recorder path", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_rebind_timeout")));
+    const diagnostics = vi.fn();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError: vi.fn(),
+      onDiagnosticEvent: diagnostics,
+    });
+    await client.connect(new FakeStream() as unknown as MediaStream);
+    await client.setInputEnabled(false);
+    peers[0].sender.replaceTrack.mockImplementationOnce(
+      () => new Promise<void>(() => undefined),
+    );
+    const rebind = client.replaceInputStream(
+      new FakeStream() as unknown as MediaStream,
+      2,
+    );
+    const rejection = expect(rebind).rejects.toThrow(
+      "transcription_track_rebind_timeout",
+    );
+    await vi.advanceTimersByTimeAsync(
+      RealtimeTranscriptionClientV2.TRACK_REBIND_TIMEOUT_MS,
+    );
+    await rejection;
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      stage: "track_rebind_completed",
+      captureGeneration: 2,
+      trackRebindOutcome: "timeout",
+    }));
+    client.disconnect();
+  });
+
+  it("reports one connection loss when disconnected outlives the grace period", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_disconnect_failed")));
+    const onError = vi.fn();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError,
+    });
+    await client.connect(new FakeStream() as unknown as MediaStream);
+    peers[0].connectionState = "disconnected";
+    peers[0].onconnectionstatechange?.();
+    peers[0].onconnectionstatechange?.();
+    await vi.advanceTimersByTimeAsync(
+      RealtimeTranscriptionClientV2.DISCONNECT_GRACE_PERIOD_MS,
+    );
+    expect(onError).toHaveBeenCalledOnce();
+    client.disconnect();
+  });
+
+  it("treats failed as terminal without waiting for grace", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(credentialResponse())
+      .mockResolvedValueOnce(sdpResponse(201, "req_failed")));
+    const onError = vi.fn();
+    const client = new RealtimeTranscriptionClientV2({
+      onDelta: vi.fn(),
+      onError,
+    });
+    await client.connect(new FakeStream() as unknown as MediaStream);
+    peers[0].connectionState = "failed";
+    peers[0].onconnectionstatechange?.();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
     client.disconnect();
   });
 });

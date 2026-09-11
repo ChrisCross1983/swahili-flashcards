@@ -19,6 +19,7 @@ import {
 } from "@/lib/translator/server/speech";
 import type {
   AutoTranslationOutput,
+  StructuredTranslationOutput,
   TranslatorAiGateway,
 } from "@/lib/translator/server/translate";
 
@@ -114,6 +115,43 @@ const AUTO_TRANSLATION_TEXT_FORMAT = {
     name: "translator_auto_result",
     strict: true,
     schema: AUTO_TRANSLATION_SCHEMA,
+  },
+} as const;
+
+const ESSENCE_SUMMARY_PROPERTY = {
+  anyOf: [{ type: "string" }, { type: "null" }],
+} as const;
+
+const AUTO_TRANSLATION_WITH_SUMMARY_TEXT_FORMAT = {
+  format: {
+    type: "json_schema",
+    name: "translator_auto_result_with_essence_v1",
+    strict: true,
+    schema: {
+      ...AUTO_TRANSLATION_SCHEMA,
+      properties: {
+        ...AUTO_TRANSLATION_SCHEMA.properties,
+        essenceSummary: ESSENCE_SUMMARY_PROPERTY,
+      },
+      required: [...AUTO_TRANSLATION_SCHEMA.required, "essenceSummary"],
+    },
+  },
+} as const;
+
+const TRANSLATION_WITH_SUMMARY_TEXT_FORMAT = {
+  format: {
+    type: "json_schema",
+    name: "translator_result_with_essence_v1",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        translatedText: { type: "string" },
+        essenceSummary: ESSENCE_SUMMARY_PROPERTY,
+      },
+      required: ["translatedText", "essenceSummary"],
+    },
   },
 } as const;
 
@@ -371,20 +409,23 @@ export function createOpenAITranslatorGateway(
       }
     },
 
-    async autoTranslate(text: string) {
+    async autoTranslate(text: string, translationOptions) {
       try {
+        const summaryEligible = translationOptions?.summaryEligible === true;
         options.onPromptPreparationStarted?.();
-        const instructions = buildAutoInterpreterPrompt();
+        const instructions = buildAutoInterpreterPrompt(summaryEligible);
         options.onPromptPreparationCompleted?.();
         options.onSchemaPreparationStarted?.();
-        const responseTextFormat = AUTO_TRANSLATION_TEXT_FORMAT;
+        const responseTextFormat = summaryEligible
+          ? AUTO_TRANSLATION_WITH_SUMMARY_TEXT_FORMAT
+          : AUTO_TRANSLATION_TEXT_FORMAT;
         options.onSchemaPreparationCompleted?.();
         const params = {
           model: TRANSLATION_MODEL,
           reasoning: { effort: "none" },
           instructions,
           input: text,
-          max_output_tokens: 1200,
+          max_output_tokens: summaryEligible ? 2400 : 1200,
           text: responseTextFormat,
         } as const;
         options.onTranslationRequestStarted?.();
@@ -468,6 +509,59 @@ export function createOpenAITranslatorGateway(
             "[translator][openai translation error]",
             getSafeOpenAIErrorDetails(error),
           );
+        }
+        throw error;
+      }
+    },
+
+    async translateWithSummary(text: string, direction: TranslationDirection) {
+      try {
+        options.onPromptPreparationStarted?.();
+        const instructions = buildInterpreterPrompt(direction, true);
+        options.onPromptPreparationCompleted?.();
+        options.onSchemaPreparationStarted?.();
+        const params = {
+          model: TRANSLATION_MODEL,
+          reasoning: { effort: "none" },
+          instructions,
+          input: text,
+          max_output_tokens: 2400,
+          text: TRANSLATION_WITH_SUMMARY_TEXT_FORMAT,
+        } as const;
+        options.onSchemaPreparationCompleted?.();
+        options.onTranslationRequestStarted?.();
+        const response = options.signal
+          ? await client.responses.parse<typeof params, StructuredTranslationOutput>(
+              params,
+              { signal: options.signal },
+            )
+          : await client.responses.parse<typeof params, StructuredTranslationOutput>(params);
+        options.onTranslationCompleted?.();
+        const parsed = response.output_parsed as unknown;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          typeof (parsed as Record<string, unknown>).translatedText === "string" &&
+          ((parsed as Record<string, unknown>).translatedText as string).trim()
+        ) {
+          const value = parsed as Record<string, unknown>;
+          return {
+            translatedText: value.translatedText as string,
+            essenceSummary:
+              typeof value.essenceSummary === "string"
+                ? value.essenceSummary
+                : null,
+          };
+        }
+        throw new Error("Invalid translation summary output");
+      } catch (error) {
+        if (process.env.NODE_ENV === "development") {
+          console.error("[translator] translation with summary failed", {
+            ...getSafeOpenAIErrorDetails(error),
+            direction: `${direction.sourceLanguage}->${direction.targetLanguage}`,
+            translationModel: TRANSLATION_MODEL,
+            openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+          });
         }
         throw error;
       }

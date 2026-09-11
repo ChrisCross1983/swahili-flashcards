@@ -75,4 +75,31 @@ describe("TranslatorIncidentStore", () => {
     });
     await expect(store.latest()).rejects.toThrow("storage unavailable");
   });
+
+  it("preserves a zero-turn pre-turn incident for export after refresh", async () => {
+    const { store } = memoryStore(() => Date.parse("2026-09-08T05:00:00.000Z"));
+    await store.save({
+      sessionId: "before-refresh",
+      reportId: "mic-start-report",
+      createdAt: "2026-09-08T04:53:39.782Z",
+      turnCount: 0,
+      report: {
+        totalTurns: 0,
+        recordingStartAttempts: 1,
+        recordingStartTimeouts: 1,
+        preTurnIncidentCount: 1,
+        activeRecordingStartAttempt: null,
+      },
+      audio: [],
+    });
+    await expect(store.latest("after-refresh")).resolves.toMatchObject({
+      sessionId: "before-refresh",
+      turnCount: 0,
+      report: {
+        recordingStartAttempts: 1,
+        recordingStartTimeouts: 1,
+      },
+      audio: [],
+    });
+  });
 });

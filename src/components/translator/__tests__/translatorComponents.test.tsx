@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
+import ProcessingIndicator from "@/components/translator/ProcessingIndicator";
 import { TRANSLATION_MODES } from "@/lib/translator/stateMachine";
 import type { TranslationEntry } from "@/lib/translator/types";
 
@@ -54,7 +55,7 @@ describe("translator components", () => {
     expect(html).toContain("Wo ist der nächste Bus?");
     expect(html).toContain("Basi inayofuata iko wapi?");
     expect(html).toContain("Abspielen");
-    expect(html).toContain("Feedback");
+    expect(html).toContain("Rückmeldung");
   });
 
   it("only starts automatic speech when the visible toggle is enabled", () => {
@@ -68,7 +69,11 @@ describe("translator components", () => {
     expect(source).toContain('state.autoPlay ? "AN" : "AUS"');
     expect(source).toContain("await playTranslation(");
     expect(source).toContain("speechSpeed,\n        automatic,");
-    expect(source).toContain("getTranslatorSpeechFailure(error, automatic)");
+    expect(source).toContain("getTranslatorSpeechFailure(error, automatic, speechReady)");
+    expect(source).toContain('ttsGenerationOutcome: state.autoPlay ? "request_started" : "disabled"');
+    expect(source).toContain('ttsSkipReason: state.autoPlay ? null : "autoplay_disabled"');
+    expect(source).toContain("claimAutoplay(entry.id)");
+    expect(source).toContain("claimFailureEvent(attemptId)");
     expect(source).toContain("DEFAULT_SPEECH_SPEED");
     expect(source).toContain('type="range"');
     expect(source).toContain("setSpeechSpeed(Number(event.target.value))");
@@ -79,7 +84,7 @@ describe("translator components", () => {
       path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
       "utf8",
     );
-    const microphoneIndex = source.indexOf("await acquireMicrophone()");
+    const microphoneIndex = source.indexOf("const acquisition = acquireMicrophone()");
     const prepareIndex = source.indexOf("await prepareRecording()");
     const recorderStartIndex = source.indexOf(
       "await startPreparedRecording()",
@@ -93,12 +98,31 @@ describe("translator components", () => {
     expect(recorderStartIndex).toBeGreaterThan(prepareIndex);
     expect(backgroundWarmIndex).toBeGreaterThan(recorderStartIndex);
     expect(source).not.toContain("waitUntilReady");
-    expect(source).toContain("Mikrofon wird geöffnet …");
-    expect(source).toContain("Aufnahme läuft …");
+    expect(source).toContain("SHARED_CONVERSATION_LABELS.openingMicrophone");
+    expect(source).toContain("SHARED_CONVERSATION_LABELS.recording");
     expect(source).toContain("Testreport exportieren");
     expect(source).toContain("JSON.stringify({");
     expect(source).toContain('window.addEventListener("pagehide"');
     expect(source).toContain('realtimeManagerRef.current?.close("classic_unmount")');
+    expect(source).toContain("mountedRef.current = true");
+    expect(source).toContain("withRecordingStartOperationWatchdog(");
+    expect(source).toContain("recordingStartGenerationRef.current");
+    expect(source).toContain("markLateCompletion(");
+  });
+
+  it("makes post-conversation review actionable or explicitly empty", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("Qualitätsprüfung ({postConversationReviewCandidateCount})");
+    expect(source).toContain("postConversationReviewCandidateCount === 0");
+    expect(source).toContain("keine auffälligen Passagen zum Prüfen");
+    expect(source).toContain("scrollIntoView");
+    expect(source).toContain("'[data-review-candidate=\"true\"]'");
+    expect(source).toContain("qualityByTurn: qualityByTurnRef.current");
+    expect(source).toContain("failedPostConversationReviewCandidateIds.length");
+    expect(source).toContain("MAX_POST_CONVERSATION_REVIEW_CANDIDATES");
   });
 
   it("shows entry-bound pause, resume and stop controls", () => {
@@ -163,7 +187,7 @@ describe("translator components", () => {
       />,
     );
 
-    expect(html).toContain("Feedback gespeichert");
+    expect(html).toContain("Rückmeldung erfasst");
   });
 
   it("renders the internal one-click STT review without changing the translation card", () => {
@@ -179,24 +203,46 @@ describe("translator components", () => {
         feedbackDisabled={false} feedbackSaved={false}
         onPlay={vi.fn()} onPause={vi.fn()} onResume={vi.fn()} onStop={vi.fn()}
         onFeedback={vi.fn()} recognitionReviewStatus="unreviewed"
+        reviewOrigin="qa_simulation"
         onAcceptTranscript={vi.fn()} onSaveTranscriptCorrection={vi.fn()}
       />,
     );
-    expect(html).toContain("Richtig erkannt");
-    expect(html).toContain("Transkript korrigieren");
+    expect(html).toContain("Hat die App das richtig verstanden?");
+    expect(html).toContain("Nein, korrigieren");
+    expect(html).toContain("keine organische Lern-Evidenz");
     expect(html).toContain("Dieses Haus ist groß.");
   });
 
-  it("keeps QA controls internal and states that no second STT call is started", () => {
+  it("keeps benchmark and explicit failure simulations internal", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
       "utf8",
     );
     expect(source).toContain("INTERNAL_TRANSLATOR_QA_ENABLED");
     expect(source).toContain("Sprach-Qualitätsmodus (interner Test)");
-    expect(source).toContain("Es wird keine zusätzliche Spracherkennung gestartet.");
+    expect(source).toContain("dieselbe Aufnahme zusätzlich über die sichere Erkennung verglichen");
     expect(source).toContain("Translation 503");
     expect(source).toContain("TTS 503");
+    expect(source).toContain('realtime: "Realtime-Ausfall"');
+    expect(source).toContain('semantic: "Semantic-Rescue"');
+    expect(source).toContain('network: "Netzwerkabbruch"');
+    expect(source).toContain("Nur interner Test. Der gewählte Fehler wird genau bei der nächsten Aufnahme simuliert.");
+    expect(source).toContain("Nächster Test:");
+    expect(source).toContain("Abbrechen");
+  });
+
+  it("does not attach a warning or retry notice to a successful fallback turn", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    const successDispatch = source.slice(
+      source.indexOf('type: "PROCESSING_SUCCEEDED"'),
+      source.indexOf("if (usedAudioFallback)", source.indexOf('type: "PROCESSING_SUCCEEDED"')),
+    );
+    expect(successDispatch).not.toContain("notice:");
+    expect(source).toContain('state.status === "error"');
+    expect(source).toContain("SHARED_CONVERSATION_LABELS.retry.de");
   });
 
   it("keeps diagnostics collapsed after the conversation in the mobile flow", () => {
@@ -209,5 +255,45 @@ describe("translator components", () => {
     expect(source.indexOf('className="order-1 mt-7"'))
       .toBeGreaterThan(source.indexOf("<details"));
     expect(source).toContain("Letzte Diagnose exportieren");
+  });
+
+  it("renders a moving bilingual processing status with reduced-motion support", () => {
+    const html = renderToStaticMarkup(<ProcessingIndicator stage="translation" />);
+    expect(html).toContain("motion-safe:animate-spin");
+    expect(html).toContain("motion-reduce:opacity-100");
+    expect(html).toContain("Übersetzung wird erstellt");
+    expect(html).toContain("Inatafsiri");
+    expect(html).toContain('role="status"');
+  });
+
+  it("shows essence separately and leaves the complete translation primary", () => {
+    const fullTranslation = "Vollständiger Inhalt ".repeat(45);
+    const html = renderToStaticMarkup(
+      <TranslationCard
+        entry={{
+          id: "summary",
+          timestamp: 1_700_000_000_000,
+          sourceLanguage: "sw",
+          targetLanguage: "de",
+          originalText: "Maelezo marefu.",
+          translatedText: fullTranslation,
+          essenceSummary: "Die Kernaussage bleibt kurz.",
+          sourceWasDetected: true,
+        }}
+        isLatest
+        playbackState="idle"
+        playbackDisabled={false}
+        feedbackDisabled={false}
+        feedbackSaved={false}
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onStop={vi.fn()}
+        onFeedback={vi.fn()}
+      />,
+    );
+    expect(html).toContain("Kurz gesagt · Kwa kifupi");
+    expect(html).toContain("Die Kernaussage bleibt kurz.");
+    expect(html).toContain("Vollständige Übersetzung anzeigen");
   });
 });

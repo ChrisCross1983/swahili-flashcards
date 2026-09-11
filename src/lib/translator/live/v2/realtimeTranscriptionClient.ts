@@ -34,7 +34,14 @@ export type RealtimeTranscriptionDiagnosticEvent = {
     | "data_channel_open"
     | "connection_ready"
     | "input_track_bound"
+    | "connection_state_changed"
+    | "temporary_disconnect"
+    | "disconnect_recovered"
+    | "track_rebind_started"
+    | "track_rebind_completed"
+    | "input_enabled"
     | "connection_error";
+  at?: string;
   attempt?: number;
   durationMs?: number;
   httpStatus?: number;
@@ -44,6 +51,18 @@ export type RealtimeTranscriptionDiagnosticEvent = {
   errorCode?: string;
   sanitizedErrorMessage?: string;
   captureGeneration?: number;
+  connectionState?: RTCPeerConnectionState;
+  iceConnectionState?: RTCIceConnectionState;
+  signalingState?: RTCSignalingState;
+  reasonContext?: string;
+  trackRebindOutcome?:
+    | "success"
+    | "temporary_disconnect_recovered"
+    | "connection_failed"
+    | "timeout"
+    | "sender_unavailable"
+    | "stale_generation";
+  senderHadTrackBeforeRebind?: boolean;
 };
 
 type TranscriptionEvent = {
@@ -131,6 +150,8 @@ function retryDelay(response: Response, attempt: number) {
 }
 
 export class RealtimeTranscriptionClientV2 {
+  static readonly DISCONNECT_GRACE_PERIOD_MS = 2_000;
+  static readonly TRACK_REBIND_TIMEOUT_MS = 1_500;
   private peer: RTCPeerConnection | null = null;
   private events: RTCDataChannel | null = null;
   private abortController: AbortController | null = null;
@@ -138,6 +159,15 @@ export class RealtimeTranscriptionClientV2 {
   private inputTrack: MediaStreamTrack | null = null;
   private inputTrackGeneration: number | null = null;
   private sender: RTCRtpSender | null = null;
+  private disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectionFailureNotified = false;
+  private stateReasonContext = "connection_setup";
+  private activeRebind: {
+    generation: number;
+    disconnected: boolean;
+    recovered: boolean;
+  } | null = null;
+  private rebindOperationGeneration = 0;
   private finalWaiter: {
     resolve: (transcript: string) => void;
     reject: (error: Error) => void;
@@ -361,6 +391,11 @@ export class RealtimeTranscriptionClientV2 {
             attempt,
             httpStatus: response.status,
             requestId,
+            at: new Date().toISOString(),
+            connectionState: resources.peer.connectionState,
+            iceConnectionState: resources.peer.iceConnectionState,
+            signalingState: resources.peer.signalingState,
+            reasonContext: "connection_ready",
           });
           return;
         } finally {
@@ -429,13 +464,28 @@ export class RealtimeTranscriptionClientV2 {
     });
   }
 
-  async setInputEnabled(enabled: boolean) {
+  async setInputEnabled(enabled: boolean, expectedGeneration?: number) {
     const sender = this.sender;
     if (!sender) throw new Error("transcription_sender_unavailable");
     if (enabled && !this.inputTrack) {
       throw new Error("transcription_track_unavailable");
     }
+    if (
+      enabled &&
+      expectedGeneration !== undefined &&
+      this.inputTrackGeneration !== expectedGeneration
+    ) {
+      throw new Error("transcription_stale_generation");
+    }
+    if (enabled && sender.track === this.inputTrack) {
+      this.emitPeerState("input_enabled", "input_enable");
+      return;
+    }
+    this.stateReasonContext = enabled ? "input_enable" : "input_disable";
     await sender.replaceTrack(enabled ? this.inputTrack : null);
+    if (sender !== this.sender || !this.peer) throw new ConnectionCancelled();
+    this.emitPeerState("input_enabled", enabled ? "input_enable" : "input_disable");
+    this.stateReasonContext = "steady_state";
   }
 
   async replaceInputStream(stream: MediaStream, captureGeneration: number) {
@@ -444,20 +494,84 @@ export class RealtimeTranscriptionClientV2 {
       throw new Error("single_live_audio_track_required");
     }
     const sender = this.sender;
-    if (!sender) throw new Error("transcription_sender_unavailable");
-    const nextTrack = tracks[0];
-    // Keep the sender gated while changing ownership. The following explicit
-    // setInputEnabled(true) is the only operation that starts sending audio.
-    await sender.replaceTrack(null);
-    if (sender !== this.sender || !this.peer) {
-      throw new ConnectionCancelled();
+    if (!sender) {
+      this.emitDiagnostic({
+        stage: "track_rebind_completed",
+        at: new Date().toISOString(),
+        captureGeneration,
+        trackRebindOutcome: "sender_unavailable",
+      });
+      throw new Error("transcription_sender_unavailable");
     }
-    this.inputTrack = nextTrack;
-    this.inputTrackGeneration = captureGeneration;
-    this.emitDiagnostic({
-      stage: "input_track_bound",
+    const nextTrack = tracks[0];
+    const peer = this.peer;
+    const operationGeneration = ++this.rebindOperationGeneration;
+    const senderHadTrackBeforeRebind = Boolean(sender.track);
+    this.activeRebind = {
+      generation: captureGeneration,
+      disconnected: false,
+      recovered: false,
+    };
+    this.stateReasonContext = "track_rebind";
+    this.emitPeerState("track_rebind_started", "track_rebind", {
       captureGeneration,
+      senderHadTrackBeforeRebind,
     });
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      // Atomic replacement avoids the WebKit-sensitive null -> new-track gap.
+      // The previous turn is already gated and its server buffer cleared by
+      // the manager before this operation begins.
+      await Promise.race([
+        sender.replaceTrack(nextTrack),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("transcription_track_rebind_timeout")),
+            RealtimeTranscriptionClientV2.TRACK_REBIND_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (
+        sender !== this.sender ||
+        peer !== this.peer ||
+        !peer ||
+        operationGeneration !== this.rebindOperationGeneration
+      ) {
+        throw new ConnectionCancelled();
+      }
+      this.inputTrack = nextTrack;
+      this.inputTrackGeneration = captureGeneration;
+      this.emitDiagnostic({
+        stage: "input_track_bound",
+        at: new Date().toISOString(),
+        captureGeneration,
+      });
+      const outcome = this.activeRebind?.recovered
+        ? "temporary_disconnect_recovered" as const
+        : "success" as const;
+      this.emitPeerState("track_rebind_completed", "track_rebind", {
+        captureGeneration,
+        trackRebindOutcome: outcome,
+        senderHadTrackBeforeRebind,
+      });
+    } catch (error) {
+      const outcome = error instanceof Error &&
+        error.message === "transcription_track_rebind_timeout"
+        ? "timeout" as const
+        : this.peer?.connectionState === "failed"
+          ? "connection_failed" as const
+          : "stale_generation" as const;
+      this.emitPeerState("track_rebind_completed", "track_rebind", {
+        captureGeneration,
+        trackRebindOutcome: outcome,
+        senderHadTrackBeforeRebind,
+      });
+      throw error;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      this.activeRebind = null;
+      this.stateReasonContext = "steady_state";
+    }
   }
 
   getInputTrackGeneration() {
@@ -481,6 +595,10 @@ export class RealtimeTranscriptionClientV2 {
     this.sender = null;
     this.inputTrack = null;
     this.inputTrackGeneration = null;
+    this.rebindOperationGeneration += 1;
+    this.activeRebind = null;
+    this.connectionFailureNotified = false;
+    this.cancelDisconnectGracePeriod();
     if (events) {
       events.onopen = null;
       events.onmessage = null;
@@ -562,7 +680,7 @@ export class RealtimeTranscriptionClientV2 {
         settled = true;
         rejectReady(new Error("data_channel_error"));
       } else {
-        this.fail(new Error("data_channel_error"));
+        this.notifyConnectionFailure(new Error("data_channel_error"));
       }
     };
     events.onclose = () => {
@@ -571,7 +689,7 @@ export class RealtimeTranscriptionClientV2 {
         settled = true;
         rejectReady(new Error("data_channel_closed"));
       } else if (peer.connectionState !== "closed") {
-        this.fail(new Error("data_channel_closed"));
+        this.notifyConnectionFailure(new Error("data_channel_closed"));
       }
     };
     peer.onconnectionstatechange = () => {
@@ -583,8 +701,24 @@ export class RealtimeTranscriptionClientV2 {
         connectionState: peer.connectionState,
         iceConnectionState: peer.iceConnectionState,
       });
-      if (["failed", "disconnected"].includes(peer.connectionState)) {
-        this.fail(new Error("peer_connection_failed"));
+      this.emitPeerState("connection_state_changed", this.stateReasonContext);
+      if (peer.connectionState === "connected") {
+        if (this.disconnectGraceTimer) {
+          this.cancelDisconnectGracePeriod();
+          if (this.activeRebind) this.activeRebind.recovered = true;
+          this.emitPeerState("disconnect_recovered", this.stateReasonContext);
+        }
+        return;
+      }
+      if (peer.connectionState === "failed") {
+        this.cancelDisconnectGracePeriod();
+        this.notifyConnectionFailure(new Error("peer_connection_failed"));
+        return;
+      }
+      if (peer.connectionState === "disconnected") {
+        if (this.activeRebind) this.activeRebind.disconnected = true;
+        this.emitPeerState("temporary_disconnect", this.stateReasonContext);
+        this.startDisconnectGracePeriod(peer, abortController, connectionAttemptId);
       }
     };
 
@@ -592,6 +726,7 @@ export class RealtimeTranscriptionClientV2 {
   }
 
   private cleanupPeerAttempt(resources: PeerAttempt) {
+    this.cancelDisconnectGracePeriod();
     resources.cancelDataChannelWait();
     resources.events.onopen = null;
     resources.events.onmessage = null;
@@ -704,7 +839,9 @@ export class RealtimeTranscriptionClientV2 {
       waiter.resolve(transcript);
       return;
     }
-    if (event.type === "error") this.fail(new Error("realtime_transcription_error"));
+    if (event.type === "error") {
+      this.notifyConnectionFailure(new Error("realtime_transcription_error"));
+    }
   }
 
   private fail(error: Error) {
@@ -714,6 +851,71 @@ export class RealtimeTranscriptionClientV2 {
       this.finalWaiter = null;
     }
     this.handlers.onError();
+  }
+
+  private notifyConnectionFailure(error: Error) {
+    if (this.connectionFailureNotified) return;
+    this.connectionFailureNotified = true;
+    const peer = this.peer;
+    this.emitDiagnostic({
+      stage: "connection_error",
+      at: new Date().toISOString(),
+      ...(peer ? {
+        connectionState: peer.connectionState,
+        iceConnectionState: peer.iceConnectionState,
+        signalingState: peer.signalingState,
+      } : {}),
+      reasonContext: this.stateReasonContext,
+      errorStage: "webrtc_connection_state",
+      errorCode: error.message,
+    });
+    this.fail(error);
+  }
+
+  private startDisconnectGracePeriod(
+    peer: RTCPeerConnection,
+    abortController: AbortController,
+    connectionAttemptId: string,
+  ) {
+    if (this.disconnectGraceTimer) return;
+    this.disconnectGraceTimer = setTimeout(() => {
+      this.disconnectGraceTimer = null;
+      if (!this.isCurrent(abortController, connectionAttemptId, peer)) return;
+      if (peer.connectionState === "disconnected") {
+        this.notifyConnectionFailure(new Error("peer_connection_disconnected"));
+      }
+    }, RealtimeTranscriptionClientV2.DISCONNECT_GRACE_PERIOD_MS);
+  }
+
+  private cancelDisconnectGracePeriod() {
+    if (!this.disconnectGraceTimer) return;
+    clearTimeout(this.disconnectGraceTimer);
+    this.disconnectGraceTimer = null;
+  }
+
+  private emitPeerState(
+    stage: Extract<RealtimeTranscriptionDiagnosticEvent["stage"],
+      | "connection_state_changed"
+      | "temporary_disconnect"
+      | "disconnect_recovered"
+      | "track_rebind_started"
+      | "track_rebind_completed"
+      | "input_enabled">,
+    reasonContext: string,
+    details: Partial<RealtimeTranscriptionDiagnosticEvent> = {},
+  ) {
+    const peer = this.peer;
+    this.emitDiagnostic({
+      stage,
+      at: new Date().toISOString(),
+      ...(peer ? {
+        connectionState: peer.connectionState,
+        iceConnectionState: peer.iceConnectionState,
+        signalingState: peer.signalingState,
+      } : {}),
+      reasonContext,
+      ...details,
+    });
   }
 
   private emitDiagnostic(event: RealtimeTranscriptionDiagnosticEvent) {

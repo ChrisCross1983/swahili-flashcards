@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTranslationEntry,
   requestAudioTranslation,
+  requestAudioTranscriptionBenchmark,
   requestTextTranslation,
 } from "@/lib/translator/client";
 import {
@@ -84,6 +85,24 @@ describe("translator client", () => {
         translationRequestCorrelationId: "translation-turn-1",
       },
     });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("uses the transcribe-only internal benchmark endpoint", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(url).toBe("/api/translator/transcribe");
+      expect(init?.headers).toEqual({ "X-Translator-Request-Phase": "internal_benchmark" });
+      const formData = init?.body as FormData;
+      expect(formData.get("audio")).toBeInstanceOf(Blob);
+      return Response.json({
+        transcript: "Unaitwa nani?", model: "gpt-4o-mini-transcribe",
+        fallbackUsed: false, transcriptionMs: 500,
+        completedAt: "2026-09-10T10:00:00.000Z",
+      });
+    });
+    await expect(requestAudioTranscriptionBenchmark(
+      new Blob([new Uint8Array(256)], { type: "audio/webm" }), direction, { fetcher },
+    )).resolves.toMatchObject({ transcript: "Unaitwa nani?", transcriptionMs: 500 });
     expect(fetcher).toHaveBeenCalledOnce();
   });
 

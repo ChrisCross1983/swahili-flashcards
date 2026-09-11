@@ -9,8 +9,8 @@ import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer"
 export function useTranslatorSpeech() {
   const playerRef = useRef<TranslatorSpeechPlayer | null>(null);
 
-  if (playerRef.current === null) {
-    playerRef.current = new TranslatorSpeechPlayer({
+  const createPlayer = useCallback(() =>
+    new TranslatorSpeechPlayer({
       requestSpeech: (entry, speed, signal) =>
         requestTranslatorSpeech(entry.translatedText, entry.targetLanguage, speed, {
           signal,
@@ -20,15 +20,22 @@ export function useTranslatorSpeech() {
       revokeObjectUrl: (url) => URL.revokeObjectURL(url),
       createAudio: (url) => new Audio(url),
       isDocumentVisible: () => document.visibilityState === "visible",
-    });
+    }), []);
+
+  if (playerRef.current === null) {
+    playerRef.current = createPlayer();
   }
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // React Strict Mode deliberately runs setup -> cleanup -> setup in
+    // development. Recreate the player after that simulated cleanup instead
+    // of leaving the hook bound to the disposed first instance.
+    if (playerRef.current === null) playerRef.current = createPlayer();
+    return () => {
       playerRef.current?.dispose();
-    },
-    [],
-  );
+      playerRef.current = null;
+    };
+  }, [createPlayer]);
 
   const playTranslation = useCallback((
     entry: TranslationEntry,
@@ -82,6 +89,9 @@ export function useTranslatorSpeech() {
     playerRef.current?.stopPlayback();
   }, []);
 
+  const hasCachedTranslation = useCallback((entryId: string, speed: number) =>
+    playerRef.current?.hasCachedAudio(entryId, speed) === true, []);
+
   const clearCache = useCallback(() => {
     playerRef.current?.clearCache();
   }, []);
@@ -92,6 +102,7 @@ export function useTranslatorSpeech() {
     pausePlayback,
     resumePlayback,
     stopPlayback,
+    hasCachedTranslation,
     clearCache,
   };
 }

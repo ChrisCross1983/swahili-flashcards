@@ -21,7 +21,7 @@ describe("translator diagnostic ZIP", () => {
     const text = await archiveText(bundle);
     expect(text).toContain("report.json");
     expect(text).toContain("manifest.json");
-    expect(text).toContain('"bundleVersion": "5.2.1"');
+    expect(text).toContain('"bundleVersion": "5.2.5"');
     expect(text).toContain('"reportVersion": 5');
     expect(text).toContain('"sessionId": "session-1"');
     expect(text).toContain('"reportId": "report-1"');
@@ -31,7 +31,7 @@ describe("translator diagnostic ZIP", () => {
 
   it("includes multiple audio files with safe names when explicitly allowed", async () => {
     const bundle = await createTranslatorDiagnosticBundle({
-      report: { reportVersion: 5 },
+      report: { reportVersion: 5, audioIncludedTurnCount: 3 },
       includeAudio: true,
       audioFiles: [
         {
@@ -59,6 +59,8 @@ describe("translator diagnostic ZIP", () => {
     expect(text).toContain("audio/turn_2-3.ogg");
     expect(text).toContain('"consentEligible": true');
     expect(text).toContain('"recognitionReviewStatus": "corrected"');
+    expect(text).toContain('"audioIncludedTurnCount": 3');
+    expect(text).toContain('"audioCount": 3');
     expect(text).not.toContain("turn-without-consent");
     expect(text).not.toContain("private");
     expect(text).not.toContain("../");

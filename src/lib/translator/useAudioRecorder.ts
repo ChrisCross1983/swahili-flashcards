@@ -107,6 +107,21 @@ export function useAudioRecorder() {
     [],
   );
 
+  const getRecorderSnapshot = useCallback(
+    () => controllerRef.current?.getSnapshot() ?? INITIAL_SNAPSHOT,
+    [],
+  );
+
+  const getMicrophoneAcquisitionState = useCallback(
+    () => controllerRef.current?.getMicrophoneAcquisitionState() ?? "idle",
+    [],
+  );
+
+  const hasPendingAcquisition = useCallback(
+    () => controllerRef.current?.hasPendingAcquisition() ?? false,
+    [],
+  );
+
   const clearError = useCallback(() => {
     if (controllerRef.current) {
       controllerRef.current.clearError();
@@ -143,6 +158,9 @@ export function useAudioRecorder() {
     poisonCurrentStream,
     abortPendingAcquisition,
     getCaptureDiagnostics,
+    getRecorderSnapshot,
+    getMicrophoneAcquisitionState,
+    hasPendingAcquisition,
     error: snapshot.error,
     audioBlob: snapshot.audioBlob,
     mimeType: snapshot.mimeType,

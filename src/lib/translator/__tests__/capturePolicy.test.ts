@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isClassicRealtimeEnabledForUserAgent,
   isWebKitCaptureEnvironment,
   shouldReuseClassicCaptureStream,
 } from "@/lib/translator/capturePolicy";
@@ -20,5 +21,12 @@ describe("classic capture policy", () => {
     "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Edg/140.0 Safari/537.36",
   ])("retains the fast stream reuse policy outside WebKit: %s", (userAgent) => {
     expect(shouldReuseClassicCaptureStream(userAgent)).toBe(true);
+  });
+
+  it("defaults public WebKit to the safe upload path while keeping Chromium realtime", () => {
+    const iphone = "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Mobile Safari/604.1";
+    const chromium = "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0 Safari/537.36";
+    expect(isClassicRealtimeEnabledForUserAgent(iphone)).toBe(false);
+    expect(isClassicRealtimeEnabledForUserAgent(chromium)).toBe(true);
   });
 });

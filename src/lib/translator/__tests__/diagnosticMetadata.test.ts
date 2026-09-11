@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getTranslatorBuildMetadata } from "@/lib/translator/diagnosticMetadata";
+import nextConfig from "../../../../next.config";
+import packageJson from "../../../../package.json";
 
 describe("translator build metadata", () => {
   it("truthfully separates a localhost frontend from an explicitly production backend", () => {
@@ -41,5 +43,12 @@ describe("translator build metadata", () => {
       frontendOriginKind: "custom_domain",
       backendEnvironmentLabel: "production",
     });
+  });
+
+  it("injects the package version instead of a development label", () => {
+    expect(nextConfig.env?.NEXT_PUBLIC_APP_VERSION).toBe(
+      process.env.NEXT_PUBLIC_APP_VERSION ?? packageJson.version,
+    );
+    expect(nextConfig.env?.NEXT_PUBLIC_APP_VERSION).not.toBe("development");
   });
 });

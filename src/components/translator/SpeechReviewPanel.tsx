@@ -7,20 +7,31 @@ export default function SpeechReviewPanel({
   sample,
   onAccept,
   onCorrect,
+  reviewOrigin = "organic_runtime",
 }: {
   sample: TranslatorSpeechQualitySample;
   onAccept: () => void;
   onCorrect: (value: string) => void;
+  reviewOrigin?: "organic_runtime" | "qa_simulation";
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(
     sample.correctedTranscript ?? sample.recognizedTranscript,
   );
   return (
-    <div className="rounded-xl border border-soft bg-surface-elevated p-3">
+    <div
+      className="rounded-xl border border-soft bg-surface-elevated p-3"
+      data-review-candidate="true"
+      tabIndex={-1}
+    >
       <p className="text-xs font-semibold uppercase text-muted">
         Erkannter Text trotz fehlgeschlagener Übersetzung
       </p>
+      {reviewOrigin === "qa_simulation" ? (
+        <p className="mt-1 text-xs font-medium text-muted">
+          Interne QA-Simulation · keine organische Lern-Evidenz
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-primary">{sample.recognizedTranscript}</p>
       {!editing ? (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -74,4 +85,3 @@ export default function SpeechReviewPanel({
     </div>
   );
 }
-

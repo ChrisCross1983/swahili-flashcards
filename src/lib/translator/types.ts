@@ -13,6 +13,24 @@ export type TranslationRequestDirection =
 
 export type TranscriptionPath = "realtime" | "audio_upload_fallback";
 
+export type TtsRequestReason = "autoplay" | "manual_play" | "none";
+export type TtsGenerationOutcome =
+  | "not_requested"
+  | "disabled"
+  | "request_started"
+  | "success"
+  | "request_failed"
+  | "aborted"
+  | "stale_result"
+  | "playback_blocked"
+  | "playback_failed";
+export type TtsPlaybackOutcome =
+  | "not_attempted"
+  | "started"
+  | "completed"
+  | "blocked"
+  | "failed";
+
 export type TranslationDiagnostics = {
   transcriptionModel: string;
   translationModel: string;
@@ -103,6 +121,14 @@ export type TranslationDiagnostics = {
   translationRequestMs?: number;
   transcriptFinalToTranslationReadyMs?: number;
   stopToTranslationVisibleMs?: number;
+  ttsDecisionAt?: string;
+  ttsRequested?: boolean;
+  ttsRequestReason?: TtsRequestReason;
+  ttsGenerationOutcome?: TtsGenerationOutcome;
+  ttsPlaybackOutcome?: TtsPlaybackOutcome;
+  ttsOutcome?: TtsGenerationOutcome;
+  ttsSkipReason?: string | null;
+  ttsRequestedAt?: string;
   ttsStartedAt?: string;
   ttsReadyAt?: string;
   ttsClientRequestStartedAt?: string;
@@ -136,8 +162,10 @@ export type TranslationDiagnostics = {
   ttsClientResponseCompletedAt?: string;
   ttsAudioPreparationStartedAt?: string;
   ttsAudioPreparationCompletedAt?: string;
+  ttsGenerationCompletedAt?: string;
   firstPlayableAudioAt?: string;
   playRequestedAt?: string;
+  ttsPlaybackRequestedAt?: string;
   ttsRequestCorrelationId?: string;
   translationVisibleToTtsRequestStartMs?: number;
   ttsClientToServerMs?: number;
@@ -172,6 +200,8 @@ export type TranslationDiagnostics = {
   stopToTtsReadyMs?: number;
   playbackStartedAt?: string;
   playbackCompletedAt?: string;
+  ttsPlaybackStartedAt?: string;
+  ttsPlaybackCompletedAt?: string;
   ttsReadyToPlaybackStartedMs?: number;
   stopToPlaybackStartedMs?: number;
   interactionOverheadMs?: number;
@@ -206,6 +236,7 @@ export type TranslationDiagnostics = {
   mediaRecorderTotalChunkBytes?: number;
   audioBlobSize?: number | null;
   audioSignalObserved?: boolean | null;
+  audioSignalEvidence?: "measured" | "inferred_from_valid_audio" | "unavailable";
   realtimeTransportReady?: boolean;
   realtimeInputTrackGeneration?: number | null;
   realtimeFirstDeltaObserved?: boolean;
@@ -226,6 +257,34 @@ export type TranslationDiagnostics = {
   rescueTranscriptToTranslationReadyMs?: number | null;
   semanticRescueTotalMs?: number | null;
   transcriptScriptAnomalyDetected?: boolean;
+  trackRebindStartedAt?: string | null;
+  trackRebindCompletedAt?: string | null;
+  trackRebindMs?: number | null;
+  trackRebindOutcome?:
+    | "success"
+    | "temporary_disconnect_recovered"
+    | "connection_failed"
+    | "timeout"
+    | "sender_unavailable"
+    | "stale_generation";
+  senderHadTrackBeforeRebind?: boolean | null;
+  connectionStateBeforeRebind?: RTCPeerConnectionState | null;
+  connectionStateAfterRebind?: RTCPeerConnectionState | null;
+  realtimeConnectionStateTimeline?: Array<{
+    at: string;
+    connectionState: RTCPeerConnectionState;
+    iceConnectionState: RTCIceConnectionState;
+    signalingState: RTCSignalingState;
+    reasonContext: string;
+    event?: string;
+  }>;
+  summaryEligible?: boolean;
+  summaryGenerated?: boolean;
+  summaryLength?: number;
+  summaryCompressionRatio?: number | null;
+  summaryCriticalFactWarningCount?: number;
+  summaryContradictionDetected?: boolean;
+  summaryGenerationOutcome?: import("@/lib/translator/essenceSummary").SummaryGenerationOutcome;
 };
 
 export type TranslationEntry = {
@@ -235,6 +294,7 @@ export type TranslationEntry = {
   targetLanguage: TranslationLanguage;
   originalText: string;
   translatedText: string;
+  essenceSummary?: string | null;
   sourceWasDetected: boolean;
   diagnostics?: TranslationDiagnostics;
 };
@@ -242,6 +302,7 @@ export type TranslationEntry = {
 export type TranslationResult = {
   originalText: string;
   translatedText: string;
+  essenceSummary?: string | null;
   sourceLanguage: TranslationLanguage;
   targetLanguage: TranslationLanguage;
   diagnostics: TranslationDiagnostics;

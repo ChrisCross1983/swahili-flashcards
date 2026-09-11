@@ -4,9 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
-import TranslationFeedbackSheet from "@/components/translator/TranslationFeedbackSheet";
+import TurnFeedbackSheet, {
+  type SavedTurnFeedback,
+} from "@/components/translator/TurnFeedbackSheet";
 import SpeechReviewPanel from "@/components/translator/SpeechReviewPanel";
-import type { SavedTranslatorFeedback } from "@/components/translator/TranslationFeedbackSheet";
+import ProcessingIndicator, {
+  type TranslatorProcessingStage,
+} from "@/components/translator/ProcessingIndicator";
 import {
   getTranslationRequestDirection,
   initialTranslatorState,
@@ -75,6 +79,8 @@ import {
   acceptSpeechQualityRecord,
   correctSpeechQualityRecord,
   createUnreviewedSpeechQualityRecord,
+  reviewSameAudioComparison,
+  type SameAudioBenchmarkComparison,
   type TranslatorSpeechQualitySample,
 } from "@/lib/translator/speechQuality";
 import {
@@ -101,6 +107,7 @@ import {
 } from "@/lib/translator/turnConsent";
 import {
   TranslatorAudioQualityMonitor,
+  inferAudioSignalFromSuccessfulTranscription,
   UNAVAILABLE_AUDIO_QUALITY,
   type TranslatorAudioCaptureMetadata,
   type TranslatorAudioQualityMetrics,
@@ -118,6 +125,29 @@ import {
   type SttCandidateComparison,
   type SttRoutingDecision,
 } from "@/lib/translator/sttRouting";
+import { SHARED_CONVERSATION_LABELS } from "@/lib/translator/sharedConversationLabels";
+import {
+  MAX_POST_CONVERSATION_REVIEW_CANDIDATES,
+  selectPostConversationReviewCandidates,
+} from "@/lib/translator/reviewCandidates";
+import { TranslatorTtsAttemptRegistry } from "@/lib/translator/ttsAttemptRegistry";
+import { SameAudioBenchmarkRunner } from "@/lib/translator/sameAudioBenchmark";
+import {
+  RecordingStartDiagnosticsTracker,
+  RecordingStartOperationTimeoutError,
+  recordingStartOutcomeForError,
+  withRecordingStartOperationWatchdog,
+  type RecordingStartPhase,
+  type RecordingStartRecorderSnapshot,
+} from "@/lib/translator/recordingStartDiagnostics";
+
+const QA_FAILURE_LABELS = {
+  realtime: "Realtime-Ausfall",
+  semantic: "Semantic-Rescue",
+  translation: "Translation 503",
+  tts: "TTS 503",
+  network: "Netzwerkabbruch",
+} as const;
 
 export default function TranslatorView() {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
@@ -140,22 +170,30 @@ export default function TranslatorView() {
     useState<PersistedTranslatorIncident | null>(null);
   const incidentStoreRef =
     useRef<ReturnType<typeof createBrowserTranslatorIncidentStore>>(null);
+  const preTurnPersistenceChainRef = useRef<Promise<void>>(Promise.resolve());
   const [qaNextFailure, setQaNextFailure] = useState<
     "realtime" | "semantic" | "translation" | "tts" | "network" | null
   >(null);
-  const [processingPhase, setProcessingPhase] = useState<"translation" | "semantic_rescue">("translation");
+  const [qaLastResult, setQaLastResult] = useState<string | null>(null);
+  const [processingPhase, setProcessingPhase] = useState<TranslatorProcessingStage>("translation");
+  const [postConversationReviewOpen, setPostConversationReviewOpen] = useState(false);
+  const reviewSectionRef = useRef<HTMLDivElement | null>(null);
   const buildMetadataRef = useRef(getTranslatorBuildMetadata());
   const sessionIdRef = useRef(createTranslatorSessionId());
   const installationIdRef = useRef<string | null>(null);
   const telemetryQueueRef = useRef<TranslatorTelemetryQueue | null>(null);
   const qualityByTurnRef = useRef(new Map<string, TranslatorSpeechQualitySample>());
   const audioBlobByTurnRef = useRef(new Map<string, Blob>());
-  const audioIncludedInBundleTurnIdsRef = useRef(new Set<string>());
   const diagnosticEventsByTurnRef = useRef(new Map<string, TranslatorDiagnosticEvent[]>());
   const consentByTurnRef = useRef(new Map<string, TranslatorTurnConsent>());
   const consentEventsRef = useRef<TranslatorConsentEvent[]>([]);
   const sttRoutingByTurnRef = useRef(new Map<string, SttRoutingDecision>());
   const sttComparisonsByTurnRef = useRef(new Map<string, SttCandidateComparison>());
+  const sameAudioBenchmarksByTurnRef = useRef(
+    new Map<string, SameAudioBenchmarkComparison>(),
+  );
+  const sameAudioEligibleTurnIdsRef = useRef(new Set<string>());
+  const sameAudioBenchmarkRunnerRef = useRef(new SameAudioBenchmarkRunner());
   const audioQualityMonitorRef = useRef<TranslatorAudioQualityMonitor | null>(null);
   const audioCaptureByTurnRef = useRef(new Map<string, {
     metadata: TranslatorAudioCaptureMetadata;
@@ -164,8 +202,11 @@ export default function TranslatorView() {
   const [failedSpeechReviewTurnIds, setFailedSpeechReviewTurnIds] = useState<string[]>([]);
   const translationInFlightRef = useRef(false);
   const recordingStartInFlightRef = useRef(false);
+  const recordingStartGenerationRef = useRef(0);
+  const recordingStartTrackerRef = useRef(new RecordingStartDiagnosticsTracker());
   const playbackInFlightRef = useRef(false);
   const playbackRunIdRef = useRef(0);
+  const ttsAttemptRegistryRef = useRef(new TranslatorTtsAttemptRegistry());
   const requestAbortRef = useRef<AbortController | null>(null);
   const turnPerformanceByEntryRef = useRef(
     new Map<string, TranslatorTurnPerformance>(),
@@ -191,6 +232,9 @@ export default function TranslatorView() {
     poisonCurrentStream,
     abortPendingAcquisition,
     getCaptureDiagnostics,
+    getRecorderSnapshot,
+    getMicrophoneAcquisitionState,
+    hasPendingAcquisition,
     disposeRecorder,
     error: recorderError,
     clearError: clearRecorderError,
@@ -201,6 +245,7 @@ export default function TranslatorView() {
     pausePlayback,
     resumePlayback,
     stopPlayback,
+    hasCachedTranslation,
     clearCache,
   } = useTranslatorSpeech();
   const [playbackReady, setPlaybackReady] = useState(false);
@@ -217,7 +262,7 @@ export default function TranslatorView() {
   const audioMetadataByTurnRef = useRef(
     new Map<string, ClassicTranslatorAudioMetadata>(),
   );
-  const feedbackByTurnRef = useRef(new Map<string, SavedTranslatorFeedback>());
+  const feedbackByTurnRef = useRef(new Map<string, SavedTurnFeedback>());
 
   useEffect(() => {
     let active = true;
@@ -367,11 +412,7 @@ export default function TranslatorView() {
     transcriptionPath: NonNullable<TranslationDiagnostics["transcriptionPath"]>;
     consent: TranslatorTurnConsent;
   }) => {
-    if (
-      !input.consent.consentAtRecordingStart.internalSpeechDiagnosticsEnabled ||
-      input.consent.consentAtTurnFinalization?.internalSpeechDiagnosticsEnabled !== true ||
-      !input.recognizedTranscript.trim()
-    ) {
+    if (!input.recognizedTranscript.trim()) {
       return null;
     }
     const capture = audioCaptureByTurnRef.current.get(input.turnId);
@@ -662,6 +703,7 @@ export default function TranslatorView() {
   useEffect(
     () => () => {
       requestAbortRef.current?.abort();
+      sameAudioBenchmarkRunnerRef.current.reset();
       realtimeManagerRef.current?.close("classic_unmount");
       realtimeManagerRef.current = null;
       activeRealtimeTurnRef.current = null;
@@ -673,7 +715,24 @@ export default function TranslatorView() {
   );
   useEffect(() => {
     const handlePageHide = () => {
+      const activeStart = recordingStartTrackerRef.current.getActiveAttempt();
+      if (activeStart) {
+        recordingStartGenerationRef.current += 1;
+        recordingStartInFlightRef.current = false;
+        recordingStartTrackerRef.current.mark(
+          activeStart.attemptId,
+          "cleanup_completed",
+          recordingStartSnapshot(),
+        );
+        recordingStartTrackerRef.current.complete(
+          activeStart.attemptId,
+          "aborted",
+          recordingStartSnapshot(),
+        );
+        void persistPreTurnDiagnosticSnapshot();
+      }
       requestAbortRef.current?.abort();
+      sameAudioBenchmarkRunnerRef.current.reset();
       abortPendingAcquisition();
       stopPlayback();
       realtimeManagerRef.current?.close("classic_page_hide");
@@ -686,6 +745,9 @@ export default function TranslatorView() {
     };
     window.addEventListener("pagehide", handlePageHide);
     return () => window.removeEventListener("pagehide", handlePageHide);
+    // The pagehide handler intentionally snapshots the latest refs without
+    // re-registering for every render of the report builder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abortPendingAcquisition, disposeRecorder, stopPlayback]);
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -698,12 +760,12 @@ export default function TranslatorView() {
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [abortPendingAcquisition]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+      mountedRef.current = true;
+      return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+      };
+  }, []);
 
   const recorderBusy =
     recorderStatus === "starting" || recorderStatus === "stopping";
@@ -711,6 +773,70 @@ export default function TranslatorView() {
   const feedbackEntry = feedbackEntryId
     ? state.entries.find((entry) => entry.id === feedbackEntryId) ?? null
     : null;
+  const failedPostConversationReviewCandidateIds = failedSpeechReviewTurnIds
+    .filter((turnId) => qualityByTurnRef.current.has(turnId))
+    .slice(0, MAX_POST_CONVERSATION_REVIEW_CANDIDATES);
+  const postConversationReviewCandidateList =
+    selectPostConversationReviewCandidates({
+        entries: state.entries,
+        diagnosticEventsByTurn: diagnosticEventsByTurnRef.current,
+        feedbackByTurn: feedbackByTurnRef.current,
+        qualityByTurn: qualityByTurnRef.current,
+        maxCandidates: Math.max(
+          0,
+          MAX_POST_CONVERSATION_REVIEW_CANDIDATES -
+            failedPostConversationReviewCandidateIds.length,
+        ),
+      });
+  const postConversationReviewCandidateCount =
+    failedPostConversationReviewCandidateIds.length +
+    postConversationReviewCandidateList.length;
+  const postConversationReviewCandidateIds = postConversationReviewOpen
+    ? new Set(postConversationReviewCandidateList)
+    : new Set<string>();
+
+  function recordingStartSnapshot(): RecordingStartRecorderSnapshot {
+    return {
+      recorderStatus: getRecorderSnapshot().status,
+      microphoneAcquisitionState: getMicrophoneAcquisitionState(),
+      hasPendingAcquisition: hasPendingAcquisition(),
+      recordingStartInFlight: recordingStartInFlightRef.current,
+      captureGeneration: getCaptureDiagnostics()?.captureGeneration ?? null,
+    };
+  }
+
+  function markRecordingStartAttempt(
+    attemptId: string,
+    phase: RecordingStartPhase,
+    persist = true,
+  ) {
+    recordingStartTrackerRef.current.mark(
+      attemptId,
+      phase,
+      recordingStartSnapshot(),
+    );
+    if (persist) void persistPreTurnDiagnosticSnapshot();
+  }
+
+  async function persistPreTurnDiagnosticSnapshot() {
+    const store = incidentStoreRef.current;
+    if (!store) return;
+    const report = buildCurrentReport();
+    preTurnPersistenceChainRef.current = preTurnPersistenceChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await store.save({
+          sessionId: sessionIdRef.current,
+          reportId: reportIdRef.current,
+          createdAt: new Date().toISOString(),
+          turnCount: report.turns.length,
+          report,
+          audio: [],
+        });
+      })
+      .catch(() => undefined);
+    await preTurnPersistenceChainRef.current;
+  }
 
   async function handleStartRecording() {
     if (recordingStartInFlightRef.current) return;
@@ -722,10 +848,13 @@ export default function TranslatorView() {
       return;
     }
     recordingStartInFlightRef.current = true;
+    const operationGeneration = ++recordingStartGenerationRef.current;
+    const attemptId = recordingStartTrackerRef.current.begin(
+      recordingStartSnapshot(),
+    );
+    markRecordingStartAttempt(attemptId, "start_operation_started");
     const stateBeforeRecording = state.status;
     activeTurnStateBeforeRecordingRef.current = stateBeforeRecording;
-    const recorderStatusBefore = recorderStatus;
-    const realtimeManagerStateBefore = realtimeManagerRef.current?.getState() ?? "idle";
     if (state.status === "playing" || state.status === "paused") {
       handleStopPlayback();
     }
@@ -745,32 +874,100 @@ export default function TranslatorView() {
     });
     activeTurnPerformanceRef.current = turnPerformance;
     let realtimeTurn: ClassicRealtimeTurnHandle | null = null;
-    try {
-      turnPerformance.markGetUserMediaStarted();
-      const stream = await acquireMicrophone();
-      turnPerformance.markGetUserMediaReady();
-      await prepareRecording();
-      turnPerformance.markMediaRecorderPrepared();
-      const captureDiagnostics = getCaptureDiagnostics();
-      if (captureDiagnostics) turnPerformance.setCaptureDiagnostics(captureDiagnostics);
-      realtimeTurn = await getRealtimeManager().prepareTurn(
-        stream,
-        () => turnPerformance.markFirstTranscriptDelta(),
+    let stream: MediaStream | null = null;
+    const assertCurrentOperation = async () => {
+      if (
+        mountedRef.current &&
+        recordingStartGenerationRef.current === operationGeneration
+      ) return;
+      recordingStartTrackerRef.current.markLateCompletion(
+        attemptId,
+        recordingStartSnapshot(),
       );
-      activeRealtimeTurnRef.current = realtimeTurn;
-      turnPerformance.markTranscriptionPathDecision(realtimeTurn);
-      if (!mountedRef.current) return;
-      await startPreparedRecording();
-      turnPerformance.markRecordingStarted();
-      dispatch({ type: "START_RECORDING" });
+      if (realtimeTurn) await getRealtimeManager().abortTurn(realtimeTurn);
+      throw new Error("stale_recording_start_operation");
+    };
+    try {
+      const startOperation = (async () => {
+        turnPerformance.markGetUserMediaStarted();
+        const acquisition = acquireMicrophone();
+        markRecordingStartAttempt(attemptId, "microphone_acquisition_requested");
+        try {
+          stream = await acquisition;
+        } catch (error) {
+          if (recordingStartGenerationRef.current !== operationGeneration) {
+            recordingStartTrackerRef.current.markLateCompletion(
+              attemptId,
+              recordingStartSnapshot(),
+            );
+            void persistPreTurnDiagnosticSnapshot();
+          }
+          throw error;
+        }
+        await assertCurrentOperation();
+        markRecordingStartAttempt(attemptId, "microphone_acquired");
+        turnPerformance.markGetUserMediaReady();
+        markRecordingStartAttempt(attemptId, "recorder_prepare_started");
+        await prepareRecording();
+        await assertCurrentOperation();
+        markRecordingStartAttempt(attemptId, "recorder_prepared");
+        turnPerformance.markMediaRecorderPrepared();
+        const captureDiagnostics = getCaptureDiagnostics();
+        if (captureDiagnostics) turnPerformance.setCaptureDiagnostics(captureDiagnostics);
+        realtimeTurn = await getRealtimeManager().prepareTurn(
+          stream,
+          () => turnPerformance.markFirstTranscriptDelta(),
+        );
+        await assertCurrentOperation();
+        activeRealtimeTurnRef.current = realtimeTurn;
+        turnPerformance.markTranscriptionPathDecision(realtimeTurn);
+        markRecordingStartAttempt(attemptId, "recording_start_called");
+        await startPreparedRecording();
+        await assertCurrentOperation();
+        turnPerformance.markRecordingStarted();
+        dispatch({ type: "START_RECORDING" });
+        markRecordingStartAttempt(attemptId, "recording_started");
+        return captureDiagnostics;
+      })();
+      const captureDiagnostics = await withRecordingStartOperationWatchdog(
+        startOperation,
+        {
+          onTimeout: () => {
+            if (recordingStartGenerationRef.current !== operationGeneration) return;
+            recordingStartGenerationRef.current += 1;
+            recordingStartInFlightRef.current = false;
+            abortPendingAcquisition();
+            disposeRecorder();
+          },
+        },
+      );
+      recordingStartTrackerRef.current.complete(
+        attemptId,
+        "recording_started",
+        { ...recordingStartSnapshot(), recordingStartInFlight: false },
+      );
+      const incidentStore = incidentStoreRef.current;
+      if (incidentStore) {
+        preTurnPersistenceChainRef.current = preTurnPersistenceChainRef.current
+          .catch(() => undefined)
+          .then(() => incidentStore.remove(sessionIdRef.current))
+          .catch(() => undefined);
+      }
+      const startedStream = stream as MediaStream | null;
+      const startedRealtimeTurn = realtimeTurn as ClassicRealtimeTurnHandle | null;
+      if (!startedStream || !startedRealtimeTurn) {
+        throw new Error("recording_start_incomplete");
+      }
+      markRecordingStartAttempt(attemptId, "realtime_rebind_started", false);
       await getRealtimeManager().recordingStarted(
-        realtimeTurn,
-        stream,
+        startedRealtimeTurn,
+        startedStream,
         captureDiagnostics?.captureGeneration ?? 0,
       );
+      markRecordingStartAttempt(attemptId, "realtime_rebind_completed", false);
       turnPerformance.setCaptureDiagnostics({
-        realtimeTransportReady: realtimeTurn.realtimeTransportReady,
-        realtimeInputTrackGeneration: realtimeTurn.realtimeInputTrackGeneration,
+        realtimeTransportReady: startedRealtimeTurn.realtimeTransportReady,
+        realtimeInputTrackGeneration: startedRealtimeTurn.realtimeInputTrackGeneration,
       });
       const recordingConsent = consentByTurnRef.current.get(
         activeTurnIdRef.current ?? "",
@@ -787,7 +984,7 @@ export default function TranslatorView() {
             audioQualityMonitorRef.current === monitor &&
             activeTurnIdRef.current === monitoringTurnId
           ) {
-            monitor.start(stream);
+            monitor.start(startedStream);
           }
         }, 0);
       }
@@ -798,7 +995,10 @@ export default function TranslatorView() {
         await getRealtimeManager().abortTurn(realtimeTurn);
       }
       activeRealtimeTurnRef.current = null;
+      const operationTimedOut = error instanceof RecordingStartOperationTimeoutError;
+      const startOutcome = recordingStartOutcomeForError(error);
       const failure = classifyTranslatorFailure(error, "recording_setup");
+      const failureCategory = operationTimedOut ? "RECORDER" : failure.category;
       turnPerformance.setCaptureDiagnostics({
         ...(getCaptureDiagnostics() ?? {}),
         capturePathOutcome:
@@ -806,96 +1006,40 @@ export default function TranslatorView() {
             ? "microphone_acquisition_timeout"
             : "recording_failed",
       });
-      const message = failure.category === "RECORDER"
+      const message = operationTimedOut
+        ? "Das Mikrofon konnte nicht geöffnet werden."
+        : failureCategory === "RECORDER"
         ? getAudioRecorderErrorMessage(error)
         : failure.message;
-      const direction = getTranslationRequestDirection(state.mode);
-      const turnId =
-        activeTurnIdRef.current ??
-        globalThis.crypto?.randomUUID?.() ??
-        `failed-${Date.now()}`;
-      finalizeTurnConsent(turnId);
-      const recordingEvent = rememberDiagnosticEvent(
-        turnId,
-        failure,
-        "recording_setup",
-        "failure",
-        failure.category === "AUTH" ? "reauthenticate" : "reset_to_idle",
-        failure.category === "AUTH" ? false : true,
-        null,
-      );
-      setFailedReportTurns((current) => [
-        ...current,
-        {
-          turnId,
-          createdAt:
-            activeTurnCreatedAtRef.current ?? new Date().toISOString(),
-          mode: state.mode,
-          sourceLanguage:
-            direction.sourceLanguage === "auto"
-              ? null
-              : direction.sourceLanguage,
-          targetLanguage:
-            direction.targetLanguage === "auto"
-              ? null
-              : direction.targetLanguage,
-          diagnostics: turnPerformance.getDiagnostics(),
-          transcriptionModel: realtimeTurn ? "gpt-live-transcribe" : null,
-          translationModel: "gpt-5.6-terra",
-          ttsModel: "gpt-4o-mini-tts",
-          ttsSpeed: speechSpeed,
-          errorCode: failure.apiErrorCode ?? "recording_failed",
-          errorStage: "recording_setup",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          sanitizedErrorMessage: message,
-          stateBeforeRecording,
-          stateAtFailure: state.status,
-          stateAfterCleanup: failure.category === "AUTH" ? "error" : "idle",
-          recorderStatusBefore,
-          recorderStatusAtFailure: recorderStatus,
-          recorderStatusAfterCleanup: "idle",
-          realtimeManagerStateBefore,
-          realtimeManagerStateAtFailure:
-            realtimeManagerRef.current?.getState() ?? "idle",
-          realtimeManagerStateAfterCleanup:
-            realtimeManagerRef.current?.getState() ?? "idle",
-          endpoint: null,
-          httpStatus: failure.httpStatus,
-          apiErrorCode: failure.apiErrorCode,
-          failureCategory: failure.category,
-          retryable: failure.retryable,
-          recoveryAction:
-            failure.category === "AUTH" ? "reauthenticate" : "reset_to_idle",
-          recoverySucceeded: failure.category === "AUTH" ? false : true,
-          audioBlobAvailable: false,
-          authCheckAttempted: false,
-          authCheckSucceeded: null,
-          authFailureType: failure.authFailureType,
-        },
-      ]);
-      enqueueTechnicalEvent({
-        turnId,
-        failure,
-        diagnosticEvent: recordingEvent,
-        errorStage: "recording_setup",
-        recoveryAction:
-          failure.category === "AUTH" ? "reauthenticate" : "reset_to_idle",
-        recoverySucceeded: failure.category !== "AUTH",
-      });
+      if (startOutcome === "timeout") {
+        markRecordingStartAttempt(attemptId, "timeout");
+      }
       resetRecoverableResources();
+      disposeRecorder();
+      markRecordingStartAttempt(attemptId, "cleanup_completed");
+      recordingStartTrackerRef.current.complete(
+        attemptId,
+        startOutcome,
+        recordingStartSnapshot(),
+      );
+      void persistPreTurnDiagnosticSnapshot();
       dispatch({
         type: "RECORDING_FAILED",
         message,
-        category: failure.category,
-        healthStatus: failure.healthStatus,
-        authRequired: failure.category === "AUTH",
+        category: failureCategory,
+        healthStatus: operationTimedOut ? "degraded" : failure.healthStatus,
+        authRequired: failureCategory === "AUTH",
       });
+      const abandonedTurnId = activeTurnIdRef.current;
+      if (abandonedTurnId) consentByTurnRef.current.delete(abandonedTurnId);
       activeTurnPerformanceRef.current = null;
       activeTurnCreatedAtRef.current = null;
       activeTurnIdRef.current = null;
       activeTurnStateBeforeRecordingRef.current = null;
     } finally {
-      recordingStartInFlightRef.current = false;
+      if (recordingStartGenerationRef.current === operationGeneration) {
+        recordingStartInFlightRef.current = false;
+      }
     }
   }
 
@@ -903,12 +1047,51 @@ export default function TranslatorView() {
     entry: TranslationEntry,
     automatic: boolean,
   ) {
-    if (playbackInFlightRef.current) return;
+    const decisionAt = new Date().toISOString();
+    if (automatic) {
+      if (!ttsAttemptRegistryRef.current.claimAutoplay(entry.id)) {
+        updateEntryDiagnostics(entry, {
+          ttsSkipReason: "duplicate_autoplay_suppressed",
+        }, "ttsDuplicateAutoplaySuppressed");
+        return;
+      }
+    }
+    if (playbackInFlightRef.current) {
+      if (automatic) ttsAttemptRegistryRef.current.releaseAutoplay(entry.id);
+      updateEntryDiagnostics(entry, {
+        ttsDecisionAt: decisionAt,
+        ttsRequested: false,
+        ttsRequestReason: "none",
+        ttsGenerationOutcome: "not_requested",
+        ttsPlaybackOutcome: "not_attempted",
+        ttsOutcome: "not_requested",
+        ttsSkipReason: "playback_operation_in_flight",
+      }, "ttsSkippedWhilePlaybackBusy");
+      return;
+    }
     const runId = playbackRunIdRef.current + 1;
+    const attemptId = `${entry.id}:${runId}`;
     playbackRunIdRef.current = runId;
     playbackInFlightRef.current = true;
+    let speechRequestStarted = false;
+    let speechReady = hasCachedTranslation(entry.id, speechSpeed);
     setPlaybackReady(false);
     setSpeechFeedback(null);
+    updateEntryDiagnostics(entry, {
+      ttsDecisionAt: decisionAt,
+      ttsRequested: true,
+      ttsRequestReason: automatic ? "autoplay" : "manual_play",
+      ttsRequestedAt: decisionAt,
+      ...(speechReady ? {
+        ttsGenerationOutcome: "success" as const,
+        ttsOutcome: "success" as const,
+      } : {
+        ttsGenerationOutcome: "request_started" as const,
+        ttsOutcome: "request_started" as const,
+      }),
+      ttsPlaybackOutcome: "not_attempted",
+      ttsSkipReason: null,
+    }, speechReady ? "ttsCachedPlaybackRequested" : "ttsRequested");
     if (!automatic) {
       dispatch({ type: "START_PLAYBACK", entryId: entry.id });
     }
@@ -927,26 +1110,41 @@ export default function TranslatorView() {
         speechSpeed,
         automatic,
         (diagnostics) => {
+          speechReady = true;
           updateEntryDiagnostics(
             entry,
-            { ...diagnostics, ttsSpeed: speechSpeed },
+            {
+              ...diagnostics,
+              ttsSpeed: speechSpeed,
+              ttsGenerationCompletedAt: new Date().toISOString(),
+              ttsGenerationOutcome: "success",
+              ttsOutcome: "success",
+            },
             "ttsGenerated",
           );
         },
         () => {
-          turnPerformanceByEntryRef.current
-            .get(entry.id)
-            ?.markTtsRequestStarted();
+          speechRequestStarted = true;
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          performance?.markTtsRequestStarted();
+          updateEntryDiagnostics(entry, {
+            ...(performance?.getDiagnostics() ?? {}),
+            ttsGenerationOutcome: "request_started",
+            ttsOutcome: "request_started",
+          }, "ttsClientRequestStarted");
         },
         () => {
+          speechReady = true;
           const performance = turnPerformanceByEntryRef.current.get(entry.id);
-          if (performance) {
-            updateEntryDiagnostics(
-              entry,
-              performance.markTtsReady(),
-              "ttsReady",
-            );
-          }
+          updateEntryDiagnostics(
+            entry,
+            {
+              ...(performance?.markTtsReady() ?? {}),
+              ttsGenerationOutcome: "success",
+              ttsOutcome: "success",
+            },
+            "ttsReady",
+          );
         },
         () => {
           if (mountedRef.current && playbackRunIdRef.current === runId) {
@@ -957,6 +1155,8 @@ export default function TranslatorView() {
               {
                 ...(performance?.markPlaybackStarted() ?? {}),
                 ttsSpeed: speechSpeed,
+                ttsPlaybackStartedAt: new Date().toISOString(),
+                ttsPlaybackOutcome: "started",
                 ...(automatic ? { autoplayBlocked: false } : {}),
               },
               "playbackStarted",
@@ -968,7 +1168,11 @@ export default function TranslatorView() {
           if (performance) {
             updateEntryDiagnostics(
               entry,
-              performance.markPlaybackCompleted(),
+              {
+                ...performance.markPlaybackCompleted(),
+                ttsPlaybackCompletedAt: new Date().toISOString(),
+                ttsPlaybackOutcome: "completed",
+              },
               "playbackCompleted",
             );
           }
@@ -1001,7 +1205,12 @@ export default function TranslatorView() {
           }
         },
         () => {
-          turnPerformanceByEntryRef.current.get(entry.id)?.markPlayRequested();
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          performance?.markPlayRequested();
+          updateEntryDiagnostics(entry, {
+            ...(performance?.getDiagnostics() ?? {}),
+            ttsPlaybackRequestedAt: new Date().toISOString(),
+          }, "ttsPlaybackRequested");
         },
       );
       const latestDiagnostics = latestDiagnosticsByEntryRef.current.get(entry.id);
@@ -1014,43 +1223,65 @@ export default function TranslatorView() {
         recoverySucceeded: recovery?.recoverySucceeded ?? null,
       });
     } catch (error) {
-      if (
-        mountedRef.current &&
-        playbackRunIdRef.current === runId &&
-        !isSpeechAbortError(error)
-      ) {
-        const failure = getTranslatorSpeechFailure(error, automatic);
+      const isCurrentRun = playbackRunIdRef.current === runId;
+      if (isSpeechAbortError(error)) {
+        if (mountedRef.current) {
+          updateEntryDiagnostics(entry, {
+            ttsGenerationOutcome: isCurrentRun ? "aborted" : "stale_result",
+            ttsOutcome: isCurrentRun ? "aborted" : "stale_result",
+            ttsSkipReason: isCurrentRun ? "playback_aborted" : "stale_playback_result",
+          }, isCurrentRun ? "ttsAborted" : "ttsStaleResult");
+        }
+      } else if (mountedRef.current && isCurrentRun) {
+        const failure = getTranslatorSpeechFailure(error, automatic, speechReady);
         setSpeechFeedback(failure);
         if (failure.kind === "autoplay-blocked") {
           updateEntryDiagnostics(
             entry,
-            { autoplayBlocked: true },
+            {
+              autoplayBlocked: true,
+              ttsGenerationOutcome: "success",
+              ttsPlaybackOutcome: "blocked",
+              ttsOutcome: "success",
+              ttsSkipReason: "browser_autoplay_blocked",
+            },
             "autoplayBlocked",
           );
         } else {
+          const generationFailed = !speechReady;
+          updateEntryDiagnostics(entry, {
+            ttsGenerationOutcome: generationFailed ? "request_failed" : "success",
+            ttsPlaybackOutcome: generationFailed ? "not_attempted" : "failed",
+            ttsOutcome: generationFailed ? "request_failed" : "playback_failed",
+            ttsSkipReason: generationFailed
+              ? (speechRequestStarted ? "speech_request_failed" : "speech_player_unavailable")
+              : "browser_playback_failed",
+          }, generationFailed ? "ttsRequestFailed" : "ttsPlaybackFailed");
           const technicalFailure = classifyTranslatorFailure(error, "tts");
           const qaScenarioId = technicalFailure.apiErrorCode?.startsWith("qa_")
             ? technicalFailure.apiErrorCode
             : null;
-          const ttsEvent = rememberDiagnosticEvent(
-            entry.id,
-            technicalFailure,
-            "tts",
-            "degradation",
-            "keep_translation_without_tts",
-            true,
-            qaScenarioId ? null : "/api/translator/speech",
-            qaScenarioId,
-          );
-          enqueueTechnicalEvent({
-            turnId: entry.id,
-            entry,
-            failure: technicalFailure,
-            diagnosticEvent: ttsEvent,
-            errorStage: "tts",
-            recoveryAction: "keep_translation_without_tts",
-            recoverySucceeded: true,
-          });
+          if (ttsAttemptRegistryRef.current.claimFailureEvent(attemptId)) {
+            const ttsEvent = rememberDiagnosticEvent(
+              entry.id,
+              technicalFailure,
+              generationFailed ? "tts_generation" : "tts_playback",
+              "degradation",
+              "keep_translation_without_tts",
+              true,
+              qaScenarioId || !generationFailed ? null : "/api/translator/speech",
+              qaScenarioId,
+            );
+            enqueueTechnicalEvent({
+              turnId: entry.id,
+              entry,
+              failure: technicalFailure,
+              diagnosticEvent: ttsEvent,
+              errorStage: generationFailed ? "tts_generation" : "tts_playback",
+              recoveryAction: "keep_translation_without_tts",
+              recoverySucceeded: true,
+            });
+          }
           dispatch({
             type: "SET_HEALTH",
             healthStatus: qaScenarioId ? "healthy" : technicalFailure.healthStatus,
@@ -1120,7 +1351,7 @@ export default function TranslatorView() {
       (error: unknown) => ({ ok: false as const, error }),
     );
     dispatch({ type: "STOP_AND_TRANSLATE" });
-    setProcessingPhase("translation");
+    setProcessingPhase("recognition");
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
     let authoritativeTranscript: string | null = null;
@@ -1149,6 +1380,21 @@ export default function TranslatorView() {
         setQaNextFailure(null);
       }
       turnPerformance.setRealtimeSetupDuration(realtimeTurn?.realtimeSetupMs);
+      turnPerformance.setCaptureDiagnostics({
+        trackRebindStartedAt: realtimeTurn?.trackRebindStartedAt ?? null,
+        trackRebindCompletedAt: realtimeTurn?.trackRebindCompletedAt ?? null,
+        trackRebindMs: realtimeTurn?.trackRebindMs ?? null,
+        trackRebindOutcome: realtimeTurn?.trackRebindOutcome ?? undefined,
+        senderHadTrackBeforeRebind:
+          realtimeTurn?.senderHadTrackBeforeRebind ?? null,
+        connectionStateBeforeRebind:
+          realtimeTurn?.connectionStateBeforeRebind ?? null,
+        connectionStateAfterRebind:
+          realtimeTurn?.connectionStateAfterRebind ?? null,
+        realtimeConnectionStateTimeline:
+          getRealtimeManager().getConnectionDiagnostics()
+            .realtimeConnectionStateTimeline,
+      });
       let captureDiagnostics = getCaptureDiagnostics();
       if (captureDiagnostics) {
         turnPerformance.setCaptureDiagnostics({
@@ -1208,6 +1454,9 @@ export default function TranslatorView() {
           ? "audio_safe_mode_circuit_breaker"
           : realtimeTurn?.fallbackReason === "realtime_disabled"
             ? "audio_safe_mode_feature_flag"
+            : realtimeResult.ok === false &&
+                realtimeResult.fallbackReason === "connection_lost_during_recording"
+              ? "audio_fallback_connection_loss"
             : "audio_fallback_cold"
         : "realtime_primary";
       sttRoutingByTurnRef.current.set(activeTurnId, initialRoutingDecision);
@@ -1219,6 +1468,7 @@ export default function TranslatorView() {
           turnPerformance.setCaptureDiagnostics(captureDiagnostics);
         }
       }
+      setProcessingPhase("translation");
       turnPerformance.markTranslationRequestStarted();
       const translationCorrelationId = activeTurnIdRef.current
         ? `translation-${activeTurnIdRef.current}`
@@ -1273,7 +1523,7 @@ export default function TranslatorView() {
         },
         simulatePrimaryUnsupportedLanguage: qaSemanticScenarioId !== null,
         onSemanticRescueStarted: ({ primaryFailure }) => {
-          setProcessingPhase("semantic_rescue");
+          setProcessingPhase("recognition");
           rememberDiagnosticEvent(
             activeTurnId,
             { ...primaryFailure, category: "TRANSCRIPTION", retryable: false },
@@ -1308,6 +1558,18 @@ export default function TranslatorView() {
       result.diagnostics.finalTranscriptionModel = result.diagnostics.transcriptionModel;
       result.diagnostics.transcriptScriptAnomalyDetected =
         transcriptScriptAnomalyDetected(result.originalText);
+      if (completedFallbackAudio?.ok) {
+        const capture = audioCaptureByTurnRef.current.get(activeTurnId);
+        if (capture) {
+          capture.metrics = inferAudioSignalFromSuccessfulTranscription(
+            capture.metrics,
+          );
+          turnPerformance.setCaptureDiagnostics({
+            audioSignalObserved: true,
+            audioSignalEvidence: capture.metrics.evidence,
+          });
+        }
+      }
       if (!semanticRescueSucceeded) {
         result.diagnostics.primaryTranscript = realtimeResult.ok
           ? realtimeResult.authoritativeTranscript
@@ -1452,6 +1714,13 @@ export default function TranslatorView() {
         diagnostics: {
           ttsSpeed: speechSpeed,
           autoplayEnabled: state.autoPlay,
+          ttsDecisionAt: new Date().toISOString(),
+          ttsRequested: state.autoPlay,
+          ttsRequestReason: state.autoPlay ? "autoplay" : "none",
+          ttsGenerationOutcome: state.autoPlay ? "request_started" : "disabled",
+          ttsPlaybackOutcome: "not_attempted",
+          ttsOutcome: state.autoPlay ? "request_started" : "disabled",
+          ttsSkipReason: state.autoPlay ? null : "autoplay_disabled",
           ...turnPerformance.getDiagnostics(),
         },
       });
@@ -1478,6 +1747,17 @@ export default function TranslatorView() {
         if (capture) {
           capture.metadata.mimeType = recordedAudio.audioBlob.type || null;
           capture.metadata.sizeBytes = recordedAudio.audioBlob.size;
+          capture.metrics = inferAudioSignalFromSuccessfulTranscription(
+            capture.metrics,
+          );
+          updateEntryDiagnostics(
+            entry,
+            {
+              audioSignalObserved: true,
+              audioSignalEvidence: capture.metrics.evidence,
+            },
+            "audioSignalInferred",
+          );
         }
         const quality = qualityByTurnRef.current.get(entry.id);
         if (quality) {
@@ -1488,6 +1768,8 @@ export default function TranslatorView() {
               mimeType: recordedAudio.audioBlob.type || null,
               sizeBytes: recordedAudio.audioBlob.size,
             },
+            audioQualityMetrics:
+              capture?.metrics ?? quality.audioQualityMetrics,
           });
           setQualityRevision((current) => current + 1);
         }
@@ -1495,24 +1777,82 @@ export default function TranslatorView() {
         if (turnConsent && speechAudioEligibleForTurn(turnConsent)) {
           rememberLocalAudio(entry.id, recordedAudio.audioBlob);
         }
+        const benchmarkInput = turnConsent ? {
+          turnId: entry.id,
+          audioBlob: recordedAudio.audioBlob,
+          primaryTranscript: result.originalText,
+          primaryCompletedAt: turnPerformance.getDiagnostics().transcriptFinalAt ??
+            result.diagnostics.transcriptFinalAt ?? new Date().toISOString(),
+          primaryEngine: "gpt-live-transcribe",
+          primaryRoute: "realtime" as const,
+          direction: {
+            sourceLanguage: result.sourceLanguage,
+            targetLanguage: result.targetLanguage,
+          },
+          recordingDurationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+          consent: turnConsent,
+          internalQaEnabled: INTERNAL_TRANSLATOR_QA_ENABLED &&
+            diagnosticsSettingsRef.current.internalQaModeEnabled &&
+            !usedAudioFallback && !semanticRescueSucceeded,
+          recordedAudioDiagnostics: {
+            recordingDurationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+            chunkCount: captureDiagnostics?.mediaRecorderChunkCount ?? null,
+            totalChunkBytes: captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
+          },
+        } : null;
+        if (benchmarkInput && sameAudioBenchmarkRunnerRef.current.isEligible(benchmarkInput)) {
+          sameAudioEligibleTurnIdsRef.current.add(entry.id);
+          sameAudioBenchmarkRunnerRef.current.run(benchmarkInput, (comparison) => {
+            if (!mountedRef.current) return;
+            const existing = sameAudioBenchmarksByTurnRef.current.get(entry.id);
+            const sample = qualityByTurnRef.current.get(entry.id);
+            let nextComparison = comparison.benchmarkStatus === "completed" &&
+              existing && existing.groundTruthStatus !== "unreviewed"
+              ? reviewSameAudioComparison(comparison, {
+                  status: existing.groundTruthStatus,
+                  correctedTranscript: existing.groundTruthTranscript ?? undefined,
+                  reviewedAt: existing.reviewedAt ?? undefined,
+                })
+              : comparison;
+            if (comparison.benchmarkStatus === "completed" &&
+              nextComparison.groundTruthStatus === "unreviewed" &&
+              sample?.recognitionReviewStatus === "accepted") {
+              nextComparison = reviewSameAudioComparison(comparison, {
+                status: "accepted_primary",
+              });
+            } else if (comparison.benchmarkStatus === "completed" &&
+              nextComparison.groundTruthStatus === "unreviewed" &&
+              sample?.recognitionReviewStatus === "corrected" &&
+              sample.correctedTranscript) {
+              nextComparison = reviewSameAudioComparison(comparison, {
+                status: "corrected",
+                correctedTranscript: sample.correctedTranscript,
+              });
+            }
+            sameAudioBenchmarksByTurnRef.current.set(entry.id, nextComparison);
+            if (sample) qualityByTurnRef.current.set(entry.id, {
+              ...sample,
+              primaryTranscriptAvailable: true,
+              rescueTranscriptAvailable: nextComparison.secondaryTranscript !== null,
+              benchmarkReadySameAudioSample:
+                nextComparison.benchmarkStatus === "completed" &&
+                nextComparison.groundTruthStatus !== "unreviewed",
+            });
+            setQualityRevision((revision) => revision + 1);
+          });
+        }
       });
       pendingTranslationVisibleEntryIdRef.current = entry.id;
       turnPerformance.markTranslationStateCommitted();
       dispatch({
         type: "PROCESSING_SUCCEEDED",
         entry,
-        ...(!usedAudioFallback && !semanticRescueSucceeded
-          ? {}
-          : {
-              healthStatus: qaRealtimeScenarioId
-                ? "healthy" as const
-                : "degraded" as const,
-              notice: semanticRescueSucceeded
-                ? "Die Live-Erkennung war unsicher. Die sichere Spracherkennung wurde verwendet."
-                : "Die Live-Spracherkennung ist gerade nicht verfügbar. Die sichere Erkennung wurde verwendet.",
-              noticeCategory: "REALTIME" as const,
-            }),
       });
+      if (qaRealtimeScenarioId) {
+        setQaLastResult("Test erfolgreich: Realtime-Ausfall → sicherer Audio-Fallback");
+      } else if (qaSemanticScenarioId && semanticRescueSucceeded) {
+        setQaLastResult("Test erfolgreich: Semantic-Rescue → sichere Erkennung");
+      }
       if (usedAudioFallback) {
         const realtimeFailure: TranslatorFailure = {
           category: "REALTIME",
@@ -1830,13 +2170,17 @@ export default function TranslatorView() {
     feedbackByTurnRef.current.clear();
     qualityByTurnRef.current.clear();
     audioBlobByTurnRef.current.clear();
-    audioIncludedInBundleTurnIdsRef.current.clear();
     diagnosticEventsByTurnRef.current.clear();
     sttRoutingByTurnRef.current.clear();
     sttComparisonsByTurnRef.current.clear();
+    sameAudioBenchmarksByTurnRef.current.clear();
+    sameAudioEligibleTurnIdsRef.current.clear();
+    sameAudioBenchmarkRunnerRef.current.reset();
+    ttsAttemptRegistryRef.current.reset();
     consentByTurnRef.current.clear();
     consentEventsRef.current = [];
     audioCaptureByTurnRef.current.clear();
+    recordingStartTrackerRef.current.reset();
     setFailedSpeechReviewTurnIds([]);
     pendingTranslationVisibleEntryIdRef.current = null;
     reportStartedAtRef.current = new Date().toISOString();
@@ -1844,16 +2188,17 @@ export default function TranslatorView() {
       globalThis.crypto?.randomUUID?.() ?? `report-${Date.now()}`;
     setFailedReportTurns([]);
     setSpeechFeedback(null);
+    setQaLastResult(null);
     setFeedbackEntryId(null);
     setSavedFeedbackIds(new Set());
+    setPostConversationReviewOpen(false);
     setQualityRevision((current) => current + 1);
     dispatch({ type: "CLEAR_HISTORY" });
   }
 
   function buildCurrentReport(
     qualityByTurn = qualityByTurnRef.current,
-    audioIncludedInDiagnosticBundleByTurn: ReadonlySet<string> =
-      audioIncludedInBundleTurnIdsRef.current,
+    audioIncludedInDiagnosticBundleByTurn: ReadonlySet<string> = new Set<string>(),
     bundleSnapshot = false,
   ) {
     const connectionDiagnostics =
@@ -1893,6 +2238,8 @@ export default function TranslatorView() {
         consentEvents: consentEventsRef.current,
         sttRoutingByTurn: sttRoutingByTurnRef.current,
         sttComparisonsByTurn: sttComparisonsByTurnRef.current,
+        sameAudioBenchmarksByTurn: sameAudioBenchmarksByTurnRef.current,
+        sameAudioEligibleTurnIds: sameAudioEligibleTurnIdsRef.current,
         audioBlobAvailableByTurn: new Set(audioBlobByTurnRef.current.keys()),
         audioIncludedInDiagnosticBundleByTurn,
         buildMetadata: buildMetadataRef.current,
@@ -1900,6 +2247,9 @@ export default function TranslatorView() {
         installationId: installationIdRef.current,
         sessionId: sessionIdRef.current,
         audioManifestConsistent: bundleSnapshot ? true : null,
+        recordingStartAttempts: recordingStartTrackerRef.current.getAttempts(),
+        activeRecordingStartAttempt:
+          recordingStartTrackerRef.current.getActiveAttempt(),
         droppedTelemetryEvents:
           telemetryQueueRef.current?.getDroppedEventCount() ?? 0,
         ...connectionDiagnostics,
@@ -1941,14 +2291,17 @@ export default function TranslatorView() {
           UNAVAILABLE_AUDIO_QUALITY,
       })),
     });
-    for (const turnId of includedTurnIds) {
-      audioIncludedInBundleTurnIdsRef.current.add(turnId);
-    }
     downloadTranslatorDiagnosticBundle(bundle);
   }
 
   useEffect(() => {
-    if (failedReportTurns.length === 0 || !incidentStoreRef.current) return;
+    const hasInternalQaLearning = diagnosticsSettingsRef.current.internalQaModeEnabled && (
+      feedbackByTurnRef.current.size > 0 ||
+      sameAudioBenchmarksByTurnRef.current.size > 0 ||
+      Array.from(qualityByTurnRef.current.values()).some((sample) =>
+        sample.recognitionReviewStatus !== "unreviewed")
+    );
+    if ((failedReportTurns.length === 0 && !hasInternalQaLearning) || !incidentStoreRef.current) return;
     const report = buildCurrentReport();
     const audio = Array.from(audioBlobByTurnRef.current, ([turnId, blob]) => ({
       turnId,
@@ -2027,7 +2380,15 @@ export default function TranslatorView() {
           audioBlobByTurnRef.current.has(entry.id),
       },
     );
+    const comparison = sameAudioBenchmarksByTurnRef.current.get(entry.id);
+    if (comparison) {
+      sameAudioBenchmarksByTurnRef.current.set(entry.id, reviewSameAudioComparison(
+        comparison,
+        { status: "corrected", correctedTranscript },
+      ));
+    }
     setQualityRevision((current) => current + 1);
+    rememberReviewCompleted(entry.id);
   }
 
   function handleAcceptTranscript(turnId: string) {
@@ -2039,7 +2400,40 @@ export default function TranslatorView() {
         sttComparisonsByTurnRef.current.has(turnId) &&
         audioBlobByTurnRef.current.has(turnId),
     });
+    const comparison = sameAudioBenchmarksByTurnRef.current.get(turnId);
+    if (comparison && comparison.groundTruthStatus === "unreviewed") {
+      sameAudioBenchmarksByTurnRef.current.set(
+        turnId,
+        reviewSameAudioComparison(comparison, { status: "accepted_primary" }),
+      );
+    }
     setQualityRevision((revision) => revision + 1);
+    rememberReviewCompleted(turnId);
+  }
+
+  function handleBenchmarkReview(
+    turnId: string,
+    status: Parameters<typeof reviewSameAudioComparison>[1]["status"],
+    correctedTranscript?: string,
+  ) {
+    const current = sameAudioBenchmarksByTurnRef.current.get(turnId);
+    if (!current) return;
+    const reviewed = reviewSameAudioComparison(current, { status, correctedTranscript });
+    sameAudioBenchmarksByTurnRef.current.set(turnId, reviewed);
+    const sample = qualityByTurnRef.current.get(turnId);
+    if (sample) {
+      const reviewedSample = status === "accepted_primary" || status === "equivalent"
+        ? acceptSpeechQualityRecord(sample)
+        : reviewed.groundTruthTranscript && status !== "uncertain"
+          ? correctSpeechQualityRecord(sample, reviewed.groundTruthTranscript)
+          : sample;
+      qualityByTurnRef.current.set(turnId, {
+        ...reviewedSample,
+        benchmarkReadySameAudioSample: status !== "uncertain",
+      });
+    }
+    setQualityRevision((revision) => revision + 1);
+    rememberReviewCompleted(turnId);
   }
 
   function handleFailedTranscriptCorrection(
@@ -2058,14 +2452,54 @@ export default function TranslatorView() {
       },
     );
     setQualityRevision((revision) => revision + 1);
+    rememberReviewCompleted(turnId);
+  }
+
+  function rememberReviewCompleted(turnId: string) {
+    const events = diagnosticEventsByTurnRef.current.get(turnId) ?? [];
+    const qaEvent = events.find((event) =>
+      event.eventOrigin === "qa_simulation");
+    const qaScenarioId = qaEvent?.qaScenarioId ?? null;
+    diagnosticEventsByTurnRef.current.set(turnId, [...events,
+      createTranslatorDiagnosticEvent({
+        eventOrigin: qaEvent ? "qa_simulation" : "organic_runtime",
+        eventKind: "info",
+        category: "UNKNOWN",
+        stage: "review_completed",
+        endpoint: null,
+        httpStatus: null,
+        apiCode: null,
+        retryable: false,
+        recoveryAction: "none",
+        recoverySucceeded: null,
+        qaScenarioId,
+        authFailureType: null,
+      }),
+    ]);
   }
 
   function handleFeedbackSaved(
     entryId: string,
-    feedback: SavedTranslatorFeedback,
+    feedback: SavedTurnFeedback,
   ) {
     feedbackByTurnRef.current.set(entryId, feedback);
     setSavedFeedbackIds((current) => new Set(current).add(entryId));
+    setQualityRevision((current) => current + 1);
+  }
+
+  function handleFeedbackCaptured(
+    entryId: string,
+    feedback: SavedTurnFeedback,
+  ) {
+    feedbackByTurnRef.current.set(entryId, feedback);
+    setSavedFeedbackIds((current) => new Set(current).add(entryId));
+    if (feedback.speechFeedbackStatus === "accepted") {
+      handleAcceptTranscript(entryId);
+    } else if (feedback.speechFeedbackStatus === "corrected" && feedback.correctedTranscript) {
+      const entry = state.entries.find((item) => item.id === entryId);
+      if (entry) handleTranscriptCorrection(entry, feedback.correctedTranscript);
+    }
+    setQualityRevision((current) => current + 1);
   }
 
   return (
@@ -2090,10 +2524,13 @@ export default function TranslatorView() {
           />
         </section>
 
-        <section className="panel mt-4 p-5 sm:p-6" aria-live="polite">
+        <section className="panel mt-4 p-5 sm:p-6">
           {state.status === "idle" ? (
             <>
-              <p className="text-center text-sm font-medium text-muted">Bereit</p>
+              <p className="text-center text-sm font-medium text-muted">
+                {SHARED_CONVERSATION_LABELS.ready.de}
+                <span className="ml-1 text-xs">· {SHARED_CONVERSATION_LABELS.ready.sw}</span>
+              </p>
               {state.errorMessage ? (
                 <div
                   className={`status-note mt-3 ${
@@ -2102,6 +2539,11 @@ export default function TranslatorView() {
                   role="status"
                 >
                   <p>{state.errorMessage}</p>
+                  {state.failureCategory === "REALTIME" ? (
+                    <p className="mt-1 text-sm text-muted">
+                      {SHARED_CONVERSATION_LABELS.safeRecognitionUsed.sw}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-sm font-medium">
                     Du kannst direkt eine neue Aufnahme starten.
                   </p>
@@ -2113,9 +2555,20 @@ export default function TranslatorView() {
                 disabled={recorderStatus !== "idle"}
                 onClick={() => void handleStartRecording()}
               >
-                {recorderStatus === "starting" || recorderStatus === "recording"
-                  ? "Mikrofon wird geöffnet …"
-                  : "Aufnahme starten"}
+                <span>
+                  {recorderStatus === "starting" || recorderStatus === "recording"
+                    ? SHARED_CONVERSATION_LABELS.openingMicrophone.de
+                    : state.errorMessage
+                      ? SHARED_CONVERSATION_LABELS.retry.de
+                      : SHARED_CONVERSATION_LABELS.startRecording.de}
+                  <span className="mt-1 block text-sm font-medium opacity-80">
+                    {recorderStatus === "starting" || recorderStatus === "recording"
+                      ? SHARED_CONVERSATION_LABELS.openingMicrophone.sw
+                      : state.errorMessage
+                        ? SHARED_CONVERSATION_LABELS.retry.sw
+                        : SHARED_CONVERSATION_LABELS.startRecording.sw}
+                  </span>
+                </span>
               </button>
             </>
           ) : null}
@@ -2124,7 +2577,12 @@ export default function TranslatorView() {
             <>
               <div className="flex items-center justify-center gap-3 text-accent-danger-strong">
                 <span className="h-3 w-3 rounded-full bg-accent-danger motion-safe:animate-pulse" aria-hidden="true" />
-                <p className="font-semibold">Aufnahme läuft …</p>
+                <p className="font-semibold">
+                  {SHARED_CONVERSATION_LABELS.recording.de}
+                  <span className="block text-sm font-medium">
+                    {SHARED_CONVERSATION_LABELS.recording.sw}
+                  </span>
+                </p>
               </div>
               <button
                 type="button"
@@ -2132,29 +2590,33 @@ export default function TranslatorView() {
                 disabled={recorderStatus === "stopping"}
                 onClick={() => void handleStopRecording()}
               >
-                {recorderStatus === "stopping" ? "Aufnahme wird beendet …" : "Fertig & übersetzen"}
+                <span>
+                  {recorderStatus === "stopping"
+                    ? SHARED_CONVERSATION_LABELS.finishingRecording.de
+                    : SHARED_CONVERSATION_LABELS.finish.de}
+                  <span className="mt-1 block text-sm font-medium opacity-85">
+                    {recorderStatus === "stopping"
+                      ? SHARED_CONVERSATION_LABELS.finishingRecording.sw
+                      : SHARED_CONVERSATION_LABELS.finish.sw}
+                  </span>
+                </span>
               </button>
             </>
           ) : null}
 
           {state.status === "processing" ? (
-            <div className="flex min-h-24 flex-col items-center justify-center text-center">
-              <span className="h-8 w-8 rounded-full border-4 border-soft border-t-[color:var(--accent-cta)] motion-safe:animate-spin" aria-hidden="true" />
-              <p className="mt-4 font-semibold">
-                {processingPhase === "semantic_rescue"
-                  ? "Ich prüfe die Aufnahme noch einmal …"
-                  : "Wird übersetzt …"}
-              </p>
-            </div>
+            <ProcessingIndicator key={processingPhase} stage={processingPhase} />
           ) : null}
 
           {state.status === "playing" ? (
             <div className="flex min-h-24 flex-col items-center justify-center text-center">
-              <p className="font-semibold text-accent-success-strong">
-                {playbackReady
-                  ? "Wird vorgelesen …"
-                  : "Sprachausgabe wird vorbereitet …"}
-              </p>
+              {playbackReady ? (
+                <p className="font-semibold text-accent-success-strong">
+                  Wird vorgelesen … · Inasomwa …
+                </p>
+              ) : (
+                <ProcessingIndicator stage="audio" />
+              )}
               <button
                 type="button"
                 className="btn btn-danger mt-4 min-h-16 w-full text-base"
@@ -2207,7 +2669,12 @@ export default function TranslatorView() {
                   className="btn btn-secondary mt-4 min-h-12 w-full"
                   onClick={handleResetError}
                 >
-                  Erneut versuchen
+                  <span>
+                    {SHARED_CONVERSATION_LABELS.retry.de}
+                    <span className="ml-1 text-sm font-medium text-muted">
+                      · {SHARED_CONVERSATION_LABELS.retry.sw}
+                    </span>
+                  </span>
                 </button>
               )}
             </div>
@@ -2353,7 +2820,7 @@ export default function TranslatorView() {
                   Sprachaufnahmen zur Verbesserung der Spracherkennung teilen
                 </label>
                 <p className="mt-1 text-sm text-muted">
-                  Sprachaufnahmen werden nur mit dieser eigenen Zustimmung lokal für ein Diagnosepaket behalten. Der Remote-Audioupload ist noch nicht aktiviert.
+                  Sprachaufnahmen werden nur mit dieser Zustimmung lokal für das Diagnosepaket behalten. Im internen Sprach-Qualitätsmodus darf dieselbe Aufnahme zusätzlich einmal an die sichere Erkennung gesendet werden; sie wird nicht als zweite Audiodatei archiviert.
                 </p>
               </div>
               <input
@@ -2383,40 +2850,42 @@ export default function TranslatorView() {
                 Sprach-Qualitätsmodus (interner Test)
               </label>
               <p className="mt-2 text-sm text-muted">
-                Speichert für interne Tests die erkannte Sprache und – wenn erlaubt – Audio lokal, damit Fehler der Spracherkennung analysiert werden können. Es wird keine zusätzliche Spracherkennung gestartet.
+                Speichert für interne Tests erkannte Sprache und – wenn erlaubt – Audio lokal. Bei Realtime-Turns wird dieselbe Aufnahme zusätzlich über die sichere Erkennung verglichen; Übersetzung und Vorlesen warten nicht darauf.
               </p>
               {diagnosticsSettings.internalQaModeEnabled ? (
                 <div className="mt-3">
                   <p className="text-sm font-medium text-primary">
                     Nächsten Fehler einmalig simulieren
                   </p>
+                  <p className="mt-1 text-xs text-muted">
+                    Nur interner Test. Der gewählte Fehler wird genau bei der nächsten Aufnahme simuliert.
+                  </p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    {([
-                      ["realtime", "Realtime"],
-                      ["semantic", "Semantischer Rescue"],
-                      ["translation", "Translation 503"],
-                      ["tts", "TTS 503"],
-                      ["network", "Netzwerk"],
-                    ] as const).map(([value, label]) => (
+                    {(Object.entries(QA_FAILURE_LABELS) as Array<
+                      [keyof typeof QA_FAILURE_LABELS, string]
+                    >).map(([value, label]) => (
                       <button
                         key={value}
                         type="button"
                         className={`btn min-h-11 text-sm ${
                           qaNextFailure === value ? "btn-primary" : "btn-secondary"
                         }`}
-                        onClick={() => setQaNextFailure(
-                          qaNextFailure === value ? null : value,
-                        )}
+                        onClick={() => {
+                          setQaLastResult(null);
+                          setQaNextFailure(qaNextFailure === value ? null : value);
+                        }}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
                   {qaNextFailure ? (
-                    <p className="mt-2 text-xs text-muted" role="status">
-                      Simulation vorgemerkt; sie wird nur beim nächsten passenden Turn verwendet.
-                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-soft p-2 text-xs" role="status">
+                      <span>Nächster Test: {QA_FAILURE_LABELS[qaNextFailure]}</span>
+                      <button type="button" className="btn btn-ghost min-h-10 px-3 text-xs" onClick={() => setQaNextFailure(null)}>Abbrechen</button>
+                    </div>
                   ) : null}
+                  {qaLastResult ? <p className="status-note status-info mt-2 text-sm" role="status">{qaLastResult}</p> : null}
                 </div>
               ) : null}
             </div>
@@ -2440,11 +2909,52 @@ export default function TranslatorView() {
             </button>
           </div>
 
-          {state.entries.length === 0 ? (
+          {state.entries.length === 0 && postConversationReviewCandidateCount === 0 ? (
             <div className="mt-3 border-y border-soft py-8 text-center text-sm text-muted">
               Noch keine Übersetzungen
             </div>
           ) : (
+            <>
+            {INTERNAL_TRANSLATOR_QA_ENABLED &&
+            diagnosticsSettings.internalQaModeEnabled ? (
+              <div
+                ref={reviewSectionRef}
+                className="mt-3 scroll-mt-4 rounded-xl border border-soft bg-surface p-3"
+                tabIndex={-1}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary min-h-11 w-full"
+                  aria-expanded={postConversationReviewOpen}
+                  disabled={postConversationReviewCandidateCount === 0}
+                  onClick={() => {
+                    setPostConversationReviewOpen((open) => {
+                      if (!open) requestAnimationFrame(() => {
+                        const firstCandidate = document.querySelector<HTMLElement>(
+                          '[data-review-candidate="true"]',
+                        );
+                        const target = firstCandidate ?? reviewSectionRef.current;
+                        target?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                        target?.focus({ preventScroll: true });
+                      });
+                      return !open;
+                    });
+                  }}
+                >
+                  Qualitätsprüfung ({postConversationReviewCandidateCount})
+                </button>
+                <p className="mt-2 text-center text-xs text-muted">
+                  {postConversationReviewCandidateCount === 0
+                    ? "Für dieses Gespräch gibt es aktuell keine auffälligen Passagen zum Prüfen."
+                    : postConversationReviewOpen
+                      ? "Die ausgewählten Passagen sind jetzt direkt unterhalb markiert."
+                      : "Prüft automatisch ausgewählte Gesprächspassagen. Jeder Turn kann zusätzlich direkt über Rückmeldung korrigiert werden."}
+                </p>
+              </div>
+            ) : null}
             <div className="mt-3 space-y-3">
               {state.entries.map((entry, index) => {
                 const isActive = state.activePlaybackEntryId === entry.id;
@@ -2457,7 +2967,10 @@ export default function TranslatorView() {
                       : "preparing";
                 const speechReview = qualityByTurnRef.current.get(entry.id) ?? null;
                 const speechReviewEnabled =
-                  INTERNAL_TRANSLATOR_QA_ENABLED && speechReview !== null;
+                  INTERNAL_TRANSLATOR_QA_ENABLED &&
+                  postConversationReviewOpen &&
+                  postConversationReviewCandidateIds.has(entry.id) &&
+                  speechReview !== null;
 
                 return (
                   <TranslationCard
@@ -2479,6 +2992,10 @@ export default function TranslatorView() {
                     recognitionReviewStatus={
                       speechReviewEnabled ? speechReview.recognitionReviewStatus : null
                     }
+                    reviewOrigin={(diagnosticEventsByTurnRef.current.get(entry.id) ?? [])
+                      .some((event) => event.eventOrigin === "qa_simulation")
+                      ? "qa_simulation"
+                      : "organic_runtime"}
                     onAcceptTranscript={
                       speechReviewEnabled
                         ? () => handleAcceptTranscript(entry.id)
@@ -2488,22 +3005,39 @@ export default function TranslatorView() {
                       ? (correctedTranscript) =>
                           handleTranscriptCorrection(entry, correctedTranscript)
                       : undefined}
+                    benchmarkComparison={
+                      INTERNAL_TRANSLATOR_QA_ENABLED && diagnosticsSettings.internalQaModeEnabled
+                        ? sameAudioBenchmarksByTurnRef.current.get(entry.id) ?? null
+                        : null
+                    }
+                    onBenchmarkReview={
+                      INTERNAL_TRANSLATOR_QA_ENABLED && diagnosticsSettings.internalQaModeEnabled
+                        ? (status, correctedTranscript) =>
+                            handleBenchmarkReview(entry.id, status, correctedTranscript)
+                        : undefined
+                    }
                   />
                 );
               })}
             </div>
+            </>
           )}
           {INTERNAL_TRANSLATOR_QA_ENABLED &&
           diagnosticsSettings.internalQaModeEnabled &&
+          postConversationReviewOpen &&
           failedSpeechReviewTurnIds.length > 0 ? (
             <div className="mt-4 space-y-2" aria-label="Sprachqualität fehlgeschlagener Turns">
-              {failedSpeechReviewTurnIds.flatMap((turnId) => {
+              {failedPostConversationReviewCandidateIds.flatMap((turnId) => {
                 const sample = qualityByTurnRef.current.get(turnId);
                 return sample
                   ? [
                       <SpeechReviewPanel
                         key={turnId}
                         sample={sample}
+                        reviewOrigin={(diagnosticEventsByTurnRef.current.get(turnId) ?? [])
+                          .some((event) => event.eventOrigin === "qa_simulation")
+                          ? "qa_simulation"
+                          : "organic_runtime"}
                         onAccept={() => handleAcceptTranscript(turnId)}
                         onCorrect={(value) =>
                           handleFailedTranscriptCorrection(turnId, value)}
@@ -2545,10 +3079,18 @@ export default function TranslatorView() {
           </div>
         </section>
       </div>
-      <TranslationFeedbackSheet
+      <TurnFeedbackSheet
         entry={feedbackEntry}
         open={Boolean(feedbackEntry)}
+        speechSample={feedbackEntry
+          ? qualityByTurnRef.current.get(feedbackEntry.id) ?? null
+          : null}
+        comparison={feedbackEntry
+          ? sameAudioBenchmarksByTurnRef.current.get(feedbackEntry.id) ?? null
+          : null}
+        internalQaMode={INTERNAL_TRANSLATOR_QA_ENABLED && diagnosticsSettings.internalQaModeEnabled}
         onClose={() => setFeedbackEntryId(null)}
+        onCaptured={handleFeedbackCaptured}
         onSaved={handleFeedbackSaved}
       />
     </main>

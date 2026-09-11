@@ -3,10 +3,12 @@ import type { TranslatorBuildMetadata } from "@/lib/translator/diagnosticMetadat
 import type { TranslatorConsentSnapshot } from "@/lib/translator/turnConsent";
 import type { RecognitionReviewStatus } from "@/lib/translator/speechQuality";
 import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQuality";
+import type { CriticalFactCategory } from "@/lib/translator/essenceSummary";
 
 export type SttRoutingDecision =
   | "realtime_primary"
   | "audio_fallback_cold"
+  | "audio_fallback_connection_loss"
   | "audio_rescue_semantic_failure"
   | "audio_safe_mode_circuit_breaker"
   | "audio_safe_mode_feature_flag";
@@ -55,6 +57,8 @@ export type TranslatorLearningSignal = {
   consentSnapshot: TranslatorConsentSnapshot | null;
   signalQuality: TranslatorLearningSignalQuality;
   benchmarkReadySameAudioSample: boolean;
+  criticalFactCategories: CriticalFactCategory[];
+  evidenceOrigin: "organic_runtime" | "qa_simulation";
 };
 
 export function transcriptScriptAnomalyDetected(text: string) {

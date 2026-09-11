@@ -94,6 +94,14 @@ type RequestOptions = {
   recordedAudioDiagnostics?: RecordedAudioDiagnostics;
 };
 
+export type AudioTranscriptionBenchmarkResult = {
+  transcript: string;
+  model: string;
+  fallbackUsed: boolean;
+  transcriptionMs: number;
+  completedAt: string;
+};
+
 function isNonNegativeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -142,6 +150,10 @@ function isTranslationResult(value: unknown): value is TranslationResult {
     Boolean(result.originalText.trim()) &&
     typeof result.translatedText === "string" &&
     Boolean(result.translatedText.trim()) &&
+    (result.essenceSummary === undefined ||
+      result.essenceSummary === null ||
+      (typeof result.essenceSummary === "string" &&
+        Boolean(result.essenceSummary.trim()))) &&
     (result.sourceLanguage === "de" || result.sourceLanguage === "sw") &&
     (result.targetLanguage === "de" || result.targetLanguage === "sw") &&
     isTranslationDiagnostics(result.diagnostics)
@@ -251,6 +263,7 @@ async function readTranslationResponse(
   const result: TranslationResult = {
     originalText: body.originalText,
     translatedText: body.translatedText,
+    ...(body.essenceSummary ? { essenceSummary: body.essenceSummary } : {}),
     sourceLanguage: body.sourceLanguage,
     targetLanguage: body.targetLanguage,
     diagnostics: {
@@ -382,6 +395,47 @@ export async function requestAudioTranslation(
   );
 }
 
+export async function requestAudioTranscriptionBenchmark(
+  audioBlob: Blob,
+  direction: TranslationRequestDirection,
+  options: Pick<RequestOptions, "fetcher" | "signal" | "recordedAudioDiagnostics"> = {},
+): Promise<AudioTranscriptionBenchmarkResult> {
+  const validation = isUsableRecordedAudio(audioBlob, options.recordedAudioDiagnostics);
+  if (!validation.usable) throw new Error(validation.code);
+  if (audioBlob.size > MAX_TRANSLATION_AUDIO_BYTES) throw new Error("audio_too_large");
+  const format = getSupportedAudioFormat(audioBlob.type);
+  if (!format) throw new Error("invalid_audio_format");
+  const formData = new FormData();
+  formData.append("audio", new File([audioBlob], `recording.${format.extension}`, {
+    type: audioBlob.type,
+  }));
+  formData.append("sourceLanguage", direction.sourceLanguage);
+  formData.append("targetLanguage", direction.targetLanguage);
+  const diagnostics = options.recordedAudioDiagnostics;
+  if (typeof diagnostics?.recordingDurationMs === "number") {
+    formData.append("recordingDurationMs", String(diagnostics.recordingDurationMs));
+  }
+  if (typeof diagnostics?.chunkCount === "number") {
+    formData.append("chunkCount", String(diagnostics.chunkCount));
+  }
+  if (typeof diagnostics?.totalChunkBytes === "number") {
+    formData.append("totalChunkBytes", String(diagnostics.totalChunkBytes));
+  }
+  const response = await (options.fetcher ?? fetch)("/api/translator/transcribe", {
+    method: "POST",
+    headers: { "X-Translator-Request-Phase": "internal_benchmark" },
+    body: formData,
+    signal: options.signal,
+  });
+  const body = await response.json().catch(() => null) as Partial<AudioTranscriptionBenchmarkResult> | null;
+  if (!response.ok || !body || typeof body.transcript !== "string" ||
+    typeof body.model !== "string" || typeof body.fallbackUsed !== "boolean" ||
+    typeof body.transcriptionMs !== "number" || typeof body.completedAt !== "string") {
+    throw new Error("benchmark_transcription_failed");
+  }
+  return body as AudioTranscriptionBenchmarkResult;
+}
+
 export async function requestTextTranslation(
   authoritativeTranscript: string,
   direction: TranslationRequestDirection,
@@ -405,6 +459,12 @@ export async function requestTextTranslation(
         sourceLanguage: direction.sourceLanguage,
         targetLanguage: direction.targetLanguage,
         transcriptionMs,
+        ...(typeof options.recordedAudioDiagnostics?.recordingDurationMs === "number"
+          ? {
+              recordingDurationMs:
+                options.recordedAudioDiagnostics.recordingDurationMs,
+            }
+          : {}),
       }),
       signal: options.signal,
     });

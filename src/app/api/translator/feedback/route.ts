@@ -2,15 +2,9 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { parseTranslatorFeedback } from "@/lib/translator/server/feedback";
+import { classifyFeedbackDatabaseError } from "@/lib/translator/server/feedbackDatabaseError";
 
 export const runtime = "nodejs";
-
-const REQUIRED_FEEDBACK_MIGRATION =
-  "supabase/migrations/20260829000000_translator_realtime_performance.sql";
-
-function isMissingFeedbackTableError(code: string | undefined) {
-  return code === "42P01" || code === "PGRST204" || code === "PGRST205";
-}
 
 export async function POST(request: Request) {
   const { user, response } = await requireUser();
@@ -39,19 +33,16 @@ export async function POST(request: Request) {
 
   if (error || !data?.id) {
     const databaseCode = error?.code ?? "missing_result";
-    const tableMissing = isMissingFeedbackTableError(error?.code);
+    const classification = classifyFeedbackDatabaseError(error);
     console.error("[translator] feedback write failed", {
       code: databaseCode,
-      reason: tableMissing ? "table_missing" : "database_error",
-      ...(tableMissing
-        ? { requiredMigration: REQUIRED_FEEDBACK_MIGRATION }
-        : {}),
+      ...classification,
     });
-    if (tableMissing) {
+    if (classification.reason !== "feedback_database_error") {
       return NextResponse.json(
         {
           code: "feedback_storage_unavailable",
-          error: "Feedback-Speicher ist nicht verfügbar.",
+          error: "Feedback konnte gerade nicht gespeichert werden.",
         },
         { status: 503 },
       );

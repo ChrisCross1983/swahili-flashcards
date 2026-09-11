@@ -82,12 +82,21 @@ type ClientPerformanceDiagnostics = Pick<
   | "mediaRecorderTotalChunkBytes"
   | "audioBlobSize"
   | "audioSignalObserved"
+  | "audioSignalEvidence"
   | "realtimeTransportReady"
   | "realtimeInputTrackGeneration"
   | "realtimeFirstDeltaObserved"
   | "realtimeFinalTranscriptReceived"
   | "capturePathOutcome"
   | "translationRequestCorrelationId"
+  | "trackRebindStartedAt"
+  | "trackRebindCompletedAt"
+  | "trackRebindMs"
+  | "trackRebindOutcome"
+  | "senderHadTrackBeforeRebind"
+  | "connectionStateBeforeRebind"
+  | "connectionStateAfterRebind"
+  | "realtimeConnectionStateTimeline"
 >;
 
 type TurnTimepointName =

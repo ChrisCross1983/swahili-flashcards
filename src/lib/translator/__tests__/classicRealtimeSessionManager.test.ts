@@ -26,6 +26,7 @@ function createHarness(options: {
   circuitBreakerTurns?: number;
   semanticFailureThreshold?: number;
   semanticCircuitBreakerTurns?: number;
+  realtimeEnabled?: boolean;
 } = {}) {
   let monotonic = 0;
   let wall = Date.parse("2026-08-31T06:00:00.000Z");
@@ -83,6 +84,27 @@ function createHarness(options: {
         }),
         replaceInputStream: vi.fn(async (_stream: MediaStream, generation: number) => {
           operations.push(`bind_${generation}`);
+          handlers.onDiagnosticEvent?.({
+            stage: "track_rebind_started",
+            at: new Date(wall).toISOString(),
+            captureGeneration: generation,
+            connectionState: "connected",
+            iceConnectionState: "connected",
+            signalingState: "stable",
+            reasonContext: "track_rebind",
+            senderHadTrackBeforeRebind: false,
+          });
+          handlers.onDiagnosticEvent?.({
+            stage: "track_rebind_completed",
+            at: new Date(wall).toISOString(),
+            captureGeneration: generation,
+            connectionState: "connected",
+            iceConnectionState: "connected",
+            signalingState: "stable",
+            reasonContext: "track_rebind",
+            trackRebindOutcome: "success",
+            senderHadTrackBeforeRebind: false,
+          });
         }),
         disconnect: vi.fn(),
       };
@@ -97,6 +119,7 @@ function createHarness(options: {
     circuitBreakerTurns: options.circuitBreakerTurns,
     semanticFailureThreshold: options.semanticFailureThreshold,
     semanticCircuitBreakerTurns: options.semanticCircuitBreakerTurns,
+    realtimeEnabled: options.realtimeEnabled,
   });
   const stream = {} as MediaStream;
   const advanceClock = (ms: number) => {
@@ -434,6 +457,20 @@ describe("ClassicRealtimeSessionManager", () => {
       "sender_on",
     ]);
     expect(warm.realtimeInputTrackGeneration).toBe(2);
+    expect(warm).toMatchObject({
+      trackRebindOutcome: "success",
+      trackRebindMs: 0,
+      senderHadTrackBeforeRebind: false,
+      connectionStateBeforeRebind: "connected",
+      connectionStateAfterRebind: "connected",
+    });
+    expect(harness.manager.getConnectionDiagnostics()
+      .realtimeConnectionStateTimeline).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          event: "track_rebind_started",
+          reasonContext: "track_rebind",
+        }),
+      ]));
   });
 
   it("rebinds a newer capture generation when a background connection resolves late", async () => {
@@ -486,6 +523,22 @@ describe("ClassicRealtimeSessionManager", () => {
     expect(harness.manager.getConnectionDiagnostics()).toMatchObject({
       realtimeCircuitBreakerTrips: 1,
       realtimeCircuitBreakerTurnsRemaining: 1,
+    });
+  });
+
+  it("uses feature-flag safe mode without creating a realtime transport", async () => {
+    const harness = createHarness({ realtimeEnabled: false });
+    const turn = await harness.manager.prepareTurn(harness.stream);
+    expect(turn).toMatchObject({
+      transcriptionPath: "audio_upload_fallback",
+      fallbackReason: "realtime_disabled",
+      transcriptionPathDecisionReason: "realtime_temporarily_bypassed",
+    });
+    await harness.manager.recordingStarted(turn, harness.stream, 1);
+    expect(harness.transports).toHaveLength(0);
+    await expect(harness.manager.finishTurn(turn)).resolves.toEqual({
+      ok: false,
+      fallbackReason: "realtime_disabled",
     });
   });
 });

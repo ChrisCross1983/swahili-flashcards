@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TranslatorAudioQualityMonitor } from "@/lib/translator/audioQuality";
+import {
+  inferAudioSignalFromSuccessfulTranscription,
+  TranslatorAudioQualityMonitor,
+  UNAVAILABLE_AUDIO_QUALITY,
+} from "@/lib/translator/audioQuality";
 
 describe("passive translator audio quality monitor", () => {
   afterEach(() => {
@@ -38,6 +42,7 @@ describe("passive translator audio quality monitor", () => {
     const result = monitor.stop();
     expect(result.metadata).toEqual({ sampleRate: 48_000, channelCount: 1 });
     expect(result.metrics.source).toBe("realtime_analyser");
+    expect(result.metrics.evidence).toBe("measured");
     for (const metric of [
       result.metrics.rmsDbfs, result.metrics.peakDbfs,
       result.metrics.clippingRatio, result.metrics.silenceRatio,
@@ -64,8 +69,22 @@ describe("passive translator audio quality monitor", () => {
     const monitor = new TranslatorAudioQualityMonitor();
     expect(monitor.start({} as MediaStream)).toBe(false);
     expect(monitor.stop().metrics).toEqual({
-      source: "unavailable", rmsDbfs: null, peakDbfs: null,
+      source: "unavailable", evidence: "unavailable", rmsDbfs: null, peakDbfs: null,
       clippingRatio: null, silenceRatio: null, speechActivityRatio: null,
+    });
+  });
+
+  it("infers valid audio without fabricating RMS or silence metrics", () => {
+    expect(inferAudioSignalFromSuccessfulTranscription(
+      UNAVAILABLE_AUDIO_QUALITY,
+    )).toEqual({
+      source: "unavailable",
+      evidence: "inferred_from_valid_audio",
+      rmsDbfs: null,
+      peakDbfs: null,
+      clippingRatio: null,
+      silenceRatio: null,
+      speechActivityRatio: null,
     });
   });
 });

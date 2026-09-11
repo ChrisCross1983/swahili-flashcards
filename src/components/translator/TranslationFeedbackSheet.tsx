@@ -121,6 +121,7 @@ type Props = {
   entry: TranslationEntry | null;
   open: boolean;
   onClose: () => void;
+  onCaptured: (entryId: string, feedback: SavedTranslatorFeedback) => void;
   onSaved: (entryId: string, feedback: SavedTranslatorFeedback) => void;
 };
 
@@ -134,6 +135,7 @@ export default function TranslationFeedbackSheet({
   entry,
   open,
   onClose,
+  onCaptured,
   onSaved,
 }: Props) {
   const [rating, setRating] = useState<TranslatorFeedbackRating | null>(null);
@@ -168,13 +170,15 @@ export default function TranslationFeedbackSheet({
     if (!entry || !rating || saving) return;
     setSaving(true);
     setStatus(null);
+    const localFeedback: SavedTranslatorFeedback = {
+      feedbackRating: rating,
+      feedbackCategories: rating === "problem" ? [...categories] : [],
+      feedbackComment: comment.trim() || null,
+    };
+    onCaptured(entry.id, localFeedback);
     try {
       await submitTranslatorFeedback(entry, { rating, categories, comment });
-      onSaved(entry.id, {
-        feedbackRating: rating,
-        feedbackCategories: rating === "problem" ? [...categories] : [],
-        feedbackComment: comment.trim() || null,
-      });
+      onSaved(entry.id, localFeedback);
       onClose();
     } catch (error) {
       setStatus(

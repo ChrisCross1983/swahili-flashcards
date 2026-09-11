@@ -6,6 +6,7 @@ export type DiagnosticAudioFile = {
   recognitionReviewStatus?: "unreviewed" | "accepted" | "corrected" | null;
   audioQualityMetrics?: {
     source: "realtime_analyser" | "decoded_blob" | "unavailable";
+    evidence?: "measured" | "inferred_from_valid_audio" | "unavailable";
     rmsDbfs: number | null;
     peakDbfs: number | null;
     clippingRatio: number | null;
@@ -74,6 +75,7 @@ export async function createTranslatorDiagnosticBundle(input: {
       recognitionReviewStatus: audio.recognitionReviewStatus ?? null,
       audioQualityMetrics: audio.audioQualityMetrics ?? {
         source: "unavailable",
+        evidence: "unavailable",
         rmsDbfs: null,
         peakDbfs: null,
         clippingRatio: null,
@@ -86,7 +88,7 @@ export async function createTranslatorDiagnosticBundle(input: {
     ? input.report as Record<string, unknown>
     : {};
   const manifestBytes = encoder.encode(JSON.stringify({
-    bundleVersion: "5.2.1",
+    bundleVersion: "5.2.5",
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     sessionId: typeof reportMetadata.sessionId === "string"
       ? reportMetadata.sessionId : null,

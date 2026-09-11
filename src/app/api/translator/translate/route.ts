@@ -447,6 +447,7 @@ export async function POST(request: Request) {
         ? values.authoritativeTranscript.trim()
         : "";
     const transcriptionMs = values?.transcriptionMs;
+    const recordingDurationMs = values?.recordingDurationMs;
     const normalizedTranscriptionMs = typeof transcriptionMs === "number"
       ? Math.round(transcriptionMs)
       : transcriptionMs;
@@ -490,6 +491,12 @@ export async function POST(request: Request) {
           direction,
           transcriptionModel: LIVE_V2_CONFIG.transcriptionModel,
           transcriptionMs: normalizedTranscriptionMs as number,
+          recordingDurationMs:
+            typeof recordingDurationMs === "number" &&
+            Number.isFinite(recordingDurationMs) &&
+            recordingDurationMs >= 0
+              ? recordingDurationMs
+              : null,
         },
         gateway,
       );
@@ -592,7 +599,7 @@ export async function POST(request: Request) {
     correlationId,
     (gateway) => {
     return translateRecordedAudio(
-      { audio, format, direction },
+      { audio, format, direction, recordingDurationMs },
       gateway,
     );
     },

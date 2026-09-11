@@ -9,6 +9,7 @@ export type PersistedTranslatorIncidentAudio = {
   recognitionReviewStatus: "unreviewed" | "accepted" | "corrected" | null;
   audioQualityMetrics: {
     source: "realtime_analyser" | "decoded_blob" | "unavailable";
+    evidence?: "measured" | "inferred_from_valid_audio" | "unavailable";
     rmsDbfs: number | null;
     peakDbfs: number | null;
     clippingRatio: number | null;
@@ -72,6 +73,10 @@ export class TranslatorIncidentStore {
         await this.adapter.put({ ...incident, audio });
       }
     }
+  }
+
+  async remove(sessionId: string) {
+    await this.adapter.delete(sessionId);
   }
 
   private async prune() {

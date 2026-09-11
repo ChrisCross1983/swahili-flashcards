@@ -1,5 +1,6 @@
 export type TranslatorAudioQualityMetrics = {
   source: "realtime_analyser" | "decoded_blob" | "unavailable";
+  evidence?: "measured" | "inferred_from_valid_audio" | "unavailable";
   rmsDbfs: number | null;
   peakDbfs: number | null;
   clippingRatio: number | null;
@@ -17,6 +18,7 @@ export type TranslatorAudioCaptureMetadata = {
 
 export const UNAVAILABLE_AUDIO_QUALITY: TranslatorAudioQualityMetrics = {
   source: "unavailable",
+  evidence: "unavailable",
   rmsDbfs: null,
   peakDbfs: null,
   clippingRatio: null,
@@ -129,6 +131,7 @@ export class TranslatorAudioQualityMonitor {
       },
       metrics: {
         source: "realtime_analyser" as const,
+        evidence: "measured" as const,
         rmsDbfs: rms > 0 ? Number((20 * Math.log10(rms)).toFixed(2)) : null,
         peakDbfs: this.peak > 0
           ? Number((20 * Math.log10(this.peak)).toFixed(2))
@@ -144,4 +147,18 @@ export class TranslatorAudioQualityMonitor {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
+}
+
+export function inferAudioSignalFromSuccessfulTranscription(
+  metrics: TranslatorAudioQualityMetrics,
+): TranslatorAudioQualityMetrics {
+  if (metrics.evidence === "measured" &&
+      typeof metrics.speechActivityRatio === "number" &&
+      metrics.speechActivityRatio > 0) {
+    return metrics;
+  }
+  return {
+    ...UNAVAILABLE_AUDIO_QUALITY,
+    evidence: "inferred_from_valid_audio",
+  };
 }

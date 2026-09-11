@@ -103,6 +103,7 @@ export async function requestClassicTranslation(
         onResponseCompleted: input.onResponseCompleted,
         requestAttempt,
         requestPhase: "primary",
+        recordedAudioDiagnostics: input.recordedAudioDiagnostics,
       });
     }
     return requestAudio(await input.getAudioBlob(), input.direction, {

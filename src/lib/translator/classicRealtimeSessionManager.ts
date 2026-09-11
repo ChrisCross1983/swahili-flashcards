@@ -3,7 +3,7 @@ import type {
   ClassicTranscriptionFallbackReason,
 } from "@/lib/translator/classicRealtimeTranscription";
 import type { RealtimeTranscriptionDiagnosticEvent } from "@/lib/translator/live/v2/realtimeTranscriptionClient";
-import type { TranscriptionPath } from "@/lib/translator/types";
+import type { TranslationDiagnostics, TranscriptionPath } from "@/lib/translator/types";
 
 export const CLASSIC_REALTIME_IDLE_TTL_MS = 120_000;
 export const CLASSIC_REALTIME_RECONNECT_DELAY_MS = 1_000;
@@ -12,6 +12,15 @@ export const CLASSIC_REALTIME_FINALIZATION_FAILURE_THRESHOLD = 2;
 export const CLASSIC_REALTIME_CIRCUIT_BREAKER_TURNS = 2;
 export const CLASSIC_REALTIME_SEMANTIC_FAILURE_THRESHOLD = 2;
 export const CLASSIC_REALTIME_SEMANTIC_CIRCUIT_BREAKER_TURNS = 2;
+
+export type ClassicRealtimeConnectionStateTimelineEntry = {
+  at: string;
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+  signalingState: RTCSignalingState;
+  reasonContext: string;
+  event: RealtimeTranscriptionDiagnosticEvent["stage"];
+};
 
 export type ClassicRealtimeSessionState =
   | "idle"
@@ -59,7 +68,7 @@ type RealtimeTransport = {
   connect: (stream: MediaStream, captureGeneration?: number) => Promise<void>;
   finalizeTurn: () => Promise<string>;
   clearTurn: () => void;
-  setInputEnabled: (enabled: boolean) => Promise<void>;
+  setInputEnabled: (enabled: boolean, expectedGeneration?: number) => Promise<void>;
   replaceInputStream: (stream: MediaStream, captureGeneration: number) => Promise<void>;
   disconnect: (reason?: string) => void;
 };
@@ -114,6 +123,13 @@ export type ClassicRealtimeTurnHandle = {
   semanticCircuitBreakerBypassed: boolean;
   semanticCircuitBreakerProbe: boolean;
   activationPromise: Promise<void> | null;
+  trackRebindStartedAt: string | null;
+  trackRebindCompletedAt: string | null;
+  trackRebindMs: number | null;
+  trackRebindOutcome: NonNullable<TranslationDiagnostics["trackRebindOutcome"]> | null;
+  senderHadTrackBeforeRebind: boolean | null;
+  connectionStateBeforeRebind: RTCPeerConnectionState | null;
+  connectionStateAfterRebind: RTCPeerConnectionState | null;
 };
 
 type InternalAttempt = ClassicRealtimeConnectionAttempt & {
@@ -160,6 +176,7 @@ export class ClassicRealtimeSessionManager {
   private semanticCircuitBreakerTurnsRemaining = 0;
   private semanticCircuitBreakerTrips = 0;
   private semanticProbePending = false;
+  private realtimeConnectionStateTimeline: ClassicRealtimeConnectionStateTimelineEntry[] = [];
 
   constructor(private readonly dependencies: ManagerDependencies) {}
 
@@ -230,6 +247,13 @@ export class ClassicRealtimeSessionManager {
       semanticCircuitBreakerBypassed,
       semanticCircuitBreakerProbe: ready && this.semanticProbePending,
       activationPromise: null,
+      trackRebindStartedAt: null,
+      trackRebindCompletedAt: null,
+      trackRebindMs: null,
+      trackRebindOutcome: null,
+      senderHadTrackBeforeRebind: null,
+      connectionStateBeforeRebind: null,
+      connectionStateAfterRebind: null,
     };
     this.activeTurn = handle;
     this.state = "recording";
@@ -247,6 +271,15 @@ export class ClassicRealtimeSessionManager {
     if (handle.activationPromise) return handle.activationPromise;
     this.stream = stream;
     this.captureGeneration = captureGeneration;
+    const latestState = this.realtimeConnectionStateTimeline.at(-1);
+    if (latestState) {
+      this.realtimeConnectionStateTimeline.push({
+        ...latestState,
+        at: this.isoNow(),
+        reasonContext: "recording_start",
+        event: "connection_state_changed",
+      });
+    }
     if (handle.transcriptionPath === "realtime") {
       const transport = this.transport;
       handle.activationPromise = (async () => {
@@ -257,13 +290,32 @@ export class ClassicRealtimeSessionManager {
           await transport.replaceInputStream(stream, captureGeneration);
           handle.realtimeInputTrackGeneration = captureGeneration;
           handle.realtimeInputTrackBound = true;
-          await transport.setInputEnabled(true);
-        } catch {
+          await transport.setInputEnabled(true, captureGeneration);
+        } catch (error) {
           handle.transcriptionPath = "audio_upload_fallback";
-          handle.fallbackReason = "realtime_track_rebind_failed";
+          if (handle.fallbackReason !== "connection_lost_during_recording") {
+            handle.fallbackReason = "realtime_track_rebind_failed";
+          }
           handle.transcriptionPathDecisionReason = "realtime_temporarily_bypassed";
           handle.connectionLostDuringRecording = true;
-          this.invalidateConnection("classic_turn_track_rebind_failed", true);
+          handle.trackRebindOutcome ??=
+            error instanceof Error && error.message.includes("timeout")
+              ? "timeout"
+              : error instanceof Error && error.message.includes("sender")
+                ? "sender_unavailable"
+                : error instanceof Error && error.name === "AbortError"
+                  ? "stale_generation"
+                  : "connection_failed";
+          handle.trackRebindCompletedAt ??= this.isoNow();
+          if (handle.trackRebindStartedAt && handle.trackRebindMs === null) {
+            const elapsed = Date.parse(handle.trackRebindCompletedAt) -
+              Date.parse(handle.trackRebindStartedAt);
+            handle.trackRebindMs = Number.isFinite(elapsed) && elapsed >= 0
+              ? elapsed : null;
+          }
+          if (transport === this.transport) {
+            this.invalidateConnection("classic_turn_track_rebind_failed", true);
+          }
         }
       })();
       return handle.activationPromise;
@@ -377,6 +429,7 @@ export class ClassicRealtimeSessionManager {
       realtimeSemanticCircuitBreakerTurnsRemaining:
         this.semanticCircuitBreakerTurnsRemaining,
       realtimeSemanticProbePending: this.semanticProbePending,
+      realtimeConnectionStateTimeline: [...this.realtimeConnectionStateTimeline],
     };
   }
 
@@ -603,6 +656,9 @@ export class ClassicRealtimeSessionManager {
     if (this.activeTurn?.transcriptionPath === "realtime") {
       this.activeTurn.connectionLostDuringRecording = true;
       this.activeTurn.fallbackReason = "connection_lost_during_recording";
+      if (this.activeTurn.trackRebindStartedAt) {
+        this.activeTurn.trackRebindOutcome = "connection_failed";
+      }
     }
     this.invalidateConnection("classic_connection_lost", true);
   }
@@ -668,8 +724,52 @@ export class ClassicRealtimeSessionManager {
     attempt: InternalAttempt,
     event: RealtimeTranscriptionDiagnosticEvent,
   ) {
-    if (!this.isCurrentGeneration(generation) || attempt.status !== "connecting") return;
-    const at = this.isoNow();
+    if (!this.isCurrentGeneration(generation)) return;
+    const at = event.at ?? this.isoNow();
+    if (
+      event.connectionState &&
+      event.iceConnectionState &&
+      event.signalingState
+    ) {
+      this.realtimeConnectionStateTimeline.push({
+        at,
+        connectionState: event.connectionState,
+        iceConnectionState: event.iceConnectionState,
+        signalingState: event.signalingState,
+        reasonContext: event.reasonContext ?? event.stage,
+        event: event.stage,
+      });
+      if (this.realtimeConnectionStateTimeline.length > 500) {
+        this.realtimeConnectionStateTimeline.shift();
+      }
+    }
+    const turn = this.activeTurn;
+    if (turn) {
+      if (event.stage === "track_rebind_started") {
+        turn.trackRebindStartedAt = at;
+        turn.senderHadTrackBeforeRebind =
+          event.senderHadTrackBeforeRebind ?? null;
+        turn.connectionStateBeforeRebind = event.connectionState ?? null;
+      }
+      if (event.stage === "track_rebind_completed") {
+        turn.trackRebindCompletedAt = at;
+        turn.trackRebindOutcome = event.trackRebindOutcome ?? "success";
+        turn.connectionStateAfterRebind = event.connectionState ?? null;
+        if (turn.trackRebindStartedAt) {
+          const elapsed = Date.parse(at) - Date.parse(turn.trackRebindStartedAt);
+          turn.trackRebindMs = Number.isFinite(elapsed) && elapsed >= 0
+            ? elapsed : null;
+        }
+      }
+      if (
+        event.stage === "disconnect_recovered" &&
+        turn.trackRebindStartedAt &&
+        !turn.connectionLostDuringRecording
+      ) {
+        turn.trackRebindOutcome = "temporary_disconnect_recovered";
+      }
+    }
+    if (attempt.status !== "connecting") return;
     switch (event.stage) {
       case "session_request_started": attempt.sessionRequestStartedAt = at; break;
       case "session_response":
@@ -697,6 +797,12 @@ export class ClassicRealtimeSessionManager {
       case "data_channel_open": attempt.dataChannelOpenedAt = at; break;
       case "connection_ready": attempt.connectionReadyAt = at; break;
       case "input_track_bound": break;
+      case "connection_state_changed": break;
+      case "temporary_disconnect": break;
+      case "disconnect_recovered": break;
+      case "track_rebind_started": break;
+      case "track_rebind_completed": break;
+      case "input_enabled": break;
       case "connection_error":
         attempt.errorStage = event.errorStage ?? "connection_sequence";
         attempt.errorType = event.errorType ?? null;

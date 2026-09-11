@@ -5,6 +5,11 @@ import {
   createSpeechQualitySample,
   createUnreviewedSpeechQualityRecord,
   KISWAHILI_STT_REGRESSION_CASES,
+  normalizeTranscriptForComparison,
+  reviewSameAudioComparison,
+  summarizeSpeechBenchmarks,
+  wordErrorRate,
+  type SameAudioBenchmarkComparison,
 } from "@/lib/translator/speechQuality";
 
 const consent = {
@@ -66,5 +71,69 @@ describe("speech quality samples", () => {
     expect(KISWAHILI_STT_REGRESSION_CASES).toContainEqual({ spoken: "Je", observed: "G / J" });
     expect(KISWAHILI_STT_REGRESSION_CASES).toContainEqual({ spoken: "moja", observed: "moji" });
     expect(KISWAHILI_STT_REGRESSION_CASES).toContainEqual({ spoken: "mbili", observed: "bili" });
+  });
+});
+
+function comparison(
+  primaryTranscript: string,
+  secondaryTranscript: string,
+): SameAudioBenchmarkComparison {
+  return {
+    comparisonId: "comparison-1", turnId: "turn-1",
+    primaryEngine: "gpt-live-transcribe", secondaryEngine: "gpt-4o-mini-transcribe",
+    primaryTranscript, secondaryTranscript,
+    primaryCompletedAt: "2026-09-10T10:00:00.000Z",
+    secondaryCompletedAt: "2026-09-10T10:00:01.000Z", sameAudio: true,
+    recordingDurationMs: 2_000, primaryRoute: "realtime",
+    secondaryRoute: "audio_upload_fallback", groundTruthStatus: "unreviewed",
+    groundTruthTranscript: null, reviewedAt: null, benchmarkStatus: "completed",
+    benchmarkFailure: null, secondaryTranscriptionMs: 1_000,
+    primaryNormalizedExactMatch: null, secondaryNormalizedExactMatch: null,
+    primaryWer: null, secondaryWer: null,
+  };
+}
+
+describe("same-audio benchmark scoring", () => {
+  it("normalizes only case, punctuation and whitespace", () => {
+    expect(normalizeTranscriptForComparison("  Unaitwa,   NANI? ")).toBe("unaitwa nani");
+    expect(normalizeTranscriptForComparison("kupwa")).not.toBe(normalizeTranscriptForComparison("kubwa"));
+  });
+
+  it("scores an audio-STT win against confirmed ground truth", () => {
+    const reviewed = reviewSameAudioComparison(
+      comparison("Una etwa nani? Mimi ni Chris.", "Unaitwa nani? Mimi ni Chris."),
+      { status: "accepted_secondary", reviewedAt: "2026-09-10T10:01:00.000Z" },
+    );
+    expect(reviewed.secondaryWer).toBe(0);
+    expect(reviewed.primaryWer).toBeGreaterThan(0);
+    expect(summarizeSpeechBenchmarks([reviewed])).toMatchObject({ audioSttWins: 1, realtimeWins: 0, ties: 0 });
+  });
+
+  it("scores realtime wins, ties, and manual corrections deterministically", () => {
+    const realtimeWin = reviewSameAudioComparison(comparison("Hamna shida.", "Hamna shinda."), { status: "accepted_primary" });
+    const tie = reviewSameAudioComparison(comparison("Tafadhali.", "tafadhali"), { status: "equivalent" });
+    const corrected = reviewSameAudioComparison(comparison("Maji kuba", "Maji baridi"), {
+      status: "corrected", correctedTranscript: "Maji kubwa.",
+    });
+    const summary = summarizeSpeechBenchmarks([realtimeWin, tie, corrected]);
+    expect(summary).toMatchObject({ realtimeWins: 1, audioSttWins: 0, ties: 2, sameAudioGroundTruthReviewed: 3 });
+    expect(tie.primaryWer).toBe(0);
+    expect(tie.secondaryWer).toBe(0);
+    expect(wordErrorRate("Maji kuba", "Maji kubwa")).toBeGreaterThan(0);
+  });
+
+  it("excludes unreviewed and uncertain comparisons and reports evidence thresholds", () => {
+    const unreviewed = comparison("A", "B");
+    const uncertain = reviewSameAudioComparison(comparison("C", "D"), { status: "uncertain" });
+    expect(summarizeSpeechBenchmarks([unreviewed, uncertain])).toMatchObject({
+      sameAudioComparisonCompleted: 2, sameAudioGroundTruthReviewed: 0,
+      realtimeWins: 0, audioSttWins: 0, ties: 0, uncertain: 1,
+      benchmarkEvidenceLevel: "insufficient",
+    });
+    const reviewed = Array.from({ length: 20 }, (_, index) => reviewSameAudioComparison(
+      { ...comparison("Sawa", "Sawa"), comparisonId: `comparison-${index}`, turnId: `turn-${index}` },
+      { status: "equivalent" },
+    ));
+    expect(summarizeSpeechBenchmarks(reviewed).benchmarkEvidenceLevel).toBe("useful");
   });
 });

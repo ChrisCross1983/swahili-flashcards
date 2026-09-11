@@ -229,6 +229,14 @@ describe("TranslatorSpeechPlayer", () => {
     );
   });
 
+  it("classifies a failure before speech is ready as generation failure", () => {
+    expect(getTranslatorSpeechFailure(new Error("player unavailable"), true, false))
+      .toEqual({
+        kind: "generation",
+        message: "Die Sprachausgabe konnte nicht erstellt werden.",
+      });
+  });
+
   it("generates audio on first replay and reuses the local cache", async () => {
     const harness = createHarness();
 

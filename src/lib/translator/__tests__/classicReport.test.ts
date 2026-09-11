@@ -9,6 +9,8 @@ import {
   acceptSpeechQualityRecord,
   createSpeechQualitySample,
   createUnreviewedSpeechQualityRecord,
+  reviewSameAudioComparison,
+  type SameAudioBenchmarkComparison,
 } from "@/lib/translator/speechQuality";
 import { createTranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
 import type { TranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
@@ -152,6 +154,13 @@ function entry(
       transcriptFinalToTranslationVisibleMs: 320,
       transcriptFinalToTranslationReadyMs: 310,
       stopToTranslationVisibleMs: realtime ? 420 : 1_010,
+      ttsDecisionAt: "2023-11-14T22:13:21.419Z",
+      ttsRequested: true,
+      ttsRequestReason: "autoplay",
+      ttsRequestedAt: "2023-11-14T22:13:21.419Z",
+      ttsGenerationOutcome: "success",
+      ttsPlaybackOutcome: "completed",
+      ttsOutcome: "success",
       ttsStartedAt: "2023-11-14T22:13:21.420Z",
       ttsReadyAt: "2023-11-14T22:13:21.720Z",
       ttsClientRequestStartedAt: "2023-11-14T22:13:21.420Z",
@@ -185,6 +194,7 @@ function entry(
       ttsClientResponseCompletedAt: "2023-11-14T22:13:21.720Z",
       ttsAudioPreparationStartedAt: "2023-11-14T22:13:21.720Z",
       ttsAudioPreparationCompletedAt: "2023-11-14T22:13:21.722Z",
+      ttsGenerationCompletedAt: "2023-11-14T22:13:21.720Z",
       firstPlayableAudioAt: "2023-11-14T22:13:21.722Z",
       playRequestedAt: "2023-11-14T22:13:21.723Z",
       ttsRequestCorrelationId: `tts-${id}`,
@@ -214,6 +224,8 @@ function entry(
       stopToTtsReadyMs: realtime ? 720 : 1_310,
       playbackStartedAt: "2023-11-14T22:13:21.730Z",
       playbackCompletedAt: "2023-11-14T22:13:22.500Z",
+      ttsPlaybackStartedAt: "2023-11-14T22:13:21.730Z",
+      ttsPlaybackCompletedAt: "2023-11-14T22:13:22.500Z",
       ttsReadyToPlaybackStartedMs: 10,
       stopToPlaybackStartedMs: realtime ? 730 : 1_320,
       interactionOverheadMs: realtime ? 830 : 1_420,
@@ -330,8 +342,8 @@ describe("classic translator QA report", () => {
 
     expect(report).toMatchObject({
       reportVersion: 5,
-      reportRevision: "5.2.1",
-      performanceOptimizationVersion: "classic-stt-rescue-observability-v5.2.1",
+      reportRevision: "5.2.5",
+      performanceOptimizationVersion: "classic-speech-quality-feedback-v5.2.5",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -639,7 +651,7 @@ describe("classic translator QA report", () => {
     expect(report).toMatchObject({
       reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
       diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
-      reportRevision: "5.2.1", failureCount: 0, failuresByCategory: {},
+      reportRevision: "5.2.5", failureCount: 0, failuresByCategory: {},
       degradationCount: 1, expectedFallbackCount: 0,
       recoveryAttempts: 1, successfulRecoveries: 1,
       sttCorrectionCount: 1, speechQualitySampleCount: 1,
@@ -867,12 +879,387 @@ describe("classic translator QA report", () => {
     expect(report.sttRoutingSummary.semanticRescueSuccesses).toBe(1);
     expect(report.failureCount).toBe(0);
     expect(report.degradationCount).toBe(1);
-    expect(report.incidentTimeline).toHaveLength(1);
+    expect(report.incidentTimeline.map((item) => item.stage)).toEqual(
+      expect.arrayContaining(["translation", "fallback_started", "fallback_success"]),
+    );
     expect(report.turns[0].sttCandidateComparison).toMatchObject({
       primary: { transcript: null }, rescue: { transcript: null },
     });
     expect(report.reportIntegrity).toMatchObject({
-      schemaVersion: "translator-report-v5.2.1", reportRevision: "5.2.1",
+      schemaVersion: "translator-report-v5.2.5", reportRevision: "5.2.5",
     });
+  });
+
+  it("separates cold fallback from connection-loss recovery and exposes product success", () => {
+    const entries = Array.from({ length: 9 }, (_, index) => {
+      const value = entry(`field-${index + 1}`, "audio_upload_fallback");
+      value.timestamp += index;
+      value.diagnostics = {
+        ...value.diagnostics!,
+        fallbackReason: index < 3
+          ? "realtime_not_ready_at_recording_start"
+          : "connection_lost_during_recording",
+        sttRoutingDecision: index < 3
+          ? "audio_fallback_cold"
+          : "audio_fallback_connection_loss",
+      };
+      return value;
+    });
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-07T00:00:00.000Z",
+      userAgent: "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Safari/604.1",
+      platform: "iPhone",
+      currentMode: "auto",
+      ttsSpeed: 1,
+      entries,
+      failedTurns: [],
+      sttRoutingByTurn: new Map(entries.map((value, index) => [
+        value.id,
+        index < 3 ? "audio_fallback_cold" : "audio_fallback_connection_loss",
+      ] as const)),
+    });
+
+    expect(report).toMatchObject({
+      productTurnSuccessRate: 1,
+      primaryPathSuccessRate: 0,
+      audioFallbackSuccessCount: 9,
+      executiveSummary: {
+        productTurnSuccessRate: 1,
+        realtimeAttemptedTurns: 6,
+        realtimeSuccessfulTurns: 0,
+        realtimeAttemptSuccessRate: 0,
+        coldFallbackTurns: 3,
+        connectionLossFallbackTurns: 6,
+        recoveredDegradationTurns: 6,
+        primaryFinding: "realtime_unstable_fallback_healthy",
+      },
+      sttRoutingSummary: {
+        coldFallbackTurns: 3,
+        connectionLossFallbackTurns: 6,
+        realtimePrimarySuccesses: 0,
+      },
+    });
+    expect(report.keyFindings).toEqual(expect.arrayContaining([
+      "all_organic_turns_successful",
+      "realtime_unstable",
+      "fallback_healthy",
+    ]));
+  });
+
+  it("reports an overlong active recording start even with zero turns", () => {
+    const attempt = {
+      attemptId: "start-stuck",
+      startedAt: "2026-09-08T04:53:25.782Z",
+      completedAt: null,
+      durationMs: null,
+      currentPhase: "microphone_acquisition_requested" as const,
+      outcome: null,
+      recorderStatus: "starting",
+      microphoneAcquisitionState: "requesting_permission_or_device",
+      hasPendingAcquisition: true,
+      recordingStartInFlight: true,
+      captureGeneration: null,
+      timeline: [{
+        phase: "microphone_acquisition_requested" as const,
+        at: "2026-09-08T04:53:25.782Z",
+        recorderStatus: "starting",
+        microphoneAcquisitionState: "requesting_permission_or_device",
+        hasPendingAcquisition: true,
+        recordingStartInFlight: true,
+        captureGeneration: null,
+      }],
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-08T04:53:25.000Z",
+      userAgent: "Chrome", platform: "Mac", currentMode: "auto", ttsSpeed: 1,
+      entries: [], failedTurns: [], recordingStartAttempts: [attempt],
+      activeRecordingStartAttempt: { ...attempt, ageMs: 29_000 },
+    });
+    expect(report).toMatchObject({
+      totalTurns: 0,
+      recordingStartAttempts: 1,
+      recordingStartTimeouts: 0,
+      preTurnIncidentCount: 1,
+      activeRecordingStartAttempt: {
+        attemptId: "start-stuck",
+        currentPhase: "microphone_acquisition_requested",
+      },
+      executiveSummary: { overallHealth: "degraded" },
+    });
+    expect(report.keyFindings).toContain("recording_start_stuck");
+    expect(report.incidentTimeline[0].stage).toBe("microphone_acquisition_requested");
+  });
+
+  it("does not call one expected cold start followed by seven warm successes unstable", () => {
+    const entries = Array.from({ length: 8 }, (_, index) => {
+      const value = entry(`desktop-${index}`, index === 0
+        ? "audio_upload_fallback" : "realtime");
+      value.timestamp += index;
+      value.diagnostics = {
+        ...value.diagnostics,
+        fallbackReason: index === 0
+          ? "realtime_not_ready_at_recording_start" : undefined,
+        sttRoutingDecision: index === 0 ? "audio_fallback_cold" : "realtime_primary",
+        realtimeConnectionReused: index > 0,
+        warmStart: index > 0,
+      } as NonNullable<TranslationEntry["diagnostics"]>;
+      return value;
+    });
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-08T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries, failedTurns: [], reconnectCount: 0,
+      sttRoutingByTurn: new Map(entries.map((value, index) => [
+        value.id, index === 0 ? "audio_fallback_cold" : "realtime_primary",
+      ] as const)),
+    });
+    expect(report.executiveSummary).toMatchObject({
+      realtimeAttemptedTurns: 7,
+      realtimeSuccessfulTurns: 7,
+      realtimeAttemptSuccessRate: 1,
+    });
+    expect(report.keyFindings).not.toContain("realtime_unstable");
+    expect(report.keyFindings).toContain("realtime_warm_path_healthy");
+  });
+
+  it("reports a completed whole-start timeout as a pre-turn degradation", () => {
+    const snapshot = {
+      recorderStatus: "idle",
+      microphoneAcquisitionState: "timed_out",
+      hasPendingAcquisition: false,
+      recordingStartInFlight: false,
+      captureGeneration: null,
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-08T04:53:25.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries: [], failedTurns: [],
+      recordingStartAttempts: [{
+        attemptId: "timeout", startedAt: "2026-09-08T04:53:25.000Z",
+        completedAt: "2026-09-08T04:53:39.000Z", durationMs: 14_000,
+        currentPhase: "cleanup_completed", outcome: "timeout", ...snapshot,
+        timeline: [
+          { phase: "timeout", at: "2026-09-08T04:53:39.000Z", ...snapshot },
+          { phase: "cleanup_completed", at: "2026-09-08T04:53:39.010Z", ...snapshot },
+        ],
+      }],
+    });
+    expect(report).toMatchObject({
+      totalTurns: 0, recordingStartAttempts: 1, recordingStartTimeouts: 1,
+      recordingStartFailures: 1, preTurnIncidentCount: 1,
+      executiveSummary: { overallHealth: "degraded" },
+    });
+    expect(report.keyFindings).toEqual(expect.arrayContaining([
+      "microphone_start_timeout", "pre_turn_failure",
+    ]));
+    expect(report.executiveSummary.recommendedQaFocus).toContain("mic_start_reliability");
+  });
+
+  it("keeps QA simulations out of organic product and realtime health metrics", () => {
+    const cold = entry("organic-cold", "audio_upload_fallback");
+    cold.diagnostics = {
+      ...cold.diagnostics!,
+      fallbackReason: "realtime_not_ready_at_recording_start",
+      sttRoutingDecision: "audio_fallback_cold",
+    };
+    const warm = Array.from({ length: 4 }, (_, index) => {
+      const value = entry(`organic-warm-${index}`, "realtime");
+      value.timestamp += index + 10;
+      value.diagnostics = {
+        ...value.diagnostics!,
+        sttRoutingDecision: "realtime_primary",
+        realtimeConnectionReused: true,
+        warmStart: true,
+      };
+      return value;
+    });
+    const qaTts = entry("qa-tts", "realtime");
+    const qaEvents = new Map<string, TranslatorDiagnosticEvent[]>([
+      ["qa-translation", [diagnosticEvent({
+        eventOrigin: "qa_simulation", eventKind: "failure",
+        apiCode: "qa_translation_503", qaScenarioId: "qa_translation_503",
+      })]],
+      ["qa-network", [diagnosticEvent({
+        eventOrigin: "qa_simulation", eventKind: "failure", category: "NETWORK",
+        apiCode: "qa_network_disconnect", qaScenarioId: "qa_network_disconnect",
+      })]],
+      ["qa-tts", [diagnosticEvent({
+        eventOrigin: "qa_simulation", eventKind: "degradation", category: "TTS",
+        stage: "tts_generation", apiCode: "qa_tts_503", qaScenarioId: "qa_tts_503",
+        recoveryAction: "keep_translation_without_tts", recoverySucceeded: true,
+      })]],
+    ]);
+    const failedTurns = ["qa-translation", "qa-network"].map((turnId) => ({
+      turnId,
+      createdAt: `2023-11-14T22:13:3${turnId === "qa-network" ? 1 : 0}.000Z`,
+      mode: "auto" as const,
+      diagnostics: { transcriptionPath: "realtime" as const },
+      ttsSpeed: 1,
+      errorCode: turnId === "qa-network" ? "qa_network_disconnect" : "qa_translation_503",
+      errorStage: "translation",
+      sanitizedErrorMessage: "Simulated QA failure",
+    }));
+    const entries = [cold, ...warm, qaTts];
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-09T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries, failedTurns,
+      diagnosticEventsByTurn: qaEvents,
+      sttRoutingByTurn: new Map(entries.map((value) => [
+        value.id,
+        value.id === "organic-cold" ? "audio_fallback_cold" : "realtime_primary",
+      ] as const)),
+    });
+
+    expect(report).toMatchObject({
+      totalTurns: 8,
+      successfulTurns: 6,
+      failedTurns: 2,
+      sessionTurnSuccessRate: 0.75,
+      organicTotalTurns: 5,
+      organicSuccessfulTurns: 5,
+      organicFailedTurns: 0,
+      organicProductTurnSuccessRate: 1,
+      organicRealtimeAttemptedTurns: 4,
+      organicRealtimeSuccessfulTurns: 4,
+      organicRealtimeAttemptSuccessRate: 1,
+      qaSummary: {
+        qaTurns: 3,
+        qaTerminalFailures: 2,
+        qaFailures: 2,
+        qaDegradations: 1,
+        qaResult: "passed_with_expected_terminal_failures",
+      },
+      executiveSummary: {
+        overallHealth: "healthy",
+        productTurnSuccessRate: 1,
+        organicTurns: 5,
+        organicSuccessful: 5,
+        organicTerminalFailures: 0,
+      },
+    });
+    expect(report.keyFindings).toContain("all_organic_turns_successful");
+    expect(report.keyFindings).toContain("realtime_warm_path_healthy");
+    expect(report.keyFindings).not.toContain("realtime_unstable");
+  });
+
+  it("reports generation and browser playback outcomes without treating disabled TTS as failure", () => {
+    const success = entry("tts-success", "realtime");
+    const disabled = entry("tts-disabled", "realtime");
+    disabled.diagnostics = {
+      ...disabled.diagnostics!, autoplayEnabled: false, ttsRequested: false,
+      ttsRequestReason: "none", ttsGenerationOutcome: "disabled",
+      ttsPlaybackOutcome: "not_attempted", ttsOutcome: "disabled",
+      ttsSkipReason: "autoplay_disabled",
+    };
+    const blocked = entry("tts-blocked", "realtime");
+    blocked.diagnostics = {
+      ...blocked.diagnostics!, ttsRequested: true, ttsRequestReason: "autoplay",
+      ttsGenerationOutcome: "success", ttsPlaybackOutcome: "blocked",
+      ttsOutcome: "success", ttsSkipReason: "browser_autoplay_blocked",
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-09T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries: [success, disabled, blocked],
+      failedTurns: [],
+    });
+    expect(report.sections.tts).toEqual({
+      autoplayEnabledTurns: 2,
+      ttsRequestedTurns: 2,
+      ttsGenerationSuccesses: 2,
+      ttsGenerationFailures: 0,
+      ttsRequestSuccessRate: 1,
+      ttsPlaybackStartedTurns: 1,
+      ttsPlaybackBlockedTurns: 1,
+      ttsPlaybackFailures: 0,
+      ttsPlaybackSuccessRate: 0.5,
+      manualTtsRequests: 0,
+      organicTtsDegradations: 0,
+    });
+    expect(report.keyFindings).toContain("tts_playback_blocked");
+    expect(report.keyFindings).not.toContain("tts_unavailable");
+  });
+
+  it("does not count a non-critical TTS degradation as a recovered translation turn", () => {
+    const ttsDegraded = entry("tts-degraded", "realtime");
+    ttsDegraded.diagnostics = {
+      ...ttsDegraded.diagnostics!, ttsGenerationOutcome: "request_failed",
+      ttsPlaybackOutcome: "not_attempted", ttsOutcome: "request_failed",
+    };
+    const connectionRecovered = entry("connection-recovered", "audio_upload_fallback");
+    connectionRecovered.diagnostics = {
+      ...connectionRecovered.diagnostics!,
+      fallbackReason: "connection_lost_during_recording",
+      sttRoutingDecision: "audio_fallback_connection_loss",
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-09T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1,
+      entries: [ttsDegraded, connectionRecovered], failedTurns: [],
+      diagnosticEventsByTurn: new Map([
+        ["tts-degraded", [diagnosticEvent({
+          eventKind: "degradation", category: "TTS", stage: "tts_generation",
+          recoveryAction: "keep_translation_without_tts", recoverySucceeded: true,
+        })]],
+      ]),
+      sttRoutingByTurn: new Map([
+        ["tts-degraded", "realtime_primary"],
+        ["connection-recovered", "audio_fallback_connection_loss"],
+      ]),
+    });
+    expect(report.executiveSummary.recoveredTurns).toBe(1);
+    expect(report.executiveSummary.recoveredDegradationTurns).toBe(1);
+    expect(report.sections.tts.organicTtsDegradations).toBe(1);
+  });
+
+  it("exports reviewed same-audio benchmark metrics separately from product health", () => {
+    const comparison = reviewSameAudioComparison({
+      comparisonId: "comparison-1", turnId: "benchmark-turn",
+      primaryEngine: "gpt-live-transcribe", secondaryEngine: "gpt-4o-mini-transcribe",
+      primaryTranscript: "Una etwa nani? Mimi ni Chris.",
+      secondaryTranscript: "Unaitwa nani? Mimi ni Chris.",
+      primaryCompletedAt: "2026-09-10T10:00:00.000Z",
+      secondaryCompletedAt: "2026-09-10T10:00:01.000Z", sameAudio: true,
+      recordingDurationMs: 2_000, primaryRoute: "realtime",
+      secondaryRoute: "audio_upload_fallback", groundTruthStatus: "unreviewed",
+      groundTruthTranscript: null, reviewedAt: null, benchmarkStatus: "completed",
+      benchmarkFailure: null, secondaryTranscriptionMs: 800,
+      primaryNormalizedExactMatch: null, secondaryNormalizedExactMatch: null,
+      primaryWer: null, secondaryWer: null,
+    } satisfies SameAudioBenchmarkComparison, { status: "accepted_secondary" });
+    const benchmarkEntry = entry("benchmark-turn", "realtime");
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-10T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries: [benchmarkEntry], failedTurns: [],
+      sameAudioBenchmarksByTurn: new Map([[benchmarkEntry.id, comparison]]),
+      sameAudioEligibleTurnIds: new Set([benchmarkEntry.id]),
+      qualityByTurn: new Map([[benchmarkEntry.id, createSpeechQualitySample({
+        turnId: benchmarkEntry.id, recognizedTranscript: benchmarkEntry.originalText,
+        sourceLanguage: "sw", transcriptionModel: "gpt-live-transcribe",
+        transcriptionPath: "realtime", appVersion: "5.2.5",
+      })]]),
+      feedbackByTurn: new Map([[benchmarkEntry.id, {
+        feedbackRating: "good", feedbackCategories: [], feedbackComment: null,
+        feedbackType: "all_correct", speechFeedbackStatus: "accepted",
+        correctedTranscript: null, translationFeedback: "positive",
+        ttsFeedback: "positive", persistenceStatus: "synced",
+      }]]),
+    });
+    expect(report.speechBenchmarkSummary).toMatchObject({
+      sameAudioEligibleTurns: 1, sameAudioComparisonAttempts: 1,
+      sameAudioComparisonCompleted: 1, sameAudioGroundTruthReviewed: 1,
+      realtimeWins: 0, audioSttWins: 1, ties: 0,
+      audioSttNormalizedExactMatchRate: 1, audioSttMeanWer: 0,
+      benchmarkEvidenceLevel: "insufficient",
+    });
+    expect(report.turns[0]).toMatchObject({
+      sameAudioBenchmarkAttempted: true, sameAudioBenchmarkCompleted: true,
+      secondaryTranscriptionModel: "gpt-4o-mini-transcribe",
+      benchmarkGroundTruthAvailable: true, secondaryWer: 0,
+    });
+    expect(report.organicProductTurnSuccessRate).toBe(1);
+    expect(report).toMatchObject({
+      speechFeedbackCount: 1, speechAcceptedCount: 1, speechCorrectedCount: 0,
+      translationPositiveFeedbackCount: 1, translationNegativeFeedbackCount: 0,
+      ttsFeedbackCount: 1, benchmarkGroundTruthCount: 1,
+    });
+    expect(report.keyFindings).toContain("speech_benchmark_insufficient_evidence");
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_TRANSLATOR_FEEDBACK_COMMENT_LENGTH } from "@/lib/translator/feedback";
+import { classifyFeedbackDatabaseError } from "@/lib/translator/server/feedbackDatabaseError";
 
 const requireUserMock = vi.fn();
 const fromMock = vi.fn();
@@ -284,15 +285,17 @@ describe("POST /api/translator/feedback", () => {
       expect(response.status).toBe(503);
       await expect(response.json()).resolves.toEqual({
         code: "feedback_storage_unavailable",
-        error: "Feedback-Speicher ist nicht verfügbar.",
+        error: "Feedback konnte gerade nicht gespeichert werden.",
       });
       expect(errorSpy).toHaveBeenCalledWith(
         "[translator] feedback write failed",
         {
           code,
-          reason: "table_missing",
-          requiredMigration:
-            "supabase/migrations/20260829000000_translator_realtime_performance.sql",
+          reason: "feedback_table_missing",
+          requiredMigrations: [
+            "supabase/migrations/20260820000000_translator_feedback.sql",
+          ],
+          affectedColumn: null,
         },
       );
       const logged = JSON.stringify(errorSpy.mock.calls);
@@ -301,4 +304,25 @@ describe("POST /api/translator/feedback", () => {
       expect(logged).not.toContain("private migration hint");
     },
   );
+
+  it("classifies PGRST204 as a feedback column/schema mismatch, not a missing table", () => {
+    expect(classifyFeedbackDatabaseError({
+      code: "PGRST204",
+      message: "Could not find the 'recording_started_at' column in the schema cache",
+    })).toEqual({
+      reason: "feedback_columns_missing",
+      requiredMigrations: [
+        "supabase/migrations/20260829000000_translator_realtime_performance.sql",
+      ],
+      affectedColumn: "recording_started_at",
+    });
+    expect(classifyFeedbackDatabaseError({ code: "PGRST204" })).toEqual({
+      reason: "feedback_schema_incompatible",
+      requiredMigrations: [
+        "supabase/migrations/20260824000000_translator_feedback_performance.sql",
+        "supabase/migrations/20260829000000_translator_realtime_performance.sql",
+      ],
+      affectedColumn: null,
+    });
+  });
 });

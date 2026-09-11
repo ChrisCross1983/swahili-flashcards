@@ -120,6 +120,7 @@ export function isSpeechPlaybackBlockedError(error: unknown) {
 export function getTranslatorSpeechFailure(
   error: unknown,
   automatic: boolean,
+  speechReady?: boolean,
 ): { kind: TranslatorSpeechFailureKind; message: string } {
   if (error instanceof TranslatorSpeechClientError) {
     return {
@@ -131,6 +132,9 @@ export function getTranslatorSpeechFailure(
   }
   if (automatic && isSpeechPlaybackBlockedError(error)) {
     return { kind: "autoplay-blocked", message: SPEECH_READY_MESSAGE };
+  }
+  if (speechReady === false) {
+    return { kind: "generation", message: SPEECH_ERROR_MESSAGE };
   }
   return { kind: "playback", message: SPEECH_PLAYBACK_ERROR_MESSAGE };
 }

@@ -34,4 +34,16 @@ describe("translator interpreter prompt", () => {
     expect(prompt).toContain("tanzanian kiswahili");
     expect(prompt).toContain("return only the structured result");
   });
+
+  it("keeps full translation separate and guards critical facts in summaries", () => {
+    const prompt = buildInterpreterPrompt({
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+    }, true).toLowerCase();
+    expect(prompt).toContain("never shorten translatedtext");
+    expect(prompt).toContain("essencesummary");
+    expect(prompt).toContain("names, places, negations");
+    expect(prompt).toContain("numbers, or money amounts");
+    expect(prompt).toContain("include every conflicting value");
+  });
 });

@@ -575,6 +575,38 @@ describe("OpenAI translator diagnostics", () => {
     expect(openAiMocks.responseCreate).not.toHaveBeenCalled();
   });
 
+  it("uses one structured Terra request for translation plus an eligible essence", async () => {
+    openAiMocks.responseParse.mockResolvedValue({
+      output_parsed: {
+        translatedText: "Die vollständige Übersetzung bleibt erhalten.",
+        essenceSummary: "Die Kernaussage ist kurz.",
+      },
+    });
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+
+    await expect(gateway.translateWithSummary!(
+      "Langer Gesprächsinhalt",
+      { sourceLanguage: "sw", targetLanguage: "de" },
+    )).resolves.toEqual({
+      translatedText: "Die vollständige Übersetzung bleibt erhalten.",
+      essenceSummary: "Die Kernaussage ist kurz.",
+    });
+    expect(openAiMocks.responseParse).toHaveBeenCalledOnce();
+    expect(openAiMocks.responseCreate).not.toHaveBeenCalled();
+    expect(openAiMocks.responseParse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-5.6-terra",
+        max_output_tokens: 2400,
+        text: expect.objectContaining({
+          format: expect.objectContaining({
+            name: "translator_result_with_essence_v1",
+            strict: true,
+          }),
+        }),
+      }),
+    );
+  });
+
   it("does not expose additional SDK error properties", () => {
     const details = getSafeOpenAIErrorDetails({
       status: 401,

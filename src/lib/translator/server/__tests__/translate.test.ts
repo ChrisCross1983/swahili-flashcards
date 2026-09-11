@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
+  transcribeRecordedAudio,
   translateRecordedAudio,
   translateAuthoritativeText,
   type TranslatorAiGateway,
@@ -26,6 +27,10 @@ function createGateway(): TranslatorAiGateway {
       translatedText: "Wir kommen morgen früh.",
     })),
     translate: vi.fn(async () => " Wir kommen morgen früh. "),
+    translateWithSummary: vi.fn(async () => ({
+      translatedText: "Wir kommen morgen früh.",
+      essenceSummary: null,
+    })),
   };
 }
 
@@ -327,5 +332,110 @@ describe("translator server pipeline", () => {
         autoTranslationFailure,
       ),
     ).rejects.toMatchObject({ code: "translation_failed" });
+  });
+
+  it("returns full translation and essence in one Terra call for a long turn", async () => {
+    const gateway = createGateway();
+    const longText = Array.from({ length: 50 }, (_, index) =>
+      index === 0 ? "Nahitaji" : "maelezo").join(" ");
+    vi.mocked(gateway.translateWithSummary!).mockResolvedValue({
+      translatedText: "Dies ist die vollständige, nicht gekürzte Übersetzung mit allen wiederholten Einzelheiten und wichtigen Nebeninformationen aus der Aussage.",
+      essenceSummary: "Er braucht eine kurze Klärung.",
+    });
+
+    const result = await translateAuthoritativeText({
+      authoritativeTranscript: longText,
+      direction: input.direction,
+      transcriptionModel: "gpt-live-transcribe",
+      transcriptionMs: 1_000,
+    }, gateway);
+
+    expect(gateway.translateWithSummary).toHaveBeenCalledOnce();
+    expect(gateway.translateWithSummary).toHaveBeenCalledWith(
+      longText,
+      input.direction,
+    );
+    expect(gateway.translate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      translatedText: "Dies ist die vollständige, nicht gekürzte Übersetzung mit allen wiederholten Einzelheiten und wichtigen Nebeninformationen aus der Aussage.",
+      essenceSummary: "Er braucht eine kurze Klärung.",
+      diagnostics: {
+        summaryEligible: true,
+        summaryGenerated: true,
+        summaryGenerationOutcome: "success",
+      },
+    });
+  });
+
+  it("keeps a valid full translation when an eligible summary is missing", async () => {
+    const gateway = createGateway();
+    const longText = Array.from({ length: 50 }, () => "maelezo").join(" ");
+    vi.mocked(gateway.translateWithSummary!).mockResolvedValue({
+      translatedText: "Vollständige Übersetzung.",
+    });
+    const result = await translateAuthoritativeText({
+      authoritativeTranscript: longText,
+      direction: input.direction,
+      transcriptionModel: "gpt-live-transcribe",
+      transcriptionMs: 1_000,
+    }, gateway);
+    expect(result.translatedText).toBe("Vollständige Übersetzung.");
+    expect(result.essenceSummary).toBeUndefined();
+    expect(result.diagnostics).toMatchObject({
+      summaryGenerated: false,
+      summaryGenerationOutcome: "missing",
+    });
+  });
+
+  it("keeps translation when Terra reports no coherent essence", async () => {
+    const gateway = createGateway();
+    const longText = Array.from({ length: 50 }, (_, index) =>
+      `phrase-${index}`).join(" ");
+    vi.mocked(gateway.translateWithSummary!).mockResolvedValue({
+      translatedText: "Hallo. Eins. Essen. Gute Nacht. Verschiedene Testphrasen.",
+      essenceSummary: null,
+    });
+    const result = await translateAuthoritativeText({
+      authoritativeTranscript: longText,
+      direction: input.direction,
+      transcriptionModel: "gpt-live-transcribe",
+      transcriptionMs: 1_000,
+    }, gateway);
+    expect(result.essenceSummary).toBeUndefined();
+    expect(result.diagnostics.summaryGenerationOutcome).toBe("not_meaningful");
+  });
+
+  it("runs benchmark audio transcription without invoking translation", async () => {
+    const gateway = createGateway();
+    await expect(transcribeRecordedAudio(input, gateway)).resolves.toMatchObject({
+      transcript: "Tutakuja kesho asubuhi.",
+      model: "gpt-4o-mini-transcribe",
+      fallbackUsed: false,
+    });
+    expect(gateway.transcribe).toHaveBeenCalledOnce();
+    expect(gateway.translate).not.toHaveBeenCalled();
+    expect(gateway.translateWithSummary).not.toHaveBeenCalled();
+    expect(gateway.autoTranslate).not.toHaveBeenCalled();
+  });
+
+  it("drops only an insufficiently compressed essence", async () => {
+    const gateway = createGateway();
+    const longText = Array.from({ length: 50 }, () => "maelezo").join(" ");
+    const translation = "Er erklärt ausführlich, dass er für seine Familie eine Wohnung mit zwei Zimmern benötigt und diese Größe für alle ausreichen würde.";
+    vi.mocked(gateway.translateWithSummary!).mockResolvedValue({
+      translatedText: translation,
+      essenceSummary: "Er erklärt, dass er für seine Familie eine Wohnung mit zwei Zimmern benötigt und diese Größe für alle ausreichen würde.",
+    });
+    const result = await translateAuthoritativeText({
+      authoritativeTranscript: longText,
+      direction: input.direction,
+      transcriptionModel: "gpt-live-transcribe",
+      transcriptionMs: 1_000,
+    }, gateway);
+    expect(result.translatedText).toBe(translation);
+    expect(result.essenceSummary).toBeUndefined();
+    expect(result.diagnostics.summaryGenerationOutcome).toBe(
+      "insufficient_compression",
+    );
   });
 });

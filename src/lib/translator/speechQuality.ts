@@ -5,6 +5,202 @@ import type { TranslationLanguage, TranscriptionPath } from "@/lib/translator/ty
 
 export type RecognitionReviewStatus = "unreviewed" | "accepted" | "corrected";
 
+export type BenchmarkGroundTruthStatus =
+  | "unreviewed"
+  | "accepted_primary"
+  | "accepted_secondary"
+  | "corrected"
+  | "equivalent"
+  | "uncertain";
+
+export type SameAudioBenchmarkComparison = {
+  comparisonId: string;
+  turnId: string;
+  primaryEngine: string;
+  secondaryEngine: string;
+  primaryTranscript: string;
+  secondaryTranscript: string | null;
+  primaryCompletedAt: string;
+  secondaryCompletedAt: string | null;
+  sameAudio: true;
+  recordingDurationMs: number | null;
+  primaryRoute: "realtime";
+  secondaryRoute: "audio_upload_fallback";
+  groundTruthStatus: BenchmarkGroundTruthStatus;
+  groundTruthTranscript: string | null;
+  reviewedAt: string | null;
+  benchmarkStatus: "pending" | "completed" | "failed";
+  benchmarkFailure: string | null;
+  secondaryTranscriptionMs: number | null;
+  primaryNormalizedExactMatch: boolean | null;
+  secondaryNormalizedExactMatch: boolean | null;
+  primaryWer: number | null;
+  secondaryWer: number | null;
+};
+
+export type SpeechBenchmarkSummary = {
+  sameAudioEligibleTurns: number;
+  sameAudioComparisonAttempts: number;
+  sameAudioComparisonCompleted: number;
+  sameAudioGroundTruthReviewed: number;
+  realtimeWins: number;
+  audioSttWins: number;
+  ties: number;
+  uncertain: number;
+  realtimeNormalizedExactMatchRate: number | null;
+  audioSttNormalizedExactMatchRate: number | null;
+  realtimeMeanWer: number | null;
+  audioSttMeanWer: number | null;
+  realtimeMedianWer: number | null;
+  audioSttMedianWer: number | null;
+  benchmarkEvidenceLevel: "insufficient" | "early" | "useful";
+};
+
+export function normalizeTranscriptForComparison(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+export function wordErrorRate(candidate: string, groundTruth: string) {
+  const reference = normalizeTranscriptForComparison(groundTruth).split(" ").filter(Boolean);
+  const hypothesis = normalizeTranscriptForComparison(candidate).split(" ").filter(Boolean);
+  if (reference.length === 0) return hypothesis.length === 0 ? 0 : 1;
+  const previous = Array.from({ length: hypothesis.length + 1 }, (_, index) => index);
+  for (let referenceIndex = 1; referenceIndex <= reference.length; referenceIndex += 1) {
+    const current = [referenceIndex];
+    for (let hypothesisIndex = 1; hypothesisIndex <= hypothesis.length; hypothesisIndex += 1) {
+      const substitutionCost = reference[referenceIndex - 1] === hypothesis[hypothesisIndex - 1]
+        ? 0
+        : 1;
+      current[hypothesisIndex] = Math.min(
+        previous[hypothesisIndex] + 1,
+        current[hypothesisIndex - 1] + 1,
+        previous[hypothesisIndex - 1] + substitutionCost,
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[hypothesis.length] / reference.length;
+}
+
+function scoreComparison(
+  comparison: SameAudioBenchmarkComparison,
+  status: BenchmarkGroundTruthStatus,
+  groundTruthTranscript: string | null,
+  reviewedAt: string | null,
+): SameAudioBenchmarkComparison {
+  const groundTruth = groundTruthTranscript?.trim() || null;
+  if (!groundTruth || status === "unreviewed" || status === "uncertain") {
+    return {
+      ...comparison,
+      groundTruthStatus: status,
+      groundTruthTranscript: groundTruth,
+      reviewedAt,
+      primaryNormalizedExactMatch: null,
+      secondaryNormalizedExactMatch: null,
+      primaryWer: null,
+      secondaryWer: null,
+    };
+  }
+  const normalizedGroundTruth = normalizeTranscriptForComparison(groundTruth);
+  return {
+    ...comparison,
+    groundTruthStatus: status,
+    groundTruthTranscript: groundTruth,
+    reviewedAt,
+    primaryNormalizedExactMatch:
+      normalizeTranscriptForComparison(comparison.primaryTranscript) === normalizedGroundTruth,
+    secondaryNormalizedExactMatch: comparison.secondaryTranscript === null
+      ? null
+      : normalizeTranscriptForComparison(comparison.secondaryTranscript) === normalizedGroundTruth,
+    primaryWer: wordErrorRate(comparison.primaryTranscript, groundTruth),
+    secondaryWer: comparison.secondaryTranscript === null
+      ? null
+      : wordErrorRate(comparison.secondaryTranscript, groundTruth),
+  };
+}
+
+export function reviewSameAudioComparison(
+  comparison: SameAudioBenchmarkComparison,
+  input: {
+    status: Exclude<BenchmarkGroundTruthStatus, "unreviewed">;
+    correctedTranscript?: string;
+    reviewedAt?: string;
+  },
+) {
+  const groundTruth = input.status === "accepted_primary"
+    ? comparison.primaryTranscript
+    : input.status === "accepted_secondary"
+      ? comparison.secondaryTranscript
+      : input.status === "equivalent"
+        ? comparison.secondaryTranscript ?? comparison.primaryTranscript
+        : input.status === "corrected"
+          ? input.correctedTranscript?.trim() || null
+          : input.correctedTranscript?.trim() || null;
+  return scoreComparison(
+    comparison,
+    input.status,
+    groundTruth,
+    input.reviewedAt ?? new Date().toISOString(),
+  );
+}
+
+function average(values: number[]) {
+  return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values: number[]) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+export function summarizeSpeechBenchmarks(
+  comparisons: readonly SameAudioBenchmarkComparison[],
+  eligibleTurns = comparisons.length,
+): SpeechBenchmarkSummary {
+  const completed = comparisons.filter((item) => item.benchmarkStatus === "completed");
+  const reviewed = completed.filter((item) =>
+    item.groundTruthStatus !== "unreviewed" && item.groundTruthStatus !== "uncertain" &&
+    item.primaryWer !== null && item.secondaryWer !== null,
+  );
+  const uncertain = completed.filter((item) => item.groundTruthStatus === "uncertain").length;
+  const primaryWers = reviewed.map((item) => item.primaryWer as number);
+  const secondaryWers = reviewed.map((item) => item.secondaryWer as number);
+  const realtimeWins = reviewed.filter((item) => (item.primaryWer as number) < (item.secondaryWer as number)).length;
+  const audioSttWins = reviewed.filter((item) => (item.secondaryWer as number) < (item.primaryWer as number)).length;
+  const ties = reviewed.length - realtimeWins - audioSttWins;
+  return {
+    sameAudioEligibleTurns: eligibleTurns,
+    sameAudioComparisonAttempts: comparisons.length,
+    sameAudioComparisonCompleted: completed.length,
+    sameAudioGroundTruthReviewed: reviewed.length,
+    realtimeWins,
+    audioSttWins,
+    ties,
+    uncertain,
+    realtimeNormalizedExactMatchRate: reviewed.length === 0 ? null :
+      reviewed.filter((item) => item.primaryNormalizedExactMatch).length / reviewed.length,
+    audioSttNormalizedExactMatchRate: reviewed.length === 0 ? null :
+      reviewed.filter((item) => item.secondaryNormalizedExactMatch).length / reviewed.length,
+    realtimeMeanWer: average(primaryWers),
+    audioSttMeanWer: average(secondaryWers),
+    realtimeMedianWer: median(primaryWers),
+    audioSttMedianWer: median(secondaryWers),
+    benchmarkEvidenceLevel: reviewed.length < 5
+      ? "insufficient"
+      : reviewed.length < 20
+        ? "early"
+        : "useful",
+  };
+}
+
 export type TranslatorSpeechQualitySample = {
   sampleId: string | null;
   turnId: string;

@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { TranslationFeedbackForm } from "@/components/translator/TranslationFeedbackSheet";
 
@@ -57,5 +59,16 @@ describe("translator feedback mobile form", () => {
     expect(html).toContain("Optional");
     expect(html).toContain("Kurze Beobachtung");
     expect(html).not.toContain("Transkription falsch");
+  });
+
+  it("captures the local learning signal before remote persistence", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslationFeedbackSheet.tsx"),
+      "utf8",
+    );
+    expect(source.indexOf("onCaptured(entry.id, localFeedback)")).toBeLessThan(
+      source.indexOf("await submitTranslatorFeedback"),
+    );
+    expect(source).toContain("setStatus(");
   });
 });

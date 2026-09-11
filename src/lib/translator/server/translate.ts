@@ -11,6 +11,10 @@ import {
   TranslatorPipelineError,
 } from "@/lib/translator/server/errors";
 import { TRANSLATION_MODEL } from "@/lib/translator/server/models";
+import {
+  isEssenceSummaryEligible,
+  validateEssenceSummary,
+} from "@/lib/translator/essenceSummary";
 
 export type TranscriptionInput = {
   bytes: Uint8Array;
@@ -33,23 +37,49 @@ export type AutoTranslationOutput =
       sourceLanguage: TranslationLanguage;
       targetLanguage: TranslationLanguage;
       translatedText: string;
+      essenceSummary?: string | null;
     }
   | {
       sourceLanguage: "unknown";
       targetLanguage: null;
       translatedText: null;
+      essenceSummary?: null;
     };
+
+export type StructuredTranslationOutput = {
+  translatedText: string;
+  essenceSummary?: string | null;
+};
 
 export type TranslatorAiGateway = {
   transcribe: (input: TranscriptionInput) => Promise<TranscriptionOutput>;
-  autoTranslate: (text: string) => Promise<AutoTranslationOutput>;
-  translate: (text: string, direction: TranslationDirection) => Promise<string>;
+  autoTranslate: (
+    text: string,
+    options?: { summaryEligible: boolean },
+  ) => Promise<AutoTranslationOutput>;
+  translate: (
+    text: string,
+    direction: TranslationDirection,
+  ) => Promise<string>;
+  translateWithSummary?: (
+    text: string,
+    direction: TranslationDirection,
+  ) => Promise<StructuredTranslationOutput>;
 };
 
 type TranslateRecordedAudioInput = {
   audio: Blob;
   format: SupportedAudioFormat;
   direction: TranslationRequestDirection;
+  recordingDurationMs?: number | null;
+};
+
+export type AudioTranscriptionResult = {
+  transcript: string;
+  model: string;
+  fallbackUsed: boolean;
+  transcriptionMs: number;
+  completedAt: string;
 };
 
 type TranslateAuthoritativeTextInput = {
@@ -57,6 +87,7 @@ type TranslateAuthoritativeTextInput = {
   direction: TranslationRequestDirection;
   transcriptionModel: string;
   transcriptionMs: number;
+  recordingDurationMs?: number | null;
 };
 
 function containsSpeechText(text: string) {
@@ -71,15 +102,24 @@ async function translateTranscript(
   startedAt: number,
   gateway: TranslatorAiGateway,
   transcriptFinalAt?: string,
+  recordingDurationMs?: number | null,
 ): Promise<TranslationResult> {
   const translationStartedAt = Date.now();
   const isAuto = direction.sourceLanguage === "auto";
   let result: Omit<TranslationResult, "diagnostics">;
+  const summaryEligible = isEssenceSummaryEligible({
+    text: originalText,
+    recordingDurationMs,
+  });
+  let rawSummary: unknown = null;
+  let summaryFallbackWithoutSummary = false;
 
   if (direction.sourceLanguage === "auto") {
     let autoResult: AutoTranslationOutput;
     try {
-      autoResult = await gateway.autoTranslate(originalText);
+      autoResult = summaryEligible
+        ? await gateway.autoTranslate(originalText, { summaryEligible: true })
+        : await gateway.autoTranslate(originalText);
     } catch {
       throw new TranslatorPipelineError(
         "translation_failed",
@@ -107,13 +147,20 @@ async function translateTranscript(
       sourceLanguage: autoResult.sourceLanguage,
       targetLanguage: autoResult.targetLanguage,
     };
+    rawSummary = autoResult.essenceSummary;
   } else {
     const concreteDirection: TranslationDirection = direction;
-    let translatedText: string;
+    let translationOutput: string | StructuredTranslationOutput;
     try {
-      translatedText = (
-        await gateway.translate(originalText, concreteDirection)
-      ).trim();
+      if (summaryEligible && gateway.translateWithSummary) {
+        translationOutput = await gateway.translateWithSummary(
+          originalText,
+          concreteDirection,
+        );
+      } else {
+        summaryFallbackWithoutSummary = summaryEligible;
+        translationOutput = await gateway.translate(originalText, concreteDirection);
+      }
     } catch {
       throw new TranslatorPipelineError(
         "translation_failed",
@@ -121,6 +168,12 @@ async function translateTranscript(
         originalText,
       );
     }
+    const translatedText = typeof translationOutput === "string"
+      ? translationOutput.trim()
+      : translationOutput.translatedText.trim();
+    rawSummary = typeof translationOutput === "string"
+      ? null
+      : translationOutput.essenceSummary;
     if (!translatedText) {
       throw new TranslatorPipelineError(
         "translation_failed",
@@ -135,6 +188,31 @@ async function translateTranscript(
       targetLanguage: concreteDirection.targetLanguage,
     };
   }
+
+  const summaryValidation = summaryFallbackWithoutSummary
+    ? {
+        valid: false,
+        summary: null,
+        warningCount: 0,
+        contradictionDetected: false,
+        compressionRatio: null,
+        outcome: "fallback_without_summary" as const,
+      }
+    : summaryEligible
+    ? validateEssenceSummary({
+        sourceText: originalText,
+        translatedText: result.translatedText,
+        summary: rawSummary,
+      })
+    : {
+        valid: false,
+        summary: null,
+        warningCount: 0,
+        contradictionDetected: false,
+        compressionRatio: null,
+        outcome: "not_eligible" as const,
+      };
+  if (summaryValidation.summary) result.essenceSummary = summaryValidation.summary;
 
   const translationReadyAt = Date.now();
   const translationDurationMs = translationReadyAt - translationStartedAt;
@@ -151,6 +229,15 @@ async function translateTranscript(
     detectedLanguage: isAuto
       ? result.sourceLanguage
       : transcriptionOutput.detectedLanguage ?? result.sourceLanguage,
+    ...(summaryEligible ? {
+      summaryEligible: true,
+      summaryGenerated: summaryValidation.valid,
+      summaryLength: summaryValidation.summary?.length ?? 0,
+      summaryCompressionRatio: summaryValidation.compressionRatio,
+      summaryCriticalFactWarningCount: summaryValidation.warningCount,
+      summaryContradictionDetected: summaryValidation.contradictionDetected,
+      summaryGenerationOutcome: summaryValidation.outcome,
+    } : {}),
     ...(transcriptFinalAt
       ? {
           transcriptFinalAt,
@@ -200,6 +287,8 @@ export async function translateAuthoritativeText(
     input.transcriptionMs,
     startedAt,
     gateway,
+    undefined,
+    input.recordingDurationMs,
   );
 }
 
@@ -250,5 +339,41 @@ export async function translateRecordedAudio(
     startedAt,
     gateway,
     transcriptFinalAt,
+    input.recordingDurationMs,
   );
+}
+
+/** Uses the established safe audio-STT gateway without starting a translation. */
+export async function transcribeRecordedAudio(
+  input: Omit<TranslateRecordedAudioInput, "recordingDurationMs">,
+  gateway: TranslatorAiGateway,
+): Promise<AudioTranscriptionResult> {
+  const startedAt = Date.now();
+  let output: TranscriptionOutput;
+  try {
+    output = await gateway.transcribe({
+      bytes: new Uint8Array(await input.audio.arrayBuffer()),
+      fileName: `recording.${input.format.extension}`,
+      extension: input.format.extension,
+      originalMimeType: input.audio.type,
+      normalizedMimeType: input.format.mimeType,
+      language: input.direction.sourceLanguage === "auto"
+        ? null
+        : input.direction.sourceLanguage,
+    });
+  } catch (error) {
+    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") throw error;
+    throw new TranslatorPipelineError("transcription_failed", "Audio transcription failed");
+  }
+  const transcript = output.text.trim();
+  if (!transcript || !containsSpeechText(transcript)) {
+    throw new TranslatorPipelineError("no_speech", "No speech detected");
+  }
+  return {
+    transcript,
+    model: output.model,
+    fallbackUsed: output.fallbackUsed,
+    transcriptionMs: Date.now() - startedAt,
+    completedAt: new Date().toISOString(),
+  };
 }

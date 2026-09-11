@@ -1,4 +1,7 @@
-import type { ClassicRealtimeConnectionAttempt } from "@/lib/translator/classicRealtimeSessionManager";
+import type {
+  ClassicRealtimeConnectionAttempt,
+  ClassicRealtimeConnectionStateTimelineEntry,
+} from "@/lib/translator/classicRealtimeSessionManager";
 import type { TranslatorFeedbackCategory, TranslatorFeedbackRating } from "@/lib/translator/feedback";
 import type {
   TranslationDiagnostics,
@@ -15,8 +18,12 @@ import type {
   TranslatorHealthStatus,
   TranslatorRecoveryAction,
 } from "@/lib/translator/reliability";
-import type { TranslatorSpeechQualitySample } from "@/lib/translator/speechQuality";
-import type { RecognitionReviewStatus } from "@/lib/translator/speechQuality";
+import {
+  summarizeSpeechBenchmarks,
+  type RecognitionReviewStatus,
+  type SameAudioBenchmarkComparison,
+  type TranslatorSpeechQualitySample,
+} from "@/lib/translator/speechQuality";
 import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQuality";
 import { UNAVAILABLE_AUDIO_QUALITY } from "@/lib/translator/audioQuality";
 import type {
@@ -38,10 +45,15 @@ import {
   type SttRoutingDecision,
   type TranslatorLearningSignal,
 } from "@/lib/translator/sttRouting";
+import { detectCriticalFactCategories } from "@/lib/translator/essenceSummary";
+import {
+  RECORDING_START_STUCK_THRESHOLD_MS,
+  type RecordingStartAttempt,
+} from "@/lib/translator/recordingStartDiagnostics";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.2.1";
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-stt-rescue-observability-v5.2.1";
+const REPORT_REVISION = "5.2.5";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-speech-quality-feedback-v5.2.5";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -65,6 +77,12 @@ export type ClassicTranslatorLocalFeedback = {
   feedbackRating: TranslatorFeedbackRating;
   feedbackCategories: TranslatorFeedbackCategory[];
   feedbackComment: string | null;
+  feedbackType?: "all_correct" | "speech_recognition" | "translation" | "tts";
+  speechFeedbackStatus?: "accepted" | "corrected" | null;
+  correctedTranscript?: string | null;
+  translationFeedback?: "positive" | "negative" | null;
+  ttsFeedback?: "positive" | "negative" | null;
+  persistenceStatus?: "local_only" | "sync_pending" | "synced" | "sync_failed";
 };
 
 export type ClassicTranslatorFailedTurn = {
@@ -234,6 +252,7 @@ export type ClassicTranslatorReportTurn = {
   targetLanguage: TranslationLanguage | null;
   originalText: string | null;
   translatedText: string | null;
+  essenceSummary: string | null;
   originalTextLength: number | null;
   translatedTextLength: number | null;
   transcriptionPath: TranscriptionPath | null;
@@ -295,6 +314,14 @@ export type ClassicTranslatorReportTurn = {
   translationStateCommittedAt: string | null;
   translationVisibleAt: string | null;
   translationRequestCorrelationId: string | null;
+  ttsDecisionAt: string | null;
+  ttsRequested: boolean;
+  ttsRequestReason: TranslationDiagnostics["ttsRequestReason"] | null;
+  ttsGenerationOutcome: TranslationDiagnostics["ttsGenerationOutcome"] | null;
+  ttsPlaybackOutcome: TranslationDiagnostics["ttsPlaybackOutcome"] | null;
+  ttsOutcome: TranslationDiagnostics["ttsOutcome"] | null;
+  ttsSkipReason: string | null;
+  ttsRequestedAt: string | null;
   ttsStartedAt: string | null;
   ttsReadyAt: string | null;
   ttsClientRequestStartedAt: string | null;
@@ -328,11 +355,15 @@ export type ClassicTranslatorReportTurn = {
   ttsClientResponseCompletedAt: string | null;
   ttsAudioPreparationStartedAt: string | null;
   ttsAudioPreparationCompletedAt: string | null;
+  ttsGenerationCompletedAt: string | null;
   firstPlayableAudioAt: string | null;
   playRequestedAt: string | null;
+  ttsPlaybackRequestedAt: string | null;
   ttsRequestCorrelationId: string | null;
   playbackStartedAt: string | null;
   playbackCompletedAt: string | null;
+  ttsPlaybackStartedAt: string | null;
+  ttsPlaybackCompletedAt: string | null;
   recordClickToGetUserMediaReadyMs: number | null;
   recordClickToMicReadyMs: number | null;
   recordClickToRecordingStartedMs: number | null;
@@ -354,6 +385,7 @@ export type ClassicTranslatorReportTurn = {
   mediaRecorderTotalChunkBytes: number;
   audioBlobSize: number | null;
   audioSignalObserved: boolean | null;
+  audioSignalEvidence: "measured" | "inferred_from_valid_audio" | "unavailable";
   realtimeTransportReady: boolean;
   realtimeInputTrackGeneration: number | null;
   realtimeFirstDeltaObserved: boolean;
@@ -374,6 +406,20 @@ export type ClassicTranslatorReportTurn = {
   rescueTranscriptToTranslationReadyMs: number | null;
   semanticRescueTotalMs: number | null;
   transcriptScriptAnomalyDetected: boolean;
+  trackRebindStartedAt: string | null;
+  trackRebindCompletedAt: string | null;
+  trackRebindMs: number | null;
+  trackRebindOutcome: TranslationDiagnostics["trackRebindOutcome"] | null;
+  senderHadTrackBeforeRebind: boolean | null;
+  connectionStateBeforeRebind: RTCPeerConnectionState | null;
+  connectionStateAfterRebind: RTCPeerConnectionState | null;
+  summaryEligible: boolean;
+  summaryGenerated: boolean;
+  summaryLength: number;
+  summaryCompressionRatio: number | null;
+  summaryCriticalFactWarningCount: number;
+  summaryContradictionDetected: boolean;
+  summaryGenerationOutcome: TranslationDiagnostics["summaryGenerationOutcome"] | null;
   sttCandidateComparison: SttCandidateComparison | null;
   learningSignal: TranslatorLearningSignal | null;
   stopToTranscriptFinalMs: number | null;
@@ -450,6 +496,11 @@ export type ClassicTranslatorReportTurn = {
   feedbackRating: TranslatorFeedbackRating | null;
   feedbackCategories: TranslatorFeedbackCategory[] | null;
   feedbackComment: string | null;
+  feedbackType: ClassicTranslatorLocalFeedback["feedbackType"] | null;
+  speechFeedbackStatus: ClassicTranslatorLocalFeedback["speechFeedbackStatus"] | null;
+  translationFeedback: ClassicTranslatorLocalFeedback["translationFeedback"] | null;
+  ttsFeedback: ClassicTranslatorLocalFeedback["ttsFeedback"] | null;
+  feedbackPersistenceStatus: ClassicTranslatorLocalFeedback["persistenceStatus"] | null;
   errorStage: string | null;
   errorType: string | null;
   errorCode: string | null;
@@ -496,6 +547,16 @@ export type ClassicTranslatorReportTurn = {
     channelCount: number | null;
   };
   audioQualityMetrics: TranslatorAudioQualityMetrics;
+  sameAudioBenchmarkAttempted: boolean;
+  sameAudioBenchmarkCompleted: boolean;
+  secondaryTranscriptionModel: string | null;
+  secondaryTranscriptionMs: number | null;
+  secondaryBenchmarkMs: number | null;
+  benchmarkReviewStatus: SameAudioBenchmarkComparison["groundTruthStatus"] | null;
+  benchmarkGroundTruthAvailable: boolean;
+  primaryWer: number | null;
+  secondaryWer: number | null;
+  sameAudioBenchmark: SameAudioBenchmarkComparison | null;
 };
 
 function finite(value: unknown) {
@@ -506,6 +567,17 @@ function finite(value: unknown) {
 
 function rate(numerator: number, denominator: number) {
   return denominator === 0 ? null : Number((numerator / denominator).toFixed(4));
+}
+
+function audioQualityWithEvidence(
+  metrics: TranslatorAudioQualityMetrics | undefined,
+): TranslatorAudioQualityMetrics {
+  const value = metrics ?? UNAVAILABLE_AUDIO_QUALITY;
+  return {
+    ...value,
+    evidence: value.evidence ??
+      (value.source === "unavailable" ? "unavailable" : "measured"),
+  };
 }
 
 function combinedPreOpenAiMs(
@@ -812,6 +884,7 @@ function turnFromValues(input: {
   targetLanguage: TranslationLanguage | null;
   originalText: string | null;
   translatedText: string | null;
+  essenceSummary?: string | null;
   diagnostics: Partial<TranslationDiagnostics>;
   audio: ClassicTranslatorAudioMetadata;
   transcriptionModel: string | null;
@@ -831,6 +904,7 @@ function turnFromValues(input: {
   consent?: TranslatorTurnConsent | null;
   sttRoutingDecision?: SttRoutingDecision | null;
   sttCandidateComparison?: SttCandidateComparison | null;
+  sameAudioBenchmark?: SameAudioBenchmarkComparison | null;
 }): ClassicTranslatorReportTurn {
   const d = input.diagnostics;
   const path = d.transcriptionPath ?? null;
@@ -874,6 +948,14 @@ function turnFromValues(input: {
           : null,
       }
     : null;
+  const sameAudioBenchmark = input.sameAudioBenchmark
+    ? {
+        ...input.sameAudioBenchmark,
+        primaryTranscript: contentAllowed ? input.sameAudioBenchmark.primaryTranscript : "",
+        secondaryTranscript: contentAllowed ? input.sameAudioBenchmark.secondaryTranscript : null,
+        groundTruthTranscript: contentAllowed ? input.sameAudioBenchmark.groundTruthTranscript : null,
+      }
+    : null;
   return {
     turnId: input.turnId,
     createdAt: input.createdAt,
@@ -883,6 +965,7 @@ function turnFromValues(input: {
     targetLanguage: input.targetLanguage,
     originalText: text,
     translatedText: translated,
+    essenceSummary: input.essenceSummary ?? null,
     originalTextLength: text === null ? null : text.length,
     translatedTextLength: translated === null ? null : translated.length,
     transcriptionPath: path,
@@ -959,6 +1042,14 @@ function turnFromValues(input: {
     translationStateCommittedAt: d.translationStateCommittedAt ?? null,
     translationVisibleAt: d.translationVisibleAt ?? null,
     translationRequestCorrelationId: d.translationRequestCorrelationId ?? null,
+    ttsDecisionAt: d.ttsDecisionAt ?? null,
+    ttsRequested: d.ttsRequested === true,
+    ttsRequestReason: d.ttsRequestReason ?? null,
+    ttsGenerationOutcome: d.ttsGenerationOutcome ?? null,
+    ttsPlaybackOutcome: d.ttsPlaybackOutcome ?? null,
+    ttsOutcome: d.ttsOutcome ?? d.ttsGenerationOutcome ?? null,
+    ttsSkipReason: d.ttsSkipReason ?? null,
+    ttsRequestedAt: d.ttsRequestedAt ?? null,
     ttsStartedAt: d.ttsStartedAt ?? null,
     ttsReadyAt: d.ttsReadyAt ?? null,
     ttsClientRequestStartedAt: d.ttsClientRequestStartedAt ?? null,
@@ -998,11 +1089,15 @@ function turnFromValues(input: {
     ttsClientResponseCompletedAt: d.ttsClientResponseCompletedAt ?? null,
     ttsAudioPreparationStartedAt: d.ttsAudioPreparationStartedAt ?? null,
     ttsAudioPreparationCompletedAt: d.ttsAudioPreparationCompletedAt ?? null,
+    ttsGenerationCompletedAt: d.ttsGenerationCompletedAt ?? null,
     firstPlayableAudioAt: d.firstPlayableAudioAt ?? null,
     playRequestedAt: d.playRequestedAt ?? null,
+    ttsPlaybackRequestedAt: d.ttsPlaybackRequestedAt ?? d.playRequestedAt ?? null,
     ttsRequestCorrelationId: d.ttsRequestCorrelationId ?? null,
     playbackStartedAt: d.playbackStartedAt ?? null,
     playbackCompletedAt: d.playbackCompletedAt ?? null,
+    ttsPlaybackStartedAt: d.ttsPlaybackStartedAt ?? d.playbackStartedAt ?? null,
+    ttsPlaybackCompletedAt: d.ttsPlaybackCompletedAt ?? d.playbackCompletedAt ?? null,
     recordClickToGetUserMediaReadyMs: finite(d.recordClickToGetUserMediaReadyMs),
     recordClickToMicReadyMs: finite(d.recordClickToMicReadyMs),
     recordClickToRecordingStartedMs: finite(d.recordClickToRecordingStartedMs),
@@ -1029,6 +1124,8 @@ function turnFromValues(input: {
     audioBlobSize: finite(d.audioBlobSize),
     audioSignalObserved:
       typeof d.audioSignalObserved === "boolean" ? d.audioSignalObserved : null,
+    audioSignalEvidence: d.audioSignalEvidence ??
+      (typeof d.audioSignalObserved === "boolean" ? "measured" : "unavailable"),
     realtimeTransportReady: d.realtimeTransportReady === true,
     realtimeInputTrackGeneration: finite(d.realtimeInputTrackGeneration),
     realtimeFirstDeltaObserved: d.realtimeFirstDeltaObserved === true,
@@ -1055,6 +1152,23 @@ function turnFromValues(input: {
     ),
     semanticRescueTotalMs: finite(d.semanticRescueTotalMs),
     transcriptScriptAnomalyDetected: d.transcriptScriptAnomalyDetected === true,
+    trackRebindStartedAt: d.trackRebindStartedAt ?? null,
+    trackRebindCompletedAt: d.trackRebindCompletedAt ?? null,
+    trackRebindMs: finite(d.trackRebindMs),
+    trackRebindOutcome: d.trackRebindOutcome ?? null,
+    senderHadTrackBeforeRebind:
+      typeof d.senderHadTrackBeforeRebind === "boolean"
+        ? d.senderHadTrackBeforeRebind : null,
+    connectionStateBeforeRebind: d.connectionStateBeforeRebind ?? null,
+    connectionStateAfterRebind: d.connectionStateAfterRebind ?? null,
+    summaryEligible: d.summaryEligible === true,
+    summaryGenerated: d.summaryGenerated === true,
+    summaryLength: finite(d.summaryLength) ?? 0,
+    summaryCompressionRatio: finite(d.summaryCompressionRatio),
+    summaryCriticalFactWarningCount:
+      finite(d.summaryCriticalFactWarningCount) ?? 0,
+    summaryContradictionDetected: d.summaryContradictionDetected === true,
+    summaryGenerationOutcome: d.summaryGenerationOutcome ?? null,
     sttCandidateComparison,
     learningSignal: null,
     stopToTranscriptFinalMs: finite(d.stopToTranscriptFinalMs),
@@ -1162,6 +1276,11 @@ function turnFromValues(input: {
       ? [...input.feedback.feedbackCategories]
       : null,
     feedbackComment: input.feedback?.feedbackComment ?? null,
+    feedbackType: input.feedback?.feedbackType ?? null,
+    speechFeedbackStatus: input.feedback?.speechFeedbackStatus ?? null,
+    translationFeedback: input.feedback?.translationFeedback ?? null,
+    ttsFeedback: input.feedback?.ttsFeedback ?? null,
+    feedbackPersistenceStatus: input.feedback?.persistenceStatus ?? null,
     errorStage: primaryEvent?.stage ?? input.errorStage,
     errorType: input.errorType,
     errorCode: input.errorCode,
@@ -1220,10 +1339,19 @@ function turnFromValues(input: {
       channelCount:
         input.quality?.audioMetadata.channelCount ?? input.audio.channelCount ?? null,
     },
-    audioQualityMetrics:
-      input.quality?.audioQualityMetrics ??
-      input.audio.audioQualityMetrics ??
-      UNAVAILABLE_AUDIO_QUALITY,
+    audioQualityMetrics: audioQualityWithEvidence(
+      input.quality?.audioQualityMetrics ?? input.audio.audioQualityMetrics,
+    ),
+    sameAudioBenchmarkAttempted: input.sameAudioBenchmark !== null && input.sameAudioBenchmark !== undefined,
+    sameAudioBenchmarkCompleted: input.sameAudioBenchmark?.benchmarkStatus === "completed",
+    secondaryTranscriptionModel: input.sameAudioBenchmark?.secondaryEngine ?? null,
+    secondaryTranscriptionMs: input.sameAudioBenchmark?.secondaryTranscriptionMs ?? null,
+    secondaryBenchmarkMs: input.sameAudioBenchmark?.secondaryTranscriptionMs ?? null,
+    benchmarkReviewStatus: input.sameAudioBenchmark?.groundTruthStatus ?? null,
+    benchmarkGroundTruthAvailable: Boolean(input.sameAudioBenchmark?.groundTruthTranscript),
+    primaryWer: input.sameAudioBenchmark?.primaryWer ?? null,
+    secondaryWer: input.sameAudioBenchmark?.secondaryWer ?? null,
+    sameAudioBenchmark,
   };
 }
 
@@ -1244,6 +1372,7 @@ export function buildClassicTranslatorReport(input: {
   connectionSuccesses?: number;
   connectionFailures?: number;
   reconnectCount?: number;
+  realtimeConnectionStateTimeline?: ClassicRealtimeConnectionStateTimelineEntry[];
   realtimeFinalizationFailureCount?: number;
   realtimeCircuitBreakerTrips?: number;
   realtimeSemanticFailureStreak?: number;
@@ -1263,9 +1392,13 @@ export function buildClassicTranslatorReport(input: {
   consentEvents?: TranslatorConsentEvent[];
   sttRoutingByTurn?: ReadonlyMap<string, SttRoutingDecision>;
   sttComparisonsByTurn?: ReadonlyMap<string, SttCandidateComparison>;
+  sameAudioBenchmarksByTurn?: ReadonlyMap<string, SameAudioBenchmarkComparison>;
+  sameAudioEligibleTurnIds?: ReadonlySet<string>;
   persistedSnapshotUsed?: boolean;
   droppedTelemetryEvents?: number;
   audioManifestConsistent?: boolean | null;
+  recordingStartAttempts?: RecordingStartAttempt[];
+  activeRecordingStartAttempt?: (RecordingStartAttempt & { ageMs: number }) | null;
 }) {
   const sourceConnectionAttempts = input.connectionAttempts ?? [];
   const successfulTurns = input.entries.map((entry) => {
@@ -1289,6 +1422,7 @@ export function buildClassicTranslatorReport(input: {
       targetLanguage: entry.targetLanguage,
       originalText: entry.originalText,
       translatedText: entry.translatedText,
+      essenceSummary: entry.essenceSummary ?? null,
       diagnostics,
       audio: input.audioMetadataByTurn?.get(entry.id) ?? {
         audioMimeType: null,
@@ -1312,6 +1446,7 @@ export function buildClassicTranslatorReport(input: {
       consent: input.consentByTurn?.get(entry.id) ?? null,
       sttRoutingDecision: input.sttRoutingByTurn?.get(entry.id) ?? null,
       sttCandidateComparison: input.sttComparisonsByTurn?.get(entry.id) ?? null,
+      sameAudioBenchmark: input.sameAudioBenchmarksByTurn?.get(entry.id) ?? null,
     });
   });
   const failedTurns = input.failedTurns.map((turn) => {
@@ -1339,6 +1474,7 @@ export function buildClassicTranslatorReport(input: {
       targetLanguage: turn.targetLanguage ?? null,
       originalText: turn.originalText ?? null,
       translatedText: turn.translatedText ?? null,
+      essenceSummary: null,
       diagnostics: turn.diagnostics,
       audio: input.audioMetadataByTurn?.get(turn.turnId) ?? {
         audioMimeType: turn.audioMimeType ?? null,
@@ -1366,6 +1502,7 @@ export function buildClassicTranslatorReport(input: {
       consent: input.consentByTurn?.get(turn.turnId) ?? null,
       sttRoutingDecision: input.sttRoutingByTurn?.get(turn.turnId) ?? null,
       sttCandidateComparison: input.sttComparisonsByTurn?.get(turn.turnId) ?? null,
+      sameAudioBenchmark: input.sameAudioBenchmarksByTurn?.get(turn.turnId) ?? null,
     });
   });
   const turns = [...successfulTurns, ...failedTurns].sort((left, right) =>
@@ -1421,23 +1558,9 @@ export function buildClassicTranslatorReport(input: {
     },
     {},
   );
-  const userPerceived = metricSummary(
-    successful
-      .filter((turn) => turn.autoplayEnabled)
-      .map((turn) => turn.stopToPlaybackStartedMs),
-  );
   const initialRealtimeSetupMs = finite(
     sourceConnectionAttempts.find((attempt) => attempt.status === "success")
       ?.totalSetupMs,
-  );
-  const translationPreOpenAi = metricSummary(
-    successful.map((turn) => turn.translationServerPreOpenAiMs),
-  );
-  const ttsPreOpenAi = metricSummary(
-    successful.map((turn) => turn.ttsServerPreOpenAiMs),
-  );
-  const combinedPreOpenAi = metricSummary(
-    successful.map((turn) => turn.combinedPreOpenAiMs),
   );
   const diagnosticEvents = turns.flatMap((turn) => turn.diagnosticEvents);
   const failureEvents = diagnosticEvents.filter((event) => event.eventKind === "failure");
@@ -1452,28 +1575,48 @@ export function buildClassicTranslatorReport(input: {
   const recoveryAttempts = diagnosticEvents.filter(
     (event) => event.recoveryAction !== "none",
   ).length;
-  const reviewedQualityTurns = turns.filter((turn) =>
+  const isReviewed = (turn: (typeof turns)[number]) =>
     turn.recognitionReviewStatus === "accepted" ||
-    turn.recognitionReviewStatus === "corrected",
-  );
+    turn.recognitionReviewStatus === "corrected";
+  const reviewedQualityTurns = turns.filter(isReviewed);
   const qaScenariosTriggered = Array.from(new Set(diagnosticEvents
     .filter((event) => event.eventOrigin === "qa_simulation" && event.qaScenarioId)
     .map((event) => event.qaScenarioId as string)));
-  const qaScenariosRecovered = Array.from(new Set(diagnosticEvents
-    .filter((event) =>
-      event.eventOrigin === "qa_simulation" &&
-      event.qaScenarioId &&
-      event.recoverySucceeded === true,
-    )
-    .map((event) => event.qaScenarioId as string)));
+  const qaScenariosRecovered = Array.from(new Set(turns.flatMap((turn) =>
+    turn.status === "success"
+      ? turn.diagnosticEvents.flatMap((event) =>
+          event.eventOrigin === "qa_simulation" &&
+          event.qaScenarioId &&
+          event.recoverySucceeded === true
+            ? [event.qaScenarioId]
+            : [])
+      : [])));
   const organicTurns = turns.filter((turn) =>
     !turn.diagnosticEvents.some((event) => event.eventOrigin === "qa_simulation"),
   );
+  const qaTurns = turns.filter((turn) =>
+    turn.diagnosticEvents.some((event) => event.eventOrigin === "qa_simulation"),
+  );
+  const qaEvents = diagnosticEvents.filter((event) =>
+    event.eventOrigin === "qa_simulation");
+  const organicSuccessfulTurns = organicTurns.filter((turn) =>
+    turn.status === "success");
   const organicFailedTurns = organicTurns.filter((turn) =>
-    turn.status === "failed" &&
-    turn.diagnosticEvents.some((event) =>
-      event.eventOrigin === "organic_runtime" && event.eventKind === "failure",
-    ),
+    turn.status === "failed");
+  const reviewedOrganicQualityTurns = organicTurns.filter(isReviewed);
+  const userPerceived = metricSummary(
+    organicSuccessfulTurns
+      .filter((turn) => turn.autoplayEnabled)
+      .map((turn) => turn.stopToPlaybackStartedMs),
+  );
+  const translationPreOpenAi = metricSummary(
+    organicSuccessfulTurns.map((turn) => turn.translationServerPreOpenAiMs),
+  );
+  const ttsPreOpenAi = metricSummary(
+    organicSuccessfulTurns.map((turn) => turn.ttsServerPreOpenAiMs),
+  );
+  const combinedPreOpenAi = metricSummary(
+    organicSuccessfulTurns.map((turn) => turn.combinedPreOpenAiMs),
   );
   const buildMetadata = input.buildMetadata ?? {
     appVersion: "unknown",
@@ -1494,9 +1637,20 @@ export function buildClassicTranslatorReport(input: {
   };
   const comparisons = turns.flatMap((turn) =>
     turn.sttCandidateComparison ? [turn.sttCandidateComparison] : []);
+  const benchmarkComparisons = Array.from(input.sameAudioBenchmarksByTurn?.values() ?? []);
+  const speechBenchmarkSummary = summarizeSpeechBenchmarks(
+    benchmarkComparisons,
+    input.sameAudioEligibleTurnIds?.size ?? benchmarkComparisons.length,
+  );
   for (const turn of turns) {
     const comparison = turn.sttCandidateComparison;
-    const sameAudioComparisonAvailable = Boolean(comparison?.rescue);
+    const evidenceOrigin = turn.diagnosticEvents.some((event) =>
+      event.eventOrigin === "qa_simulation")
+      ? "qa_simulation" as const
+      : "organic_runtime" as const;
+    const sameAudioComparisonAvailable = Boolean(
+      comparison?.rescue || turn.sameAudioBenchmark?.benchmarkStatus === "completed",
+    );
     const audioAvailable = turn.audioBlobAvailable;
     const signalQuality = learningSignalQuality({
       sameAudioComparisonAvailable,
@@ -1525,14 +1679,69 @@ export function buildClassicTranslatorReport(input: {
       consentSnapshot: turn.consentAtRecordingStart,
       signalQuality,
       benchmarkReadySameAudioSample: signalQuality === "high",
+      criticalFactCategories: turn.originalText
+        ? detectCriticalFactCategories(turn.originalText)
+        : [],
+      evidenceOrigin,
     };
   }
-  const semanticRescueTurns = turns.filter((turn) =>
+  const semanticRescueTurns = organicTurns.filter((turn) =>
     turn.sttRoutingDecision === "audio_rescue_semantic_failure");
   const semanticRescueSuccesses = semanticRescueTurns.filter((turn) =>
     turn.status === "success").length;
-  const safePathTurns = turns.filter((turn) =>
+  const safePathTurns = organicTurns.filter((turn) =>
     turn.sttRoutingDecision === "audio_safe_mode_circuit_breaker");
+  const featureFlagSafePathTurns = organicTurns.filter((turn) =>
+    turn.sttRoutingDecision === "audio_safe_mode_feature_flag");
+  const coldFallbackTurns = organicTurns.filter((turn) =>
+    turn.fallbackReason === "realtime_not_ready_at_recording_start");
+  const connectionLossFallbackTurns = organicTurns.filter((turn) =>
+    turn.fallbackReason === "connection_lost_during_recording" ||
+    turn.sttRoutingDecision === "audio_fallback_connection_loss");
+  const realtimeEligibleTurns = organicTurns.filter((turn) =>
+    turn.sttRoutingDecision !== "audio_safe_mode_feature_flag" &&
+    turn.sttRoutingDecision !== "audio_safe_mode_circuit_breaker");
+  const realtimeAttemptedTurns = realtimeEligibleTurns.filter((turn) =>
+    turn.sttRoutingDecision === "realtime_primary" ||
+    turn.realtimeConnectionReused ||
+    connectionLossFallbackTurns.includes(turn) ||
+    ["empty_transcript", "transcript_timeout", "transcript_not_finalized"]
+      .includes(turn.fallbackReason ?? ""));
+  const realtimeSuccessfulTurns = organicSuccessfulTurns.filter((turn) =>
+    turn.sttRoutingDecision === "realtime_primary");
+  const recoveredDegradationTurns = organicSuccessfulTurns.filter((turn) =>
+    connectionLossFallbackTurns.includes(turn) ||
+    turn.sttRoutingDecision === "audio_rescue_semantic_failure" ||
+    turn.diagnosticEvents.some((event) =>
+      event.eventOrigin === "organic_runtime" &&
+      event.recoverySucceeded === true &&
+      (event.recoveryAction === "audio_upload_fallback" ||
+        event.recoveryAction === "retry_translation_once") &&
+      event.eventKind !== "expected_fallback"));
+  const organicFallbackTurns = organicTurns.filter((turn) =>
+    turn.transcriptionPath === "audio_upload_fallback");
+  const organicFallbackSuccesses = organicFallbackTurns.filter((turn) =>
+    turn.status === "success");
+  const organicFallbackReasons = organicTurns.reduce<Record<string, number>>(
+    (counts, turn) => {
+      if (turn.fallbackReason) {
+        counts[turn.fallbackReason] = (counts[turn.fallbackReason] ?? 0) + 1;
+      }
+      return counts;
+    },
+    {},
+  );
+  const fallbackRecoveryTurns = organicFallbackTurns.filter((turn) =>
+    !coldFallbackTurns.includes(turn) &&
+    !featureFlagSafePathTurns.includes(turn) &&
+    !safePathTurns.includes(turn));
+  const fallbackRecoverySuccesses = fallbackRecoveryTurns.filter((turn) =>
+    turn.status === "success");
+  const webKitEnvironment = /(?:iPhone|iPad|iPod)|AppleWebKit/i.test(input.userAgent) &&
+    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|OPiOS)/i.test(input.userAgent);
+  const webKitSafeModeTurns = webKitEnvironment ? featureFlagSafePathTurns : [];
+  const summaryEligibleTurns = organicTurns.filter((turn) => turn.summaryEligible);
+  const summaryGeneratedTurns = organicTurns.filter((turn) => turn.summaryGenerated);
   const organicUnsupportedLanguageEvents = diagnosticEvents.filter((event) =>
     event.eventOrigin === "organic_runtime" &&
     event.apiCode === "unsupported_language" &&
@@ -1549,7 +1758,27 @@ export function buildClassicTranslatorReport(input: {
       return counts;
     }, {}),
   ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
+  const recordingStartAttempts = input.recordingStartAttempts ?? [];
+  const activeRecordingStartAttempt = input.activeRecordingStartAttempt ?? null;
+  const recordingStartTimeouts = recordingStartAttempts.filter((attempt) =>
+    attempt.outcome === "timeout");
+  const recordingStartFailures = recordingStartAttempts.filter((attempt) =>
+    attempt.outcome !== null && attempt.outcome !== "recording_started");
+  const activeRecordingStartStuck = Boolean(
+    activeRecordingStartAttempt &&
+    activeRecordingStartAttempt.ageMs >= RECORDING_START_STUCK_THRESHOLD_MS,
+  );
+  const preTurnIncidentCount = recordingStartFailures.length +
+    (activeRecordingStartStuck ? 1 : 0);
+  const recordingStartOutcomeCounts = recordingStartAttempts.reduce<Record<string, number>>(
+    (counts, attempt) => {
+      if (attempt.outcome) counts[attempt.outcome] = (counts[attempt.outcome] ?? 0) + 1;
+      return counts;
+    },
+    {},
+  );
   const recommendedQaFocus = [
+    ...(preTurnIncidentCount > 0 ? ["mic_start_reliability"] : []),
     ...(turns.some((turn) => turn.microphoneAcquisitionOutcome === "timeout")
       ? ["microphone_acquisition"] : []),
     ...(turns.some((turn) => turn.capturePathOutcome === "invalid_audio_capture")
@@ -1559,8 +1788,56 @@ export function buildClassicTranslatorReport(input: {
     ...(semanticRescueTurns.length > semanticRescueSuccesses
       ? ["semantic_rescue_failures"] : []),
   ];
-  const incidentTimeline = turns.flatMap((turn) =>
-    turn.diagnosticEvents.flatMap((event) => {
+  const connectionTimelineItems = (input.realtimeConnectionStateTimeline ?? [])
+    .flatMap((event, index) => {
+      const stage = event.event === "temporary_disconnect"
+        ? "temporary_disconnect"
+        : event.event === "disconnect_recovered"
+          ? "disconnect_recovered"
+          : event.event === "connection_error"
+            ? "connection_lost"
+            : null;
+      return stage ? [{
+        turnId: null,
+        at: event.at,
+        eventId: `webrtc-${index}-${stage}`,
+        eventOrigin: "organic_runtime" as const,
+        eventKind: stage === "connection_lost"
+          ? "degradation" as const : "info" as const,
+        stage,
+        apiCode: null,
+        recoveryAction: stage === "connection_lost"
+          ? "audio_upload_fallback" as const : "none" as const,
+        recoverySucceeded: null,
+        qaScenarioId: null,
+      }] : [];
+    });
+  const recordingStartTimelineItems = recordingStartAttempts.flatMap((attempt) =>
+    attempt.timeline.map((event, index) => ({
+      turnId: null,
+      at: event.at,
+      eventId: `recording-start-${attempt.attemptId}-${index}`,
+      eventOrigin: "organic_runtime" as const,
+      eventKind: event.phase === "timeout" ||
+        (event.phase === "cleanup_completed" && attempt.outcome !== "recording_started")
+        ? "degradation" as const : "info" as const,
+      stage: event.phase === "user_click" ? "recording_start_clicked" : event.phase,
+      apiCode: event.phase === "timeout" ? "recording_start_timeout" : null,
+      recoveryAction: event.phase === "timeout"
+        ? "reset_to_idle" as const : "none" as const,
+      recoverySucceeded: event.phase === "cleanup_completed" &&
+        attempt.outcome !== "recording_started" ? true : null,
+      qaScenarioId: null,
+    })),
+  );
+  const incidentTimeline = [...turns.flatMap((turn) => {
+    const qaEvent = turn.diagnosticEvents.find((event) =>
+      event.eventOrigin === "qa_simulation");
+    const qaScenarioId = qaEvent?.qaScenarioId ?? null;
+    const eventOrigin = qaEvent
+      ? "qa_simulation" as const
+      : "organic_runtime" as const;
+    const diagnosticItems = turn.diagnosticEvents.flatMap((event) => {
       const code = event.apiCode ?? "";
       const relevant = event.eventKind !== "expected_fallback" ||
         code === "realtime_not_ready_at_recording_start" ||
@@ -1577,8 +1854,178 @@ export function buildClassicTranslatorReport(input: {
         recoverySucceeded: event.recoverySucceeded,
         qaScenarioId: event.qaScenarioId,
       }] : [];
-    }))
+    });
+    const synthetic = [
+      ...(turn.trackRebindStartedAt ? [{
+        turnId: turn.turnId,
+        at: turn.trackRebindStartedAt,
+        eventId: `track-rebind-started-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "info" as const,
+        stage: "track_rebind_started",
+        apiCode: null,
+        recoveryAction: "none" as const,
+        recoverySucceeded: null,
+        qaScenarioId,
+      }] : []),
+      ...(turn.trackRebindCompletedAt ? [{
+        turnId: turn.turnId,
+        at: turn.trackRebindCompletedAt,
+        eventId: `track-rebind-completed-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "info" as const,
+        stage: "track_rebind_completed",
+        apiCode: turn.trackRebindOutcome ?? null,
+        recoveryAction: "none" as const,
+        recoverySucceeded: turn.trackRebindOutcome === "success" ||
+          turn.trackRebindOutcome === "temporary_disconnect_recovered",
+        qaScenarioId,
+      }] : []),
+      ...(turn.summaryGenerated && turn.translationReadyAt ? [{
+        turnId: turn.turnId,
+        at: turn.translationReadyAt,
+        eventId: `summary-generated-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "info" as const,
+        stage: "summary_generated",
+        apiCode: null,
+        recoveryAction: "none" as const,
+        recoverySucceeded: null,
+        qaScenarioId,
+      }] : []),
+      ...(turn.summaryCriticalFactWarningCount > 0 && turn.translationReadyAt ? [{
+        turnId: turn.turnId,
+        at: turn.translationReadyAt,
+        eventId: `summary-warning-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "degradation" as const,
+        stage: "summary_warning",
+        apiCode: "summary_critical_fact_guard",
+        recoveryAction: "none" as const,
+        recoverySucceeded: null,
+        qaScenarioId,
+      }] : []),
+      ...(turn.transcriptionPath === "audio_upload_fallback" &&
+      turn.recordingStoppedAt ? [{
+        turnId: turn.turnId,
+        at: turn.recordingStoppedAt,
+        eventId: `fallback-started-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "info" as const,
+        stage: "fallback_started",
+        apiCode: turn.fallbackReason,
+        recoveryAction: "audio_upload_fallback" as const,
+        recoverySucceeded: null,
+        qaScenarioId,
+      }] : []),
+      ...(turn.transcriptionPath === "audio_upload_fallback" &&
+      turn.status === "success" && turn.translationReadyAt ? [{
+        turnId: turn.turnId,
+        at: turn.translationReadyAt,
+        eventId: `fallback-success-${turn.turnId}`,
+        eventOrigin,
+        eventKind: "info" as const,
+        stage: "fallback_success",
+        apiCode: turn.fallbackReason,
+        recoveryAction: "audio_upload_fallback" as const,
+        recoverySucceeded: true,
+        qaScenarioId,
+      }] : []),
+    ];
+    return [...diagnosticItems, ...synthetic];
+  }), ...connectionTimelineItems, ...recordingStartTimelineItems]
     .sort((left, right) => left.at.localeCompare(right.at));
+
+  const realtimeAttemptSuccessRate = rate(
+    realtimeSuccessfulTurns.length,
+    realtimeAttemptedTurns.length,
+  );
+  const productTurnSuccessRate = rate(
+    organicSuccessfulTurns.length,
+    organicTurns.length,
+  );
+  const sessionTurnSuccessRate = rate(successful.length, turns.length);
+  const primaryPathSuccessRate = realtimeAttemptSuccessRate;
+  const fallbackRecoveryRate = rate(
+    fallbackRecoverySuccesses.length,
+    fallbackRecoveryTurns.length,
+  );
+  const audioFallbackSuccesses = fallbackAll.filter((turn) =>
+    turn.status === "success").length;
+  const organicDiagnosticEvents = organicTurns.flatMap((turn) =>
+    turn.diagnosticEvents.filter((event) => event.eventOrigin === "organic_runtime"));
+  const organicRealtimeFailureEvents = organicDiagnosticEvents.filter((event) =>
+    event.category === "REALTIME" &&
+    event.eventKind !== "expected_fallback" &&
+    (event.eventKind === "failure" || event.eventKind === "degradation"));
+  const realtimeStabilityFailure = connectionLossFallbackTurns.length > 0 ||
+    organicRealtimeFailureEvents.some((event) =>
+      event.stage === "realtime_finalization" ||
+      event.stage === "connection_lost" ||
+      event.apiCode === "connection_lost_during_recording") ||
+    (input.realtimeCircuitBreakerTrips ?? 0) > 0 ||
+    (realtimeAttemptedTurns.length >= 3 && realtimeAttemptSuccessRate !== null &&
+      realtimeAttemptSuccessRate < 0.9);
+  const autoplayEnabledTurns = organicSuccessfulTurns.filter((turn) =>
+    turn.autoplayEnabled);
+  const ttsRequestedTurns = organicSuccessfulTurns.filter((turn) =>
+    turn.ttsRequested);
+  const ttsGenerationSuccesses = ttsRequestedTurns.filter((turn) =>
+    turn.ttsGenerationOutcome === "success");
+  const ttsGenerationFailures = ttsRequestedTurns.filter((turn) =>
+    turn.ttsGenerationOutcome === "request_failed");
+  const ttsPlaybackStartedTurns = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackOutcome === "started" ||
+    turn.ttsPlaybackOutcome === "completed");
+  const ttsPlaybackBlockedTurns = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackOutcome === "blocked");
+  const ttsPlaybackFailures = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackOutcome === "failed");
+  const manualTtsRequests = ttsRequestedTurns.filter((turn) =>
+    turn.ttsRequestReason === "manual_play");
+  const organicTtsDegradations = organicDiagnosticEvents.filter((event) =>
+    event.category === "TTS" && event.eventKind === "degradation");
+  const qaTerminalFailures = qaTurns.filter((turn) => turn.status === "failed");
+  const qaDegradations = qaEvents.filter((event) =>
+    event.eventKind === "degradation");
+  const qaFailures = qaEvents.filter((event) => event.eventKind === "failure");
+  const qaResult = qaTurns.length === 0
+    ? "not_run" as const
+    : qaTerminalFailures.length > 0
+      ? "passed_with_expected_terminal_failures" as const
+      : "passed" as const;
+  const keyFindings = [
+    ...(organicTurns.length > 0 && organicSuccessfulTurns.length === organicTurns.length
+      ? ["all_organic_turns_successful"] : []),
+    ...(realtimeStabilityFailure ? ["realtime_unstable"] : []),
+    ...(realtimeSuccessfulTurns.filter((turn) =>
+      turn.realtimeConnectionReused && turn.warmStart).length >= 3 &&
+      !realtimeStabilityFailure &&
+      realtimeAttemptSuccessRate === 1 ? ["realtime_warm_path_healthy"] : []),
+    ...(activeRecordingStartStuck ? ["recording_start_stuck"] : []),
+    ...(recordingStartTimeouts.length > 0 ? ["microphone_start_timeout"] : []),
+    ...(recordingStartFailures.length > 0 ? ["pre_turn_failure"] : []),
+    ...(organicFallbackTurns.length > 0 &&
+      organicFallbackSuccesses.length === organicFallbackTurns.length
+      ? ["fallback_healthy"] : []),
+    ...(userPerceived.median !== null && userPerceived.median > 10_000
+      ? ["performance_slow"] : []),
+    ...(organicTurns.some((turn) => turn.audioQualityMetrics.source === "unavailable")
+      ? ["audio_quality_metrics_unavailable"] : []),
+    ...(reviewedOrganicQualityTurns.length === 0 && organicTurns.length > 0
+      ? ["learning_ground_truth_missing"] : []),
+    ...(summaryGeneratedTurns.length > 0 ? ["summary_available"] : []),
+    ...(ttsGenerationFailures.length > 0 ? ["tts_unavailable"] : []),
+    ...(ttsPlaybackBlockedTurns.length > 0 ? ["tts_playback_blocked"] : []),
+    ...(benchmarkComparisons.length > 0 && speechBenchmarkSummary.sameAudioGroundTruthReviewed < 5
+      ? ["speech_benchmark_insufficient_evidence"] : []),
+    ...(benchmarkComparisons.some((comparison) =>
+      comparison.benchmarkStatus === "pending")
+      ? ["speech_benchmark_collecting"] : []),
+    ...(benchmarkComparisons.some((comparison) =>
+      comparison.benchmarkStatus === "completed" && comparison.groundTruthStatus === "unreviewed")
+      ? ["speech_benchmark_ready_for_review"] : []),
+  ];
 
   return {
     reportVersion: REPORT_VERSION,
@@ -1621,20 +2068,42 @@ export function buildClassicTranslatorReport(input: {
     ttsModel: CLASSIC_TTS_MODEL,
     ttsSpeed: input.ttsSpeed,
     totalTurns: turns.length,
+    recordingStartAttempts: recordingStartAttempts.length,
+    recordingStartSuccesses: recordingStartAttempts.filter((attempt) =>
+      attempt.outcome === "recording_started").length,
+    recordingStartTimeouts: recordingStartTimeouts.length,
+    recordingStartFailures: recordingStartFailures.length,
+    preTurnIncidentCount,
+    activeRecordingStartAttempt,
+    recordingStartOutcomeCounts,
     successfulTurns: successful.length,
     failedTurns: failedTurns.length,
     failureCount: failedTurns.length,
-    diagnosticEventCount: diagnosticEvents.length,
-    organicRuntimeFailureCount: diagnosticEvents.filter((event) =>
-      event.eventOrigin === "organic_runtime" && event.eventKind === "failure").length,
+    sessionTurnSuccessRate,
+    organicTotalTurns: organicTurns.length,
+    organicSuccessfulTurns: organicSuccessfulTurns.length,
+    organicFailedTurns: organicFailedTurns.length,
+    organicProductTurnSuccessRate: productTurnSuccessRate,
+    organicRealtimeEligibleTurns: realtimeEligibleTurns.length,
+    organicRealtimeAttemptedTurns: realtimeAttemptedTurns.length,
+    organicRealtimeSuccessfulTurns: realtimeSuccessfulTurns.length,
+    organicRealtimeAttemptSuccessRate: realtimeAttemptSuccessRate,
+    organicFallbackTurns: organicFallbackTurns.length,
+    organicFallbackSuccessRate: rate(
+      organicFallbackSuccesses.length,
+      organicFallbackTurns.length,
+    ),
+    diagnosticEventCount: diagnosticEvents.length + recordingStartTimelineItems.length,
+    organicRuntimeFailureCount: organicDiagnosticEvents.filter((event) =>
+      event.eventKind === "failure").length,
     qaSimulationEventCount: diagnosticEvents.filter((event) =>
       event.eventOrigin === "qa_simulation").length,
     degradationCount: diagnosticEvents.filter((event) =>
       event.eventKind === "degradation").length,
     expectedFallbackCount: diagnosticEvents.filter((event) =>
       event.eventKind === "expected_fallback").length,
-    organicRuntimeDegradationCount: diagnosticEvents.filter((event) =>
-      event.eventOrigin === "organic_runtime" && event.eventKind === "degradation").length,
+    organicRuntimeDegradationCount: organicDiagnosticEvents.filter((event) =>
+      event.eventKind === "degradation").length,
     qaSimulationFailureCount: diagnosticEvents.filter((event) =>
       event.eventOrigin === "qa_simulation" && event.eventKind === "failure").length,
     qaSimulationDegradationCount: diagnosticEvents.filter((event) =>
@@ -1655,15 +2124,43 @@ export function buildClassicTranslatorReport(input: {
     successfulRecoveries: diagnosticEvents.filter(
       (event) => event.recoverySucceeded === true,
     ).length,
+    recoveredTranslationSttTurns: recoveredDegradationTurns.length,
     qaScenariosTriggered,
     qaScenariosRecovered,
+    qaSummary: {
+      qaTurns: qaTurns.length,
+      qaScenariosTriggered,
+      qaScenariosRecovered,
+      qaTerminalFailures: qaTerminalFailures.length,
+      qaFailures: qaFailures.length,
+      qaDegradations: qaDegradations.length,
+      qaReviewCandidates: qaTurns.filter((turn) =>
+        turn.recognitionReviewStatus !== null).length,
+      qaResult,
+    },
     sttAcceptedCount: turns.filter((turn) =>
       turn.recognitionReviewStatus === "accepted").length,
     sttCorrectionCount: turns.filter((turn) =>
       turn.recognitionReviewStatus === "corrected").length,
     sttUnreviewedCount: turns.filter((turn) =>
       turn.recognitionReviewStatus === "unreviewed").length,
-    speechQualitySampleCount: reviewedQualityTurns.length,
+    speechQualitySampleCount: turns.filter((turn) =>
+      turn.speechQualitySampleId !== null).length,
+    speechFeedbackCount: Array.from(input.feedbackByTurn?.values() ?? []).filter((feedback) =>
+      feedback.speechFeedbackStatus !== null && feedback.speechFeedbackStatus !== undefined).length,
+    speechAcceptedCount: turns.filter((turn) => turn.recognitionReviewStatus === "accepted").length,
+    speechCorrectedCount: turns.filter((turn) => turn.recognitionReviewStatus === "corrected").length,
+    translationPositiveFeedbackCount: Array.from(input.feedbackByTurn?.values() ?? []).filter((feedback) =>
+      feedback.translationFeedback === "positive").length,
+    translationNegativeFeedbackCount: Array.from(input.feedbackByTurn?.values() ?? []).filter((feedback) =>
+      feedback.translationFeedback === "negative").length,
+    ttsFeedbackCount: Array.from(input.feedbackByTurn?.values() ?? []).filter((feedback) =>
+      feedback.ttsFeedback !== null && feedback.ttsFeedback !== undefined).length,
+    benchmarkGroundTruthCount: speechBenchmarkSummary.sameAudioGroundTruthReviewed,
+    speechReviewCandidateCount: turns.filter((turn) =>
+      turn.recognitionReviewStatus !== null).length,
+    organicSpeechReviewCandidateCount: organicTurns.filter((turn) =>
+      turn.recognitionReviewStatus !== null).length,
     correctionRate: rate(
       turns.filter((turn) => turn.recognitionReviewStatus === "corrected").length,
       reviewedQualityTurns.length,
@@ -1673,64 +2170,125 @@ export function buildClassicTranslatorReport(input: {
     audioIncludedTurnCount: turns.filter((turn) =>
       turn.audioIncludedInDiagnosticBundle).length,
     organicFailureRate: rate(organicFailedTurns.length, organicTurns.length),
+    productTurnSuccessRate,
+    primaryPathSuccessRate,
+    fallbackRecoveryRate,
+    keyFindings,
     executiveSummary: {
       overallHealth: organicFailedTurns.length > 0
         ? "problematic" as const
-        : diagnosticEvents.some((event) =>
-            event.eventOrigin === "organic_runtime" &&
-            event.eventKind === "degradation") ||
+        : preTurnIncidentCount > 0 ||
+            realtimeStabilityFailure ||
+            organicDiagnosticEvents.some((event) =>
+              event.eventKind === "degradation") ||
             safePathTurns.length > 0
           ? "degraded" as const
           : "healthy" as const,
       turns: turns.length,
       successful: successful.length,
       terminalFailures: failedTurns.length,
+      organicTurns: organicTurns.length,
+      organicSuccessful: organicSuccessfulTurns.length,
+      organicTerminalFailures: organicFailedTurns.length,
       organicFailures: organicFailedTurns.length,
-      recoveredTurns: semanticRescueSuccesses,
-      realtimeSuccessRate: rate(
-        successful.filter((turn) => turn.sttRoutingDecision === "realtime_primary").length,
-        turns.filter((turn) => turn.sttRoutingDecision === "realtime_primary").length,
+      primaryFinding: realtimeAttemptedTurns.length > 0 &&
+        realtimeSuccessfulTurns.length === 0 && organicFallbackSuccesses.length > 0
+        ? "realtime_unstable_fallback_healthy" as const
+        : null,
+      keyFindings,
+      productTurnSuccessRate,
+      organicProductTurnSuccessRate: productTurnSuccessRate,
+      sessionTurnSuccessRate,
+      primaryPathSuccessRate,
+      fallbackRecoveryRate,
+      recoveredTurns: recoveredDegradationTurns.length,
+      recoveredDegradationTurns: recoveredDegradationTurns.length,
+      realtimeEligibleTurns: realtimeEligibleTurns.length,
+      realtimeAttemptedTurns: realtimeAttemptedTurns.length,
+      realtimeSuccessfulTurns: realtimeSuccessfulTurns.length,
+      realtimeAttemptSuccessRate,
+      realtimeSuccessRate: realtimeAttemptSuccessRate,
+      coldFallbackTurns: coldFallbackTurns.length,
+      connectionLossFallbackTurns: connectionLossFallbackTurns.length,
+      audioFallbackTurns: organicFallbackTurns.length,
+      audioFallbackSuccessRate: rate(
+        organicFallbackSuccesses.length,
+        organicFallbackTurns.length,
       ),
-      audioFallbackSuccessRate: rate(fallback.length, fallbackAll.length),
+      webKitSafeModeTurns: webKitSafeModeTurns.length,
       sttRescueAttempts: semanticRescueTurns.length,
       sttRescueSuccessRate: rate(semanticRescueSuccesses, semanticRescueTurns.length),
       micTimeouts: turns.filter((turn) =>
         turn.microphoneAcquisitionOutcome === "timeout").length,
       invalidAudioCaptures: turns.filter((turn) =>
         turn.capturePathOutcome === "invalid_audio_capture").length,
+      summaryEligibleTurns: summaryEligibleTurns.length,
+      summaryGeneratedTurns: summaryGeneratedTurns.length,
+      reviewedLearningSamples: reviewedOrganicQualityTurns.length,
+      ttsRequestSuccessRate: rate(
+        ttsGenerationSuccesses.length,
+        ttsRequestedTurns.length,
+      ),
+      ttsPlaybackSuccessRate: rate(
+        ttsPlaybackStartedTurns.length,
+        ttsPlaybackStartedTurns.length +
+          ttsPlaybackBlockedTurns.length +
+          ttsPlaybackFailures.length,
+      ),
+      qa: {
+        qaTurns: qaTurns.length,
+        qaTerminalFailures: qaTerminalFailures.length,
+        qaResult,
+      },
+      recordingStartAttempts: recordingStartAttempts.length,
+      recordingStartSuccesses: recordingStartAttempts.filter((attempt) =>
+        attempt.outcome === "recording_started").length,
+      recordingStartTimeouts: recordingStartTimeouts.length,
+      recordingStartFailures: recordingStartFailures.length,
+      preTurnIncidentCount,
+      activeRecordingStartAttempt,
+      recordingStartOutcomeCounts,
       topOrganicFailureCode,
       recommendedQaFocus,
     },
     learningSummary: {
-      reviewedSpeechSamples: reviewedQualityTurns.length,
-      acceptedSpeechSamples: turns.filter((turn) =>
+      reviewedSpeechSamples: reviewedOrganicQualityTurns.length,
+      acceptedSpeechSamples: organicTurns.filter((turn) =>
         turn.recognitionReviewStatus === "accepted").length,
-      correctedSpeechSamples: turns.filter((turn) =>
+      correctedSpeechSamples: organicTurns.filter((turn) =>
         turn.recognitionReviewStatus === "corrected").length,
-      sameAudioComparisonCount: comparisons.filter((comparison) =>
+      sameAudioComparisonCount: organicTurns.filter((turn) =>
+        Boolean(turn.sttCandidateComparison?.rescue)).length,
+      realtimeToRescueTranscriptDisagreementCount: organicTurns.filter((turn) =>
+        turn.sttCandidateComparison?.didTranscriptChange === true).length,
+      sessionSameAudioComparisonCount: comparisons.filter((comparison) =>
         comparison.rescue !== null).length,
-      realtimeToRescueTranscriptDisagreementCount: comparisons.filter((comparison) =>
-        comparison.didTranscriptChange === true).length,
       semanticRescueAttempts: semanticRescueTurns.length,
       semanticRescueSuccesses,
       semanticRescueFailures: semanticRescueTurns.length - semanticRescueSuccesses,
       semanticCircuitBreakerTrips: input.realtimeSemanticCircuitBreakerTrips ?? 0,
       organicUnsupportedLanguageCount: organicUnsupportedLanguageEvents.length,
       fallbackPreferredDueToCircuitBreakerCount: safePathTurns.length,
-      benchmarkReadySameAudioSampleCount: turns.filter((turn) =>
+      benchmarkReadySameAudioSampleCount: organicTurns.filter((turn) =>
         turn.learningSignal?.benchmarkReadySameAudioSample).length,
     },
+    speechBenchmarkSummary,
     sttRoutingSummary: {
-      realtimePrimaryTurns: turns.filter((turn) =>
+      realtimePrimaryTurns: organicTurns.filter((turn) =>
         turn.sttRoutingDecision === "realtime_primary").length,
-      realtimePrimarySuccesses: successful.filter((turn) =>
+      realtimePrimarySuccesses: organicSuccessfulTurns.filter((turn) =>
         turn.sttRoutingDecision === "realtime_primary").length,
-      coldFallbackTurns: turns.filter((turn) =>
-        turn.sttRoutingDecision === "audio_fallback_cold").length,
-      coldFallbackSuccesses: successful.filter((turn) =>
-        turn.sttRoutingDecision === "audio_fallback_cold").length,
+      coldFallbackTurns: coldFallbackTurns.length,
+      coldFallbackSuccesses: coldFallbackTurns.filter((turn) =>
+        turn.status === "success").length,
+      connectionLossFallbackTurns: connectionLossFallbackTurns.length,
+      connectionLossFallbackSuccesses: connectionLossFallbackTurns.filter((turn) =>
+        turn.status === "success").length,
       semanticRescueAttempts: semanticRescueTurns.length,
       semanticRescueSuccesses,
+      semanticRescueTurns: semanticRescueTurns.length,
+      semanticSafeModeTurns: safePathTurns.length,
+      featureFlagSafeModeTurns: featureFlagSafePathTurns.length,
       circuitBreakerSafePathTurns: safePathTurns.length,
       circuitBreakerSafePathSuccesses: safePathTurns.filter((turn) =>
         turn.status === "success").length,
@@ -1738,14 +2296,14 @@ export function buildClassicTranslatorReport(input: {
         turn.diagnosticEvents.some((event) =>
           event.eventOrigin === "qa_simulation") &&
         turn.sttRoutingDecision !== "realtime_primary").length,
-      terminalSttFailures: turns.filter((turn) =>
+      terminalSttFailures: organicTurns.filter((turn) =>
         turn.status === "failed" &&
         (turn.failureCategory === "TRANSCRIPTION" || turn.failureCategory === "REALTIME" ||
           turn.apiErrorCode === "unsupported_language")).length,
     },
     incidentTimeline,
     reportIntegrity: {
-      schemaVersion: "translator-report-v5.2.1",
+      schemaVersion: "translator-report-v5.2.5",
       reportRevision: REPORT_REVISION,
       sessionComplete: false,
       persistedSnapshotUsed: input.persistedSnapshotUsed === true,
@@ -1779,6 +2337,8 @@ export function buildClassicTranslatorReport(input: {
       sourceConnectionAttempts.filter((attempt) => attempt.status === "failed").length,
     reconnectCount: input.reconnectCount ??
       sourceConnectionAttempts.filter((attempt) => attempt.reason === "reconnect").length,
+    realtimeConnectionStateTimeline:
+      input.realtimeConnectionStateTimeline ?? [],
     microphoneAcquisitionAttempts: turns.filter((turn) =>
       turn.microphoneAcquisitionAttemptId !== null).length,
     microphoneAcquisitionTimeouts: turns.filter((turn) =>
@@ -1794,9 +2354,9 @@ export function buildClassicTranslatorReport(input: {
         ["empty_transcript", "transcript_timeout", "transcript_not_finalized"]
           .includes(turn.fallbackReason ?? "")).length,
     realtimeCircuitBreakerTrips: input.realtimeCircuitBreakerTrips ?? 0,
-    audioFallbackSuccessCount: successful.filter((turn) =>
-      turn.capturePathOutcome === "audio_fallback_success").length,
+    audioFallbackSuccessCount: audioFallbackSuccesses,
     fallbackReasons,
+    organicFallbackReasons,
     translationStreamingTurns: successful.filter(
       (turn) => turn.translationStreamingUsed,
     ).length,
@@ -1837,18 +2397,98 @@ export function buildClassicTranslatorReport(input: {
     connectionAttempts,
     performanceSummary: {
       allSuccessfulTurns: performanceGroup(successful),
+      organicSuccessfulTurns: performanceGroup(organicSuccessfulTurns),
       realtimeTurns: performanceGroup(realtime),
       audioUploadFallbackTurns: performanceGroup(fallback),
       warmReusedRealtimeTurns: performanceGroup(warmRealtime),
       ttsStreamingTurns: performanceGroup(ttsStreamingTurns),
       nonStreamingTtsTurns: performanceGroup(nonStreamingTtsTurns),
     },
-    bottleneckSummary: bottleneckSummary(successful),
-    preOpenAiBottleneckSummary: preOpenAiBottleneckSummary(successful),
+    bottleneckSummary: bottleneckSummary(organicSuccessfulTurns),
+    preOpenAiBottleneckSummary: preOpenAiBottleneckSummary(organicSuccessfulTurns),
     preOpenAiBottleneckSummaryByGroup: {
       allSuccessfulTurns: preOpenAiBottleneckSummary(successful),
       warmReusedRealtimeTurns: preOpenAiBottleneckSummary(warmRealtime),
       audioUploadFallbackTurns: preOpenAiBottleneckSummary(fallback),
+    },
+    sections: {
+      reliability: {
+        productTurnSuccessRate,
+        organicTotalTurns: organicTurns.length,
+        organicSuccessfulTurns: organicSuccessfulTurns.length,
+        organicFailedTurns: organicFailedTurns.length,
+        sessionTotalTurns: turns.length,
+        sessionSuccessfulTurns: successful.length,
+        sessionTerminalFailures: failedTurns.length,
+        realtimeAttemptedTurns: realtimeAttemptedTurns.length,
+        realtimeSuccessfulTurns: realtimeSuccessfulTurns.length,
+        audioFallbackTurns: organicFallbackTurns.length,
+        audioFallbackSuccesses: organicFallbackSuccesses.length,
+        recoveredDegradationTurns: recoveredDegradationTurns.length,
+        recordingStartAttempts: recordingStartAttempts.length,
+        recordingStartSuccesses: recordingStartAttempts.filter((attempt) =>
+          attempt.outcome === "recording_started").length,
+        recordingStartTimeouts: recordingStartTimeouts.length,
+        recordingStartFailures: recordingStartFailures.length,
+        preTurnIncidentCount,
+      },
+      quality: {
+        reviewedTurns: reviewedOrganicQualityTurns.length,
+        summaryEligibleTurns: summaryEligibleTurns.length,
+        summaryGeneratedTurns: summaryGeneratedTurns.length,
+        audioQualityMeasuredTurns: organicTurns.filter((turn) =>
+          turn.audioQualityMetrics.evidence === "measured").length,
+      },
+      performance: {
+        medianStopToPlaybackStartedMs: userPerceived.median,
+        p90StopToPlaybackStartedMs:
+          "p90" in userPerceived ? userPerceived.p90 : null,
+      },
+      learning: {
+        speechReviewCandidates: organicTurns.filter((turn) =>
+          turn.recognitionReviewStatus !== null).length,
+        reviewedLearningSamples: reviewedOrganicQualityTurns.length,
+        benchmarkReadySameAudioSampleCount: organicTurns.filter((turn) =>
+          turn.learningSignal?.benchmarkReadySameAudioSample).length,
+      },
+      tts: {
+        autoplayEnabledTurns: autoplayEnabledTurns.length,
+        ttsRequestedTurns: ttsRequestedTurns.length,
+        ttsGenerationSuccesses: ttsGenerationSuccesses.length,
+        ttsGenerationFailures: ttsGenerationFailures.length,
+        ttsRequestSuccessRate: rate(
+          ttsGenerationSuccesses.length,
+          ttsRequestedTurns.length,
+        ),
+        ttsPlaybackStartedTurns: ttsPlaybackStartedTurns.length,
+        ttsPlaybackBlockedTurns: ttsPlaybackBlockedTurns.length,
+        ttsPlaybackFailures: ttsPlaybackFailures.length,
+        ttsPlaybackSuccessRate: rate(
+          ttsPlaybackStartedTurns.length,
+          ttsPlaybackStartedTurns.length +
+            ttsPlaybackBlockedTurns.length +
+            ttsPlaybackFailures.length,
+        ),
+        manualTtsRequests: manualTtsRequests.length,
+        organicTtsDegradations: organicTtsDegradations.length,
+      },
+      qa: {
+        qaTurns: qaTurns.length,
+        qaScenariosTriggered,
+        qaScenariosRecovered,
+        qaTerminalFailures: qaTerminalFailures.length,
+        qaFailures: qaFailures.length,
+        qaDegradations: qaDegradations.length,
+        qaReviewCandidates: qaTurns.filter((turn) =>
+          turn.recognitionReviewStatus !== null).length,
+        qaResult,
+      },
+      environment: {
+        appVersion: buildMetadata.appVersion,
+        frontendRuntimeEnvironment: buildMetadata.frontendRuntimeEnvironment,
+        frontendOriginKind: buildMetadata.frontendOriginKind,
+        backendEnvironmentLabel: buildMetadata.backendEnvironmentLabel,
+      },
     },
     turns,
   };
