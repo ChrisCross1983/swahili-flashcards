@@ -279,7 +279,7 @@ and the user feedback is never overridden.
 | Summary | No eligibility, prompt, compression, or critical-fact guard change. |
 | TTS model/voice/streaming | No model, voice, speed, endpoint protocol, or streaming behavior change. |
 | Database and migrations | No schema/source migration changed and no SQL/CLI Production action ran. |
-| Feedback persistence | `TurnFeedbackSheet`, feedback route/client, and persistence semantics are unchanged; existing feedback route tests pass. `synced` remains the success status. |
+| Feedback persistence | The bounded owner-scoped retry extension retains failed feedback locally and retries it opportunistically; existing route/client contract and feedback categories remain unchanged. `synced` remains the confirmed remote-success status. |
 | Mic / Realtime | No recording lifecycle, watchdog, capture, or connection implementation change. |
 
 ## Tests and verification
@@ -347,9 +347,10 @@ then interrupted turn yields `started = 2`, `completed = 1`, `interrupted = 1`,
 and completion rate `0.5`.
 
 No player lifecycle behavior, generation/download, model, voice, cache,
-routing, WebKit policy, Safe-STT, Terra, Summary, feedback persistence,
-database, migration, deployment, or other V5.2.7 behavior changed in this
-follow-up.
+routing, WebKit policy, Safe-STT, Terra, Summary, database, migration,
+deployment, or other V5.2.7 behavior changed in this TTS aggregate follow-up.
+Feedback persistence is separately extended only by the bounded opportunistic
+retry documented below.
 
 ## Changed files and purpose
 
@@ -370,9 +371,12 @@ follow-up.
 ## Performance and privacy
 
 There are no extra model calls, STT calls, TTS calls, translation calls,
-network round trips, blocking lookup, or playback retry. The added work is local
-event bookkeeping and a few scalar fields; critical-path latency is unchanged
-apart from negligible callback work.
+blocking lookups, or playback retries. The only new network traffic is a bounded
+opportunistic POST retry for feedback whose earlier direct POST failed; it uses
+the existing feedback endpoint and never runs as a timer or polling loop. The
+TTS lifecycle work itself is local event bookkeeping and scalar diagnostics, so
+the normal translation/TTS critical path is unchanged apart from negligible
+callback work.
 
 New diagnostics contain only timestamps, scalar playback positions, generated
 audio byte count/MIME, text length, and opaque local IDs. They do not add raw
@@ -390,8 +394,6 @@ sharing. Existing consent and feedback behavior remains authoritative.
 - The Kiswahili sample warrants further evidence collection, not a phrase-level
   correction. Future model/prompt evaluation should use reviewed samples under
   the preserved Safe-STT parity version.
-- No real Mac or iPhone browser run was performed in this workspace; manual QA
-  remains required.
 
 ## Manual QA plan
 
@@ -432,11 +434,263 @@ sharing. Existing consent and feedback behavior remains authoritative.
 6. Confirm translation, summary eligibility/generation, and normal feedback UX
    are unchanged. No Live/V6 screen or migration action is part of this QA.
 
+## Final Production feedback sync audit
+
+### Production trigger
+
+The final Production iPhone session showed two distinct outcomes. The first TTS
+feedback submission ("Vorlesen stimmt nicht") was captured locally with
+`feedbackType = "tts"`, `ttsFeedback = "negative"`, and
+`feedbackPersistenceStatus = "sync_failed"`. A shortly later speech-recognition
+feedback submission saved successfully with `feedbackPersistenceStatus =
+"synced"`. Since the Production feedback migration and schema are working, this
+is treated as a transient client/network/server-write outcome, not as evidence
+for a schema change.
+
+### Previous persistence call graph and finding
+
+```text
+TurnFeedbackSheet.save()
+  -> createSavedTurnFeedback(... sync_pending)
+  -> onCaptured() -> TranslatorView.feedbackByTurnRef Map
+  -> submitTranslatorFeedback()
+  -> POST /api/translator/feedback
+  -> server owner-authenticated upsert on (owner_key, translation_entry_id)
+  -> success: onSaved(... synced)
+  -> failure: onCaptured(... sync_failed) + in-sheet local-only message
+```
+
+Before this follow-up, `feedbackByTurnRef` was only an in-memory `Map`. It held
+the rendered feedback status and report value for the current React session but
+was not IndexedDB, localStorage, sessionStorage, telemetry, or a retry queue.
+The existing `online` event only flushed opt-in telemetry. There was no retry on
+app startup, reload, a later feedback submission, reconnect, or any timer. A
+later successful feedback did not update an older failed item. The failed item
+remained visible only as `sync_failed` in the current in-memory report and was
+lost on reload, history clear, or session teardown.
+
+The failure message is user-visible while the feedback sheet stays open:
+"Rückmeldung erfasst. Die Serverspeicherung ist gerade nicht verfügbar." In
+internal QA it says that the feedback was saved locally. After closing the
+sheet, the existing product UI has no per-item durable pending badge; the report
+is the technical record. Existing telemetry/reporting distinguishes `synced`
+from `sync_failed`, but previously had no `later_retry_succeeded` or
+`permanently_pending` lifecycle value.
+
+### Minimal implementation
+
+The missing recovery path justified a bounded fix, without changing the
+feedback database, schema, API contract, models, routing, or UI categories.
+
+```text
+failed POST
+  -> retain full existing TranslatorFeedbackSubmission in sessionStorage
+  -> status remains sync_failed in the current view
+
+safe later trigger (app startup, window online, or next successful feedback save)
+  -> one queue flush
+  -> at most 10 pending items, one POST attempt each
+  -> success: remove item and mark in-memory status synced when that turn exists
+  -> failure: retain item and increment retryCount
+```
+
+The queue stores the complete pre-existing remote submission payload, including
+the entry ID, rating/categories/comment, language metadata, transcript/
+translation, and diagnostics. This is required to retry the same request;
+nothing new is sent remotely. The queue keeps only the latest item for a
+`translationEntryId`. A direct successful save removes an older pending item for
+that turn before triggering a flush, preventing an old retry from overwriting a
+newer feedback choice.
+
+There is no polling, timer, service worker, background job, unbounded retry
+loop, new dependency, or blocking UX. A flush processes no more than ten items
+and one failure does not stop later items. The server's existing
+`upsert(..., { onConflict: "owner_key,translation_entry_id" })` is the final
+duplicate-row guard; a response lost after a successful write can safely be
+retried as an upsert rather than create a second row.
+
+### Persistence, privacy, and remaining limits
+
+The queue intentionally uses **sessionStorage**, not IndexedDB or localStorage.
+It survives a page reload in the same browser tab/session and enables startup
+recovery, but it can be removed by closing the tab/browser session, browser
+storage cleanup, private-browsing teardown, or storage unavailability. It is
+not a durable cross-session offline-sync system. The original first follow-up
+used one global key; the external-review correction below replaces that unsafe
+shape with queues scoped to the authenticated stable user ID.
+
+`sync_failed` continues to mean: local current-session feedback was captured,
+but the immediate remote POST did not confirm `{ saved: true }`. A retry that
+succeeds changes the current in-memory item to `synced`; after a reload the
+queue can retry it remotely, but there is no historic turn card to update. The
+report schema retains its existing `feedbackPersistenceStatus` values and does
+not fabricate a new remote-status claim.
+
+### External review follow-up
+
+The previous queue incremented `retryCount` after every failed POST but did not
+consult it before the next startup, `online`, or successful-submission flush.
+`MAX_PENDING_FEEDBACK_FLUSH_ITEMS = 10` only capped a single flush; it did not
+cap automatic attempts for an individual payload. That made retries effectively
+unbounded across the lifetime of a tab session.
+
+The queue now has `MAX_AUTOMATIC_FEEDBACK_RETRIES = 3`. Items with
+`retryCount < 3` remain eligible for one attempt at a safe trigger. A third
+failed automatic attempt is retained in the same sessionStorage queue with
+`retryCount = 3`, reported as exhausted by the flush result, and is skipped by
+all later automatic flushes. It is deliberately not deleted. A new explicit
+feedback submission for the same `translationEntryId` replaces the old queued
+payload and starts at `retryCount = 0`; latest-item-per-turn behavior and the
+existing server upsert key are unchanged. Exhausted entries are filtered before
+the ten-item work limit, so they cannot block eligible later feedback.
+
+Pending data is now isolated by the existing authenticated stable Supabase
+`user.id`: the storage key is
+`swahili-flashcards:translator-feedback-pending-v1:<user-id>`. No email, name,
+or other profile data is stored. The server-authenticated classic `/translator`
+page supplies its confirmed user ID to the client at render, and the browser
+Supabase client confirms/updates it through `auth.getUser()` plus
+`onAuthStateChange`. A feedback save captures that owner at submission start;
+its direct success can only remove a queued item for that same owner, and a
+failed direct submission can only enqueue under that same owner.
+
+On logout or account switch the active owner generation changes. A running
+flush checks that owner/generation before each queued POST, stops before later
+items if it is stale, and its late `onSynced` callback cannot mutate the new
+account's in-memory feedback state. The existing `feedbackSyncInFlightRef` is
+the single-flight guard: a changed owner is flushed only after an already
+started old flush finishes. Thus User B never reads, removes, or automatically
+posts User A's owner-scoped queue; returning to User A in the same tab naturally
+finds and may retry User A's own queue. An HTTP request that was already
+initiated while User A was current cannot be retroactively cancelled, but no
+additional queued A item is initiated after the owner change.
+
+The old unscoped pre-review sessionStorage key is intentionally not imported
+into an owner queue: it contains no trustworthy owner binding, so assigning it
+to the current account would reintroduce the privacy/integrity problem. It
+remains untouched in that browser session rather than being silently sent or
+deleted.
+
+Focused tests now prove: retry-count increment; retry of an eligible item;
+retention and non-resubmission at the limit; an exhausted item not blocking a
+later eligible one; a new same-turn submission resetting the count; A/B queue
+isolation; account-switch preservation and later recovery for A; stale-owner
+flush stopping before its second POST; preservation of a newer local queue
+change while an older flush completes; latest-item dedupe; and no resend after
+success/removal. Existing feedback-client and API-route tests continue to prove
+unchanged categories and the server upsert contract
+`owner_key,translation_entry_id`.
+
+Limitations remain intentionally narrow: this is session-scoped best-effort
+recovery, not a cross-session offline queue; exhausted items have no new UI
+badge or manual resend control; and no periodic polling/backoff loop was added.
+The offline-to-online retry path is manually confirmed below. Remaining optional
+manual coverage is the three-attempt exhaustion boundary and logout/login A → B
+→ A owner isolation.
+
+### Manual retry QA result
+
+**PASSED.** A real Classic `/translator` Mac localhost session verified the
+browser retry path without a manual resubmission:
+
+1. One normal translation turn completed and TTS reached its natural end.
+2. The user opened feedback, selected TTS / “Vorlesen stimmt nicht”, and entered
+   `Test Hinweis, hat alles geklappt!`.
+3. The internet connection was disabled before Save. The direct feedback POST
+   failed and the UI correctly displayed: “Rückmeldung lokal gespeichert.
+   Serverspeicherung noch nicht verfügbar.”
+4. The internet connection was restored. The user did **not** press Save again;
+   they only closed the feedback sheet.
+5. The browser `online` event opportunistically retried the retained pending
+   payload through the existing feedback endpoint, and the exported report then
+   showed `feedbackPersistenceStatus = "synced"`.
+
+The exported report also recorded `feedbackType = "tts"`,
+`ttsFeedback = "negative"`, `ttsPlaybackCompletedTurns = 1`,
+`ttsNegativeFeedbackCount = 1`, and
+`ttsNegativeFeedbackWithCompletedPlaybackCount = 1`. This confirms that
+online-event retry is manually proven, no second Save was required, the feedback
+reached confirmed synced state, and natural TTS completion remained intact. The
+negative TTS feedback remains independent user-quality evidence even when the
+technical playback lifecycle is `completed`.
+
+No model, Safe-STT, TTS generation/playback, translation, routing, WebKit,
+database, schema, migration, or `/translator/live` behavior was changed for
+this documentation-only QA closeout. The only added traffic from the retry
+feature is bounded opportunistic delivery of a previously failed feedback POST.
+
+Validation after this external-review correction:
+
+```text
+npx tsc --noEmit                                      PASS
+npx eslint src/app/translator/page.tsx src/components/translator/TranslatorView.tsx src/components/translator/TurnFeedbackSheet.tsx src/components/translator/__tests__/turnFeedback.test.tsx src/lib/translator/feedbackRetry.ts src/lib/translator/__tests__/feedbackRetry.test.ts src/lib/translator/feedbackClient.ts
+                                                     PASS (no warnings)
+npx vitest run src/lib/translator/__tests__/feedbackRetry.test.ts src/components/translator/__tests__/turnFeedback.test.tsx src/lib/translator/__tests__/feedbackClient.test.ts
+                                                     PASS: 3 files / 16 tests
+npx vitest run <43 non-live classic Translator test files>
+                                                     PASS: 43 files / 316 tests
+npm run build                                        PASS
+git diff --check                                     PASS
+npm test                                             759 passed / 1 known unrelated failure
+```
+
+The sole full-suite failure remains
+`src/components/trainer/__tests__/phase2-ux.test.ts`, whose historical literal
+expectation is `if (focusedTrainerMode)`; no trainer source was touched.
+
+### Tests and validation
+
+Added `feedbackRetry.test.ts` covers full-payload retention after failure,
+later successful retry/removal, latest-item-per-turn dedupe, a failed item not
+blocking a later one, the ten-item flush bound, and already-removed/synced items
+not being resent. `turnFeedback.test.tsx` confirms local capture still precedes
+the POST and now invokes the failure/recovery hooks. Existing feedback client
+and server-route tests preserve all categories and the server upsert behavior.
+
+Validation commands for this follow-up:
+
+```text
+npx tsc --noEmit
+npx eslint src/components/translator/TranslatorView.tsx src/components/translator/TurnFeedbackSheet.tsx src/components/translator/__tests__/turnFeedback.test.tsx src/lib/translator/feedbackClient.ts src/lib/translator/feedbackRetry.ts src/lib/translator/__tests__/feedbackClient.test.ts src/lib/translator/__tests__/feedbackRetry.test.ts
+npx vitest run src/lib/translator/__tests__/feedbackRetry.test.ts src/lib/translator/__tests__/feedbackClient.test.ts src/components/translator/__tests__/turnFeedback.test.tsx
+npx vitest run <all non-live classic Translator tests>
+npm run build
+git diff --check
+npm test
+```
+
+Final results after the external-review correction: TypeScript passed; targeted
+ESLint passed with no warnings; the focused recovery run has 3 files / 16 tests
+passing; the complete classic Translator suite has 43 files / 316 tests
+passing; `npm run build` passed; and `git diff --check` passed. Full `npm test`
+has 759 passing tests and one unchanged unrelated failure (760 total):
+`src/components/trainer/__tests__/phase2-ux.test.ts` still expects the literal
+`if (focusedTrainerMode)`. No trainer code was changed. No migration, Production
+SQL, deployment, commit, push, or `/translator/live` change was made.
+
+**Recommendation: manual QA passed; ready for commit/deploy** Test the original failure
+scenario, reload the same tab, restore connectivity or submit another feedback,
+and verify that the old item reaches `synced` remotely without affecting the
+new item. A user-bound durable offline queue is a larger future design if
+cross-session retention becomes necessary.
+
 ## Recommendation and final state
 
-**Ready for manual QA.** The TTS telemetry is now truthful about browser
+**Ready for commit and production deployment.** The TTS telemetry is now truthful about browser
 playback completion, while the Safe-STT audit found no evidence-based code change
 to make. The next decision should be based on reviewed post-V5.2.7 production
 diagnostics and user feedback, not on a speculative phrase-specific STT patch.
 
-All V5.2.7 files, including this report, intentionally remain uncommitted.
+The deployed V5.2.7 checkpoint remains unchanged. The following final
+mini-audit files intentionally remain uncommitted:
+
+```text
+ M docs/translator-v5.2.7-quality-hardening-report.md
+ M src/app/translator/page.tsx
+ M src/components/translator/TranslatorView.tsx
+ M src/components/translator/TurnFeedbackSheet.tsx
+ M src/components/translator/__tests__/turnFeedback.test.tsx
+ M src/lib/translator/feedbackClient.ts
+?? src/lib/translator/__tests__/feedbackRetry.test.ts
+?? src/lib/translator/feedbackRetry.ts
+```

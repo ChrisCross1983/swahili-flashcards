@@ -10,5 +10,5 @@ export default async function TranslatorPage() {
 
   if (!user) redirect("/login");
 
-  return <TranslatorView />;
+  return <TranslatorView initialFeedbackOwnerId={user.id} />;
 }

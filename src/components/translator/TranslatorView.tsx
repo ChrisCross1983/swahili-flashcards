@@ -24,6 +24,18 @@ import {
   TranslatorClientError,
 } from "@/lib/translator/client";
 import {
+  enqueuePendingTranslatorFeedback,
+  flushPendingTranslatorFeedback,
+  removePendingTranslatorFeedback,
+} from "@/lib/translator/feedbackRetry";
+import { submitTranslatorFeedbackSubmission } from "@/lib/translator/feedbackClient";
+import {
+  createTranslatorFeedbackSubmission,
+  type TranslatorFeedbackCategory,
+  type TranslatorFeedbackRating,
+} from "@/lib/translator/feedback";
+import { supabaseBrowser } from "@/lib/supabase/client";
+import {
   getTranslatorSpeechFailure,
   isSpeechAbortError,
   type TranslatorSpeechFailureKind,
@@ -149,7 +161,11 @@ const QA_FAILURE_LABELS = {
   network: "Netzwerkabbruch",
 } as const;
 
-export default function TranslatorView() {
+export default function TranslatorView({
+  initialFeedbackOwnerId,
+}: {
+  initialFeedbackOwnerId: string;
+}) {
   const [state, dispatch] = useReducer(translatorReducer, initialTranslatorState);
   const [speechFeedback, setSpeechFeedback] = useState<{
     kind: TranslatorSpeechFailureKind;
@@ -263,6 +279,48 @@ export default function TranslatorView() {
     new Map<string, ClassicTranslatorAudioMetadata>(),
   );
   const feedbackByTurnRef = useRef(new Map<string, SavedTurnFeedback>());
+  const feedbackSyncInFlightRef = useRef(false);
+  const feedbackOwnerIdRef = useRef<string | null>(initialFeedbackOwnerId);
+  const feedbackOwnerGenerationRef = useRef(0);
+
+  const markPendingFeedbackSynced = useCallback((entryId: string) => {
+    const current = feedbackByTurnRef.current.get(entryId);
+    if (!current || current.persistenceStatus === "synced") return;
+    feedbackByTurnRef.current.set(entryId, { ...current, persistenceStatus: "synced" });
+    setSavedFeedbackIds((ids) => new Set(ids).add(entryId));
+    setQualityRevision((revision) => revision + 1);
+  }, []);
+
+  const flushPendingFeedback = useCallback((ownerId = feedbackOwnerIdRef.current) => {
+    if (!ownerId || feedbackSyncInFlightRef.current || typeof sessionStorage === "undefined") return;
+    const ownerGeneration = feedbackOwnerGenerationRef.current;
+    feedbackSyncInFlightRef.current = true;
+    void flushPendingTranslatorFeedback({
+      storage: sessionStorage,
+      ownerId,
+      submit: submitTranslatorFeedbackSubmission,
+      onSynced: (entryId) => {
+        if (
+          feedbackOwnerIdRef.current === ownerId &&
+          feedbackOwnerGenerationRef.current === ownerGeneration
+        ) {
+          markPendingFeedbackSynced(entryId);
+        }
+      },
+      shouldContinue: () =>
+        feedbackOwnerIdRef.current === ownerId &&
+        feedbackOwnerGenerationRef.current === ownerGeneration,
+    }).catch(() => undefined).finally(() => {
+      feedbackSyncInFlightRef.current = false;
+      const currentOwnerId = feedbackOwnerIdRef.current;
+      if (
+        currentOwnerId &&
+        feedbackOwnerGenerationRef.current !== ownerGeneration
+      ) {
+        flushPendingFeedback(currentOwnerId);
+      }
+    });
+  }, [markPendingFeedbackSynced]);
 
   useEffect(() => {
     let active = true;
@@ -285,13 +343,34 @@ export default function TranslatorView() {
     if (REMOTE_TRANSLATOR_TELEMETRY_ENABLED && settings.diagnosticsSharingEnabled) {
       void telemetryQueueRef.current.flush();
     }
-    const flushOnline = () => void telemetryQueueRef.current?.flush();
+    const supabase = supabaseBrowser();
+    const setFeedbackOwner = (ownerId: string | null) => {
+      if (feedbackOwnerIdRef.current === ownerId) {
+        if (ownerId) flushPendingFeedback(ownerId);
+        return;
+      }
+      feedbackOwnerGenerationRef.current += 1;
+      feedbackOwnerIdRef.current = ownerId;
+      if (ownerId) flushPendingFeedback(ownerId);
+    };
+    setFeedbackOwner(initialFeedbackOwnerId);
+    void supabase.auth.getUser().then(({ data }) => {
+      if (active) setFeedbackOwner(data.user?.id ?? null);
+    }).catch(() => undefined);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setFeedbackOwner(session?.user.id ?? null);
+    });
+    const flushOnline = () => {
+      void telemetryQueueRef.current?.flush();
+      flushPendingFeedback();
+    };
     window.addEventListener("online", flushOnline);
     return () => {
       active = false;
       window.removeEventListener("online", flushOnline);
+      subscription.unsubscribe();
     };
-  }, []);
+  }, [flushPendingFeedback, initialFeedbackOwnerId]);
 
   const updateDiagnosticsSetting = useCallback(<K extends keyof TranslatorDiagnosticsSettings>(
     key: K,
@@ -2502,7 +2581,11 @@ export default function TranslatorView() {
   function handleFeedbackSaved(
     entryId: string,
     feedback: SavedTurnFeedback,
+    ownerId: string | null,
   ) {
+    if (typeof sessionStorage !== "undefined" && ownerId) {
+      removePendingTranslatorFeedback(sessionStorage, ownerId, entryId);
+    }
     feedbackByTurnRef.current.set(entryId, feedback);
     setSavedFeedbackIds((current) => new Set(current).add(entryId));
     setQualityRevision((current) => current + 1);
@@ -2521,6 +2604,23 @@ export default function TranslatorView() {
       if (entry) handleTranscriptCorrection(entry, feedback.correctedTranscript);
     }
     setQualityRevision((current) => current + 1);
+  }
+
+  function handleFeedbackSyncFailed(
+    entry: TranslationEntry,
+    input: {
+      rating: TranslatorFeedbackRating;
+      categories: TranslatorFeedbackCategory[];
+      comment: string;
+    },
+    ownerId: string | null,
+  ) {
+    if (typeof sessionStorage === "undefined" || !ownerId) return;
+    enqueuePendingTranslatorFeedback(
+      sessionStorage,
+      ownerId,
+      createTranslatorFeedbackSubmission(entry, input),
+    );
   }
 
   return (
@@ -3113,6 +3213,9 @@ export default function TranslatorView() {
         onClose={() => setFeedbackEntryId(null)}
         onCaptured={handleFeedbackCaptured}
         onSaved={handleFeedbackSaved}
+        onSyncFailed={handleFeedbackSyncFailed}
+        onSyncOpportunity={flushPendingFeedback}
+        getFeedbackOwnerId={() => feedbackOwnerIdRef.current}
       />
     </main>
   );

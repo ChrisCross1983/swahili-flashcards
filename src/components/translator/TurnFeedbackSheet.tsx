@@ -62,7 +62,8 @@ export function createSavedTurnFeedback(input: {
 }
 
 export default function TurnFeedbackSheet({ entry, open, speechSample = null,
-  comparison = null, internalQaMode = false, onClose, onCaptured, onSaved }: {
+  comparison = null, internalQaMode = false, onClose, onCaptured, onSaved,
+  onSyncFailed, onSyncOpportunity, getFeedbackOwnerId }: {
   entry: TranslationEntry | null;
   open: boolean;
   speechSample?: TranslatorSpeechQualitySample | null;
@@ -70,7 +71,14 @@ export default function TurnFeedbackSheet({ entry, open, speechSample = null,
   internalQaMode?: boolean;
   onClose: () => void;
   onCaptured: (entryId: string, feedback: SavedTurnFeedback) => void;
-  onSaved: (entryId: string, feedback: SavedTurnFeedback) => void;
+  onSaved: (entryId: string, feedback: SavedTurnFeedback, ownerId: string | null) => void;
+  onSyncFailed: (entry: TranslationEntry, input: {
+    rating: TranslatorFeedbackRating;
+    categories: TranslatorFeedbackCategory[];
+    comment: string;
+  }, ownerId: string | null) => void;
+  onSyncOpportunity: () => void;
+  getFeedbackOwnerId: () => string | null;
 }) {
   const [type, setType] = useState<TurnFeedbackType | null>(null);
   const [comment, setComment] = useState("");
@@ -91,6 +99,7 @@ export default function TurnFeedbackSheet({ entry, open, speechSample = null,
     if (selectedType === "speech_recognition" && !correctedTranscript.trim()) return;
     setSaving(true);
     setStatus(null);
+    const feedbackOwnerId = getFeedbackOwnerId();
     const remote = remoteFeedback(selectedType, comment);
     const ttsWasActuallyUsed = entry.diagnostics?.ttsPlaybackOutcome === "started" ||
       entry.diagnostics?.ttsPlaybackOutcome === "completed";
@@ -100,10 +109,12 @@ export default function TurnFeedbackSheet({ entry, open, speechSample = null,
     onCaptured(entry.id, local);
     try {
       await submitTranslatorFeedback(entry, remote);
-      onSaved(entry.id, { ...local, persistenceStatus: "synced" });
+      onSaved(entry.id, { ...local, persistenceStatus: "synced" }, feedbackOwnerId);
+      onSyncOpportunity();
       onClose();
     } catch {
       onCaptured(entry.id, { ...local, persistenceStatus: "sync_failed" });
+      onSyncFailed(entry, remote, feedbackOwnerId);
       setStatus(internalQaMode
         ? "Rückmeldung lokal gespeichert. Serverspeicherung noch nicht verfügbar."
         : "Rückmeldung erfasst. Die Serverspeicherung ist gerade nicht verfügbar.");

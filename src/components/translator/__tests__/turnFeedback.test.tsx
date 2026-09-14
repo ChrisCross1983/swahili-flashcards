@@ -17,7 +17,7 @@ const entry: TranslationEntry = {
 
 describe("unified per-turn feedback", () => {
   it("renders one calm, tappable feedback chooser for every successful turn", () => {
-    const html = renderToStaticMarkup(<TurnFeedbackSheet entry={entry} open onClose={vi.fn()} onCaptured={vi.fn()} onSaved={vi.fn()} />);
+    const html = renderToStaticMarkup(<TurnFeedbackSheet entry={entry} open onClose={vi.fn()} onCaptured={vi.fn()} onSaved={vi.fn()} onSyncFailed={vi.fn()} onSyncOpportunity={vi.fn()} getFeedbackOwnerId={() => "user-a"} />);
     expect(html).toContain("Was möchtest du rückmelden?");
     expect(html).toContain("Alles richtig");
     expect(html).toContain("Gesprochenes falsch erkannt");
@@ -53,6 +53,8 @@ describe("unified per-turn feedback", () => {
       source.indexOf("await submitTranslatorFeedback"),
     );
     expect(source).toContain('persistenceStatus: "sync_failed"');
+    expect(source).toContain("onSyncFailed(entry, remote, feedbackOwnerId)");
+    expect(source).toContain("onSyncOpportunity()");
     expect(source).toContain("Rückmeldung lokal gespeichert. Serverspeicherung noch nicht verfügbar.");
   });
 });

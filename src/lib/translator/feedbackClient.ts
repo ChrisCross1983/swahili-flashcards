@@ -2,6 +2,7 @@ import {
   createTranslatorFeedbackSubmission,
   type TranslatorFeedbackCategory,
   type TranslatorFeedbackRating,
+  type TranslatorFeedbackSubmission,
 } from "@/lib/translator/feedback";
 import type { TranslationEntry } from "@/lib/translator/types";
 
@@ -20,10 +21,20 @@ export async function submitTranslatorFeedback(
   },
   options: FeedbackClientOptions = {},
 ) {
+  return submitTranslatorFeedbackSubmission(
+    createTranslatorFeedbackSubmission(entry, input),
+    options,
+  );
+}
+
+export async function submitTranslatorFeedbackSubmission(
+  submission: TranslatorFeedbackSubmission,
+  options: FeedbackClientOptions = {},
+) {
   const response = await (options.fetcher ?? fetch)("/api/translator/feedback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(createTranslatorFeedbackSubmission(entry, input)),
+    body: JSON.stringify(submission),
   }).catch(() => null);
 
   if (!response?.ok) throw new Error(FEEDBACK_ERROR);
