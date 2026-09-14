@@ -282,6 +282,36 @@ and the user feedback is never overridden.
 | Feedback persistence | The bounded owner-scoped retry extension retains failed feedback locally and retries it opportunistically; existing route/client contract and feedback categories remain unchanged. `synced` remains the confirmed remote-success status. |
 | Mic / Realtime | No recording lifecycle, watchdog, capture, or connection implementation change. |
 
+## Visible build marker
+
+Classic `/translator` now renders one muted footer marker below the normal
+translator content. Its exact display format is:
+
+```text
+Production:  Classic 5.2.7 · PROD · f9b9cf0
+Local/dev:   Classic 5.2.7 · LOCAL
+```
+
+The version is the same exported `CLASSIC_TRANSLATOR_REPORT_REVISION` that
+becomes the diagnostic report's `reportRevision`. Environment and commit SHA
+come from the already-instantiated `getTranslatorBuildMetadata()` value used by
+the report export (`frontendRuntimeEnvironment` and `gitCommitSha`). Production
+uses the first seven SHA characters; an unavailable SHA simply omits that final
+segment without breaking the marker. No Git SHA or deployment ID is hardcoded.
+
+Because these public build values are embedded in the frontend bundle, the
+marker identifies the exact frontend already loaded in the browser. A tester can
+therefore distinguish a stale tab from the currently deployed Production build
+at a glance. Rendering performs no runtime network request, introduces no
+loading state, and changes neither authentication nor Translator behavior.
+
+Focused marker tests cover Production version/`PROD`/short SHA, development
+`LOCAL`, missing-SHA fallback, and pure presentation behavior. Validation for
+this addition: `npx tsc --noEmit` passed; targeted ESLint passed with no
+warnings; focused metadata/marker/report tests passed (3 files, 26 tests);
+the complete non-live Classic Translator suite passed (44 files, 320 tests);
+and `npm run build` passed.
+
 ## Tests and verification
 
 ### Tests added or updated

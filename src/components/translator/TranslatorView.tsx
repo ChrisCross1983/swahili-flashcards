@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
+import TranslatorBuildMarker from "@/components/translator/TranslatorBuildMarker";
 import TurnFeedbackSheet, {
   type SavedTurnFeedback,
 } from "@/components/translator/TurnFeedbackSheet";
@@ -57,6 +58,7 @@ import {
 } from "@/lib/translator/classicTranslationPipeline";
 import {
   buildClassicTranslatorReport,
+  CLASSIC_TRANSLATOR_REPORT_REVISION,
   downloadClassicTranslatorReport,
   type ClassicTranslatorAudioMetadata,
   type ClassicTranslatorFailedTurn,
@@ -3199,6 +3201,10 @@ export default function TranslatorView({
               ) : null}
           </div>
         </section>
+        <TranslatorBuildMarker
+          reportRevision={CLASSIC_TRANSLATOR_REPORT_REVISION}
+          buildMetadata={buildMetadataRef.current}
+        />
       </div>
       <TurnFeedbackSheet
         entry={feedbackEntry}

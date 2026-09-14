@@ -52,7 +52,7 @@ import {
 } from "@/lib/translator/recordingStartDiagnostics";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.2.7";
+export const CLASSIC_TRANSLATOR_REPORT_REVISION = "5.2.7";
 const PERFORMANCE_OPTIMIZATION_VERSION = "classic-quality-hardening-v5.2.7";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
@@ -2069,7 +2069,7 @@ export function buildClassicTranslatorReport(input: {
 
   return {
     reportVersion: REPORT_VERSION,
-    reportRevision: REPORT_REVISION,
+    reportRevision: CLASSIC_TRANSLATOR_REPORT_REVISION,
     stabilityObservabilityVersion: PERFORMANCE_OPTIMIZATION_VERSION,
     performanceOptimizationVersion: PERFORMANCE_OPTIMIZATION_VERSION,
     translationStreamingEnabled: false,
@@ -2345,7 +2345,7 @@ export function buildClassicTranslatorReport(input: {
     incidentTimeline,
     reportIntegrity: {
       schemaVersion: "translator-report-v5.2.7",
-      reportRevision: REPORT_REVISION,
+      reportRevision: CLASSIC_TRANSLATOR_REPORT_REVISION,
       sessionComplete: false,
       persistedSnapshotUsed: input.persistedSnapshotUsed === true,
       droppedTelemetryEvents: input.droppedTelemetryEvents ?? 0,
