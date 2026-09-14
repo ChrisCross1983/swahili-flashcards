@@ -343,8 +343,8 @@ describe("classic translator QA report", () => {
 
     expect(report).toMatchObject({
       reportVersion: 5,
-      reportRevision: "5.2.6",
-      performanceOptimizationVersion: "classic-benchmark-parity-v5.2.6",
+      reportRevision: "5.2.7",
+      performanceOptimizationVersion: "classic-quality-hardening-v5.2.7",
       preOpenAiOptimizationEnabled: true,
       translationPreOpenAiOptimized: true,
       ttsPreOpenAiOptimized: true,
@@ -652,7 +652,7 @@ describe("classic translator QA report", () => {
     expect(report).toMatchObject({
       reportVersion: 5, appVersion: "1.2.3", buildVersion: "99",
       diagnosticsSharingEnabled: true, speechSampleSharingEnabled: false,
-      reportRevision: "5.2.6", failureCount: 0, failuresByCategory: {},
+      reportRevision: "5.2.7", failureCount: 0, failuresByCategory: {},
       degradationCount: 1, expectedFallbackCount: 0,
       recoveryAttempts: 1, successfulRecoveries: 1,
       sttCorrectionCount: 1, speechQualitySampleCount: 1,
@@ -887,7 +887,7 @@ describe("classic translator QA report", () => {
       primary: { transcript: null }, rescue: { transcript: null },
     });
     expect(report.reportIntegrity).toMatchObject({
-      schemaVersion: "translator-report-v5.2.6", reportRevision: "5.2.6",
+      schemaVersion: "translator-report-v5.2.7", reportRevision: "5.2.7",
     });
   });
 
@@ -1155,6 +1155,10 @@ describe("classic translator QA report", () => {
       ...blocked.diagnostics!, ttsRequested: true, ttsRequestReason: "autoplay",
       ttsGenerationOutcome: "success", ttsPlaybackOutcome: "blocked",
       ttsOutcome: "success", ttsSkipReason: "browser_autoplay_blocked",
+      ttsPlaybackStartedAt: undefined,
+      ttsPlaybackCompletedAt: undefined,
+      playbackStartedAt: undefined,
+      playbackCompletedAt: undefined,
     };
     const report = buildClassicTranslatorReport({
       startedAt: "2026-09-09T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
@@ -1168,14 +1172,76 @@ describe("classic translator QA report", () => {
       ttsGenerationFailures: 0,
       ttsRequestSuccessRate: 1,
       ttsPlaybackStartedTurns: 1,
+      ttsPlaybackCompletedTurns: 1,
+      ttsPlaybackInterruptedTurns: 0,
       ttsPlaybackBlockedTurns: 1,
       ttsPlaybackFailures: 0,
+      ttsPlaybackFailedTurns: 0,
+      ttsPlaybackFromCacheCount: 0,
+      ttsNegativeFeedbackCount: 0,
+      ttsNegativeFeedbackWithCompletedPlaybackCount: 0,
       ttsPlaybackSuccessRate: 0.5,
       manualTtsRequests: 0,
       organicTtsDegradations: 0,
     });
     expect(report.keyFindings).toContain("tts_playback_blocked");
     expect(report.keyFindings).not.toContain("tts_unavailable");
+  });
+
+  it("keeps negative TTS feedback independent from a completed natural playback", () => {
+    const completed = entry("tts-completed-negative", "audio_upload_fallback");
+    completed.diagnostics = {
+      ...completed.diagnostics!,
+      ttsRequested: true,
+      ttsGenerationOutcome: "success",
+      ttsPlaybackOutcome: "completed",
+    };
+    const interrupted = entry("tts-interrupted", "audio_upload_fallback");
+    interrupted.diagnostics = {
+      ...interrupted.diagnostics!,
+      ttsRequested: true,
+      ttsGenerationOutcome: "success",
+      ttsPlaybackOutcome: "interrupted",
+      ttsPlaybackStartedAt: "2026-09-12T00:00:02.000Z",
+      ttsPlaybackInterruptedAt: "2026-09-12T00:00:03.000Z",
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-12T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries: [completed, interrupted], failedTurns: [],
+      feedbackByTurn: new Map([[completed.id, {
+        feedbackRating: "problem", feedbackCategories: ["speech_pronunciation"],
+        feedbackComment: "not all read", feedbackType: "tts", ttsFeedback: "negative",
+        persistenceStatus: "synced",
+      }]]),
+    });
+
+    expect(report.sections.tts).toMatchObject({
+      // Both turns began playback; one then reached ended and one was stopped.
+      ttsPlaybackStartedTurns: 2,
+      ttsPlaybackCompletedTurns: 1,
+      ttsPlaybackInterruptedTurns: 1,
+      // Completion rate is terminal-outcome based, not a start-rate.
+      ttsPlaybackSuccessRate: 0.5,
+      ttsNegativeFeedbackCount: 1,
+      ttsNegativeFeedbackWithCompletedPlaybackCount: 1,
+    });
+  });
+
+  it("tolerates legacy turns that do not contain V5.2.7 playback diagnostics", () => {
+    const legacy = entry("legacy-tts", "audio_upload_fallback");
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-12T00:00:00.000Z", userAgent: "Chrome", platform: "Mac",
+      currentMode: "auto", ttsSpeed: 1, entries: [legacy], failedTurns: [],
+    });
+
+    expect(report.turns[0]).toMatchObject({
+      ttsPlaybackInterruptedAt: null,
+      ttsGenerationId: null,
+      ttsPlaybackAttemptId: null,
+      ttsPlaybackFromCache: null,
+      ttsAudioByteLength: null,
+      ttsAudioMimeType: null,
+    });
   });
 
   it("does not count a non-critical TTS degradation as a recovered translation turn", () => {

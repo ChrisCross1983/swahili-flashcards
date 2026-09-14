@@ -36,6 +36,9 @@ describe("translator speech client", () => {
       ttsClientFirstByteAt: expect.any(String),
       ttsClientResponseCompletedAt: expect.any(String),
       ttsStreamingUsed: true,
+      ttsInputTextLength: 6,
+      ttsAudioByteLength: 3,
+      ttsAudioMimeType: "audio/mpeg",
     });
     await expect(result.serverDiagnostics).resolves.toMatchObject({
       ttsOpenAiTimeToFirstByteMs: 120,

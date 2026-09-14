@@ -1090,6 +1090,7 @@ export default function TranslatorView() {
         ttsOutcome: "request_started" as const,
       }),
       ttsPlaybackOutcome: "not_attempted",
+      ttsPlaybackAttemptId: attemptId,
       ttsSkipReason: null,
     }, speechReady ? "ttsCachedPlaybackRequested" : "ttsRequested");
     if (!automatic) {
@@ -1163,15 +1164,17 @@ export default function TranslatorView() {
             );
           }
         },
-        () => {
+        (position) => {
           const performance = turnPerformanceByEntryRef.current.get(entry.id);
-          if (performance) {
+          if (mountedRef.current && playbackRunIdRef.current === runId) {
             updateEntryDiagnostics(
               entry,
               {
-                ...performance.markPlaybackCompleted(),
+                ...(performance?.markPlaybackCompleted() ?? {}),
                 ttsPlaybackCompletedAt: new Date().toISOString(),
                 ttsPlaybackOutcome: "completed",
+                ttsPlaybackCurrentTimeAtEnd: position.currentTime,
+                ttsPlaybackDurationAtEnd: position.duration,
               },
               "playbackCompleted",
             );
@@ -1211,6 +1214,25 @@ export default function TranslatorView() {
             ...(performance?.getDiagnostics() ?? {}),
             ttsPlaybackRequestedAt: new Date().toISOString(),
           }, "ttsPlaybackRequested");
+        },
+        (identity) => {
+          if (mountedRef.current && playbackRunIdRef.current === runId) {
+            updateEntryDiagnostics(entry, {
+              ttsGenerationId: identity.generationId,
+              ttsPlaybackAttemptId: identity.playbackAttemptId,
+              ttsPlaybackFromCache: identity.fromCache,
+            }, "ttsPlaybackAttemptPrepared");
+          }
+        },
+        (position) => {
+          if (mountedRef.current && playbackRunIdRef.current === runId) {
+            updateEntryDiagnostics(entry, {
+              ttsPlaybackInterruptedAt: new Date().toISOString(),
+              ttsPlaybackOutcome: "interrupted",
+              ttsPlaybackCurrentTimeAtInterrupt: position.currentTime,
+              ttsPlaybackDurationAtInterrupt: position.duration,
+            }, "playbackInterrupted");
+          }
         },
       );
       const latestDiagnostics = latestDiagnosticsByEntryRef.current.get(entry.id);
@@ -1311,10 +1333,12 @@ export default function TranslatorView() {
   }
 
   function handleStopPlayback() {
+    // Stop first so the active attempt can record its intentional interruption.
+    // Only then invalidate its callbacks for the next playback generation.
+    stopPlayback();
     playbackRunIdRef.current += 1;
     playbackInFlightRef.current = false;
     setPlaybackReady(false);
-    stopPlayback();
     dispatch({ type: "PLAYBACK_FINISHED" });
   }
 

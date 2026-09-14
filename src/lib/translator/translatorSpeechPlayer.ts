@@ -10,6 +10,7 @@ import {
 type AudioElement = Pick<
   HTMLAudioElement,
   | "currentTime"
+  | "duration"
   | "load"
   | "onended"
   | "onerror"
@@ -22,6 +23,18 @@ type AudioElement = Pick<
 type CachedSpeech = {
   objectUrl: string;
   audio: AudioElement;
+  generationId: string;
+};
+
+export type TranslatorSpeechPlaybackIdentity = {
+  generationId: string;
+  playbackAttemptId: string;
+  fromCache: boolean;
+};
+
+export type TranslatorSpeechPlaybackPosition = {
+  currentTime: number | null;
+  duration: number | null;
 };
 
 export type TranslatorSpeechPlayerDependencies = {
@@ -49,8 +62,10 @@ export type TranslatorSpeechPlaybackOptions = {
   onAudioPreparationCompleted?: () => void;
   onSpeechReady?: () => void;
   onPlayRequested?: () => void;
+  onPlaybackAttempt?: (identity: TranslatorSpeechPlaybackIdentity) => void;
   onPlaybackStarted?: () => void;
-  onPlaybackCompleted?: () => void;
+  onPlaybackCompleted?: (position: TranslatorSpeechPlaybackPosition) => void;
+  onPlaybackInterrupted?: (position: TranslatorSpeechPlaybackPosition) => void;
 };
 
 function createAbortError() {
@@ -64,6 +79,17 @@ function resetAudio(audio: AudioElement) {
   } catch {
     // Some browsers reject seeking before media metadata is available.
   }
+}
+
+function finiteAudioPosition(value: number) {
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function playbackPosition(audio: AudioElement): TranslatorSpeechPlaybackPosition {
+  return {
+    currentTime: finiteAudioPosition(audio.currentTime),
+    duration: finiteAudioPosition(audio.duration),
+  };
 }
 
 function logPlaybackFailure(error: unknown, autoplay: boolean) {
@@ -114,6 +140,7 @@ export class TranslatorSpeechPlayer {
     const operationId = this.operationId;
     const cacheKey = getSpeechCacheKey(entry.id, speed);
     let cachedSpeech = this.cache.get(cacheKey);
+    const fromCache = cachedSpeech !== undefined;
 
     if (!cachedSpeech) {
       const requestController = new AbortController();
@@ -150,7 +177,11 @@ export class TranslatorSpeechPlayer {
       audio.preload = "auto";
       audio.src = objectUrl;
       audio.load();
-      cachedSpeech = { objectUrl, audio };
+      cachedSpeech = {
+        objectUrl,
+        audio,
+        generationId: `tts-generation-${operationId}`,
+      };
       this.cache.set(cacheKey, cachedSpeech);
       options.onAudioPreparationCompleted?.();
     }
@@ -171,11 +202,18 @@ export class TranslatorSpeechPlayer {
     }
 
     const audio = cachedSpeech.audio;
+    const playbackIdentity: TranslatorSpeechPlaybackIdentity = {
+      generationId: cachedSpeech.generationId,
+      playbackAttemptId: `tts-playback-${operationId}`,
+      fromCache,
+    };
     const playbackRequestedAt = performance.now();
+    options.onPlaybackAttempt?.(playbackIdentity);
     options.onPlayRequested?.();
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let naturalEnd = false;
 
       const finish = (error?: unknown) => {
         if (settled) return;
@@ -197,6 +235,8 @@ export class TranslatorSpeechPlayer {
       };
 
       const stop = () => {
+        if (settled) return;
+        if (!naturalEnd) options.onPlaybackInterrupted?.(playbackPosition(audio));
         resetAudio(audio);
         finish();
       };
@@ -205,12 +245,16 @@ export class TranslatorSpeechPlayer {
       this.activeFail = failPlayback;
       this.activeAudio = audio;
       audio.onended = () => {
-        options.onPlaybackCompleted?.();
+        if (operationId !== this.operationId || this.disposed || settled) return;
+        naturalEnd = true;
+        options.onPlaybackCompleted?.(playbackPosition(audio));
         resetAudio(audio);
         finish();
       };
-      audio.onerror = () =>
+      audio.onerror = () => {
+        if (operationId !== this.operationId || this.disposed || settled) return;
         failPlayback(new Error("The browser could not play the speech audio"));
+      };
 
       try {
         void audio.play().then(

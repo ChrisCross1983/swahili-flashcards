@@ -135,6 +135,67 @@ describe("TranslatorSpeechPlayer", () => {
     });
   });
 
+  it("records play() resolution as started and waits for natural ended before completion", async () => {
+    const harness = createHarness();
+    const onPlaybackStarted = vi.fn();
+    const onPlaybackCompleted = vi.fn();
+    const playback = harness.player.play(entry, 1, {
+      onPlaybackStarted,
+      onPlaybackCompleted,
+    });
+
+    await waitForAudio(harness.audios, 1);
+    await vi.waitFor(() => expect(onPlaybackStarted).toHaveBeenCalledOnce());
+    expect(onPlaybackCompleted).not.toHaveBeenCalled();
+
+    finishAudio(harness.audios[0]);
+    await playback;
+    expect(onPlaybackCompleted).toHaveBeenCalledOnce();
+  });
+
+  it("classifies an intentional stop before natural ended as interrupted", async () => {
+    const harness = createHarness();
+    const onPlaybackCompleted = vi.fn();
+    const onPlaybackInterrupted = vi.fn();
+    const playback = harness.player.play(entry, 1, {
+      onPlaybackCompleted,
+      onPlaybackInterrupted,
+    });
+    await waitForAudio(harness.audios, 1);
+    await vi.waitFor(() => expect(harness.audios[0].play).toHaveBeenCalledOnce());
+
+    harness.player.stopPlayback();
+    await playback;
+
+    expect(onPlaybackCompleted).not.toHaveBeenCalled();
+    expect(onPlaybackInterrupted).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a stale ended event after the old playback was stopped", async () => {
+    const harness = createHarness();
+    const onPlaybackCompleted = vi.fn();
+    const playback = harness.player.play(entry, 1, { onPlaybackCompleted });
+    await waitForAudio(harness.audios, 1);
+    const staleEnded = harness.audios[0].onended!;
+
+    harness.player.stopPlayback();
+    staleEnded.call(harness.audios[0], new Event("ended"));
+    await playback;
+
+    expect(onPlaybackCompleted).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale media error after the old playback was stopped", async () => {
+    const harness = createHarness();
+    const playback = harness.player.play(entry, 1);
+    await waitForAudio(harness.audios, 1);
+    const staleError = harness.audios[0].onerror!;
+
+    harness.player.stopPlayback();
+    staleError.call(harness.audios[0], new Event("error"));
+    await expect(playback).resolves.toBeUndefined();
+  });
+
   it("keeps generated audio cached when iOS blocks autoplay and reuses it on tap", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);

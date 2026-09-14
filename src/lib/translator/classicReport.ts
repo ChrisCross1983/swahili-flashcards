@@ -52,8 +52,8 @@ import {
 } from "@/lib/translator/recordingStartDiagnostics";
 
 const REPORT_VERSION = 5;
-const REPORT_REVISION = "5.2.6";
-const PERFORMANCE_OPTIMIZATION_VERSION = "classic-benchmark-parity-v5.2.6";
+const REPORT_REVISION = "5.2.7";
+const PERFORMANCE_OPTIMIZATION_VERSION = "classic-quality-hardening-v5.2.7";
 const CLASSIC_TTS_MODEL = "gpt-4o-mini-tts";
 const CLASSIC_TRANSLATION_MODEL = "gpt-5.6-terra";
 
@@ -364,6 +364,17 @@ export type ClassicTranslatorReportTurn = {
   playbackCompletedAt: string | null;
   ttsPlaybackStartedAt: string | null;
   ttsPlaybackCompletedAt: string | null;
+  ttsPlaybackInterruptedAt: string | null;
+  ttsGenerationId: string | null;
+  ttsPlaybackAttemptId: string | null;
+  ttsPlaybackFromCache: boolean | null;
+  ttsAudioByteLength: number | null;
+  ttsAudioMimeType: string | null;
+  ttsInputTextLength: number | null;
+  ttsPlaybackCurrentTimeAtEnd: number | null;
+  ttsPlaybackDurationAtEnd: number | null;
+  ttsPlaybackCurrentTimeAtInterrupt: number | null;
+  ttsPlaybackDurationAtInterrupt: number | null;
   recordClickToGetUserMediaReadyMs: number | null;
   recordClickToMicReadyMs: number | null;
   recordClickToRecordingStartedMs: number | null;
@@ -1098,6 +1109,18 @@ function turnFromValues(input: {
     playbackCompletedAt: d.playbackCompletedAt ?? null,
     ttsPlaybackStartedAt: d.ttsPlaybackStartedAt ?? d.playbackStartedAt ?? null,
     ttsPlaybackCompletedAt: d.ttsPlaybackCompletedAt ?? d.playbackCompletedAt ?? null,
+    ttsPlaybackInterruptedAt: d.ttsPlaybackInterruptedAt ?? null,
+    ttsGenerationId: d.ttsGenerationId ?? null,
+    ttsPlaybackAttemptId: d.ttsPlaybackAttemptId ?? null,
+    ttsPlaybackFromCache: typeof d.ttsPlaybackFromCache === "boolean"
+      ? d.ttsPlaybackFromCache : null,
+    ttsAudioByteLength: finite(d.ttsAudioByteLength),
+    ttsAudioMimeType: d.ttsAudioMimeType ?? null,
+    ttsInputTextLength: finite(d.ttsInputTextLength),
+    ttsPlaybackCurrentTimeAtEnd: finite(d.ttsPlaybackCurrentTimeAtEnd),
+    ttsPlaybackDurationAtEnd: finite(d.ttsPlaybackDurationAtEnd),
+    ttsPlaybackCurrentTimeAtInterrupt: finite(d.ttsPlaybackCurrentTimeAtInterrupt),
+    ttsPlaybackDurationAtInterrupt: finite(d.ttsPlaybackDurationAtInterrupt),
     recordClickToGetUserMediaReadyMs: finite(d.recordClickToGetUserMediaReadyMs),
     recordClickToMicReadyMs: finite(d.recordClickToMicReadyMs),
     recordClickToRecordingStartedMs: finite(d.recordClickToRecordingStartedMs),
@@ -1975,12 +1998,25 @@ export function buildClassicTranslatorReport(input: {
   const ttsGenerationFailures = ttsRequestedTurns.filter((turn) =>
     turn.ttsGenerationOutcome === "request_failed");
   const ttsPlaybackStartedTurns = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackStartedAt !== null ||
+    // Legacy reports can predate the explicit start timestamp but still carry
+    // an unambiguous started/completed outcome.
     turn.ttsPlaybackOutcome === "started" ||
     turn.ttsPlaybackOutcome === "completed");
+  const ttsPlaybackCompletedTurns = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackOutcome === "completed");
+  const ttsPlaybackInterruptedTurns = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackOutcome === "interrupted");
   const ttsPlaybackBlockedTurns = ttsRequestedTurns.filter((turn) =>
     turn.ttsPlaybackOutcome === "blocked");
   const ttsPlaybackFailures = ttsRequestedTurns.filter((turn) =>
     turn.ttsPlaybackOutcome === "failed");
+  const ttsPlaybackFromCacheCount = ttsRequestedTurns.filter((turn) =>
+    turn.ttsPlaybackFromCache === true).length;
+  const ttsNegativeFeedbackCount = turns.filter((turn) =>
+    turn.ttsFeedback === "negative").length;
+  const ttsNegativeFeedbackWithCompletedPlaybackCount = turns.filter((turn) =>
+    turn.ttsFeedback === "negative" && turn.ttsPlaybackOutcome === "completed").length;
   const manualTtsRequests = ttsRequestedTurns.filter((turn) =>
     turn.ttsRequestReason === "manual_play");
   const organicTtsDegradations = organicDiagnosticEvents.filter((event) =>
@@ -2234,8 +2270,9 @@ export function buildClassicTranslatorReport(input: {
         ttsRequestedTurns.length,
       ),
       ttsPlaybackSuccessRate: rate(
-        ttsPlaybackStartedTurns.length,
-        ttsPlaybackStartedTurns.length +
+        ttsPlaybackCompletedTurns.length,
+        ttsPlaybackCompletedTurns.length +
+          ttsPlaybackInterruptedTurns.length +
           ttsPlaybackBlockedTurns.length +
           ttsPlaybackFailures.length,
       ),
@@ -2307,7 +2344,7 @@ export function buildClassicTranslatorReport(input: {
     },
     incidentTimeline,
     reportIntegrity: {
-      schemaVersion: "translator-report-v5.2.6",
+      schemaVersion: "translator-report-v5.2.7",
       reportRevision: REPORT_REVISION,
       sessionComplete: false,
       persistedSnapshotUsed: input.persistedSnapshotUsed === true,
@@ -2465,11 +2502,18 @@ export function buildClassicTranslatorReport(input: {
           ttsRequestedTurns.length,
         ),
         ttsPlaybackStartedTurns: ttsPlaybackStartedTurns.length,
+        ttsPlaybackCompletedTurns: ttsPlaybackCompletedTurns.length,
+        ttsPlaybackInterruptedTurns: ttsPlaybackInterruptedTurns.length,
         ttsPlaybackBlockedTurns: ttsPlaybackBlockedTurns.length,
         ttsPlaybackFailures: ttsPlaybackFailures.length,
+        ttsPlaybackFailedTurns: ttsPlaybackFailures.length,
+        ttsPlaybackFromCacheCount,
+        ttsNegativeFeedbackCount,
+        ttsNegativeFeedbackWithCompletedPlaybackCount,
         ttsPlaybackSuccessRate: rate(
-          ttsPlaybackStartedTurns.length,
-          ttsPlaybackStartedTurns.length +
+          ttsPlaybackCompletedTurns.length,
+          ttsPlaybackCompletedTurns.length +
+            ttsPlaybackInterruptedTurns.length +
             ttsPlaybackBlockedTurns.length +
             ttsPlaybackFailures.length,
         ),

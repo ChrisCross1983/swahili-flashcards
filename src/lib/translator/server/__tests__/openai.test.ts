@@ -258,6 +258,21 @@ describe("OpenAI translator diagnostics", () => {
     expect(prompt).toMatch(/Do not translate, infer, complete, or add words/i);
   });
 
+  it("keeps explicit German and Kiswahili requests language-forced without the AUTO hint", async () => {
+    for (const language of ["de", "sw"] as const) {
+      openAiMocks.transcriptionCreate.mockResolvedValueOnce({ text: "spoken text" });
+      const gateway = createOpenAITranslatorGateway("configured-secret");
+
+      await gateway.transcribe({ ...transcriptionInput, language });
+
+      expect(openAiMocks.transcriptionCreate).toHaveBeenLastCalledWith({
+        file: expect.anything(),
+        model: "gpt-4o-mini-transcribe",
+        language,
+      });
+    }
+  });
+
   it("logs quality metadata without transcript content in development", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);

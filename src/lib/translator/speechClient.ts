@@ -74,6 +74,10 @@ export type TranslatorSpeechGenerationDiagnostics = {
   ttsClientDownloadTotalMs?: number;
   ttsStreamingUsed?: boolean;
   streamingFallbackReason?: string;
+  /** Metadata only: no TTS input text is persisted by this diagnostic. */
+  ttsInputTextLength?: number;
+  ttsAudioByteLength?: number;
+  ttsAudioMimeType?: string | null;
 };
 
 export type TranslatorSpeechAsset = {
@@ -286,6 +290,9 @@ export async function requestTranslatorSpeech(
       ttsClientResponseCompletedAt: responseCompletedAt,
       ttsClientDownloadTotalMs,
       ttsStreamingUsed: streamingFallbackReason === undefined,
+      ttsInputTextLength: text.length,
+      ttsAudioByteLength: audio.size,
+      ttsAudioMimeType: audio.type || response.headers.get("content-type") || null,
       ...(streamingFallbackReason ? { streamingFallbackReason } : {}),
     },
     serverDiagnostics,

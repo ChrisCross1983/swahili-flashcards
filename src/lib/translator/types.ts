@@ -28,6 +28,7 @@ export type TtsPlaybackOutcome =
   | "not_attempted"
   | "started"
   | "completed"
+  | "interrupted"
   | "blocked"
   | "failed";
 
@@ -202,6 +203,18 @@ export type TranslationDiagnostics = {
   playbackCompletedAt?: string;
   ttsPlaybackStartedAt?: string;
   ttsPlaybackCompletedAt?: string;
+  ttsPlaybackInterruptedAt?: string;
+  /** Correlates a generated/cached audio asset with its playback attempt. */
+  ttsGenerationId?: string;
+  ttsPlaybackAttemptId?: string;
+  ttsPlaybackFromCache?: boolean;
+  ttsAudioByteLength?: number;
+  ttsAudioMimeType?: string | null;
+  ttsInputTextLength?: number;
+  ttsPlaybackCurrentTimeAtEnd?: number | null;
+  ttsPlaybackDurationAtEnd?: number | null;
+  ttsPlaybackCurrentTimeAtInterrupt?: number | null;
+  ttsPlaybackDurationAtInterrupt?: number | null;
   ttsReadyToPlaybackStartedMs?: number;
   stopToPlaybackStartedMs?: number;
   interactionOverheadMs?: number;

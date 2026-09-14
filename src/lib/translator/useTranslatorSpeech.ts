@@ -5,6 +5,10 @@ import type { TranslationEntry } from "@/lib/translator/types";
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
+import type {
+  TranslatorSpeechPlaybackIdentity,
+  TranslatorSpeechPlaybackPosition,
+} from "@/lib/translator/translatorSpeechPlayer";
 
 export function useTranslatorSpeech() {
   const playerRef = useRef<TranslatorSpeechPlayer | null>(null);
@@ -47,13 +51,15 @@ export function useTranslatorSpeech() {
     onSpeechRequestStarted?: () => void,
     onSpeechReady?: () => void,
     onPlaybackStarted?: () => void,
-    onPlaybackCompleted?: () => void,
+    onPlaybackCompleted?: (position: TranslatorSpeechPlaybackPosition) => void,
     onSpeechDiagnosticsUpdated?: (
       diagnostics: Partial<TranslatorSpeechGenerationDiagnostics>,
     ) => void,
     onAudioPreparationStarted?: () => void,
     onAudioPreparationCompleted?: () => void,
     onPlayRequested?: () => void,
+    onPlaybackAttempt?: (identity: TranslatorSpeechPlaybackIdentity) => void,
+    onPlaybackInterrupted?: (position: TranslatorSpeechPlaybackPosition) => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
@@ -68,6 +74,8 @@ export function useTranslatorSpeech() {
       onAudioPreparationStarted,
       onAudioPreparationCompleted,
       onPlayRequested,
+      onPlaybackAttempt,
+      onPlaybackInterrupted,
     });
   }, []);
 
