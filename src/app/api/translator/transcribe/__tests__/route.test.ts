@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 
 const requireUserMock = vi.fn();
 const transcribeMock = vi.fn();
@@ -15,7 +16,7 @@ vi.mock("@/lib/translator/server/openai", () => ({
   }),
 }));
 
-function request(withHeader = true) {
+function request(withHeader = true, benchmarkModel?: string) {
   const formData = new FormData();
   formData.append("audio", new Blob([new Uint8Array(256)], { type: "audio/webm" }), "recording.webm");
   formData.append("sourceLanguage", "sw");
@@ -23,6 +24,7 @@ function request(withHeader = true) {
   formData.append("recordingDurationMs", "1000");
   formData.append("chunkCount", "2");
   formData.append("totalChunkBytes", "256");
+  if (benchmarkModel) formData.append("benchmarkModel", benchmarkModel);
   return new Request("http://localhost/api/translator/transcribe", {
     method: "POST",
     headers: withHeader ? { "X-Translator-Request-Phase": "internal_benchmark" } : undefined,
@@ -64,11 +66,57 @@ describe("POST /api/translator/transcribe", () => {
     expect(autoTranslateMock).not.toHaveBeenCalled();
   });
 
+  it("accepts allowlisted Whisper only as a direct internal benchmark model", async () => {
+    transcribeMock.mockResolvedValueOnce({
+      text: "Habari yako leo?", detectedLanguage: "sw",
+      model: "whisper-1", fallbackUsed: false,
+    });
+    const { POST } = await import("../route");
+    const response = await POST(request(true, "whisper-1"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      model: "whisper-1",
+      fallbackUsed: false,
+    });
+    expect(transcribeMock).toHaveBeenCalledWith(expect.objectContaining({
+      benchmarkModel: "whisper-1",
+    }));
+  });
+
   it("isolates an audio-STT failure as a benchmark 503", async () => {
     transcribeMock.mockRejectedValue(new Error("upstream"));
     const { POST } = await import("../route");
     const response = await POST(request());
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: "transcription_failed" });
+  });
+
+  it.each([
+    ["gpt-transcribe", "model_not_found", "benchmark_model_unavailable"],
+    ["gpt-4o-transcribe", "forbidden", "benchmark_model_unavailable"],
+    ["gpt-transcribe", "upstream", "benchmark_model_transcription_failed"],
+  ])("returns a sanitized %s failure for %s", async (model, message, expectedCode) => {
+    transcribeMock.mockRejectedValue(new TranslatorPipelineError(
+      message === "model_not_found" || message === "forbidden" ? "configuration" : "transcription_failed",
+      message,
+    ));
+    const { POST } = await import("../route");
+    const response = await POST(request(true, model));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: expectedCode,
+      error: "Vergleich konnte nicht erstellt werden.",
+    });
+  });
+
+  it("rejects an arbitrary benchmark model before invoking transcription", async () => {
+    const { POST } = await import("../route");
+    const response = await POST(request(true, "not-a-transcription-model"));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Ungültige Anfrage." });
+    expect(transcribeMock).not.toHaveBeenCalled();
   });
 });

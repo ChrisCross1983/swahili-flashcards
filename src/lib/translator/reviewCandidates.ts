@@ -6,6 +6,24 @@ import type { TranslatorSpeechQualitySample } from "@/lib/translator/speechQuali
 
 export const MAX_POST_CONVERSATION_REVIEW_CANDIDATES = 5;
 
+export function countPendingPostConversationReviewCandidates(
+  candidateTurnIds: readonly string[],
+  qualityByTurn: ReadonlyMap<string, TranslatorSpeechQualitySample>,
+) {
+  return candidateTurnIds.filter((turnId) =>
+    qualityByTurn.get(turnId)?.recognitionReviewStatus === "unreviewed").length;
+}
+
+export function countReviewedPostConversationReviewCandidates(
+  candidateTurnIds: readonly string[],
+  qualityByTurn: ReadonlyMap<string, TranslatorSpeechQualitySample>,
+) {
+  return candidateTurnIds.filter((turnId) => {
+    const status = qualityByTurn.get(turnId)?.recognitionReviewStatus;
+    return status === "accepted" || status === "corrected";
+  }).length;
+}
+
 export function selectPostConversationReviewCandidates(input: {
   entries: readonly TranslationEntry[];
   diagnosticEventsByTurn?: ReadonlyMap<string, readonly TranslatorDiagnosticEvent[]>;

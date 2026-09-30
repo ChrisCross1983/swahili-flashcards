@@ -142,10 +142,18 @@ import {
 import { SHARED_CONVERSATION_LABELS } from "@/lib/translator/sharedConversationLabels";
 import {
   MAX_POST_CONVERSATION_REVIEW_CANDIDATES,
+  countPendingPostConversationReviewCandidates,
+  countReviewedPostConversationReviewCandidates,
   selectPostConversationReviewCandidates,
 } from "@/lib/translator/reviewCandidates";
 import { TranslatorTtsAttemptRegistry } from "@/lib/translator/ttsAttemptRegistry";
 import { SameAudioBenchmarkRunner } from "@/lib/translator/sameAudioBenchmark";
+import {
+  applySameAudioGroundTruthToSafeSttModelBenchmark,
+  reviewSafeSttModelBenchmark,
+  SafeSttModelBenchmarkRunner,
+  type SafeSttModelBenchmark,
+} from "@/lib/translator/safeSttModelBenchmark";
 import {
   RecordingStartDiagnosticsTracker,
   RecordingStartOperationTimeoutError,
@@ -212,6 +220,8 @@ export default function TranslatorView({
   );
   const sameAudioEligibleTurnIdsRef = useRef(new Set<string>());
   const sameAudioBenchmarkRunnerRef = useRef(new SameAudioBenchmarkRunner());
+  const safeSttModelBenchmarksByTurnRef = useRef(new Map<string, SafeSttModelBenchmark>());
+  const safeSttModelBenchmarkRunnerRef = useRef(new SafeSttModelBenchmarkRunner());
   const audioQualityMonitorRef = useRef<TranslatorAudioQualityMonitor | null>(null);
   const audioCaptureByTurnRef = useRef(new Map<string, {
     metadata: TranslatorAudioCaptureMetadata;
@@ -223,6 +233,7 @@ export default function TranslatorView({
   const recordingStartGenerationRef = useRef(0);
   const recordingStartTrackerRef = useRef(new RecordingStartDiagnosticsTracker());
   const playbackInFlightRef = useRef(false);
+  const playbackResumeInFlightRef = useRef(false);
   const playbackRunIdRef = useRef(0);
   const ttsAttemptRegistryRef = useRef(new TranslatorTtsAttemptRegistry());
   const requestAbortRef = useRef<AbortController | null>(null);
@@ -785,6 +796,7 @@ export default function TranslatorView({
     () => () => {
       requestAbortRef.current?.abort();
       sameAudioBenchmarkRunnerRef.current.reset();
+      safeSttModelBenchmarkRunnerRef.current.reset();
       realtimeManagerRef.current?.close("classic_unmount");
       realtimeManagerRef.current = null;
       activeRealtimeTurnRef.current = null;
@@ -814,6 +826,7 @@ export default function TranslatorView({
       }
       requestAbortRef.current?.abort();
       sameAudioBenchmarkRunnerRef.current.reset();
+      safeSttModelBenchmarkRunnerRef.current.reset();
       abortPendingAcquisition();
       stopPlayback();
       realtimeManagerRef.current?.close("classic_page_hide");
@@ -872,8 +885,22 @@ export default function TranslatorView({
   const postConversationReviewCandidateCount =
     failedPostConversationReviewCandidateIds.length +
     postConversationReviewCandidateList.length;
+  const postConversationReviewCandidateTurnIds = Array.from(new Set([
+    ...failedPostConversationReviewCandidateIds,
+    ...postConversationReviewCandidateList,
+  ]));
+  const postConversationReviewPendingCount =
+    countPendingPostConversationReviewCandidates(
+      postConversationReviewCandidateTurnIds,
+      qualityByTurnRef.current,
+    );
+  const postConversationReviewReviewedCount =
+    countReviewedPostConversationReviewCandidates(
+      postConversationReviewCandidateTurnIds,
+      qualityByTurnRef.current,
+    );
   const postConversationReviewCandidateIds = postConversationReviewOpen
-    ? new Set(postConversationReviewCandidateList)
+    ? new Set(postConversationReviewCandidateTurnIds)
     : new Set<string>();
 
   function recordingStartSnapshot(): RecordingStartRecorderSnapshot {
@@ -923,6 +950,7 @@ export default function TranslatorView({
     if (recordingStartInFlightRef.current) return;
     if (
       state.status !== "idle" &&
+      state.status !== "preparing" &&
       state.status !== "playing" &&
       state.status !== "paused"
     ) {
@@ -936,7 +964,11 @@ export default function TranslatorView({
     markRecordingStartAttempt(attemptId, "start_operation_started");
     const stateBeforeRecording = state.status;
     activeTurnStateBeforeRecordingRef.current = stateBeforeRecording;
-    if (state.status === "playing" || state.status === "paused") {
+    if (
+      state.status === "preparing" ||
+      state.status === "playing" ||
+      state.status === "paused"
+    ) {
       handleStopPlayback();
     }
     if (state.autoPlay) preparePlaybackForUserGesture();
@@ -1231,6 +1263,7 @@ export default function TranslatorView({
         () => {
           if (mountedRef.current && playbackRunIdRef.current === runId) {
             setPlaybackReady(true);
+            dispatch({ type: "PLAYBACK_STARTED" });
             const performance = turnPerformanceByEntryRef.current.get(entry.id);
             updateEntryDiagnostics(
               entry,
@@ -1408,9 +1441,21 @@ export default function TranslatorView({
   }
 
   function handleResumePlayback() {
-    if (state.status !== "paused") return;
-    dispatch({ type: "RESUME_PLAYBACK" });
-    void resumePlayback().catch(() => undefined);
+    if (state.status !== "paused" || playbackResumeInFlightRef.current) return;
+    const runId = playbackRunIdRef.current;
+    playbackResumeInFlightRef.current = true;
+    void resumePlayback()
+      .then(() => {
+        if (mountedRef.current && playbackRunIdRef.current === runId) {
+          dispatch({ type: "PLAYBACK_STARTED" });
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (playbackRunIdRef.current === runId) {
+          playbackResumeInFlightRef.current = false;
+        }
+      });
   }
 
   function handleStopPlayback() {
@@ -1419,6 +1464,7 @@ export default function TranslatorView({
     stopPlayback();
     playbackRunIdRef.current += 1;
     playbackInFlightRef.current = false;
+    playbackResumeInFlightRef.current = false;
     setPlaybackReady(false);
     dispatch({ type: "PLAYBACK_FINISHED" });
   }
@@ -1932,6 +1978,13 @@ export default function TranslatorView({
               });
             }
             sameAudioBenchmarksByTurnRef.current.set(entry.id, nextComparison);
+            const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(entry.id);
+            if (modelBenchmark) {
+              safeSttModelBenchmarksByTurnRef.current.set(
+                entry.id,
+                applySameAudioGroundTruthToSafeSttModelBenchmark(modelBenchmark, nextComparison),
+              );
+            }
             if (sample) qualityByTurnRef.current.set(entry.id, {
               ...sample,
               primaryTranscriptAvailable: true,
@@ -1940,6 +1993,40 @@ export default function TranslatorView({
                 nextComparison.benchmarkStatus === "completed" &&
                 nextComparison.groundTruthStatus !== "unreviewed",
             });
+            setQualityRevision((revision) => revision + 1);
+          });
+        }
+        const modelBenchmarkInput = turnConsent ? {
+          turnId: entry.id,
+          audioBlob: recordedAudio.audioBlob,
+          direction,
+          resolvedSourceLanguage: entry.sourceLanguage,
+          recordingDurationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+          consent: turnConsent,
+          internalQaEnabled: INTERNAL_TRANSLATOR_QA_ENABLED &&
+            diagnosticsSettingsRef.current.internalQaModeEnabled,
+          recordedAudioDiagnostics: {
+            recordingDurationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+            chunkCount: captureDiagnostics?.mediaRecorderChunkCount ?? null,
+            totalChunkBytes: captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
+          },
+        } : null;
+        if (modelBenchmarkInput) {
+          safeSttModelBenchmarkRunnerRef.current.run(modelBenchmarkInput, (benchmark) => {
+            if (!mountedRef.current) return;
+            const comparison = sameAudioBenchmarksByTurnRef.current.get(entry.id);
+            const comparisonReviewed = comparison
+              ? applySameAudioGroundTruthToSafeSttModelBenchmark(benchmark, comparison)
+              : benchmark;
+            const sample = qualityByTurnRef.current.get(entry.id);
+            const reviewed = comparisonReviewed !== benchmark
+              ? comparisonReviewed
+              : sample?.recognitionReviewStatus === "accepted"
+                ? reviewSafeSttModelBenchmark(benchmark, entry.originalText)
+                : sample?.recognitionReviewStatus === "corrected" && sample.correctedTranscript
+                  ? reviewSafeSttModelBenchmark(benchmark, sample.correctedTranscript)
+                  : benchmark;
+            safeSttModelBenchmarksByTurnRef.current.set(entry.id, reviewed);
             setQualityRevision((revision) => revision + 1);
           });
         }
@@ -2276,8 +2363,10 @@ export default function TranslatorView({
     sttRoutingByTurnRef.current.clear();
     sttComparisonsByTurnRef.current.clear();
     sameAudioBenchmarksByTurnRef.current.clear();
+    safeSttModelBenchmarksByTurnRef.current.clear();
     sameAudioEligibleTurnIdsRef.current.clear();
     sameAudioBenchmarkRunnerRef.current.reset();
+    safeSttModelBenchmarkRunnerRef.current.reset();
     ttsAttemptRegistryRef.current.reset();
     consentByTurnRef.current.clear();
     consentEventsRef.current = [];
@@ -2342,6 +2431,7 @@ export default function TranslatorView({
         sttComparisonsByTurn: sttComparisonsByTurnRef.current,
         sameAudioBenchmarksByTurn: sameAudioBenchmarksByTurnRef.current,
         sameAudioEligibleTurnIds: sameAudioEligibleTurnIdsRef.current,
+        safeSttModelBenchmarksByTurn: safeSttModelBenchmarksByTurnRef.current,
         audioBlobAvailableByTurn: new Set(audioBlobByTurnRef.current.keys()),
         audioIncludedInDiagnosticBundleByTurn,
         buildMetadata: buildMetadataRef.current,
@@ -2489,6 +2579,13 @@ export default function TranslatorView({
         { status: "corrected", correctedTranscript },
       ));
     }
+    const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(entry.id);
+    if (modelBenchmark) {
+      safeSttModelBenchmarksByTurnRef.current.set(
+        entry.id,
+        reviewSafeSttModelBenchmark(modelBenchmark, correctedTranscript),
+      );
+    }
     setQualityRevision((current) => current + 1);
     rememberReviewCompleted(entry.id);
   }
@@ -2509,6 +2606,14 @@ export default function TranslatorView({
         reviewSameAudioComparison(comparison, { status: "accepted_primary" }),
       );
     }
+    const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(turnId);
+    const entry = state.entries.find((item) => item.id === turnId);
+    if (modelBenchmark && entry) {
+      safeSttModelBenchmarksByTurnRef.current.set(
+        turnId,
+        reviewSafeSttModelBenchmark(modelBenchmark, entry.originalText),
+      );
+    }
     setQualityRevision((revision) => revision + 1);
     rememberReviewCompleted(turnId);
   }
@@ -2522,6 +2627,13 @@ export default function TranslatorView({
     if (!current) return;
     const reviewed = reviewSameAudioComparison(current, { status, correctedTranscript });
     sameAudioBenchmarksByTurnRef.current.set(turnId, reviewed);
+    const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(turnId);
+    if (modelBenchmark) {
+      safeSttModelBenchmarksByTurnRef.current.set(
+        turnId,
+        applySameAudioGroundTruthToSafeSttModelBenchmark(modelBenchmark, reviewed),
+      );
+    }
     const sample = qualityByTurnRef.current.get(turnId);
     if (sample) {
       const reviewedSample = status === "accepted_primary" || status === "equivalent"
@@ -2731,22 +2843,58 @@ export default function TranslatorView({
             <ProcessingIndicator key={processingPhase} stage={processingPhase} />
           ) : null}
 
-          {state.status === "playing" ? (
+          {state.status === "preparing" ? (
             <div className="flex min-h-24 flex-col items-center justify-center text-center">
-              {playbackReady ? (
-                <p className="font-semibold text-accent-success-strong">
-                  Wird vorgelesen … · Inasomwa …
-                </p>
-              ) : (
-                <ProcessingIndicator stage="audio" />
-              )}
+              <p className="font-semibold text-muted">
+                {SHARED_CONVERSATION_LABELS.preparingAudio.de}
+                <span className="block text-sm font-medium">
+                  {SHARED_CONVERSATION_LABELS.preparingAudio.sw}
+                </span>
+              </p>
               <button
                 type="button"
-                className="btn btn-danger mt-4 min-h-16 w-full text-base"
-                onClick={handleStopPlayback}
+                className="btn btn-primary mt-4 min-h-20 w-full touch-manipulation text-lg active:scale-[0.99]"
+                disabled={recorderStatus !== "idle"}
+                onClick={() => void handleStartRecording()}
               >
-                <span aria-hidden="true">■</span> Sprachausgabe stoppen
+                <span>
+                  {SHARED_CONVERSATION_LABELS.startRecording.de}
+                  <span className="mt-1 block text-sm font-medium opacity-80">
+                    {SHARED_CONVERSATION_LABELS.startRecording.sw}
+                  </span>
+                </span>
               </button>
+            </div>
+          ) : null}
+
+          {state.status === "playing" ? (
+            <div className="flex flex-col items-center justify-center text-center">
+              <p className="text-sm font-semibold leading-tight text-accent-success-strong" role="status">
+                Sprachausgabe läuft
+                <span className="block text-xs font-medium">Inasomwa …</span>
+              </p>
+              <div className="mt-3 grid w-full gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary min-h-20 w-full touch-manipulation text-lg active:scale-[0.99]"
+                  disabled={recorderStatus !== "idle"}
+                  onClick={() => void handleStartRecording()}
+                >
+                  <span>
+                    {SHARED_CONVERSATION_LABELS.startRecording.de}
+                    <span className="mt-1 block text-sm font-medium opacity-80">
+                      {SHARED_CONVERSATION_LABELS.startRecording.sw}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary min-h-12 w-full touch-manipulation border bg-transparent text-sm"
+                  onClick={handleStopPlayback}
+                >
+                  <span aria-hidden="true">■</span> Sprachausgabe stoppen
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -3067,11 +3215,17 @@ export default function TranslatorView({
                     });
                   }}
                 >
-                  Qualitätsprüfung ({postConversationReviewCandidateCount})
+                  {postConversationReviewPendingCount > 0
+                    ? `Qualitätsprüfung (${postConversationReviewPendingCount} offen)`
+                    : postConversationReviewReviewedCount > 0
+                      ? "Qualitätsprüfung abgeschlossen"
+                      : "Qualitätsprüfung (0 offen)"}
                 </button>
                 <p className="mt-2 text-center text-xs text-muted">
-                  {postConversationReviewCandidateCount === 0
-                    ? "Für dieses Gespräch gibt es aktuell keine auffälligen Passagen zum Prüfen."
+                  {postConversationReviewPendingCount === 0 && postConversationReviewReviewedCount > 0
+                    ? "Alle ausgewählten Passagen wurden geprüft."
+                    : postConversationReviewCandidateCount === 0
+                      ? "Für dieses Gespräch gibt es aktuell keine auffälligen Passagen zum Prüfen."
                     : postConversationReviewOpen
                       ? "Die ausgewählten Passagen sind jetzt direkt unterhalb markiert."
                       : "Prüft automatisch ausgewählte Gesprächspassagen. Jeder Turn kann zusätzlich direkt über Rückmeldung korrigiert werden."}

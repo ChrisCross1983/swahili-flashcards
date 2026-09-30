@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TranslationEntry } from "@/lib/translator/types";
-import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
+import {
+  TranslatorSpeechPlayer,
+  type TranslatorSpeechPlayerDependencies,
+} from "@/lib/translator/translatorSpeechPlayer";
 import {
   getTranslatorSpeechFailure,
   isSpeechPlaybackBlockedError,
@@ -26,19 +29,20 @@ type FakeAudio = HTMLAudioElement & {
 function createHarness(
   playAttempts: Array<() => Promise<void>> = [],
   documentVisible = true,
+  requestSpeechOverride?: TranslatorSpeechPlayerDependencies["requestSpeech"],
 ) {
   const audios: FakeAudio[] = [];
   let playAttemptIndex = 0;
-  const requestSpeech = vi.fn(async () =>
-    Promise.resolve({
+  const defaultRequestSpeech: TranslatorSpeechPlayerDependencies["requestSpeech"] =
+    async () => ({
       audio: new Blob(["audio"], { type: "audio/mpeg" }),
       diagnostics: {
         ttsModel: "gpt-4o-mini-tts",
         ttsGenerationMs: 400,
       },
       serverDiagnostics: Promise.resolve({ ttsOpenAiTotalMs: 350 }),
-    }),
-  );
+    });
+  const requestSpeech = vi.fn(requestSpeechOverride ?? defaultRequestSpeech);
   const createObjectUrl = vi.fn(() => "blob:translation-1");
   const revokeObjectUrl = vi.fn();
   const createAudio = vi.fn((url?: string) => {
@@ -151,6 +155,33 @@ describe("TranslatorSpeechPlayer", () => {
     finishAudio(harness.audios[0]);
     await playback;
     expect(onPlaybackCompleted).toHaveBeenCalledOnce();
+  });
+
+  it("aborts preparation and never plays a late speech response", async () => {
+    let resolveSpeech: (asset: TranslatorSpeechAsset) => void = () => undefined;
+    const requestState: { signal: AbortSignal | null } = { signal: null };
+    const requestSpeech: TranslatorSpeechPlayerDependencies["requestSpeech"] =
+      (_entry, _speed, signal) => {
+        requestState.signal = signal;
+        return new Promise((resolve) => {
+          resolveSpeech = resolve;
+        });
+      };
+    const harness = createHarness([], true, requestSpeech);
+    const playback = harness.player.play(entry, 1, { autoplay: true });
+
+    expect(requestState.signal?.aborted).toBe(false);
+    harness.player.stopPlayback();
+    expect(requestState.signal?.aborted).toBe(true);
+
+    resolveSpeech({
+      audio: new Blob(["late audio"], { type: "audio/mpeg" }),
+      diagnostics: { ttsModel: "gpt-4o-mini-tts", ttsGenerationMs: 500 },
+    });
+    await expect(playback).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(harness.createObjectUrl).not.toHaveBeenCalled();
+    expect(harness.audios).toHaveLength(0);
   });
 
   it("classifies an intentional stop before natural ended as interrupted", async () => {

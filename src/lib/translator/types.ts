@@ -338,6 +338,7 @@ export type TranslatorStatus =
   | "idle"
   | "recording"
   | "processing"
+  | "preparing"
   | "playing"
   | "paused"
   | "error";

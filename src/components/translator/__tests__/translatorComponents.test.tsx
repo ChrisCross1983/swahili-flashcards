@@ -115,7 +115,9 @@ describe("translator components", () => {
       path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
       "utf8",
     );
-    expect(source).toContain("Qualitätsprüfung ({postConversationReviewCandidateCount})");
+    expect(source).toContain("postConversationReviewPendingCount");
+    expect(source).toContain("Qualitätsprüfung abgeschlossen");
+    expect(source).toContain("offen)");
     expect(source).toContain("postConversationReviewCandidateCount === 0");
     expect(source).toContain("keine auffälligen Passagen zum Prüfen");
     expect(source).toContain("scrollIntoView");
@@ -123,6 +125,9 @@ describe("translator components", () => {
     expect(source).toContain("qualityByTurn: qualityByTurnRef.current");
     expect(source).toContain("failedPostConversationReviewCandidateIds.length");
     expect(source).toContain("MAX_POST_CONVERSATION_REVIEW_CANDIDATES");
+    expect(source).toContain("applySameAudioGroundTruthToSafeSttModelBenchmark");
+    expect(source).toContain('status: "accepted_primary"');
+    expect(source).toContain('status: "corrected"');
   });
 
   it("shows entry-bound pause, resume and stop controls", () => {
@@ -151,14 +156,50 @@ describe("translator components", () => {
     const playing = renderToStaticMarkup(
       <TranslationCard {...commonProps} playbackState="playing" />,
     );
+    const preparing = renderToStaticMarkup(
+      <TranslationCard {...commonProps} playbackState="preparing" />,
+    );
     const paused = renderToStaticMarkup(
       <TranslationCard {...commonProps} playbackState="paused" />,
     );
 
+    expect(preparing).toContain("Audio wird vorbereitet");
+    expect(preparing).toContain("Vorbereitung abbrechen");
+    expect(preparing).not.toContain("Sprachausgabe stoppen");
     expect(playing).toContain("Pause");
     expect(playing).toContain("Stop");
     expect(paused).toContain("Fortsetzen");
     expect(paused).toContain("Stop");
+  });
+
+  it("shows separate preparing and active-playback actions in the main view", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    const preparingUi = source.slice(
+      source.indexOf('{state.status === "preparing" ? (', source.indexOf("<ProcessingIndicator key={processingPhase}")),
+      source.indexOf('{state.status === "playing" ? (', source.indexOf("<ProcessingIndicator key={processingPhase}")),
+    );
+    const playingUi = source.slice(
+      source.indexOf('{state.status === "playing" ? (', source.indexOf("<ProcessingIndicator key={processingPhase}")),
+      source.indexOf('{state.status === "paused" ? (', source.indexOf("<ProcessingIndicator key={processingPhase}")),
+    );
+
+    expect(preparingUi).toContain("SHARED_CONVERSATION_LABELS.preparingAudio.de");
+    expect(preparingUi).toContain("SHARED_CONVERSATION_LABELS.startRecording.de");
+    expect(preparingUi).not.toContain("Sprachausgabe stoppen");
+    expect(playingUi).toContain("Sprachausgabe läuft");
+    expect(playingUi).toContain("Inasomwa …");
+    expect(playingUi).toContain("Sprachausgabe stoppen");
+    expect(playingUi).toContain("btn btn-primary min-h-20");
+    expect(playingUi).toContain("btn btn-secondary min-h-12");
+    expect(playingUi).toContain("SHARED_CONVERSATION_LABELS.startRecording.de");
+    expect(source).toContain('dispatch({ type: "PLAYBACK_STARTED" })');
+    expect(source).toContain('ttsGenerationOutcome: isCurrentRun ? "aborted" : "stale_result"');
+    expect(source).toContain('ttsSkipReason: isCurrentRun ? "playback_aborted" : "stale_playback_result"');
+    expect(source).toContain('ttsPlaybackOutcome: "interrupted"');
+    expect(source).toContain('ttsPlaybackOutcome: "completed"');
   });
 
   it("shows a saved state on the exact translation card", () => {

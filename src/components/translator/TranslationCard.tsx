@@ -248,7 +248,7 @@ export default function TranslationCard({
               className="btn btn-danger min-h-12 px-4"
               onClick={onStop}
             >
-              <span aria-hidden="true">■</span> Stop
+              <span aria-hidden="true">■</span> Vorbereitung abbrechen
             </button>
           </div>
         ) : null}

@@ -4,6 +4,7 @@ import { TranslatorPipelineError } from "@/lib/translator/server/errors";
 import {
   FALLBACK_TRANSCRIPTION_MODEL,
   PRIMARY_TRANSCRIPTION_MODEL,
+  type SafeSttModelBenchmarkCandidate,
   SPEECH_MODEL,
   SPEECH_RESPONSE_FORMAT,
   SPEECH_VOICE,
@@ -202,7 +203,8 @@ const AUTO_TRANSCRIPTION_CONTEXT = [
 
 type TranscriptionModel =
   | typeof PRIMARY_TRANSCRIPTION_MODEL
-  | typeof FALLBACK_TRANSCRIPTION_MODEL;
+  | typeof FALLBACK_TRANSCRIPTION_MODEL
+  | SafeSttModelBenchmarkCandidate;
 
 let sharedOpenAiClient: { apiKey: string; client: OpenAI } | null = null;
 
@@ -313,23 +315,30 @@ export function createOpenAITranslatorGateway(
         });
       };
 
-      const autoContext = input.language
+      // Whisper's prompt should match the audio language. In Auto mode the
+      // language is intentionally unknown, so its direct QA comparison uses
+      // the same no-prompt semantics as the existing Product Whisper fallback.
+      const autoContext = input.language || input.benchmarkModel === FALLBACK_TRANSCRIPTION_MODEL
         ? {}
         : { prompt: AUTO_TRANSCRIPTION_CONTEXT };
 
-      logTranscriptionDebug(PRIMARY_TRANSCRIPTION_MODEL, false);
+      const requestedModel = input.benchmarkModel ?? PRIMARY_TRANSCRIPTION_MODEL;
+      logTranscriptionDebug(requestedModel, false);
       let fallbackReason: "model_access" | "transcription_error";
 
       try {
         const startedAt = Date.now();
         const primary = await client.audio.transcriptions.create({
           file,
-          model: PRIMARY_TRANSCRIPTION_MODEL,
+          model: requestedModel,
           ...(input.language ? { language: input.language } : {}),
+          ...(input.benchmarkModel === FALLBACK_TRANSCRIPTION_MODEL && !input.language
+            ? { response_format: "verbose_json" as const }
+            : {}),
           ...autoContext,
         });
         logTranscriptionQualityDebug(
-          PRIMARY_TRANSCRIPTION_MODEL,
+          requestedModel,
           false,
           primary.text,
           startedAt,
@@ -339,7 +348,7 @@ export function createOpenAITranslatorGateway(
           return {
             text: primary.text,
             detectedLanguage: input.language,
-            model: PRIMARY_TRANSCRIPTION_MODEL,
+            model: requestedModel,
             fallbackUsed: false,
           };
         }
@@ -349,11 +358,16 @@ export function createOpenAITranslatorGateway(
         logTranscriptionError(error);
       }
 
-      logFallback(
-        PRIMARY_TRANSCRIPTION_MODEL,
-        FALLBACK_TRANSCRIPTION_MODEL,
-        fallbackReason,
-      );
+      if (input.benchmarkModel) {
+        throw new TranslatorPipelineError(
+          fallbackReason === "model_access" ? "configuration" : "transcription_failed",
+          fallbackReason === "model_access"
+            ? "benchmark_model_access_unavailable"
+            : "benchmark_model_transcription_failed",
+        );
+      }
+
+      logFallback(PRIMARY_TRANSCRIPTION_MODEL, FALLBACK_TRANSCRIPTION_MODEL, fallbackReason);
       logTranscriptionDebug(FALLBACK_TRANSCRIPTION_MODEL, true);
 
       try {

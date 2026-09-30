@@ -108,6 +108,8 @@ export type AudioTranscriptionBenchmarkOptions = {
   correlationId?: string;
   recordedAudioDiagnostics?: RecordedAudioDiagnostics;
   requestAttempt?: number;
+  /** Internal model-quality benchmark only; omitted by product and parity requests. */
+  benchmarkModel?: string;
 };
 
 function isNonNegativeNumber(value: unknown) {
@@ -390,7 +392,6 @@ export async function requestAudioTranslation(
     format,
     options.recordedAudioDiagnostics,
   );
-
   let response: Response;
   try {
     response = await (options.fetcher ?? fetch)("/api/translator/translate", {
@@ -434,6 +435,7 @@ export async function requestAudioTranscriptionBenchmark(
     format,
     options.recordedAudioDiagnostics,
   );
+  if (options.benchmarkModel) formData.append("benchmarkModel", options.benchmarkModel);
   let response: Response;
   try {
     response = await (options.fetcher ?? fetch)("/api/translator/transcribe", {

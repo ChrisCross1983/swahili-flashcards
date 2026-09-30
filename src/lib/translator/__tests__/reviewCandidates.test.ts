@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { selectPostConversationReviewCandidates } from "@/lib/translator/reviewCandidates";
+import {
+  countPendingPostConversationReviewCandidates,
+  countReviewedPostConversationReviewCandidates,
+  selectPostConversationReviewCandidates,
+} from "@/lib/translator/reviewCandidates";
 import type { TranslationEntry } from "@/lib/translator/types";
+import {
+  createUnreviewedSpeechQualityRecord,
+  type TranslatorSpeechQualitySample,
+} from "@/lib/translator/speechQuality";
 
 function entry(id: string, diagnostics = {}, originalText = "Habari."): TranslationEntry {
   return {
@@ -41,6 +49,35 @@ describe("post-conversation review selection", () => {
       "feedback",
     ]);
     expect(selected).not.toContain("normal");
+  });
+
+  it("reports open work separately from the selected review window", () => {
+    const selected = ["sw-1", "sw-2", "de-1", "de-2", "de-3"];
+    const sample = (status: TranslatorSpeechQualitySample["recognitionReviewStatus"], turnId: string): TranslatorSpeechQualitySample => ({
+      ...createUnreviewedSpeechQualityRecord({
+        turnId, recognizedTranscript: "Habari", sourceLanguage: "sw",
+        transcriptionModel: "gpt-4o-mini-transcribe", transcriptionPath: "audio_upload_fallback",
+        appVersion: "test", audioEligible: true,
+        consentAtRecordingStart: {
+          diagnosticsSharingEnabled: false, qualityContentSharingEnabled: false,
+          speechSampleSharingEnabled: true, internalSpeechDiagnosticsEnabled: true,
+        },
+      }),
+      recognitionReviewStatus: status,
+    });
+    const reviewed = new Map<string, TranslatorSpeechQualitySample>([
+      ["sw-1", sample("accepted", "sw-1")], ["sw-2", sample("corrected", "sw-2")],
+      ["de-1", sample("accepted", "de-1")], ["de-2", sample("unreviewed", "de-2")],
+      ["de-3", sample("unreviewed", "de-3")],
+    ]);
+    expect(countPendingPostConversationReviewCandidates(selected, reviewed)).toBe(2);
+    expect(countReviewedPostConversationReviewCandidates(selected, reviewed)).toBe(3);
+
+    reviewed.set("de-3", sample("corrected", "de-3"));
+    expect(countPendingPostConversationReviewCandidates(selected, reviewed)).toBe(1);
+    reviewed.set("de-2", sample("accepted", "de-2"));
+    expect(countPendingPostConversationReviewCandidates(selected, reviewed)).toBe(0);
+    expect(countReviewedPostConversationReviewCandidates(selected, reviewed)).toBe(5);
   });
 
   it("finds the realistic cold fallback and 27-second summary turn", () => {

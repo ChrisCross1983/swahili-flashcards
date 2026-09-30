@@ -6,6 +6,7 @@ import type {
   TranslationResult,
 } from "@/lib/translator/types";
 import type { SupportedAudioFormat } from "@/lib/translator/audioFormats";
+import type { SafeSttModelBenchmarkCandidate } from "@/lib/translator/server/models";
 import {
   getTranslatorPipelineErrorCode,
   TranslatorPipelineError,
@@ -23,6 +24,8 @@ export type TranscriptionInput = {
   originalMimeType: string;
   normalizedMimeType: string;
   language: TranslationLanguage | null;
+  /** Internal QA only. Omitted on every product Safe-STT request. */
+  benchmarkModel?: SafeSttModelBenchmarkCandidate;
 };
 
 export type TranscriptionOutput = {
@@ -77,7 +80,7 @@ type TranslateRecordedAudioInput = {
 export type SafeAudioTranscriptionInput = Pick<
   TranslateRecordedAudioInput,
   "audio" | "format" | "direction"
->;
+> & Pick<TranscriptionInput, "benchmarkModel">;
 
 export type SafeAudioTranscriptionResult = {
   transcript: string;
@@ -126,9 +129,12 @@ export async function transcribeSafeAudio(
       language: input.direction.sourceLanguage === "auto"
         ? null
         : input.direction.sourceLanguage,
+      ...(input.benchmarkModel ? { benchmarkModel: input.benchmarkModel } : {}),
     });
   } catch (error) {
-    if (getTranslatorPipelineErrorCode(error) === "unsupported_language") {
+    const code = getTranslatorPipelineErrorCode(error);
+    if (code === "unsupported_language" ||
+      (input.benchmarkModel && code === "configuration")) {
       throw error;
     }
     throw new TranslatorPipelineError(

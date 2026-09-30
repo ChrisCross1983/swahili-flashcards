@@ -10,6 +10,7 @@ import { getTranslatorPipelineErrorCode } from "@/lib/translator/server/errors";
 import { transcribeRecordedAudio } from "@/lib/translator/server/translate";
 import { isUsableRecordedAudio } from "@/lib/translator/recordedAudio";
 import { INTERNAL_TRANSLATOR_QA_ENABLED } from "@/lib/translator/capturePolicy";
+import { isSafeSttModelBenchmarkCandidate } from "@/lib/translator/server/models";
 
 export const runtime = "nodejs";
 
@@ -36,13 +37,18 @@ export async function POST(request: Request) {
   const sourceValue = formData.get("sourceLanguage");
   const sourceLanguage = sourceValue === "auto" ? null : language(sourceValue);
   const targetValue = formData.get("targetLanguage");
+  const requestedBenchmarkModel = formData.get("benchmarkModel");
+  const benchmarkModel = typeof requestedBenchmarkModel === "string" && requestedBenchmarkModel
+    ? requestedBenchmarkModel
+    : null;
   const targetLanguage = targetValue === "auto" ? null : language(targetValue);
   const direction: TranslationRequestDirection | null = sourceValue === "auto" && targetValue === "auto"
     ? { sourceLanguage: "auto", targetLanguage: "auto" }
     : sourceLanguage && targetLanguage && sourceLanguage !== targetLanguage
       ? { sourceLanguage: sourceLanguage as TranslationLanguage, targetLanguage: targetLanguage as TranslationLanguage }
       : null;
-  if (!(audio instanceof Blob) || !direction) {
+  if (!(audio instanceof Blob) || !direction ||
+    (benchmarkModel !== null && !isSafeSttModelBenchmarkCandidate(benchmarkModel))) {
     return NextResponse.json({ error: "Ungültige Anfrage." }, { status: 400 });
   }
   const recordingDurationMs = Number(formData.get("recordingDurationMs"));
@@ -65,14 +71,19 @@ export async function POST(request: Request) {
   }
   try {
     const result = await transcribeRecordedAudio(
-      { audio, format, direction },
+      { audio, format, direction, ...(benchmarkModel ? { benchmarkModel } : {}) },
       createOpenAITranslatorGateway(),
     );
     return NextResponse.json(result);
   } catch (error) {
     const code = getTranslatorPipelineErrorCode(error);
+    const benchmarkFailure = benchmarkModel
+      ? code === "configuration"
+        ? "benchmark_model_unavailable"
+        : "benchmark_model_transcription_failed"
+      : null;
     return NextResponse.json(
-      { code: code === "no_speech" ? "no_speech" : "transcription_failed", error: "Vergleich konnte nicht erstellt werden." },
+      { code: benchmarkFailure ?? (code === "no_speech" ? "no_speech" : "transcription_failed"), error: "Vergleich konnte nicht erstellt werden." },
       { status: code === "no_speech" ? 422 : 503 },
     );
   }

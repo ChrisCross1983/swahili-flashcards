@@ -40,6 +40,10 @@ import type {
 } from "@/lib/translator/turnConsent";
 import { speechAudioEligibleForTurn } from "@/lib/translator/turnConsent";
 import {
+  summarizeSafeSttModelBenchmarks,
+  type SafeSttModelBenchmark,
+} from "@/lib/translator/safeSttModelBenchmark";
+import {
   learningSignalQuality,
   type SttCandidateComparison,
   type SttRoutingDecision,
@@ -1417,6 +1421,7 @@ export function buildClassicTranslatorReport(input: {
   sttComparisonsByTurn?: ReadonlyMap<string, SttCandidateComparison>;
   sameAudioBenchmarksByTurn?: ReadonlyMap<string, SameAudioBenchmarkComparison>;
   sameAudioEligibleTurnIds?: ReadonlySet<string>;
+  safeSttModelBenchmarksByTurn?: ReadonlyMap<string, SafeSttModelBenchmark>;
   persistedSnapshotUsed?: boolean;
   droppedTelemetryEvents?: number;
   audioManifestConsistent?: boolean | null;
@@ -1665,6 +1670,42 @@ export function buildClassicTranslatorReport(input: {
     benchmarkComparisons,
     input.sameAudioEligibleTurnIds?.size ?? benchmarkComparisons.length,
   );
+  const safeSttModelBenchmarkSummary = summarizeSafeSttModelBenchmarks(
+    Array.from(input.safeSttModelBenchmarksByTurn?.values() ?? []),
+  );
+  const safeSttModelBenchmarkResults = Array.from(
+    input.safeSttModelBenchmarksByTurn?.values() ?? [],
+  ).flatMap((benchmark) => benchmark.results.map((result) => ({
+    turnId: benchmark.turnId,
+    requestedModel: result.requestedModel,
+    actualModel: result.actualModel,
+    outcome: result.outcome,
+    failureCategory: result.failureCategory,
+    failureReason: result.failureReason,
+    fallbackUsed: result.fallbackUsed,
+    transcriptionMs: result.transcriptionMs,
+  })));
+  const safeSttModelBenchmarks = Array.from(
+    input.safeSttModelBenchmarksByTurn?.values() ?? [],
+  );
+  const safeSttModelBenchmarkCompletedEligibleTurns = safeSttModelBenchmarks.filter((benchmark) =>
+    benchmark.results.some((result) => result.outcome === "completed"),
+  ).length;
+  const safeSttModelBenchmarkReviewedTurns = safeSttModelBenchmarks.filter((benchmark) =>
+    benchmark.groundTruthTranscript?.trim() && benchmark.reviewedAt,
+  ).length;
+  const safeSttModelBenchmarkGroundTruthCoverage = {
+    completedEligibleTurns: safeSttModelBenchmarkCompletedEligibleTurns,
+    reviewedTurns: safeSttModelBenchmarkReviewedTurns,
+    unreviewedCompletedTurns: Math.max(
+      0,
+      safeSttModelBenchmarkCompletedEligibleTurns - safeSttModelBenchmarkReviewedTurns,
+    ),
+    coverageRate: rate(
+      safeSttModelBenchmarkReviewedTurns,
+      safeSttModelBenchmarkCompletedEligibleTurns,
+    ),
+  };
   for (const turn of turns) {
     const comparison = turn.sttCandidateComparison;
     const evidenceOrigin = turn.diagnosticEvents.some((event) =>
@@ -2065,6 +2106,9 @@ export function buildClassicTranslatorReport(input: {
       comparison.benchmarkParityVersion === speechBenchmarkSummary.benchmarkParityVersion &&
       comparison.benchmarkStatus === "completed" && comparison.groundTruthStatus === "unreviewed")
       ? ["speech_benchmark_ready_for_review"] : []),
+    ...(reviewedOrganicQualityTurns.length >= safeSttModelBenchmarkCompletedEligibleTurns &&
+      safeSttModelBenchmarkGroundTruthCoverage.unreviewedCompletedTurns > 0
+      ? ["model_benchmark_ground_truth_incomplete"] : []),
   ];
 
   return {
@@ -2314,6 +2358,10 @@ export function buildClassicTranslatorReport(input: {
         turn.learningSignal?.benchmarkReadySameAudioSample).length,
     },
     speechBenchmarkSummary,
+    safeSttModelBenchmarkVersion: "safe-stt-model-benchmark-v1",
+    safeSttModelBenchmarkSummary,
+    safeSttModelBenchmarkResults,
+    safeSttModelBenchmarkGroundTruthCoverage,
     sttRoutingSummary: {
       realtimePrimaryTurns: organicTurns.filter((turn) =>
         turn.sttRoutingDecision === "realtime_primary").length,

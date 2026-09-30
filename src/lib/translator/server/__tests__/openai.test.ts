@@ -214,6 +214,71 @@ describe("OpenAI translator diagnostics", () => {
     );
   });
 
+  it("does not substitute Whisper for an explicit primary model benchmark request", async () => {
+    openAiMocks.transcriptionCreate.mockRejectedValueOnce(
+      Object.assign(new Error("provider model_not_found details"), {
+        status: 403,
+        code: "model_not_found",
+      }),
+    );
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+
+    await expect(gateway.transcribe({
+      ...transcriptionInput,
+      benchmarkModel: "gpt-4o-mini-transcribe",
+    })).rejects.toMatchObject({
+      code: "configuration",
+      message: "benchmark_model_access_unavailable",
+    });
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-4o-mini-transcribe" }),
+    );
+    expect(openAiMocks.transcriptionCreate.mock.calls.map(([request]) => request.model))
+      .not.toContain("whisper-1");
+  });
+
+  it("runs Whisper as a direct Auto benchmark candidate without fallback semantics", async () => {
+    openAiMocks.transcriptionCreate.mockResolvedValueOnce({
+      text: "Habari yako leo?",
+      language: "sw",
+    });
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+
+    await expect(gateway.transcribe({
+      ...transcriptionInput,
+      language: null,
+      benchmarkModel: "whisper-1",
+    })).resolves.toEqual({
+      text: "Habari yako leo?",
+      detectedLanguage: null,
+      model: "whisper-1",
+      fallbackUsed: false,
+    });
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledOnce();
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledWith({
+      file: expect.anything(),
+      model: "whisper-1",
+      response_format: "verbose_json",
+    });
+  });
+
+  it("keeps explicit Whisper benchmark language semantics without a prompt", async () => {
+    openAiMocks.transcriptionCreate.mockResolvedValueOnce({ text: "Habari yako leo?" });
+    const gateway = createOpenAITranslatorGateway("configured-secret");
+
+    await expect(gateway.transcribe({
+      ...transcriptionInput,
+      language: "sw",
+      benchmarkModel: "whisper-1",
+    })).resolves.toMatchObject({ model: "whisper-1", fallbackUsed: false });
+    expect(openAiMocks.transcriptionCreate).toHaveBeenCalledWith({
+      file: expect.anything(),
+      model: "whisper-1",
+      language: "sw",
+    });
+  });
+
   it("falls back when the primary returns no usable transcript", async () => {
     openAiMocks.transcriptionCreate
       .mockResolvedValueOnce({ text: " ... " })

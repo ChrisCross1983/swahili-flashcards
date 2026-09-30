@@ -184,7 +184,7 @@ describe("translator state machine", () => {
     expect(complete.entries).toEqual([swToDeEntry]);
   });
 
-  it("stores visible text and enters playing when auto play is enabled", () => {
+  it("stores visible text and prepares autoplay before entering playing", () => {
     const autoPlay = translatorReducer(initialTranslatorState, {
       type: "TOGGLE_AUTO_PLAY",
     });
@@ -195,26 +195,66 @@ describe("translator state machine", () => {
       entry: swToDeEntry,
     });
 
-    expect(complete.status).toBe("playing");
+    expect(complete.status).toBe("preparing");
     expect(complete.activePlaybackEntryId).toBe(swToDeEntry.id);
     expect(complete.autoPlay).toBe(true);
     expect(complete.entries).toEqual([swToDeEntry]);
     expect(translatorReducer(complete, { type: "START_RECORDING" })).toBe(
       complete,
     );
+    const playing = translatorReducer(complete, { type: "PLAYBACK_STARTED" });
+    expect(playing.status).toBe("playing");
     expect(
-      translatorReducer(complete, { type: "PLAYBACK_FINISHED" }).status,
+      translatorReducer(playing, { type: "PLAYBACK_FINISHED" }).status,
     ).toBe("idle");
+  });
+
+  it("allows preparing playback to be stopped or replaced by a new recording", () => {
+    const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
+    const preparing = translatorReducer(withEntry, {
+      type: "START_PLAYBACK",
+      entryId: swToDeEntry.id,
+    });
+
+    expect(preparing.status).toBe("preparing");
+    expect(translatorReducer(preparing, { type: "PLAYBACK_FINISHED" })).toMatchObject({
+      status: "idle",
+      activePlaybackEntryId: null,
+    });
+
+    const recordingAfterCancel = translatorReducer(
+      translatorReducer(preparing, { type: "PLAYBACK_FINISHED" }),
+      { type: "START_RECORDING" },
+    );
+    expect(recordingAfterCancel.status).toBe("recording");
+
+    const playing = translatorReducer(preparing, { type: "PLAYBACK_STARTED" });
+    const recordingAfterPlayback = translatorReducer(
+      translatorReducer(playing, { type: "PLAYBACK_FINISHED" }),
+      { type: "START_RECORDING" },
+    );
+    expect(recordingAfterPlayback.status).toBe("recording");
+  });
+
+  it("ignores playback-start events unless audio is preparing", () => {
+    expect(translatorReducer(initialTranslatorState, { type: "PLAYBACK_STARTED" }))
+      .toBe(initialTranslatorState);
+    const processing = translatorReducer(
+      translatorReducer(initialTranslatorState, { type: "START_RECORDING" }),
+      { type: "STOP_AND_TRANSLATE" },
+    );
+    expect(translatorReducer(processing, { type: "PLAYBACK_STARTED" })).toBe(processing);
   });
 
   it("pauses and resumes only the active playback entry", () => {
     const withEntry = { ...initialTranslatorState, entries: [swToDeEntry] };
-    const playing = translatorReducer(withEntry, {
+    const preparing = translatorReducer(withEntry, {
       type: "START_PLAYBACK",
       entryId: swToDeEntry.id,
     });
+    const playing = translatorReducer(preparing, { type: "PLAYBACK_STARTED" });
     const paused = translatorReducer(playing, { type: "PAUSE_PLAYBACK" });
-    const resumed = translatorReducer(paused, { type: "RESUME_PLAYBACK" });
+    const resumed = translatorReducer(paused, { type: "PLAYBACK_STARTED" });
     const stopped = translatorReducer(resumed, { type: "PLAYBACK_FINISHED" });
 
     expect(playing).toMatchObject({

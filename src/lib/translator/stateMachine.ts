@@ -82,8 +82,8 @@ export type TranslatorEvent =
       category?: TranslatorFailureCategory | null;
     }
   | { type: "START_PLAYBACK"; entryId: string }
+  | { type: "PLAYBACK_STARTED" }
   | { type: "PAUSE_PLAYBACK" }
-  | { type: "RESUME_PLAYBACK" }
   | { type: "PLAYBACK_FINISHED" }
   | { type: "RESET_ERROR" }
   | { type: "CLEAR_HISTORY" };
@@ -144,7 +144,7 @@ export function translatorReducer(
       if (state.status !== "processing") return state;
       return {
         ...state,
-        status: state.autoPlay ? "playing" : "idle",
+        status: state.autoPlay ? "preparing" : "idle",
         entries: [event.entry, ...state.entries],
         activePlaybackEntryId: state.autoPlay ? event.entry.id : null,
         errorMessage: event.notice ?? null,
@@ -203,20 +203,24 @@ export function translatorReducer(
       }
       return {
         ...state,
-        status: "playing",
+        status: "preparing",
         activePlaybackEntryId: event.entryId,
       };
+
+    case "PLAYBACK_STARTED":
+      if (state.status !== "preparing" && state.status !== "paused") return state;
+      return { ...state, status: "playing" };
 
     case "PAUSE_PLAYBACK":
       if (state.status !== "playing") return state;
       return { ...state, status: "paused" };
 
-    case "RESUME_PLAYBACK":
-      if (state.status !== "paused") return state;
-      return { ...state, status: "playing" };
-
     case "PLAYBACK_FINISHED":
-      if (state.status !== "playing" && state.status !== "paused") return state;
+      if (
+        state.status !== "preparing" &&
+        state.status !== "playing" &&
+        state.status !== "paused"
+      ) return state;
       return { ...state, status: "idle", activePlaybackEntryId: null };
 
     case "RESET_ERROR":

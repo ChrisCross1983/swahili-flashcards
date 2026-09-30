@@ -15,6 +15,7 @@ import {
 } from "@/lib/translator/speechQuality";
 import { createTranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
 import type { TranslatorDiagnosticEvent } from "@/lib/translator/diagnosticEvents";
+import type { SafeSttModelBenchmark } from "@/lib/translator/safeSttModelBenchmark";
 
 function diagnosticEvent(
   overrides: Partial<TranslatorDiagnosticEvent> = {},
@@ -254,6 +255,60 @@ function entry(
   };
 }
 
+const safeSttModelBenchmark: SafeSttModelBenchmark = {
+  benchmarkId: "model-benchmark-1",
+  turnId: "fallback-turn",
+  benchmarkVersion: "safe-stt-model-benchmark-v1",
+  sameAudio: true,
+  languageMode: "auto",
+  resolvedSourceLanguage: "sw",
+  recordingDurationMs: 1_000,
+  audioMimeType: "audio/webm",
+  groundTruthTranscript: "Habari yako leo?",
+  reviewedAt: "2026-09-16T12:00:00.000Z",
+  results: [
+    {
+      requestedModel: "gpt-4o-mini-transcribe",
+      actualModel: "gpt-4o-mini-transcribe",
+      transcript: "Habari yako leo?",
+      transcriptionMs: 200,
+      completedAt: "2026-09-16T12:00:01.000Z",
+      outcome: "completed",
+      failureCategory: null,
+      failureReason: null,
+      fallbackUsed: false,
+      normalizedExactMatch: true,
+      wer: 0,
+    },
+    {
+      requestedModel: "gpt-transcribe",
+      actualModel: null,
+      transcript: null,
+      transcriptionMs: null,
+      completedAt: "2026-09-16T12:00:01.000Z",
+      outcome: "unavailable",
+      failureCategory: "model_unavailable",
+      failureReason: "benchmark_model_unavailable",
+      fallbackUsed: false,
+      normalizedExactMatch: null,
+      wer: null,
+    },
+    {
+      requestedModel: "gpt-4o-transcribe",
+      actualModel: null,
+      transcript: null,
+      transcriptionMs: null,
+      completedAt: "2026-09-16T12:00:01.000Z",
+      outcome: "runtime_failed",
+      failureCategory: "transcription_failed",
+      failureReason: "benchmark_model_transcription_failed",
+      fallbackUsed: false,
+      normalizedExactMatch: null,
+      wer: null,
+    },
+  ],
+};
+
 describe("classic translator QA report", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -459,6 +514,38 @@ describe("classic translator QA report", () => {
     expect(serialized).not.toContain("rawAudio");
     expect(serialized).not.toContain("offer-sdp");
     expect(serialized).not.toContain("answer-sdp");
+  });
+
+  it("exports benchmark failure classification without provider error content", () => {
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-09-16T12:00:00.000Z",
+      userAgent: "QA Browser",
+      platform: "QA Platform",
+      currentMode: "auto",
+      ttsSpeed: 1,
+      entries: [entry("fallback-turn", "audio_upload_fallback")],
+      failedTurns: [],
+      safeSttModelBenchmarksByTurn: new Map([[safeSttModelBenchmark.turnId, safeSttModelBenchmark]]),
+    });
+
+    expect(report.safeSttModelBenchmarkSummary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ model: "gpt-4o-mini-transcribe", completedSamples: 1, reviewedSamples: 1, accessOrRuntimeFailures: 0 }),
+      expect.objectContaining({ model: "gpt-transcribe", completedSamples: 0, unavailableFailures: 1, runtimeFailures: 0, reviewedSamples: 0, accessOrRuntimeFailures: 1 }),
+      expect.objectContaining({ model: "gpt-4o-transcribe", completedSamples: 0, unavailableFailures: 0, runtimeFailures: 1, reviewedSamples: 0, accessOrRuntimeFailures: 1 }),
+    ]));
+    expect(report.safeSttModelBenchmarkResults).toEqual([
+      expect.objectContaining({ turnId: "fallback-turn", requestedModel: "gpt-4o-mini-transcribe", actualModel: "gpt-4o-mini-transcribe", outcome: "completed", fallbackUsed: false, transcriptionMs: 200 }),
+      expect.objectContaining({ turnId: "fallback-turn", requestedModel: "gpt-transcribe", actualModel: null, outcome: "unavailable", failureCategory: "model_unavailable", failureReason: "benchmark_model_unavailable", fallbackUsed: false, transcriptionMs: null }),
+      expect.objectContaining({ turnId: "fallback-turn", requestedModel: "gpt-4o-transcribe", actualModel: null, outcome: "runtime_failed", failureCategory: "transcription_failed", failureReason: "benchmark_model_transcription_failed", fallbackUsed: false, transcriptionMs: null }),
+    ]);
+    expect(report.safeSttModelBenchmarkGroundTruthCoverage).toEqual({
+      completedEligibleTurns: 1,
+      reviewedTurns: 1,
+      unreviewedCompletedTurns: 0,
+      coverageRate: 1,
+    });
+    expect(JSON.stringify(report.safeSttModelBenchmarkResults)).not.toContain("provider");
+    expect(JSON.stringify(report.safeSttModelBenchmarkResults)).not.toContain("secret");
   });
 
   it("uses the requested local filename format", () => {
