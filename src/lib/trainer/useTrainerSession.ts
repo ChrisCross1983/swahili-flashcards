@@ -125,7 +125,6 @@ export function useTrainerSession({
             setCurrentIndex(0);
             setReveal(false);
             onSetupCountsPatch?.({ todayDue: items.length });
-            refreshSetupCountsInBackground();
             onStatus(`Fällig heute: ${items.length}`);
             return { ok: true as const, items };
         } catch (error) {

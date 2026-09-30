@@ -59,6 +59,27 @@ describe("trainer session runtime regression guards", () => {
         expect(sessionSource).toContain("const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial)");
         expect(sessionSource).toContain('if (loadPlan?.kind === "today")');
         expect(sessionSource).toContain("loadResult = await loadToday()");
+
+        const loadTodaySource = sessionSource.slice(
+            sessionSource.indexOf("async function loadToday()"),
+            sessionSource.indexOf("async function loadAllForDrill("),
+        );
+        expect(loadTodaySource).toContain("setSessionTotal(items.length)");
+        expect(loadTodaySource).toContain("onSetupCountsPatch?.({ todayDue: items.length })");
+        expect(loadTodaySource).not.toContain("refreshSetupCountsInBackground()");
+    });
+
+    it("ignores stale setup-count refresh responses", () => {
+        const refreshCountsSource = clientSource.slice(
+            clientSource.indexOf("const refreshSetupCounts = useCallback"),
+            clientSource.indexOf("const {\n        todayItems", clientSource.indexOf("const refreshSetupCounts = useCallback")),
+        );
+
+        expect(clientSource).toContain("const setupCountsRequestIdRef = useRef(0)");
+        expect(refreshCountsSource).toContain("const requestId = ++setupCountsRequestIdRef.current");
+        expect(refreshCountsSource).toContain("if (requestId !== setupCountsRequestIdRef.current) return;");
+        expect(refreshCountsSource).toContain("if (requestId === setupCountsRequestIdRef.current)");
+        expect(clientSource).toContain("setupCountsRequestIdRef.current += 1;");
     });
 
     it("starts all/group drill via all-cards loader", () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAllCardsForDrill } from "@/lib/trainer/api";
+import { fetchAllCardsForDrill, fetchSetupCounts } from "@/lib/trainer/api";
 
 describe("trainer api", () => {
     afterEach(() => {
@@ -38,5 +38,23 @@ describe("trainer api", () => {
         ));
 
         await expect(fetchAllCardsForDrill("vocab")).rejects.toThrow("ungültige Antwort vom Server");
+    });
+
+    it("fetches setup counts without using a cached response", async () => {
+        const fetchMock = vi.fn(async () =>
+            new Response(JSON.stringify({ todayDue: 3, totalCards: 10, lastMissedCount: 1 }), { status: 200 })
+        );
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(fetchSetupCounts("vocab")).resolves.toEqual({
+            todayDue: 3,
+            totalCards: 10,
+            lastMissedCount: 1,
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/learn/setup-counts?type=vocab",
+            { cache: "no-store" },
+        );
     });
 });

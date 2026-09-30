@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { LIVE_TRANSLATOR_BETA } from "@/lib/translator/live/config";
 
@@ -26,6 +26,7 @@ function getTypeFilter(typeParam: string | null): CardTypeFilter {
 export default function HomeClient({ ownerKey }: Props) {
   void ownerKey;
   const router = useRouter();
+  const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [leitnerStats, setLeitnerStats] = useState<LeitnerStats | null>(null);
 
@@ -56,22 +57,56 @@ export default function HomeClient({ ownerKey }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    let requestInFlight = false;
+    let lastRequestAt = 0;
+    let requestGeneration = 0;
+    let activeRequest: AbortController | null = null;
 
-    (async () => {
-      const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
-      const res = await fetch(
-        `/api/learn/stats?type=${typeFilter}`,
-        { cache: "no-store" }
-      );
-      const json = await res.json();
-      if (!res.ok || cancelled) return;
-      setLeitnerStats(json);
-    })();
+    async function loadLeitnerStats(force = false) {
+      if (requestInFlight && !force) return;
+      const requestId = ++requestGeneration;
+      activeRequest?.abort();
+      const controller = new AbortController();
+      activeRequest = controller;
+      requestInFlight = true;
+      lastRequestAt = Date.now();
+
+      try {
+        const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
+        const res = await fetch(
+          `/api/learn/stats?type=${typeFilter}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const json = await res.json();
+        if (!res.ok || cancelled || requestId !== requestGeneration) return;
+        setLeitnerStats(json);
+      } catch {
+        // Keep the last known count when a refresh fails; a later focus can retry.
+      } finally {
+        if (requestId === requestGeneration) {
+          requestInFlight = false;
+          activeRequest = null;
+        }
+      }
+    }
+
+    function refreshWhenActive() {
+      if (document.visibilityState !== "visible" || Date.now() - lastRequestAt < 1000) return;
+      void loadLeitnerStats(true);
+    }
+
+    void loadLeitnerStats();
+    window.addEventListener("focus", refreshWhenActive);
+    document.addEventListener("visibilitychange", refreshWhenActive);
 
     return () => {
       cancelled = true;
+      requestGeneration += 1;
+      activeRequest?.abort();
+      window.removeEventListener("focus", refreshWhenActive);
+      document.removeEventListener("visibilitychange", refreshWhenActive);
     };
-  }, []);
+  }, [pathname]);
 
   async function logout() {
     const supabase = supabaseBrowser();

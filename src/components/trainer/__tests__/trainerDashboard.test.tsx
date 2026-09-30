@@ -1,4 +1,6 @@
 import { isValidElement } from "react";
+import fs from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -41,6 +43,29 @@ const baseProps = {
 };
 
 describe("TrainerDashboard start flow", () => {
+    it("loads home Leitner counts initially and refreshes them when the page becomes active", () => {
+        const homeSource = fs.readFileSync(
+            path.join(process.cwd(), "src/app/HomeClient.tsx"),
+            "utf8",
+        );
+        const statsEffect = homeSource.slice(
+            homeSource.indexOf("async function loadLeitnerStats(force = false)"),
+            homeSource.indexOf("async function logout()"),
+        );
+
+        expect(statsEffect).toContain("void loadLeitnerStats()");
+        expect(homeSource).toContain("const pathname = usePathname()");
+        expect(statsEffect).toContain("}, [pathname]);");
+        expect(statsEffect).toContain('window.addEventListener("focus", refreshWhenActive)');
+        expect(statsEffect).toContain('document.addEventListener("visibilitychange", refreshWhenActive)');
+        expect(statsEffect).toContain("setLeitnerStats(json)");
+        expect(statsEffect).toContain("cache: \"no-store\"");
+        expect(statsEffect).toContain("if (requestInFlight && !force) return;");
+        expect(statsEffect).toContain("|| cancelled");
+        expect(statsEffect).toContain("requestId !== requestGeneration");
+        expect(statsEffect).toContain("void loadLeitnerStats(true)");
+    });
+
     it("makes today learning the primary dashboard action while keeping setup reachable", () => {
         const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} />);
 

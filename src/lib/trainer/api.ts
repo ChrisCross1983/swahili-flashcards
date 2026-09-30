@@ -44,7 +44,7 @@ async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
 }
 
 export async function fetchSetupCounts(cardType: CardType, groupIds?: string[]): Promise<SetupCounts> {
-    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds));
+    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<Partial<SetupCounts>>(res, "Setup counts failed");
     return {
         todayDue: json.todayDue ?? 0,

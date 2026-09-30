@@ -251,6 +251,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
+    const setupCountsRequestIdRef = useRef(0);
     const [groups, setGroups] = useState<Group[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
@@ -539,19 +540,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     );
 
     const refreshSetupCounts = useCallback(async () => {
+        const requestId = ++setupCountsRequestIdRef.current;
         setSetupCountsLoading(true);
 
         try {
             const counts = await fetchSetupCounts(cardType);
+            if (requestId !== setupCountsRequestIdRef.current) return;
             setSetupCounts(counts);
         } catch {
+            if (requestId !== setupCountsRequestIdRef.current) return;
             setSetupCounts({
                 todayDue: 0,
                 totalCards: 0,
                 lastMissedCount: 0,
             });
         } finally {
-            setSetupCountsLoading(false);
+            if (requestId === setupCountsRequestIdRef.current) {
+                setSetupCountsLoading(false);
+            }
         }
     }, [cardType]);
 
@@ -602,11 +608,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         stopRecording,
         stopAnyAudio,
         onStatus: setStatus,
-        onSetupCountsPatch: (patch) => setSetupCounts((prev) => ({ ...prev, ...patch })),
-        onLastMissedRemoved: () => setSetupCounts((prev) => ({
-            ...prev,
-            lastMissedCount: Math.max(0, prev.lastMissedCount - 1),
-        })),
+        onSetupCountsPatch: (patch) => {
+            setupCountsRequestIdRef.current += 1;
+            setSetupCountsLoading(false);
+            setSetupCounts((prev) => ({ ...prev, ...patch }));
+        },
+        onLastMissedRemoved: () => {
+            setupCountsRequestIdRef.current += 1;
+            setSetupCountsLoading(false);
+            setSetupCounts((prev) => ({
+                ...prev,
+                lastMissedCount: Math.max(0, prev.lastMissedCount - 1),
+            }));
+        },
         onValidationHighlight: triggerSetupHighlight,
         onDebugSessionReset: () => {
             loopGuardRef.current = { cardId: null, streak: 0 };
