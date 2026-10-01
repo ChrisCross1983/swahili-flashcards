@@ -105,6 +105,15 @@ type TranslateAuthoritativeTextInput = {
   recordingDurationMs?: number | null;
 };
 
+export type TranslationPipelineInstrumentation = {
+  onAuthoritativeTextBranchEntered?: () => void;
+  onRecordedAudioBranchEntered?: () => void;
+  onSttStarted?: () => void;
+  onSttCompleted?: () => void;
+  onTranslationPreparationEntered?: () => void;
+  onSummaryEligibilityDecisionCompleted?: () => void;
+};
+
 function containsSpeechText(text: string) {
   return /[\p{L}\p{N}]/u.test(text);
 }
@@ -163,7 +172,9 @@ async function translateTranscript(
   gateway: TranslatorAiGateway,
   transcriptFinalAt?: string,
   recordingDurationMs?: number | null,
+  instrumentation: TranslationPipelineInstrumentation = {},
 ): Promise<TranslationResult> {
+  instrumentation.onTranslationPreparationEntered?.();
   const translationStartedAt = Date.now();
   const isAuto = direction.sourceLanguage === "auto";
   let result: Omit<TranslationResult, "diagnostics">;
@@ -171,6 +182,7 @@ async function translateTranscript(
     text: originalText,
     recordingDurationMs,
   });
+  instrumentation.onSummaryEligibilityDecisionCompleted?.();
   let rawSummary: unknown = null;
   let summaryFallbackWithoutSummary = false;
 
@@ -325,7 +337,9 @@ async function translateTranscript(
 export async function translateAuthoritativeText(
   input: TranslateAuthoritativeTextInput,
   gateway: TranslatorAiGateway,
+  instrumentation: TranslationPipelineInstrumentation = {},
 ): Promise<TranslationResult> {
+  instrumentation.onAuthoritativeTextBranchEntered?.();
   const startedAt = Date.now();
   const originalText = input.authoritativeTranscript.trim();
   if (!originalText || !containsSpeechText(originalText)) {
@@ -349,15 +363,20 @@ export async function translateAuthoritativeText(
     gateway,
     undefined,
     input.recordingDurationMs,
+    instrumentation,
   );
 }
 
 export async function translateRecordedAudio(
   input: TranslateRecordedAudioInput,
   gateway: TranslatorAiGateway,
+  instrumentation: TranslationPipelineInstrumentation = {},
 ): Promise<TranslationResult> {
+  instrumentation.onRecordedAudioBranchEntered?.();
   const startedAt = Date.now();
+  instrumentation.onSttStarted?.();
   const safeTranscription = await transcribeSafeAudio(input, gateway);
+  instrumentation.onSttCompleted?.();
 
   return translateTranscript(
     safeTranscription.transcript,
@@ -368,6 +387,7 @@ export async function translateRecordedAudio(
     gateway,
     safeTranscription.transcriptFinalAt,
     input.recordingDurationMs,
+    instrumentation,
   );
 }
 

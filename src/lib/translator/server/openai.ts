@@ -222,6 +222,8 @@ type TranslationGatewayInstrumentation = {
   onSchemaPreparationStarted?: () => void;
   onSchemaPreparationCompleted?: () => void;
   onTranslationRequestStarted?: () => void;
+  onTranslationDispatchStarted?: () => void;
+  onTranslationDispatched?: () => void;
   onTranslationCompleted?: () => void;
 };
 
@@ -443,6 +445,7 @@ export function createOpenAITranslatorGateway(
           text: responseTextFormat,
         } as const;
         options.onTranslationRequestStarted?.();
+        options.onTranslationDispatchStarted?.();
         const request = options.signal
           ? client.responses.parse<typeof params, AutoTranslationOutput>(
               params,
@@ -451,6 +454,7 @@ export function createOpenAITranslatorGateway(
           : client.responses.parse<typeof params, AutoTranslationOutput>(
               params,
             );
+        options.onTranslationDispatched?.();
         const response = await request;
         options.onTranslationCompleted?.();
         if (process.env.NODE_ENV === "development") {
@@ -495,9 +499,11 @@ export function createOpenAITranslatorGateway(
           max_output_tokens: 1200,
         } as const;
         options.onTranslationRequestStarted?.();
+        options.onTranslationDispatchStarted?.();
         const request = options.signal
           ? client.responses.create(params, { signal: options.signal })
           : client.responses.create(params);
+        options.onTranslationDispatched?.();
         const response = await request;
         options.onTranslationCompleted?.();
         if (process.env.NODE_ENV === "development") {
@@ -544,12 +550,15 @@ export function createOpenAITranslatorGateway(
         } as const;
         options.onSchemaPreparationCompleted?.();
         options.onTranslationRequestStarted?.();
-        const response = options.signal
-          ? await client.responses.parse<typeof params, StructuredTranslationOutput>(
+        options.onTranslationDispatchStarted?.();
+        const request = options.signal
+          ? client.responses.parse<typeof params, StructuredTranslationOutput>(
               params,
               { signal: options.signal },
             )
-          : await client.responses.parse<typeof params, StructuredTranslationOutput>(params);
+          : client.responses.parse<typeof params, StructuredTranslationOutput>(params);
+        options.onTranslationDispatched?.();
+        const response = await request;
         options.onTranslationCompleted?.();
         const parsed = response.output_parsed as unknown;
         if (

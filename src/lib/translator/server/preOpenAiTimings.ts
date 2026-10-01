@@ -1,6 +1,7 @@
 export class ServerStageTimings<Stage extends string> {
   private readonly starts = new Map<Stage, { mono: number; at: string }>();
   private readonly completions = new Map<Stage, { mono: number; at: string }>();
+  private readonly points = new Map<string, { mono: number; at: string }>();
 
   start(stage: Stage) {
     const point = { mono: performance.now(), at: new Date().toISOString() };
@@ -20,6 +21,28 @@ export class ServerStageTimings<Stage extends string> {
 
   completedAt(stage: Stage) {
     return this.completions.get(stage)?.at ?? null;
+  }
+
+  markPoint(
+    point: string,
+    mono = performance.now(),
+    at = new Date().toISOString(),
+  ) {
+    const value = { mono, at };
+    this.points.set(point, value);
+    return value.at;
+  }
+
+  pointAt(point: string) {
+    return this.points.get(point)?.at ?? null;
+  }
+
+  durationBetween(startPoint: string, endPoint: string) {
+    const start = this.points.get(startPoint)?.mono;
+    const end = this.points.get(endPoint)?.mono;
+    return start === undefined || end === undefined || end < start
+      ? null
+      : end - start;
   }
 
   duration(stage: Stage) {
@@ -47,4 +70,11 @@ export function otherPreOpenAiTiming(
     0,
   );
   return Math.max(0, total - measured);
+}
+
+export function unattributedPreOpenAiTiming(
+  legacyOther: number | null,
+  newlyMeasured: Array<number | null>,
+) {
+  return otherPreOpenAiTiming(legacyOther, newlyMeasured);
 }

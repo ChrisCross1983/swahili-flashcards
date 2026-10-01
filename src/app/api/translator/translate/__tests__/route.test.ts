@@ -13,6 +13,8 @@ const createGatewayMock = vi.fn(
     onSchemaPreparationStarted?: () => void;
     onSchemaPreparationCompleted?: () => void;
     onTranslationRequestStarted?: () => void;
+    onTranslationDispatchStarted?: () => void;
+    onTranslationDispatched?: () => void;
     onTranslationCompleted?: () => void;
   }) => ({
     transcribe: transcribeMock,
@@ -22,6 +24,8 @@ const createGatewayMock = vi.fn(
       instrumentation?.onSchemaPreparationStarted?.();
       instrumentation?.onSchemaPreparationCompleted?.();
       instrumentation?.onTranslationRequestStarted?.();
+      instrumentation?.onTranslationDispatchStarted?.();
+      instrumentation?.onTranslationDispatched?.();
       const result = await autoTranslateMock(...args);
       instrumentation?.onTranslationCompleted?.();
       return result;
@@ -30,6 +34,8 @@ const createGatewayMock = vi.fn(
       instrumentation?.onPromptPreparationStarted?.();
       instrumentation?.onPromptPreparationCompleted?.();
       instrumentation?.onTranslationRequestStarted?.();
+      instrumentation?.onTranslationDispatchStarted?.();
+      instrumentation?.onTranslationDispatched?.();
       const result = await translateMock(...args);
       instrumentation?.onTranslationCompleted?.();
       return result;
@@ -247,6 +253,16 @@ describe("POST /api/translator/translate", () => {
         translationSchemaPreparationMs: null,
         translationOpenAiClientPreparationMs: expect.any(Number),
         translationOtherPreOpenAiMs: expect.any(Number),
+        translationRouteToServiceMs: expect.any(Number),
+        translationServiceToOperationMs: expect.any(Number),
+        translationOperationToOpenAiDispatchMs: expect.any(Number),
+        translationRecordedAudioBranchEnteredAt: expect.any(String),
+        translationSttStartedAt: expect.any(String),
+        translationSttCompletedAt: expect.any(String),
+        translationSttMs: expect.any(Number),
+        translationOpenAiDispatchStartedAt: expect.any(String),
+        translationOpenAiDispatchedAt: expect.any(String),
+        translationUnattributedPreOpenAiMs: expect.any(Number),
       },
     });
     expect(transcribeMock).toHaveBeenCalledOnce();
@@ -255,6 +271,37 @@ describe("POST /api/translator/translate", () => {
       { sourceLanguage: "sw", targetLanguage: "de" },
     );
     expect(requireUserMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps server STT out of the post-instrumentation translation residual", async () => {
+    const response = await post(createFormData());
+    const { diagnostics } = await response.json();
+    const measuredBoundaryGaps = [
+      diagnostics.translationRouteToAuthMs,
+      diagnostics.translationAuthToBodyParsingMs,
+      diagnostics.translationBodyParsingToNormalizationMs,
+      diagnostics.translationNormalizationToValidationMs,
+      diagnostics.translationValidationToServiceMs,
+      diagnostics.translationGatewayReadyToOperationMs,
+      diagnostics.translationOperationToBranchMs,
+      diagnostics.translationBranchToSttMs,
+      diagnostics.translationSttMs,
+      diagnostics.translationSttToPreparationMs,
+      diagnostics.translationPreparationToSummaryEligibilityMs,
+      diagnostics.translationSummaryEligibilityToPromptMs,
+      diagnostics.translationPromptToOpenAiRequestStartedMs,
+      diagnostics.translationUnattributedPreOpenAiMs,
+    ].filter((value: number | null) => typeof value === "number");
+    const explainedOther = measuredBoundaryGaps.reduce(
+      (total: number, value: number) => total + value,
+      0,
+    );
+
+    expect(response.status).toBe(200);
+    expect(diagnostics.translationSttMs).toBeGreaterThanOrEqual(0);
+    expect(diagnostics.translationUnattributedPreOpenAiMs).toBeGreaterThanOrEqual(0);
+    // Per-field integer rounding can shift the sum by a few milliseconds.
+    expect(Math.abs(diagnostics.translationOtherPreOpenAiMs - explainedOther)).toBeLessThan(12);
   });
 
   it("accepts AUTO and returns the detected concrete direction", async () => {
@@ -297,12 +344,38 @@ describe("POST /api/translator/translate", () => {
         translationRequestCorrelationId: "translation-turn-1",
         translationJsonParseMs: expect.any(Number),
         translationSchemaPreparationMs: expect.any(Number),
+        translationBodyParsingCompletedAt: expect.any(String),
+        translationModeLanguageDecisionCompletedAt: expect.any(String),
+        translationAuthoritativeTextBranchEnteredAt: expect.any(String),
+        translationSttMs: null,
+        translationSttStartedAt: null,
+        translationSttCompletedAt: null,
+        translationOpenAiDispatchStartedAt: expect.any(String),
+        translationOpenAiDispatchedAt: expect.any(String),
+        translationUnattributedPreOpenAiMs: expect.any(Number),
       },
     });
     expect(transcribeMock).not.toHaveBeenCalled();
     expect(autoTranslateMock).toHaveBeenCalledOnce();
     expect(autoTranslateMock).toHaveBeenCalledWith("Habari yako?");
     expect(translateMock).not.toHaveBeenCalled();
+  });
+
+  it("does not report server STT for an authoritative realtime transcript", async () => {
+    const response = await postJson({
+      authoritativeTranscript: "Habari yako?",
+      sourceLanguage: "sw",
+      targetLanguage: "de",
+      transcriptionMs: 700,
+    });
+    const { diagnostics } = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(diagnostics.translationSttStartedAt).toBeNull();
+    expect(diagnostics.translationSttCompletedAt).toBeNull();
+    expect(diagnostics.translationSttMs).toBeNull();
+    expect(diagnostics.translationUnattributedPreOpenAiMs).toBeGreaterThanOrEqual(0);
+    expect(transcribeMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid realtime transcript timing without calling a model", async () => {

@@ -19,11 +19,13 @@ import { createOpenAITranslatorGateway } from "@/lib/translator/server/openai";
 import {
   translateAuthoritativeText,
   translateRecordedAudio,
+  type TranslationPipelineInstrumentation,
 } from "@/lib/translator/server/translate";
 import {
   otherPreOpenAiTiming,
   roundedServerTiming,
   ServerStageTimings,
+  unattributedPreOpenAiTiming,
 } from "@/lib/translator/server/preOpenAiTimings";
 import { LIVE_V2_CONFIG } from "@/lib/translator/live/v2/config";
 import {
@@ -46,11 +48,13 @@ type TranslationPreOpenAiStage =
   | "normalization"
   | "openAiClientPreparation"
   | "promptPreparation"
-  | "schemaPreparation";
+  | "schemaPreparation"
+  | "stt";
 
 type TranslationTimingContext = {
   routeReceivedAt: string;
   routeReceivedMono: number;
+  hasJsonBody: boolean;
   stages: ServerStageTimings<TranslationPreOpenAiStage>;
 };
 
@@ -127,25 +131,40 @@ async function translationResponse(
   let openAiCompletedAt: string | null = null;
   let openAiCompletedMono: number | null = null;
   try {
-    const serviceEnteredAt = new Date().toISOString();
+    const serviceEnteredAt = timingContext.stages.markPoint("serviceEntered");
     timingContext.stages.start("openAiClientPreparation");
     const gateway = createOpenAITranslatorGateway(undefined, {
       signal: request.signal,
       onPromptPreparationStarted: () => {
         timingContext.stages.start("promptPreparation");
+        timingContext.stages.markPoint("promptPreparationStarted");
       },
       onPromptPreparationCompleted: () => {
         timingContext.stages.complete("promptPreparation");
+        timingContext.stages.markPoint("promptPreparationCompleted");
       },
       onSchemaPreparationStarted: () => {
         timingContext.stages.start("schemaPreparation");
+        timingContext.stages.markPoint("schemaPreparationStarted");
       },
       onSchemaPreparationCompleted: () => {
         timingContext.stages.complete("schemaPreparation");
+        timingContext.stages.markPoint("schemaPreparationCompleted");
       },
       onTranslationRequestStarted: () => {
         openAiStartedMono = performance.now();
         openAiStartedAt = new Date().toISOString();
+        timingContext.stages.markPoint(
+          "openAiRequestStarted",
+          openAiStartedMono,
+          openAiStartedAt,
+        );
+      },
+      onTranslationDispatchStarted: () => {
+        timingContext.stages.markPoint("openAiDispatchStarted");
+      },
+      onTranslationDispatched: () => {
+        timingContext.stages.markPoint("openAiDispatched");
       },
       onTranslationCompleted: () => {
         openAiCompletedMono = performance.now();
@@ -155,6 +174,8 @@ async function translationResponse(
     const openAiClientReadyAt = timingContext.stages.complete(
       "openAiClientPreparation",
     );
+    timingContext.stages.markPoint("gatewayReady");
+    timingContext.stages.markPoint("operationEntered");
     const result = await operation(gateway);
     const preOpenAiMs = openAiStartedMono === null
       ? null
@@ -179,6 +200,65 @@ async function translationResponse(
     const translationOtherPreOpenAiMs = otherPreOpenAiTiming(
       preOpenAiMs,
       Object.values(translationStageDurations),
+    );
+    const boundaryDurations = {
+      translationRouteToAuthMs: timingContext.stages.durationBetween("routeReceived", "authStarted"),
+      translationAuthToBodyParsingMs: timingContext.stages.durationBetween("authCompleted", "bodyReadStarted"),
+      translationBodyReadToJsonParseMs: timingContext.hasJsonBody
+        ? timingContext.stages.durationBetween("bodyReadCompleted", "jsonParseStarted")
+        : null,
+      translationBodyParsingToNormalizationMs: timingContext.hasJsonBody
+        ? timingContext.stages.durationBetween("jsonParseCompleted", "normalizationStarted")
+        : timingContext.stages.durationBetween("bodyReadCompleted", "normalizationStarted"),
+      translationNormalizationToValidationMs: timingContext.stages.durationBetween("normalizationCompleted", "validationStarted"),
+      translationValidationToServiceMs: timingContext.stages.durationBetween("validationCompleted", "serviceEntered"),
+      translationGatewayReadyToOperationMs: timingContext.stages.durationBetween("gatewayReady", "operationEntered"),
+      translationOperationToBranchMs: timingContext.stages.durationBetween("operationEntered", "branchEntered"),
+      translationBranchToSttMs: timingContext.stages.durationBetween("branchEntered", "sttStarted"),
+      translationBranchToPreparationMs: timingContext.stages.durationBetween("branchEntered", "translationPreparationEntered"),
+      translationSttToPreparationMs: timingContext.stages.durationBetween("sttCompleted", "translationPreparationEntered"),
+      translationPreparationToSummaryEligibilityMs: timingContext.stages.durationBetween("translationPreparationEntered", "summaryEligibilityDecisionCompleted"),
+      translationSummaryEligibilityToPromptMs: timingContext.stages.durationBetween("summaryEligibilityDecisionCompleted", "promptPreparationStarted"),
+      translationPromptToSchemaMs: timingContext.stages.durationBetween("promptPreparationCompleted", "schemaPreparationStarted"),
+      translationSchemaToOpenAiRequestStartedMs: timingContext.stages.pointAt("schemaPreparationCompleted")
+        ? timingContext.stages.durationBetween("schemaPreparationCompleted", "openAiRequestStarted")
+        : null,
+      translationPromptToOpenAiRequestStartedMs: timingContext.stages.durationBetween("promptPreparationCompleted", "openAiRequestStarted"),
+    };
+    const boundaryGaps = [
+      ...Object.entries(boundaryDurations)
+        .filter(([key]) => key !== "translationBranchToPreparationMs" && key !== "translationPromptToOpenAiRequestStartedMs" && key !== "translationPromptToSchemaMs" && key !== "translationSchemaToOpenAiRequestStartedMs")
+        .map(([, value]) => value),
+      ...(timingContext.hasJsonBody
+        ? [boundaryDurations.translationBranchToPreparationMs]
+        : []),
+      boundaryDurations.translationPromptToSchemaMs !== null
+        ? boundaryDurations.translationPromptToSchemaMs
+        : boundaryDurations.translationPromptToOpenAiRequestStartedMs,
+      ...(boundaryDurations.translationPromptToSchemaMs !== null
+        ? [boundaryDurations.translationSchemaToOpenAiRequestStartedMs]
+        : []),
+    ];
+    const translationSttMs = timingContext.stages.duration("stt");
+    const translationUnattributedPreOpenAiMs = unattributedPreOpenAiTiming(
+      translationOtherPreOpenAiMs,
+      [translationSttMs, ...boundaryGaps],
+    );
+    const translationRouteToServiceMs = timingContext.stages.durationBetween(
+      "routeReceived",
+      "serviceEntered",
+    );
+    const translationServiceToOperationMs = timingContext.stages.durationBetween(
+      "serviceEntered",
+      "operationEntered",
+    );
+    const translationOperationToOpenAiDispatchMs = timingContext.stages.durationBetween(
+      "operationEntered",
+      "openAiDispatchStarted",
+    );
+    const translationSttToTranslationDispatchMs = timingContext.stages.durationBetween(
+      "sttCompleted",
+      "openAiDispatchStarted",
     );
     const preOpenAiDiagnostics = {
       translationRouteReceivedAt: timingContext.routeReceivedAt,
@@ -205,6 +285,38 @@ async function translationResponse(
       translationInputNormalizationCompletedAt:
         timingContext.stages.completedAt("normalization"),
       translationServiceEnteredAt: serviceEnteredAt,
+      translationBodyParsingCompletedAt:
+        timingContext.stages.pointAt("bodyParsingCompleted"),
+      translationModeLanguageDecisionCompletedAt:
+        timingContext.stages.pointAt("modeLanguageDecisionCompleted"),
+      translationGatewayReadyAt: timingContext.stages.pointAt("gatewayReady"),
+      translationOperationEnteredAt: timingContext.stages.pointAt("operationEntered"),
+      translationAuthoritativeTextBranchEnteredAt:
+        timingContext.stages.pointAt("authoritativeTextBranchEntered"),
+      translationRecordedAudioBranchEnteredAt:
+        timingContext.stages.pointAt("recordedAudioBranchEntered"),
+      translationSttStartedAt: timingContext.stages.pointAt("sttStarted"),
+      translationSttCompletedAt: timingContext.stages.pointAt("sttCompleted"),
+      translationPreparationEnteredAt:
+        timingContext.stages.pointAt("translationPreparationEntered"),
+      translationSummaryEligibilityDecisionCompletedAt:
+        timingContext.stages.pointAt("summaryEligibilityDecisionCompleted"),
+      translationOpenAiDispatchStartedAt:
+        timingContext.stages.pointAt("openAiDispatchStarted"),
+      translationOpenAiDispatchedAt:
+        timingContext.stages.pointAt("openAiDispatched"),
+      translationRouteToServiceMs: roundedServerTiming(translationRouteToServiceMs),
+      translationServiceToOperationMs:
+        roundedServerTiming(translationServiceToOperationMs),
+      translationOperationToOpenAiDispatchMs:
+        roundedServerTiming(translationOperationToOpenAiDispatchMs),
+      translationSttMs: roundedServerTiming(translationSttMs),
+      translationSttToTranslationDispatchMs:
+        roundedServerTiming(translationSttToTranslationDispatchMs),
+      ...Object.fromEntries(Object.entries(boundaryDurations).map(([key, value]) => [
+        key,
+        roundedServerTiming(value),
+      ])),
       translationPromptPreparationStartedAt:
         timingContext.stages.startedAt("promptPreparation"),
       translationPromptPreparationCompletedAt:
@@ -246,6 +358,9 @@ async function translationResponse(
       ),
       translationOtherPreOpenAiMs: roundedServerTiming(
         translationOtherPreOpenAiMs,
+      ),
+      translationUnattributedPreOpenAiMs: roundedServerTiming(
+        translationUnattributedPreOpenAiMs,
       ),
     };
     const serializationStartedMono = performance.now();
@@ -378,11 +493,14 @@ async function translationResponse(
 export async function POST(request: Request) {
   const requestReceivedMono = performance.now();
   const requestReceivedAt = new Date().toISOString();
+  const hasJsonBody = request.headers.get("content-type")?.includes("application/json") === true;
   const timingContext: TranslationTimingContext = {
     routeReceivedAt: requestReceivedAt,
     routeReceivedMono: requestReceivedMono,
+    hasJsonBody,
     stages: new ServerStageTimings<TranslationPreOpenAiStage>(),
   };
+  timingContext.stages.markPoint("routeReceived");
   const correlationId = validCorrelationId(
     request.headers.get(TRANSLATOR_CORRELATION_HEADER),
   );
@@ -393,6 +511,7 @@ export async function POST(request: Request) {
   const requestPhase = request.headers.get("X-Translator-Request-Phase") ===
     "semantic_rescue" ? "semantic_rescue" as const : "primary" as const;
   timingContext.stages.start("auth");
+  timingContext.stages.markPoint("authStarted");
   const { response } = await requireUser({
     onClientPreparationStarted: () => {
       timingContext.stages.start("authClientPreparation");
@@ -408,6 +527,7 @@ export async function POST(request: Request) {
     },
   });
   timingContext.stages.complete("auth");
+  timingContext.stages.markPoint("authCompleted");
   if (response) {
     if (!correlationId) return response;
     const headers = new Headers(response.headers);
@@ -419,9 +539,10 @@ export async function POST(request: Request) {
     });
   }
 
-  if (request.headers.get("content-type")?.includes("application/json")) {
+  if (hasJsonBody) {
     let bodyText: string;
     timingContext.stages.start("bodyRead");
+    timingContext.stages.markPoint("bodyReadStarted");
     try {
       bodyText = await request.text();
     } catch {
@@ -429,8 +550,10 @@ export async function POST(request: Request) {
       return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
     }
     timingContext.stages.complete("bodyRead");
+    timingContext.stages.markPoint("bodyReadCompleted");
     let body: unknown;
     timingContext.stages.start("jsonParse");
+    timingContext.stages.markPoint("jsonParseStarted");
     try {
       body = JSON.parse(bodyText);
     } catch {
@@ -438,7 +561,10 @@ export async function POST(request: Request) {
       return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
     }
     timingContext.stages.complete("jsonParse");
+    timingContext.stages.markPoint("jsonParseCompleted");
+    timingContext.stages.markPoint("bodyParsingCompleted");
     timingContext.stages.start("normalization");
+    timingContext.stages.markPoint("normalizationStarted");
     const values = body && typeof body === "object"
       ? body as Record<string, unknown>
       : null;
@@ -452,7 +578,9 @@ export async function POST(request: Request) {
       ? Math.round(transcriptionMs)
       : transcriptionMs;
     timingContext.stages.complete("normalization");
+    timingContext.stages.markPoint("normalizationCompleted");
     timingContext.stages.start("validation");
+    timingContext.stages.markPoint("modeLanguageDecisionStarted");
     if (!body || typeof body !== "object") {
       timingContext.stages.complete("validation");
       return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
@@ -465,6 +593,7 @@ export async function POST(request: Request) {
       timingContext.stages.complete("validation");
       return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.", null, correlationId);
     }
+    timingContext.stages.markPoint("modeLanguageDecisionCompleted");
     if (
       !authoritativeTranscript ||
       authoritativeTranscript.length > 10_000 ||
@@ -477,6 +606,7 @@ export async function POST(request: Request) {
       return errorResponse(400, "invalid_request", "Ungültiges Transkript.", null, correlationId);
     }
     timingContext.stages.complete("validation");
+    timingContext.stages.markPoint("validationCompleted");
 
     const parsingDoneAt = new Date().toISOString();
     return translationResponse(
@@ -485,6 +615,14 @@ export async function POST(request: Request) {
       parsingDoneAt,
       correlationId,
       (gateway) => {
+      const instrumentation: TranslationPipelineInstrumentation = {
+        onAuthoritativeTextBranchEntered: () =>
+          timingContext.stages.markPoint("authoritativeTextBranchEntered"),
+        onTranslationPreparationEntered: () =>
+          timingContext.stages.markPoint("translationPreparationEntered"),
+        onSummaryEligibilityDecisionCompleted: () =>
+          timingContext.stages.markPoint("summaryEligibilityDecisionCompleted"),
+      };
       return translateAuthoritativeText(
         {
           authoritativeTranscript,
@@ -499,6 +637,7 @@ export async function POST(request: Request) {
               : null,
         },
         gateway,
+        instrumentation,
       );
       },
       { audioBytes: null, normalizedMimeType: null, retryAttempt, requestPhase },
@@ -507,6 +646,7 @@ export async function POST(request: Request) {
 
   let formData: FormData;
   timingContext.stages.start("bodyRead");
+  timingContext.stages.markPoint("bodyReadStarted");
   try {
     formData = await request.formData();
   } catch {
@@ -514,8 +654,11 @@ export async function POST(request: Request) {
     return errorResponse(400, "invalid_request", "Ungültige Anfrage.", null, correlationId);
   }
   timingContext.stages.complete("bodyRead");
+  timingContext.stages.markPoint("bodyReadCompleted");
+  timingContext.stages.markPoint("bodyParsingCompleted");
 
   timingContext.stages.start("normalization");
+  timingContext.stages.markPoint("normalizationStarted");
   const audio = formData.get("audio");
   const sourceValue = formData.get("sourceLanguage");
   const targetValue = formData.get("targetLanguage");
@@ -532,7 +675,9 @@ export async function POST(request: Request) {
         targetLanguage: targetLanguage as TranslationLanguage,
       };
   timingContext.stages.complete("normalization");
+  timingContext.stages.markPoint("normalizationCompleted");
   timingContext.stages.start("validation");
+  timingContext.stages.markPoint("modeLanguageDecisionStarted");
 
   if (!(audio instanceof Blob)) {
     timingContext.stages.complete("validation");
@@ -573,6 +718,7 @@ export async function POST(request: Request) {
     timingContext.stages.complete("validation");
     return errorResponse(400, "invalid_direction", "Ungültige Übersetzungsrichtung.", null, correlationId);
   }
+  timingContext.stages.markPoint("modeLanguageDecisionCompleted");
   if (audio.size > MAX_TRANSLATION_AUDIO_BYTES) {
     timingContext.stages.complete("validation");
     return errorResponse(413, "audio_too_large", "Die Audioaufnahme ist zu groß.", null, correlationId);
@@ -590,6 +736,7 @@ export async function POST(request: Request) {
     );
   }
   timingContext.stages.complete("validation");
+  timingContext.stages.markPoint("validationCompleted");
 
   const parsingDoneAt = new Date().toISOString();
   return translationResponse(
@@ -598,9 +745,26 @@ export async function POST(request: Request) {
     parsingDoneAt,
     correlationId,
     (gateway) => {
+    const instrumentation: TranslationPipelineInstrumentation = {
+      onRecordedAudioBranchEntered: () =>
+        timingContext.stages.markPoint("recordedAudioBranchEntered"),
+      onSttStarted: () => {
+        timingContext.stages.start("stt");
+        timingContext.stages.markPoint("sttStarted");
+      },
+      onSttCompleted: () => {
+        timingContext.stages.complete("stt");
+        timingContext.stages.markPoint("sttCompleted");
+      },
+      onTranslationPreparationEntered: () =>
+        timingContext.stages.markPoint("translationPreparationEntered"),
+      onSummaryEligibilityDecisionCompleted: () =>
+        timingContext.stages.markPoint("summaryEligibilityDecisionCompleted"),
+    };
     return translateRecordedAudio(
       { audio, format, direction, recordingDurationMs },
       gateway,
+      instrumentation,
     );
     },
     {

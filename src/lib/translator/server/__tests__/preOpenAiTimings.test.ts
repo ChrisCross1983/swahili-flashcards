@@ -3,6 +3,7 @@ import {
   otherPreOpenAiTiming,
   roundedServerTiming,
   ServerStageTimings,
+  unattributedPreOpenAiTiming,
 } from "@/lib/translator/server/preOpenAiTimings";
 
 describe("server pre-OpenAI timings", () => {
@@ -26,5 +27,25 @@ describe("server pre-OpenAI timings", () => {
     expect(otherPreOpenAiTiming(10, [20])).toBe(0);
     expect(roundedServerTiming(1.6)).toBe(2);
     expect(roundedServerTiming(null)).toBeNull();
+  });
+
+  it("measures named boundary intervals and leaves a non-negative residual", () => {
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(125)
+      .mockReturnValueOnce(180)
+      .mockReturnValueOnce(190);
+    const timings = new ServerStageTimings<"unused">();
+    timings.markPoint("route");
+    timings.markPoint("service");
+    timings.markPoint("dispatch");
+
+    expect(timings.durationBetween("route", "service")).toBe(25);
+    expect(timings.durationBetween("service", "dispatch")).toBe(55);
+    expect(timings.durationBetween("dispatch", "route")).toBeNull();
+    expect(timings.durationBetween("missing", "dispatch")).toBeNull();
+    expect(unattributedPreOpenAiTiming(40, [15, null, 30])).toBe(0);
+    expect(unattributedPreOpenAiTiming(40, [10, 5])).toBe(25);
+    expect(unattributedPreOpenAiTiming(null, [10])).toBeNull();
   });
 });

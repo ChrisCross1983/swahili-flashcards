@@ -192,6 +192,28 @@ const PERFORMANCE_METRICS = [
   "translationSchemaPreparationMs",
   "translationOpenAiClientPreparationMs",
   "translationOtherPreOpenAiMs",
+  "translationRouteToServiceMs",
+  "translationServiceToOperationMs",
+  "translationOperationToOpenAiDispatchMs",
+  "translationSttMs",
+  "translationSttToTranslationDispatchMs",
+  "translationRouteToAuthMs",
+  "translationAuthToBodyParsingMs",
+  "translationBodyReadToJsonParseMs",
+  "translationBodyParsingToNormalizationMs",
+  "translationNormalizationToValidationMs",
+  "translationValidationToServiceMs",
+  "translationGatewayReadyToOperationMs",
+  "translationOperationToBranchMs",
+  "translationBranchToSttMs",
+  "translationBranchToPreparationMs",
+  "translationSttToPreparationMs",
+  "translationPreparationToSummaryEligibilityMs",
+  "translationSummaryEligibilityToPromptMs",
+  "translationPromptToSchemaMs",
+  "translationSchemaToOpenAiRequestStartedMs",
+  "translationPromptToOpenAiRequestStartedMs",
+  "translationUnattributedPreOpenAiMs",
   "translationOpenAiFirstResponseMs",
   "translationOpenAiTotalMs",
   "translationServerPostOpenAiMs",
@@ -307,6 +329,18 @@ export type ClassicTranslatorReportTurn = {
   translationOpenAiClientReadyAt: string | null;
   translationServerRequestReceivedAt: string | null;
   translationServerParsingDoneAt: string | null;
+  translationBodyParsingCompletedAt: string | null;
+  translationModeLanguageDecisionCompletedAt: string | null;
+  translationGatewayReadyAt: string | null;
+  translationOperationEnteredAt: string | null;
+  translationAuthoritativeTextBranchEnteredAt: string | null;
+  translationRecordedAudioBranchEnteredAt: string | null;
+  translationSttStartedAt: string | null;
+  translationSttCompletedAt: string | null;
+  translationPreparationEnteredAt: string | null;
+  translationSummaryEligibilityDecisionCompletedAt: string | null;
+  translationOpenAiDispatchStartedAt: string | null;
+  translationOpenAiDispatchedAt: string | null;
   translationOpenAiRequestStartedAt: string | null;
   translationOpenAiFirstEventAt: string | null;
   translationOpenAiFirstByteAt: string | null;
@@ -453,6 +487,28 @@ export type ClassicTranslatorReportTurn = {
   translationSchemaPreparationMs: number | null;
   translationOpenAiClientPreparationMs: number | null;
   translationOtherPreOpenAiMs: number | null;
+  translationRouteToServiceMs: number | null;
+  translationServiceToOperationMs: number | null;
+  translationOperationToOpenAiDispatchMs: number | null;
+  translationSttMs: number | null;
+  translationSttToTranslationDispatchMs: number | null;
+  translationRouteToAuthMs: number | null;
+  translationAuthToBodyParsingMs: number | null;
+  translationBodyReadToJsonParseMs: number | null;
+  translationBodyParsingToNormalizationMs: number | null;
+  translationNormalizationToValidationMs: number | null;
+  translationValidationToServiceMs: number | null;
+  translationGatewayReadyToOperationMs: number | null;
+  translationOperationToBranchMs: number | null;
+  translationBranchToSttMs: number | null;
+  translationBranchToPreparationMs: number | null;
+  translationSttToPreparationMs: number | null;
+  translationPreparationToSummaryEligibilityMs: number | null;
+  translationSummaryEligibilityToPromptMs: number | null;
+  translationPromptToSchemaMs: number | null;
+  translationSchemaToOpenAiRequestStartedMs: number | null;
+  translationPromptToOpenAiRequestStartedMs: number | null;
+  translationUnattributedPreOpenAiMs: number | null;
   translationOpenAiFirstResponseMs: number | null;
   translationOpenAiTotalMs: number | null;
   translationServerPostOpenAiMs: number | null;
@@ -669,7 +725,22 @@ const TRANSLATION_PRE_OPENAI_STAGES = [
   ["prompt_preparation", "translationPromptPreparationMs"],
   ["schema_preparation", "translationSchemaPreparationMs"],
   ["openai_client_preparation", "translationOpenAiClientPreparationMs"],
-  ["other", "translationOtherPreOpenAiMs"],
+  ["safe_audio_stt", "translationSttMs"],
+  ["unattributed_residual", "translationUnattributedPreOpenAiMs"],
+  ["route_to_auth", "translationRouteToAuthMs"],
+  ["auth_to_body_parsing", "translationAuthToBodyParsingMs"],
+  ["body_read_to_json_parse", "translationBodyReadToJsonParseMs"],
+  ["body_parsing_to_normalization", "translationBodyParsingToNormalizationMs"],
+  ["normalization_to_validation", "translationNormalizationToValidationMs"],
+  ["validation_to_service", "translationValidationToServiceMs"],
+  ["gateway_ready_to_operation", "translationGatewayReadyToOperationMs"],
+  ["operation_to_branch", "translationOperationToBranchMs"],
+  ["branch_to_stt", "translationBranchToSttMs"],
+  ["stt_to_preparation", "translationSttToPreparationMs"],
+  ["preparation_to_summary_decision", "translationPreparationToSummaryEligibilityMs"],
+  ["summary_decision_to_prompt", "translationSummaryEligibilityToPromptMs"],
+  ["prompt_to_schema", "translationPromptToSchemaMs"],
+  ["schema_to_openai_request_started", "translationSchemaToOpenAiRequestStartedMs"],
 ] as const;
 
 const TTS_PRE_OPENAI_STAGES = [
@@ -760,6 +831,11 @@ function buildCriticalPath(d: Partial<TranslationDiagnostics>) {
     criticalPathStage("realtime_transcript_finalize", d.recordingStoppedAt, d.transcriptFinalAt, d.stopToTranscriptFinalMs),
     criticalPathStage("translation_client_to_server", d.translationClientRequestStartedAt, d.translationServerRequestReceivedAt, d.clientToTranslationServerMs),
     criticalPathStage("translation_server_pre_openai", d.translationServerRequestReceivedAt, d.translationOpenAiRequestStartedAt, d.translationServerPreOpenAiMs),
+    criticalPathStage("translation_route_to_service", d.translationServerRequestReceivedAt, d.translationServiceEnteredAt, d.translationRouteToServiceMs),
+    criticalPathStage("translation_service_to_operation", d.translationServiceEnteredAt, d.translationOperationEnteredAt, d.translationServiceToOperationMs),
+    criticalPathStage("translation_operation_to_dispatch", d.translationOperationEnteredAt, d.translationOpenAiDispatchStartedAt, d.translationOperationToOpenAiDispatchMs),
+    criticalPathStage("translation_safe_audio_stt", d.translationSttStartedAt, d.translationSttCompletedAt, d.translationSttMs),
+    criticalPathStage("translation_stt_to_dispatch", d.translationSttCompletedAt, d.translationOpenAiDispatchStartedAt, d.translationSttToTranslationDispatchMs),
     criticalPathStage("translation_auth", d.translationAuthStartedAt, d.translationAuthCompletedAt, d.translationAuthMs),
     criticalPathStage("translation_auth_client_prepare", d.translationAuthClientPreparationStartedAt, d.translationAuthClientPreparationCompletedAt, d.translationAuthClientPreparationMs),
     criticalPathStage("translation_auth_user_lookup", d.translationAuthUserLookupStartedAt, d.translationAuthUserLookupCompletedAt, d.translationAuthUserLookupMs),
@@ -1046,6 +1122,22 @@ function turnFromValues(input: {
       d.translationOpenAiClientReadyAt ?? null,
     translationServerRequestReceivedAt: d.translationServerRequestReceivedAt ?? null,
     translationServerParsingDoneAt: d.translationServerParsingDoneAt ?? null,
+    translationBodyParsingCompletedAt: d.translationBodyParsingCompletedAt ?? null,
+    translationModeLanguageDecisionCompletedAt:
+      d.translationModeLanguageDecisionCompletedAt ?? null,
+    translationGatewayReadyAt: d.translationGatewayReadyAt ?? null,
+    translationOperationEnteredAt: d.translationOperationEnteredAt ?? null,
+    translationAuthoritativeTextBranchEnteredAt:
+      d.translationAuthoritativeTextBranchEnteredAt ?? null,
+    translationRecordedAudioBranchEnteredAt:
+      d.translationRecordedAudioBranchEnteredAt ?? null,
+    translationSttStartedAt: d.translationSttStartedAt ?? null,
+    translationSttCompletedAt: d.translationSttCompletedAt ?? null,
+    translationPreparationEnteredAt: d.translationPreparationEnteredAt ?? null,
+    translationSummaryEligibilityDecisionCompletedAt:
+      d.translationSummaryEligibilityDecisionCompletedAt ?? null,
+    translationOpenAiDispatchStartedAt: d.translationOpenAiDispatchStartedAt ?? null,
+    translationOpenAiDispatchedAt: d.translationOpenAiDispatchedAt ?? null,
     translationOpenAiRequestStartedAt: d.translationOpenAiRequestStartedAt ?? null,
     translationOpenAiFirstEventAt: d.translationOpenAiFirstEventAt ?? null,
     translationOpenAiFirstByteAt: d.translationOpenAiFirstByteAt ?? null,
@@ -1226,6 +1318,44 @@ function turnFromValues(input: {
       d.translationOpenAiClientPreparationMs,
     ),
     translationOtherPreOpenAiMs: finite(d.translationOtherPreOpenAiMs),
+    translationRouteToServiceMs: finite(d.translationRouteToServiceMs),
+    translationServiceToOperationMs: finite(d.translationServiceToOperationMs),
+    translationOperationToOpenAiDispatchMs: finite(
+      d.translationOperationToOpenAiDispatchMs,
+    ),
+    translationSttMs: finite(d.translationSttMs),
+    translationSttToTranslationDispatchMs: finite(
+      d.translationSttToTranslationDispatchMs,
+    ),
+    translationRouteToAuthMs: finite(d.translationRouteToAuthMs),
+    translationAuthToBodyParsingMs: finite(d.translationAuthToBodyParsingMs),
+    translationBodyReadToJsonParseMs: finite(d.translationBodyReadToJsonParseMs),
+    translationBodyParsingToNormalizationMs: finite(
+      d.translationBodyParsingToNormalizationMs,
+    ),
+    translationNormalizationToValidationMs: finite(
+      d.translationNormalizationToValidationMs,
+    ),
+    translationValidationToServiceMs: finite(d.translationValidationToServiceMs),
+    translationGatewayReadyToOperationMs: finite(
+      d.translationGatewayReadyToOperationMs,
+    ),
+    translationOperationToBranchMs: finite(d.translationOperationToBranchMs),
+    translationBranchToSttMs: finite(d.translationBranchToSttMs),
+    translationBranchToPreparationMs: finite(d.translationBranchToPreparationMs),
+    translationSttToPreparationMs: finite(d.translationSttToPreparationMs),
+    translationPreparationToSummaryEligibilityMs: finite(
+      d.translationPreparationToSummaryEligibilityMs,
+    ),
+    translationSummaryEligibilityToPromptMs: finite(
+      d.translationSummaryEligibilityToPromptMs,
+    ),
+    translationPromptToSchemaMs: finite(d.translationPromptToSchemaMs),
+    translationSchemaToOpenAiRequestStartedMs: finite(d.translationSchemaToOpenAiRequestStartedMs),
+    translationPromptToOpenAiRequestStartedMs: finite(d.translationPromptToOpenAiRequestStartedMs),
+    translationUnattributedPreOpenAiMs: finite(
+      d.translationUnattributedPreOpenAiMs,
+    ),
     translationOpenAiFirstResponseMs: finite(d.translationOpenAiFirstResponseMs),
     translationOpenAiTotalMs: finite(d.translationOpenAiTotalMs),
     translationServerPostOpenAiMs: finite(d.translationServerPostOpenAiMs),
