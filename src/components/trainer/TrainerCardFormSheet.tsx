@@ -46,6 +46,8 @@ type Props = {
     cardType: CardType;
     editTitle: string;
     createTitle: string;
+    closeOnCreateSuccess?: boolean;
+    onCreateFlowComplete?: () => void;
     saveCardLabel: string;
     groups: Group[];
     cards: any[];
@@ -64,6 +66,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         cardType,
         editTitle,
         createTitle,
+        closeOnCreateSuccess = false,
+        onCreateFlowComplete,
         saveCardLabel,
         groups,
         cards,
@@ -170,6 +174,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setFormGroupIds([]);
         setEditingOriginalGroupIds([]);
         setOptionalExamplesOpen(false);
+        setGerman("");
+        setSwahili("");
+        setGermanExample("");
+        setSwahiliExample("");
         resetFormNotes();
     }
 
@@ -199,6 +207,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
         clearDuplicateCheck();
         setStatus("Karte gespeichert ✅");
+        if (closeOnCreateSuccess) {
+            setOpen(false);
+            onCreateFlowComplete?.();
+        }
     }
 
     function handleCreatePartialSuccess(created: any) {
@@ -426,6 +438,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             media.resetMediaInputs();
             clearDuplicateCheck();
             setStatus("");
+            onCreateFlowComplete?.();
             return;
         }
 

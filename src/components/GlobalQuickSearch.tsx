@@ -74,6 +74,14 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         onClose();
     }, [onClose]);
 
+    const resetSearchAfterCreate = useCallback(() => {
+        setQuery("");
+        setResults([]);
+        setSelected(null);
+        setError(null);
+        setEditStatus(null);
+    }, []);
+
     useEffect(() => {
         if (!open) return;
 
@@ -206,6 +214,13 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         }
     }, [ensureGroupsLoaded, hideSearchForEdit, mergeKnownCard]);
 
+    const handleCreateFromSearch = useCallback(() => {
+        const searchTerm = query.trim();
+        if (!searchTerm) return;
+        hideSearchForEdit();
+        cardFormRef.current?.openCreate();
+    }, [hideSearchForEdit, query]);
+
     const handleSaved = useCallback((updated: CardResult, nextGroups?: Group[]) => {
         const updatedWithGroups = nextGroups ? { ...updated, groups: nextGroups } : updated;
         setResults((prev) =>
@@ -330,6 +345,16 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                 )}
                             </div>
 
+                            {query.trim() ? (
+                                <button
+                                    type="button"
+                                    className="inline-flex min-h-11 items-center justify-center self-start rounded-full border border-soft bg-surface px-4 py-2 text-sm font-medium text-primary transition hover:border-accent hover:bg-surface-elevated"
+                                    onClick={handleCreateFromSearch}
+                                >
+                                    + Neues Wort anlegen
+                                </button>
+                            ) : null}
+
                             {selected ? (
                                 <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft" data-testid="quick-search-card-preview">
                                     <div className="mb-3 flex items-start justify-between">
@@ -381,6 +406,8 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
             <TrainerCardFormSheet
                 ref={cardFormRef}
                 cardType="vocab"
+                closeOnCreateSuccess
+                onCreateFlowComplete={resetSearchAfterCreate}
                 editTitle="Karte bearbeiten"
                 createTitle="Neue Karte"
                 saveCardLabel="Speichern"
