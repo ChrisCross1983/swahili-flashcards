@@ -220,14 +220,14 @@ export async function requestTranslatorSpeech(
       audio = await response.blob();
     } else {
       const reader = response.body.getReader();
-      const chunks: ArrayBuffer[] = [];
+      const chunks: BlobPart[] = [];
       while (true) {
         const chunk = await reader.read();
         if (chunk.done) break;
         if (!firstByteAt && chunk.value.byteLength > 0) {
           firstByteAt = new Date().toISOString();
         }
-        chunks.push(chunk.value.slice().buffer as ArrayBuffer);
+        chunks.push(chunk.value);
       }
       audio = new Blob(chunks, {
         type: response.headers.get("content-type") || "audio/mpeg",

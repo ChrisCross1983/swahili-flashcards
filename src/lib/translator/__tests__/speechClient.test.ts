@@ -53,6 +53,30 @@ describe("translator speech client", () => {
     );
   });
 
+  it("preserves ordered stream bytes and content type in the playback blob", async () => {
+    const chunks = [
+      new Uint8Array([99, 1, 2, 99]).subarray(1, 3),
+      new Uint8Array([88, 3, 4, 88]).subarray(1, 3),
+    ];
+    const fetcher = vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      }),
+      { headers: { "Content-Type": "audio/mp4" } },
+    ));
+
+    const result = await requestTranslatorSpeech("Habari", "sw", 1, { fetcher });
+
+    expect(result.audio).toBeInstanceOf(Blob);
+    expect(result.audio.type).toBe("audio/mp4");
+    expect(Array.from(new Uint8Array(await result.audio.arrayBuffer()))).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
   it("maps API failures to a generic speech error", async () => {
     const fetcher = vi.fn(async () =>
       Response.json(

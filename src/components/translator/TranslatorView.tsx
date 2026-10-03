@@ -154,6 +154,7 @@ import {
   SafeSttModelBenchmarkRunner,
   type SafeSttModelBenchmark,
 } from "@/lib/translator/safeSttModelBenchmark";
+import { DeferredBenchmarkQueue } from "@/lib/translator/deferredBenchmarkQueue";
 import {
   RecordingStartDiagnosticsTracker,
   RecordingStartOperationTimeoutError,
@@ -222,6 +223,7 @@ export default function TranslatorView({
   const sameAudioBenchmarkRunnerRef = useRef(new SameAudioBenchmarkRunner());
   const safeSttModelBenchmarksByTurnRef = useRef(new Map<string, SafeSttModelBenchmark>());
   const safeSttModelBenchmarkRunnerRef = useRef(new SafeSttModelBenchmarkRunner());
+  const deferredBenchmarkQueueRef = useRef(new DeferredBenchmarkQueue());
   const audioQualityMonitorRef = useRef<TranslatorAudioQualityMonitor | null>(null);
   const audioCaptureByTurnRef = useRef(new Map<string, {
     metadata: TranslatorAudioCaptureMetadata;
@@ -791,6 +793,16 @@ export default function TranslatorView({
       recoverySucceeded: recovery?.recoverySucceeded ?? null,
     });
   }, [enqueueTechnicalEvent, state.entries, updateEntryDiagnostics]);
+
+  useEffect(() => {
+    if (
+      state.status !== "idle" ||
+      playbackInFlightRef.current ||
+      recordingStartInFlightRef.current ||
+      translationInFlightRef.current
+    ) return;
+    deferredBenchmarkQueueRef.current.flush();
+  }, [state.status]);
 
   useEffect(
     () => () => {
@@ -1948,54 +1960,6 @@ export default function TranslatorView({
             totalChunkBytes: captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
           },
         } : null;
-        if (benchmarkInput && sameAudioBenchmarkRunnerRef.current.isEligible(benchmarkInput)) {
-          sameAudioEligibleTurnIdsRef.current.add(entry.id);
-          sameAudioBenchmarkRunnerRef.current.run(benchmarkInput, (comparison) => {
-            if (!mountedRef.current) return;
-            const existing = sameAudioBenchmarksByTurnRef.current.get(entry.id);
-            const sample = qualityByTurnRef.current.get(entry.id);
-            let nextComparison = comparison.benchmarkStatus === "completed" &&
-              existing && existing.groundTruthStatus !== "unreviewed"
-              ? reviewSameAudioComparison(comparison, {
-                  status: existing.groundTruthStatus,
-                  correctedTranscript: existing.groundTruthTranscript ?? undefined,
-                  reviewedAt: existing.reviewedAt ?? undefined,
-                })
-              : comparison;
-            if (comparison.benchmarkStatus === "completed" &&
-              nextComparison.groundTruthStatus === "unreviewed" &&
-              sample?.recognitionReviewStatus === "accepted") {
-              nextComparison = reviewSameAudioComparison(comparison, {
-                status: "accepted_primary",
-              });
-            } else if (comparison.benchmarkStatus === "completed" &&
-              nextComparison.groundTruthStatus === "unreviewed" &&
-              sample?.recognitionReviewStatus === "corrected" &&
-              sample.correctedTranscript) {
-              nextComparison = reviewSameAudioComparison(comparison, {
-                status: "corrected",
-                correctedTranscript: sample.correctedTranscript,
-              });
-            }
-            sameAudioBenchmarksByTurnRef.current.set(entry.id, nextComparison);
-            const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(entry.id);
-            if (modelBenchmark) {
-              safeSttModelBenchmarksByTurnRef.current.set(
-                entry.id,
-                applySameAudioGroundTruthToSafeSttModelBenchmark(modelBenchmark, nextComparison),
-              );
-            }
-            if (sample) qualityByTurnRef.current.set(entry.id, {
-              ...sample,
-              primaryTranscriptAvailable: true,
-              rescueTranscriptAvailable: nextComparison.secondaryTranscript !== null,
-              benchmarkReadySameAudioSample:
-                nextComparison.benchmarkStatus === "completed" &&
-                nextComparison.groundTruthStatus !== "unreviewed",
-            });
-            setQualityRevision((revision) => revision + 1);
-          });
-        }
         const modelBenchmarkInput = turnConsent ? {
           turnId: entry.id,
           audioBlob: recordedAudio.audioBlob,
@@ -2011,25 +1975,80 @@ export default function TranslatorView({
             totalChunkBytes: captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
           },
         } : null;
-        if (modelBenchmarkInput) {
-          safeSttModelBenchmarkRunnerRef.current.run(modelBenchmarkInput, (benchmark) => {
-            if (!mountedRef.current) return;
-            const comparison = sameAudioBenchmarksByTurnRef.current.get(entry.id);
-            const comparisonReviewed = comparison
-              ? applySameAudioGroundTruthToSafeSttModelBenchmark(benchmark, comparison)
-              : benchmark;
-            const sample = qualityByTurnRef.current.get(entry.id);
-            const reviewed = comparisonReviewed !== benchmark
-              ? comparisonReviewed
-              : sample?.recognitionReviewStatus === "accepted"
-                ? reviewSafeSttModelBenchmark(benchmark, entry.originalText)
-                : sample?.recognitionReviewStatus === "corrected" && sample.correctedTranscript
-                  ? reviewSafeSttModelBenchmark(benchmark, sample.correctedTranscript)
-                  : benchmark;
-            safeSttModelBenchmarksByTurnRef.current.set(entry.id, reviewed);
-            setQualityRevision((revision) => revision + 1);
-          });
-        }
+        const startBenchmarks = () => {
+          if (benchmarkInput && sameAudioBenchmarkRunnerRef.current.isEligible(benchmarkInput)) {
+            sameAudioEligibleTurnIdsRef.current.add(entry.id);
+            sameAudioBenchmarkRunnerRef.current.run(benchmarkInput, (comparison) => {
+              if (!mountedRef.current) return;
+              const existing = sameAudioBenchmarksByTurnRef.current.get(entry.id);
+              const sample = qualityByTurnRef.current.get(entry.id);
+              let nextComparison = comparison.benchmarkStatus === "completed" &&
+                existing && existing.groundTruthStatus !== "unreviewed"
+                ? reviewSameAudioComparison(comparison, {
+                    status: existing.groundTruthStatus,
+                    correctedTranscript: existing.groundTruthTranscript ?? undefined,
+                    reviewedAt: existing.reviewedAt ?? undefined,
+                  })
+                : comparison;
+              if (comparison.benchmarkStatus === "completed" &&
+                nextComparison.groundTruthStatus === "unreviewed" &&
+                sample?.recognitionReviewStatus === "accepted") {
+                nextComparison = reviewSameAudioComparison(comparison, {
+                  status: "accepted_primary",
+                });
+              } else if (comparison.benchmarkStatus === "completed" &&
+                nextComparison.groundTruthStatus === "unreviewed" &&
+                sample?.recognitionReviewStatus === "corrected" &&
+                sample.correctedTranscript) {
+                nextComparison = reviewSameAudioComparison(comparison, {
+                  status: "corrected",
+                  correctedTranscript: sample.correctedTranscript,
+                });
+              }
+              sameAudioBenchmarksByTurnRef.current.set(entry.id, nextComparison);
+              const modelBenchmark = safeSttModelBenchmarksByTurnRef.current.get(entry.id);
+              if (modelBenchmark) {
+                safeSttModelBenchmarksByTurnRef.current.set(
+                  entry.id,
+                  applySameAudioGroundTruthToSafeSttModelBenchmark(modelBenchmark, nextComparison),
+                );
+              }
+              if (sample) qualityByTurnRef.current.set(entry.id, {
+                ...sample,
+                primaryTranscriptAvailable: true,
+                rescueTranscriptAvailable: nextComparison.secondaryTranscript !== null,
+                benchmarkReadySameAudioSample:
+                  nextComparison.benchmarkStatus === "completed" &&
+                  nextComparison.groundTruthStatus !== "unreviewed",
+              });
+              setQualityRevision((revision) => revision + 1);
+            });
+          }
+          if (modelBenchmarkInput) {
+            safeSttModelBenchmarkRunnerRef.current.run(modelBenchmarkInput, (benchmark) => {
+              if (!mountedRef.current) return;
+              const comparison = sameAudioBenchmarksByTurnRef.current.get(entry.id);
+              const comparisonReviewed = comparison
+                ? applySameAudioGroundTruthToSafeSttModelBenchmark(benchmark, comparison)
+                : benchmark;
+              const sample = qualityByTurnRef.current.get(entry.id);
+              const reviewed = comparisonReviewed !== benchmark
+                ? comparisonReviewed
+                : sample?.recognitionReviewStatus === "accepted"
+                  ? reviewSafeSttModelBenchmark(benchmark, entry.originalText)
+                  : sample?.recognitionReviewStatus === "corrected" && sample.correctedTranscript
+                    ? reviewSafeSttModelBenchmark(benchmark, sample.correctedTranscript)
+                    : benchmark;
+              safeSttModelBenchmarksByTurnRef.current.set(entry.id, reviewed);
+              setQualityRevision((revision) => revision + 1);
+            });
+          }
+        };
+        deferredBenchmarkQueueRef.current.schedule(
+          entry.id,
+          startBenchmarks,
+          state.autoPlay && playbackInFlightRef.current,
+        );
       });
       pendingTranslationVisibleEntryIdRef.current = entry.id;
       turnPerformance.markTranslationStateCommitted();
