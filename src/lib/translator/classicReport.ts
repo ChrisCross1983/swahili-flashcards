@@ -287,6 +287,22 @@ export type ClassicTranslatorReportTurn = {
   fallbackReason: string | null;
   translationModel: string | null;
   ttsModel: string;
+  ttsSpeechProtocol: TranslationDiagnostics["ttsSpeechProtocol"] | null;
+  ttsTransport: TranslationDiagnostics["ttsTransport"] | null;
+  ttsVoice: string | null;
+  ttsRealtimeConnectionColdWarm: TranslationDiagnostics["ttsRealtimeConnectionColdWarm"] | null;
+  ttsRealtimeSessionRequestStartedAt: string | null;
+  ttsRealtimeSessionReadyAt: string | null;
+  ttsRealtimePeerConnectionStartedAt: string | null;
+  ttsRealtimePeerConnectionReadyAt: string | null;
+  ttsRealtimeResponseCreateSentAt: string | null;
+  ttsRealtimeFirstAudioReceivedAt: string | null;
+  ttsRealtimeFirstAudioRenderableAt: string | null;
+  ttsRealtimePlaybackStartedAt: string | null;
+  ttsRealtimePlaybackCompletedAt: string | null;
+  ttsRealtimeFallbackUsed: boolean;
+  ttsRealtimeFallbackReason: string | null;
+  ttsRealtimeFallbackStartedAt: string | null;
   ttsSpeed: number;
   connectionId: string | null;
   realtimeConnectionReadyAtRecordingStart: string | null;
@@ -547,6 +563,11 @@ export type ClassicTranslatorReportTurn = {
   ttsRequestToReadyMs: number | null;
   stopToTtsReadyMs: number | null;
   ttsReadyToPlaybackStartedMs: number | null;
+  translationReadyToRealtimeSessionReadyMs: number | null;
+  translationReadyToRealtimeFirstAudioReceivedMs: number | null;
+  translationReadyToRealtimePlaybackStartedMs: number | null;
+  realtimeResponseCreateToFirstAudioMs: number | null;
+  realtimeFirstAudioToPlaybackStartedMs: number | null;
   stopToPlaybackStartedMs: number | null;
   interactionOverheadMs: number | null;
   serverTranscriptionMs: number | null;
@@ -1066,6 +1087,22 @@ function turnFromValues(input: {
     fallbackReason: d.fallbackReason ?? null,
     translationModel: input.translationModel,
     ttsModel: input.ttsModel ?? CLASSIC_TTS_MODEL,
+    ttsSpeechProtocol: d.ttsSpeechProtocol ?? null,
+    ttsTransport: d.ttsTransport ?? null,
+    ttsVoice: d.ttsVoice ?? null,
+    ttsRealtimeConnectionColdWarm: d.ttsRealtimeConnectionColdWarm ?? null,
+    ttsRealtimeSessionRequestStartedAt: d.ttsRealtimeSessionRequestStartedAt ?? null,
+    ttsRealtimeSessionReadyAt: d.ttsRealtimeSessionReadyAt ?? null,
+    ttsRealtimePeerConnectionStartedAt: d.ttsRealtimePeerConnectionStartedAt ?? null,
+    ttsRealtimePeerConnectionReadyAt: d.ttsRealtimePeerConnectionReadyAt ?? null,
+    ttsRealtimeResponseCreateSentAt: d.ttsRealtimeResponseCreateSentAt ?? null,
+    ttsRealtimeFirstAudioReceivedAt: d.ttsRealtimeFirstAudioReceivedAt ?? null,
+    ttsRealtimeFirstAudioRenderableAt: d.ttsRealtimeFirstAudioRenderableAt ?? null,
+    ttsRealtimePlaybackStartedAt: d.ttsRealtimePlaybackStartedAt ?? null,
+    ttsRealtimePlaybackCompletedAt: d.ttsRealtimePlaybackCompletedAt ?? null,
+    ttsRealtimeFallbackUsed: d.ttsRealtimeFallbackUsed === true,
+    ttsRealtimeFallbackReason: d.ttsRealtimeFallbackReason ?? null,
+    ttsRealtimeFallbackStartedAt: d.ttsRealtimeFallbackStartedAt ?? null,
     ttsSpeed: input.ttsSpeed,
     connectionId: d.connectionId ?? null,
     realtimeConnectionReadyAtRecordingStart:
@@ -1409,6 +1446,21 @@ function turnFromValues(input: {
     ttsRequestToReadyMs: finite(d.ttsRequestToReadyMs),
     stopToTtsReadyMs: finite(d.stopToTtsReadyMs),
     ttsReadyToPlaybackStartedMs: finite(d.ttsReadyToPlaybackStartedMs),
+    translationReadyToRealtimeSessionReadyMs: finite(
+      d.translationReadyToRealtimeSessionReadyMs,
+    ),
+    translationReadyToRealtimeFirstAudioReceivedMs: finite(
+      d.translationReadyToRealtimeFirstAudioReceivedMs,
+    ),
+    translationReadyToRealtimePlaybackStartedMs: finite(
+      d.translationReadyToRealtimePlaybackStartedMs,
+    ),
+    realtimeResponseCreateToFirstAudioMs: finite(
+      d.realtimeResponseCreateToFirstAudioMs,
+    ),
+    realtimeFirstAudioToPlaybackStartedMs: finite(
+      d.realtimeFirstAudioToPlaybackStartedMs,
+    ),
     stopToPlaybackStartedMs: finite(d.stopToPlaybackStartedMs),
     interactionOverheadMs: finite(d.interactionOverheadMs),
     serverTranscriptionMs:

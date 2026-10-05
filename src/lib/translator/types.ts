@@ -244,6 +244,28 @@ export type TranslationDiagnostics = {
   ttsPlaybackFromCache?: boolean;
   ttsAudioByteLength?: number;
   ttsAudioMimeType?: string | null;
+  ttsSpeechProtocol?: "realtime_webrtc";
+  /** Additive output-transport diagnostics. Historical full-Blob metrics retain their meaning. */
+  ttsTransport?: "full_blob" | "realtime_webrtc";
+  ttsRealtimeConnectionColdWarm?: "cold" | "warm";
+  ttsRealtimeSessionRequestStartedAt?: string;
+  ttsRealtimeSessionReadyAt?: string;
+  ttsRealtimePeerConnectionStartedAt?: string;
+  ttsRealtimePeerConnectionReadyAt?: string;
+  ttsRealtimeResponseCreateSentAt?: string;
+  ttsRealtimeFirstAudioReceivedAt?: string;
+  ttsRealtimeFirstAudioRenderableAt?: string;
+  ttsRealtimePlaybackStartedAt?: string;
+  ttsRealtimePlaybackCompletedAt?: string;
+  ttsRealtimeFallbackUsed?: boolean;
+  ttsRealtimeFallbackReason?: string | null;
+  ttsRealtimeFallbackStartedAt?: string | null;
+  translationReadyToRealtimeSessionReadyMs?: number;
+  translationReadyToRealtimeFirstAudioReceivedMs?: number;
+  translationReadyToRealtimePlaybackStartedMs?: number;
+  realtimeResponseCreateToFirstAudioMs?: number;
+  realtimeFirstAudioToPlaybackStartedMs?: number;
+  ttsVoice?: string;
   ttsInputTextLength?: number;
   ttsPlaybackCurrentTimeAtEnd?: number | null;
   ttsPlaybackDurationAtEnd?: number | null;

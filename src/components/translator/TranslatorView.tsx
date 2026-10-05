@@ -1307,10 +1307,29 @@ export default function TranslatorView({
           }
         },
         (diagnostics) => {
+          const performance = turnPerformanceByEntryRef.current.get(entry.id);
+          const realtimeStage = diagnostics.ttsRealtimeSessionRequestStartedAt
+            ? "realtimeSpeechSessionRequestStarted" as const
+            : diagnostics.ttsRealtimeSessionReadyAt
+            ? "realtimeSpeechSessionReady" as const
+            : diagnostics.ttsRealtimePeerConnectionStartedAt
+            ? "realtimeSpeechPeerConnectionStarted" as const
+            : diagnostics.ttsRealtimePeerConnectionReadyAt
+            ? "realtimeSpeechPeerConnectionReady" as const
+            : diagnostics.ttsRealtimeResponseCreateSentAt
+            ? "realtimeSpeechResponseCreateSent" as const
+            : diagnostics.ttsRealtimeFirstAudioReceivedAt
+            ? "realtimeSpeechFirstAudioReceived" as const
+            : diagnostics.ttsRealtimeFirstAudioRenderableAt
+            ? "realtimeSpeechFirstAudioRenderable" as const
+            : null;
           updateEntryDiagnostics(
             entry,
             {
               ...diagnostics,
+              ...(realtimeStage
+                ? performance?.markRealtimeSpeechStage(realtimeStage) ?? {}
+                : {}),
               ...(typeof diagnostics.ttsOpenAiTotalMs === "number"
                 ? { ttsGenerationMs: diagnostics.ttsOpenAiTotalMs }
                 : {}),

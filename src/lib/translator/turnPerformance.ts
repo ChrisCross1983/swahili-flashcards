@@ -56,6 +56,11 @@ type ClientPerformanceDiagnostics = Pick<
   | "playbackStartedAt"
   | "playbackCompletedAt"
   | "ttsReadyToPlaybackStartedMs"
+  | "translationReadyToRealtimeSessionReadyMs"
+  | "translationReadyToRealtimeFirstAudioReceivedMs"
+  | "translationReadyToRealtimePlaybackStartedMs"
+  | "realtimeResponseCreateToFirstAudioMs"
+  | "realtimeFirstAudioToPlaybackStartedMs"
   | "stopToPlaybackStartedMs"
   | "interactionOverheadMs"
   | "transcriptionPath"
@@ -118,6 +123,13 @@ type TurnTimepointName =
   | "translationStateCommitted"
   | "translationVisible"
   | "ttsRequestStarted"
+  | "realtimeSpeechSessionRequestStarted"
+  | "realtimeSpeechSessionReady"
+  | "realtimeSpeechPeerConnectionStarted"
+  | "realtimeSpeechPeerConnectionReady"
+  | "realtimeSpeechResponseCreateSent"
+  | "realtimeSpeechFirstAudioReceived"
+  | "realtimeSpeechFirstAudioRenderable"
   | "ttsAudioPreparationStarted"
   | "ttsAudioPreparationCompleted"
   | "ttsReady"
@@ -353,6 +365,21 @@ export class TranslatorTurnPerformance {
     this.markOnce("ttsRequestStarted", now);
   }
 
+  markRealtimeSpeechStage(
+    stage: Extract<TurnTimepointName,
+      | "realtimeSpeechSessionRequestStarted"
+      | "realtimeSpeechSessionReady"
+      | "realtimeSpeechPeerConnectionStarted"
+      | "realtimeSpeechPeerConnectionReady"
+      | "realtimeSpeechResponseCreateSent"
+      | "realtimeSpeechFirstAudioReceived"
+      | "realtimeSpeechFirstAudioRenderable">,
+    now = performance.now(),
+  ) {
+    this.markOnce(stage, now);
+    return this.getDiagnostics();
+  }
+
   markTtsAudioPreparationStarted(now = performance.now()) {
     this.markOnce("ttsAudioPreparationStarted", now);
   }
@@ -494,6 +521,26 @@ export class TranslatorTurnPerformance {
       stopToPlaybackStartedMs !== undefined
         ? recordClickToRecordingStartedMs + stopToPlaybackStartedMs
         : undefined;
+    const translationReadyToRealtimeSessionReadyMs = duration(
+      this.timepoints.translationCompleted,
+      this.timepoints.realtimeSpeechSessionReady,
+    );
+    const translationReadyToRealtimeFirstAudioReceivedMs = duration(
+      this.timepoints.translationCompleted,
+      this.timepoints.realtimeSpeechFirstAudioReceived,
+    );
+    const translationReadyToRealtimePlaybackStartedMs = duration(
+      this.timepoints.translationCompleted,
+      this.timepoints.playbackStarted,
+    );
+    const realtimeResponseCreateToFirstAudioMs = duration(
+      this.timepoints.realtimeSpeechResponseCreateSent,
+      this.timepoints.realtimeSpeechFirstAudioReceived,
+    );
+    const realtimeFirstAudioToPlaybackStartedMs = duration(
+      this.timepoints.realtimeSpeechFirstAudioReceived,
+      this.timepoints.playbackStarted,
+    );
 
     return {
       ...this.timestampDiagnostic(
@@ -573,6 +620,31 @@ export class TranslatorTurnPerformance {
         : { stopToTranslationVisibleMs }),
       ...this.timestampDiagnostic("ttsRequestStarted", "ttsStartedAt"),
       ...this.timestampDiagnostic(
+        "realtimeSpeechSessionRequestStarted",
+        "ttsRealtimeSessionRequestStartedAt",
+      ),
+      ...this.timestampDiagnostic("realtimeSpeechSessionReady", "ttsRealtimeSessionReadyAt"),
+      ...this.timestampDiagnostic(
+        "realtimeSpeechPeerConnectionStarted",
+        "ttsRealtimePeerConnectionStartedAt",
+      ),
+      ...this.timestampDiagnostic(
+        "realtimeSpeechPeerConnectionReady",
+        "ttsRealtimePeerConnectionReadyAt",
+      ),
+      ...this.timestampDiagnostic(
+        "realtimeSpeechResponseCreateSent",
+        "ttsRealtimeResponseCreateSentAt",
+      ),
+      ...this.timestampDiagnostic(
+        "realtimeSpeechFirstAudioReceived",
+        "ttsRealtimeFirstAudioReceivedAt",
+      ),
+      ...this.timestampDiagnostic(
+        "realtimeSpeechFirstAudioRenderable",
+        "ttsRealtimeFirstAudioRenderableAt",
+      ),
+      ...this.timestampDiagnostic(
         "ttsRequestStarted",
         "ttsClientRequestStartedAt",
       ),
@@ -619,6 +691,21 @@ export class TranslatorTurnPerformance {
       ...(ttsReadyToPlaybackStartedMs === undefined
         ? {}
         : { ttsReadyToPlaybackStartedMs }),
+      ...(translationReadyToRealtimeSessionReadyMs === undefined ? {} : {
+        translationReadyToRealtimeSessionReadyMs,
+      }),
+      ...(translationReadyToRealtimeFirstAudioReceivedMs === undefined ? {} : {
+        translationReadyToRealtimeFirstAudioReceivedMs,
+      }),
+      ...(translationReadyToRealtimePlaybackStartedMs === undefined ? {} : {
+        translationReadyToRealtimePlaybackStartedMs,
+      }),
+      ...(realtimeResponseCreateToFirstAudioMs === undefined ? {} : {
+        realtimeResponseCreateToFirstAudioMs,
+      }),
+      ...(realtimeFirstAudioToPlaybackStartedMs === undefined ? {} : {
+        realtimeFirstAudioToPlaybackStartedMs,
+      }),
       ...(ttsPlayCallToStartedMs === undefined
         ? {}
         : { ttsPlayCallToStartedMs }),
@@ -657,6 +744,13 @@ export class TranslatorTurnPerformance {
       | "translationVisibleAt"
       | "ttsStartedAt"
       | "ttsClientRequestStartedAt"
+      | "ttsRealtimeSessionRequestStartedAt"
+      | "ttsRealtimeSessionReadyAt"
+      | "ttsRealtimePeerConnectionStartedAt"
+      | "ttsRealtimePeerConnectionReadyAt"
+      | "ttsRealtimeResponseCreateSentAt"
+      | "ttsRealtimeFirstAudioReceivedAt"
+      | "ttsRealtimeFirstAudioRenderableAt"
       | "ttsAudioPreparationStartedAt"
       | "ttsAudioPreparationCompletedAt"
       | "firstPlayableAudioAt"

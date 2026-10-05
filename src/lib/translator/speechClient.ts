@@ -78,6 +78,22 @@ export type TranslatorSpeechGenerationDiagnostics = {
   ttsInputTextLength?: number;
   ttsAudioByteLength?: number;
   ttsAudioMimeType?: string | null;
+  ttsSpeechProtocol?: "realtime_webrtc";
+  ttsTransport?: "full_blob" | "realtime_webrtc";
+  ttsRealtimeConnectionColdWarm?: "cold" | "warm";
+  ttsRealtimeSessionRequestStartedAt?: string;
+  ttsRealtimeSessionReadyAt?: string;
+  ttsRealtimePeerConnectionStartedAt?: string;
+  ttsRealtimePeerConnectionReadyAt?: string;
+  ttsRealtimeResponseCreateSentAt?: string;
+  ttsRealtimeFirstAudioReceivedAt?: string;
+  ttsRealtimeFirstAudioRenderableAt?: string;
+  ttsRealtimePlaybackStartedAt?: string;
+  ttsRealtimePlaybackCompletedAt?: string;
+  ttsRealtimeFallbackUsed?: boolean;
+  ttsRealtimeFallbackReason?: string | null;
+  ttsRealtimeFallbackStartedAt?: string | null;
+  ttsVoice?: string;
 };
 
 export type TranslatorSpeechAsset = {
