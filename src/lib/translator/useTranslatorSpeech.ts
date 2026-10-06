@@ -94,9 +94,11 @@ export function useTranslatorSpeech() {
   }, []);
 
   const preparePlaybackForUserGesture = useCallback(() => {
-    (CLASSIC_REALTIME_21_OUTPUT_ENABLED
-      ? realtimePlayerRef.current
-      : playerRef.current)?.prepareForUserGesture();
+    // Keep the legacy fallback prepared even when Realtime output is selected.
+    playerRef.current?.prepareForUserGesture();
+    if (CLASSIC_REALTIME_21_OUTPUT_ENABLED) {
+      realtimePlayerRef.current?.prepareForUserGesture();
+    }
   }, []);
 
   const pausePlayback = useCallback(() => {

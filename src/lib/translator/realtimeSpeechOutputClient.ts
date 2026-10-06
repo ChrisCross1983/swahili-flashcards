@@ -120,7 +120,8 @@ export class ClassicRealtimeSpeechOutputClient {
   private requestController: AbortController | null = null;
 
   constructor(dependencies: Dependencies = {}) {
-    this.fetcher = dependencies.fetcher ?? fetch;
+    // WebKit requires the browser fetch receiver to remain Window.
+    this.fetcher = dependencies.fetcher ?? globalThis.fetch.bind(globalThis);
     this.createPeerConnection = dependencies.createPeerConnection ?? (() => new RTCPeerConnection());
     this.createAudio = dependencies.createAudio ?? (() => new Audio());
     this.createMediaStream = dependencies.createMediaStream ?? ((tracks) => new MediaStream(tracks));

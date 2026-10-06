@@ -6,6 +6,8 @@ afterEach(() => {
   vi.doUnmock("react");
   vi.doUnmock("@/lib/translator/speechClient");
   vi.doUnmock("@/lib/translator/translatorSpeechPlayer");
+  vi.doUnmock("@/lib/translator/realtimeSpeechOutputPlayer");
+  vi.doUnmock("@/lib/translator/capturePolicy");
   vi.resetModules();
 });
 
@@ -26,6 +28,35 @@ describe("useTranslatorSpeech lifecycle", () => {
     );
     expect(source).toContain("requestTranslatorSpeech(entry.translatedText");
     expect(source).not.toContain("entry.essenceSummary");
+  });
+
+  it("prepares the legacy player for an automatic fallback during a Realtime turn", async () => {
+    const prepareLegacy = vi.fn();
+    const prepareRealtime = vi.fn();
+    vi.doMock("react", () => ({
+      useRef: () => ({ current: null }),
+      useCallback: <T,>(callback: T) => callback,
+      useEffect: (setup: () => void | (() => void)) => { setup(); },
+    }));
+    vi.doMock("@/lib/translator/capturePolicy", () => ({
+      CLASSIC_REALTIME_21_OUTPUT_ENABLED: true,
+    }));
+    vi.doMock("@/lib/translator/translatorSpeechPlayer", () => ({
+      TranslatorSpeechPlayer: class {
+        prepareForUserGesture = prepareLegacy;
+      },
+    }));
+    vi.doMock("@/lib/translator/realtimeSpeechOutputPlayer", () => ({
+      RealtimeSpeechOutputPlayer: class {
+        prepareForUserGesture = prepareRealtime;
+      },
+    }));
+    const { useTranslatorSpeech } = await import("@/lib/translator/useTranslatorSpeech");
+
+    useTranslatorSpeech().preparePlaybackForUserGesture();
+
+    expect(prepareLegacy).toHaveBeenCalledOnce();
+    expect(prepareRealtime).toHaveBeenCalledOnce();
   });
 
   it("recreates the disposed player during the Strict Mode setup-cleanup-setup cycle", async () => {

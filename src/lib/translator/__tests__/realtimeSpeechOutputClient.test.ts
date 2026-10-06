@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ClassicRealtimeSpeechOutputClient,
   EXACT_TERRA_READ_INSTRUCTION,
@@ -30,7 +30,9 @@ class FakePeer {
   close = vi.fn();
 }
 
-function createHarness() {
+afterEach(() => vi.unstubAllGlobals());
+
+function createHarness(useBrowserFetch = false) {
   const peer = new FakePeer();
   const audio = {
     autoplay: false,
@@ -46,7 +48,7 @@ function createHarness() {
     }), { status: 200 }))
     .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }));
   const client = new ClassicRealtimeSpeechOutputClient({
-    fetcher,
+    ...(useBrowserFetch ? {} : { fetcher }),
     createPeerConnection: () => peer as unknown as RTCPeerConnection,
     createAudio: () => audio,
     createMediaStream: () => ({}) as MediaStream,
@@ -55,6 +57,29 @@ function createHarness() {
 }
 
 describe("ClassicRealtimeSpeechOutputClient", () => {
+  it("keeps the Window receiver when using browser fetch for session and SDP", async () => {
+    const browserFetch = vi.fn(function (this: unknown, input: RequestInfo | URL) {
+      if (this !== globalThis) {
+        throw new TypeError("Can only call Window.fetch on instances of Window");
+      }
+      return Promise.resolve(input === "/api/translator/realtime-speech/session"
+        ? new Response(JSON.stringify({
+          clientSecret: "secret", expiresAt: 1, model: "gpt-realtime-2.1-mini", voice: "alloy",
+        }), { status: 200 })
+        : new Response("answer-sdp", { status: 200 }));
+    });
+    vi.stubGlobal("fetch", browserFetch);
+    const { peer, audio, client } = createHarness(true);
+
+    const render = client.render("Habari", "sw", new AbortController().signal);
+    await vi.waitFor(() => expect(peer.channel.send).toHaveBeenCalledTimes(2));
+    expect(browserFetch).toHaveBeenCalledTimes(2);
+    peer.ontrack?.({ streams: [{} as MediaStream], track: {} as MediaStreamTrack } as unknown as RTCTrackEvent);
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledOnce());
+    audio.onended?.();
+    await expect(render).resolves.toBeUndefined();
+  });
+
   it("sends the exact Terra text on the WebRTC event channel and plays the remote track", async () => {
     const { peer, audio, client } = createHarness();
     const onPlaybackStarted = vi.fn();
