@@ -2902,6 +2902,13 @@ export default function TranslatorView({
                   </span>
                 </span>
               </button>
+              <button
+                type="button"
+                className="btn btn-secondary mt-2 min-h-12 w-full touch-manipulation border bg-transparent text-sm"
+                onClick={handleStopPlayback}
+              >
+                <span aria-hidden="true">■</span> Vorbereitung abbrechen
+              </button>
             </div>
           ) : null}
 

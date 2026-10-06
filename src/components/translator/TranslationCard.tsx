@@ -217,7 +217,7 @@ export default function TranslationCard({
         />
       ) : null}
 
-      <div className="mt-5" aria-live="polite">
+      {playbackState !== "preparing" ? <div className="mt-5" aria-live="polite">
         {playbackState === "idle" ? (
           <button
             type="button"
@@ -233,24 +233,6 @@ export default function TranslationCard({
               </span>
             </span>
           </button>
-        ) : null}
-
-        {playbackState === "preparing" ? (
-          <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-            <p className="text-sm font-semibold text-muted">
-              {SHARED_CONVERSATION_LABELS.preparingAudio.de}
-              <span className="block text-xs font-medium">
-                {SHARED_CONVERSATION_LABELS.preparingAudio.sw}
-              </span>
-            </p>
-            <button
-              type="button"
-              className="btn btn-danger min-h-12 px-4"
-              onClick={onStop}
-            >
-              <span aria-hidden="true">■</span> Vorbereitung abbrechen
-            </button>
-          </div>
         ) : null}
 
         {playbackState === "playing" ? (
@@ -290,7 +272,7 @@ export default function TranslationCard({
             </button>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div className="mt-4 flex min-h-11 items-center justify-between gap-2 border-t border-soft pt-3">
         {feedbackSaved ? <span className="text-xs font-medium text-accent-success-strong" role="status">

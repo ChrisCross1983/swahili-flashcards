@@ -48,7 +48,7 @@ export type RealtimeSpeechOutputHandlers = {
 };
 
 type OutputAudio = Pick<HTMLAudioElement,
-  "autoplay" | "onended" | "onerror" | "pause" | "play" | "srcObject">;
+  "autoplay" | "muted" | "onended" | "onerror" | "onplaying" | "pause" | "play" | "srcObject">;
 
 type Dependencies = {
   fetcher?: typeof fetch;
@@ -141,6 +141,9 @@ export class ClassicRealtimeSpeechOutputClient {
     const transportSignal = requestController.signal;
 
     let firstAudioReceived = false;
+    let responseCreateSent = false;
+    let playbackObserved = false;
+    let playbackStarted = false;
     let playbackCompleted = false;
     let firstAudioTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,6 +152,13 @@ export class ClassicRealtimeSpeechOutputClient {
     const done = new Promise<void>((resolve, reject) => {
       settle = (error?: Error) => error ? reject(error) : resolve();
     });
+    // A media-track callback can fail while an unrelated WebRTC setup promise
+    // is pending. Observe the terminal result immediately and race setup with it.
+    void done.catch(() => undefined);
+    const setupInterrupted = done.then(() => { throw abortError(); });
+    void setupInterrupted.catch(() => undefined);
+    const awaitSetup = <T>(operation: Promise<T>): Promise<T> =>
+      Promise.race([operation, setupInterrupted]);
     const telemetryBase: RealtimeSpeechOutputTelemetry = {
       ttsTransport: "realtime_webrtc",
       ttsModel: "gpt-realtime-2.1-mini",
@@ -171,6 +181,7 @@ export class ClassicRealtimeSpeechOutputClient {
       if (audio) {
         audio.onended = null;
         audio.onerror = null;
+        audio.onplaying = null;
         audio.pause();
         audio.srcObject = null;
       }
@@ -207,6 +218,13 @@ export class ClassicRealtimeSpeechOutputClient {
       if (!transportSignal.aborted) requestController.abort();
       fail(abortError());
     };
+    const armPlaybackTimer = () => {
+      if (playbackTimer) clearTimeout(playbackTimer);
+      playbackTimer = setTimeout(
+        () => fail(new Error("realtime_playback_start_timeout")),
+        PLAYBACK_START_TIMEOUT_MS,
+      );
+    };
     signal.addEventListener("abort", abort, { once: true });
     sessionSetupTimer = setTimeout(() => {
       if (!transportSignal.aborted) requestController.abort();
@@ -215,12 +233,12 @@ export class ClassicRealtimeSpeechOutputClient {
 
     try {
       emit({ ttsRealtimeSessionRequestStartedAt: this.nowIso() });
-      const credentialResponse = await this.fetcher(
+      const credentialResponse = await awaitSetup(this.fetcher(
         "/api/translator/realtime-speech/session",
         { method: "POST", signal: transportSignal, cache: "no-store" },
-      );
+      ));
       if (!credentialResponse.ok) throw new Error("realtime_speech_session_request_failed");
-      const credentialJson = await credentialResponse.json();
+      const credentialJson = await awaitSetup(credentialResponse.json());
       if (!validCredential(credentialJson)) throw new Error("realtime_speech_session_invalid");
       const credential = credentialJson;
       emit({
@@ -240,6 +258,15 @@ export class ClassicRealtimeSpeechOutputClient {
         if (peer !== this.peer || playbackCompleted || signal.aborted) return;
         if (peer.connectionState === "failed") fail(new Error("realtime_speech_peer_failed"));
       };
+      const markPlaybackStarted = () => {
+        playbackObserved = true;
+        if (!responseCreateSent || playbackStarted || playbackCompleted || signal.aborted || peer !== this.peer) return;
+        playbackStarted = true;
+        if (playbackTimer) clearTimeout(playbackTimer);
+        playbackTimer = null;
+        emit({ ttsRealtimePlaybackStartedAt: this.nowIso() });
+        handlers.onPlaybackStarted?.();
+      };
       peer.ontrack = (event) => {
         if (peer !== this.peer || playbackCompleted || signal.aborted || firstAudioReceived) return;
         firstAudioReceived = true;
@@ -248,27 +275,37 @@ export class ClassicRealtimeSpeechOutputClient {
         const audio = this.createAudio();
         this.audio = audio;
         const stream = event.streams[0] ?? this.createMediaStream([event.track]);
-        audio.autoplay = false;
+        audio.autoplay = true;
+        audio.muted = false;
+        audio.onplaying = markPlaybackStarted;
+        audio.onended = () => {
+          if (playbackStarted) complete();
+          else fail(new Error("realtime_speech_audio_ended_before_playback"));
+        };
+        audio.onerror = () => fail(new Error("realtime_speech_audio_error"));
         audio.srcObject = stream;
         emit({ ttsRealtimeFirstAudioRenderableAt: this.nowIso() });
         handlers.onFirstAudio?.({ ...telemetryBase, ttsModel: credential.model, ttsVoice: credential.voice });
         handlers.onPlaybackAttempt?.();
-        audio.onended = () => complete();
-        audio.onerror = () => fail(new Error("realtime_speech_audio_error"));
-        playbackTimer = setTimeout(() => fail(timeoutError("playback_start")), PLAYBACK_START_TIMEOUT_MS);
-        void audio.play().then(() => {
-          if (peer !== this.peer || playbackCompleted || signal.aborted) return;
-          if (playbackTimer) clearTimeout(playbackTimer);
-          emit({ ttsRealtimePlaybackStartedAt: this.nowIso() });
-          handlers.onPlaybackStarted?.();
-        }, (error) => fail(error instanceof Error ? error : new Error("realtime_speech_playback_failed")));
+        armPlaybackTimer();
+        try {
+          void audio.play().then(markPlaybackStarted, (error) => {
+            if (!playbackStarted) {
+              fail(error instanceof Error ? error : new Error("realtime_speech_playback_failed"));
+            }
+          });
+        } catch (error) {
+          if (!playbackStarted) {
+            fail(error instanceof Error ? error : new Error("realtime_speech_playback_failed"));
+          }
+        }
       };
 
-      const offer = await peer.createOffer();
+      const offer = await awaitSetup(peer.createOffer());
       if (signal.aborted || transportSignal.aborted) throw abortError();
-      await peer.setLocalDescription(offer);
+      await awaitSetup(peer.setLocalDescription(offer));
       if (!offer.sdp) throw new Error("realtime_speech_offer_missing_sdp");
-      const answer = await this.fetcher(REALTIME_CALLS_ENDPOINT, {
+      const answer = await awaitSetup(this.fetcher(REALTIME_CALLS_ENDPOINT, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${credential.clientSecret}`,
@@ -276,11 +313,11 @@ export class ClassicRealtimeSpeechOutputClient {
         },
         body: offer.sdp,
         signal: transportSignal,
-      });
-      const answerSdp = await answer.text();
+      }));
+      const answerSdp = await awaitSetup(answer.text());
       if (!answer.ok || !answerSdp) throw new Error("realtime_speech_sdp_failed");
-      await peer.setRemoteDescription({ type: "answer", sdp: answerSdp });
-      await waitForDataChannel(events, transportSignal, SESSION_SETUP_TIMEOUT_MS);
+      await awaitSetup(peer.setRemoteDescription({ type: "answer", sdp: answerSdp }));
+      await awaitSetup(waitForDataChannel(events, transportSignal, SESSION_SETUP_TIMEOUT_MS));
       if (sessionSetupTimer) clearTimeout(sessionSetupTimer);
       sessionSetupTimer = null;
       if (signal.aborted || transportSignal.aborted) throw abortError();
@@ -310,8 +347,13 @@ export class ClassicRealtimeSpeechOutputClient {
           instructions: EXACT_TERRA_READ_INSTRUCTION,
         },
       }));
+      responseCreateSent = true;
       emit({ ttsRealtimeResponseCreateSentAt: this.nowIso() });
-      firstAudioTimer = setTimeout(() => fail(timeoutError("first_audio")), FIRST_AUDIO_TIMEOUT_MS);
+      if (playbackObserved) markPlaybackStarted();
+      if (firstAudioReceived && !playbackStarted) armPlaybackTimer();
+      if (!firstAudioReceived) {
+        firstAudioTimer = setTimeout(() => fail(timeoutError("first_audio")), FIRST_AUDIO_TIMEOUT_MS);
+      }
       await done;
     } catch (error) {
       if (!playbackCompleted) {
@@ -337,6 +379,7 @@ export class ClassicRealtimeSpeechOutputClient {
     if (audio) {
       audio.onended = null;
       audio.onerror = null;
+      audio.onplaying = null;
       audio.pause();
       audio.srcObject = null;
     }

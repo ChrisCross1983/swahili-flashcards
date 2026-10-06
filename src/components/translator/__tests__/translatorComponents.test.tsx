@@ -163,8 +163,8 @@ describe("translator components", () => {
       <TranslationCard {...commonProps} playbackState="paused" />,
     );
 
-    expect(preparing).toContain("Audio wird vorbereitet");
-    expect(preparing).toContain("Vorbereitung abbrechen");
+    expect(preparing).not.toContain("Audio wird vorbereitet");
+    expect(preparing).not.toContain("Vorbereitung abbrechen");
     expect(preparing).not.toContain("Sprachausgabe stoppen");
     expect(playing).toContain("Pause");
     expect(playing).toContain("Stop");
@@ -188,6 +188,8 @@ describe("translator components", () => {
 
     expect(preparingUi).toContain("SHARED_CONVERSATION_LABELS.preparingAudio.de");
     expect(preparingUi).toContain("SHARED_CONVERSATION_LABELS.startRecording.de");
+    expect(preparingUi).toContain("Vorbereitung abbrechen");
+    expect(preparingUi).toContain("onClick={handleStopPlayback}");
     expect(preparingUi).not.toContain("Sprachausgabe stoppen");
     expect(playingUi).toContain("Sprachausgabe läuft");
     expect(playingUi).toContain("Inasomwa …");
