@@ -391,6 +391,28 @@ export type ClassicTranslatorReportTurn = {
   progressiveTtsFirstServerAudioChunkAt: string | null;
   progressiveTtsStreamCompletedAt: string | null;
   progressiveTtsPlaybackStartedBeforeStreamCompleted: boolean | null;
+  progressiveTtsLoadStartAt: string | null;
+  progressiveTtsLoadedMetadataAt: string | null;
+  progressiveTtsLoadedDataAt: string | null;
+  progressiveTtsProgressAt: string | null;
+  progressiveTtsStalledAt: string | null;
+  progressiveTtsSuspendAt: string | null;
+  progressiveTtsAbortAt: string | null;
+  progressiveTtsErrorAt: string | null;
+  progressiveTtsPlayInvokedAt: string | null;
+  progressiveTtsPlayRejectedAt: string | null;
+  progressiveTtsPlayErrorName: string | null;
+  progressiveTtsMediaErrorCode: number | null;
+  progressiveTtsMediaErrorMessage: string | null;
+  progressiveTtsMediaNetworkState: number | null;
+  progressiveTtsMediaReadyState: number | null;
+  progressiveTtsMediaCurrentSrc: string | null;
+  progressiveTtsMediaResourceObserved: boolean | null;
+  progressiveTtsMediaResourceResponseStatus: number | null;
+  progressiveTtsMediaResourceRequestStartMs: number | null;
+  progressiveTtsMediaResourceResponseStartMs: number | null;
+  progressiveTtsMediaResourceResponseEndMs: number | null;
+  progressiveTtsMediaResourceTransferSizeBytes: number | null;
   ttsStartedAt: string | null;
   ttsReadyAt: string | null;
   ttsClientRequestStartedAt: string | null;
@@ -1220,6 +1242,28 @@ function turnFromValues(input: {
     progressiveTtsStreamCompletedAt: d.progressiveTtsStreamCompletedAt ?? null,
     progressiveTtsPlaybackStartedBeforeStreamCompleted:
       d.progressiveTtsPlaybackStartedBeforeStreamCompleted ?? null,
+    progressiveTtsLoadStartAt: d.progressiveTtsLoadStartAt ?? null,
+    progressiveTtsLoadedMetadataAt: d.progressiveTtsLoadedMetadataAt ?? null,
+    progressiveTtsLoadedDataAt: d.progressiveTtsLoadedDataAt ?? null,
+    progressiveTtsProgressAt: d.progressiveTtsProgressAt ?? null,
+    progressiveTtsStalledAt: d.progressiveTtsStalledAt ?? null,
+    progressiveTtsSuspendAt: d.progressiveTtsSuspendAt ?? null,
+    progressiveTtsAbortAt: d.progressiveTtsAbortAt ?? null,
+    progressiveTtsErrorAt: d.progressiveTtsErrorAt ?? null,
+    progressiveTtsPlayInvokedAt: d.progressiveTtsPlayInvokedAt ?? null,
+    progressiveTtsPlayRejectedAt: d.progressiveTtsPlayRejectedAt ?? null,
+    progressiveTtsPlayErrorName: d.progressiveTtsPlayErrorName ?? null,
+    progressiveTtsMediaErrorCode: finite(d.progressiveTtsMediaErrorCode),
+    progressiveTtsMediaErrorMessage: d.progressiveTtsMediaErrorMessage ?? null,
+    progressiveTtsMediaNetworkState: finite(d.progressiveTtsMediaNetworkState),
+    progressiveTtsMediaReadyState: finite(d.progressiveTtsMediaReadyState),
+    progressiveTtsMediaCurrentSrc: d.progressiveTtsMediaCurrentSrc ?? null,
+    progressiveTtsMediaResourceObserved: d.progressiveTtsMediaResourceObserved ?? null,
+    progressiveTtsMediaResourceResponseStatus: finite(d.progressiveTtsMediaResourceResponseStatus),
+    progressiveTtsMediaResourceRequestStartMs: finite(d.progressiveTtsMediaResourceRequestStartMs),
+    progressiveTtsMediaResourceResponseStartMs: finite(d.progressiveTtsMediaResourceResponseStartMs),
+    progressiveTtsMediaResourceResponseEndMs: finite(d.progressiveTtsMediaResourceResponseEndMs),
+    progressiveTtsMediaResourceTransferSizeBytes: finite(d.progressiveTtsMediaResourceTransferSizeBytes),
     ttsStartedAt: d.ttsStartedAt ?? null,
     ttsReadyAt: d.ttsReadyAt ?? null,
     ttsClientRequestStartedAt: d.ttsClientRequestStartedAt ?? null,

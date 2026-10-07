@@ -72,3 +72,50 @@ export function readNativeMediaResponseEnd(mediaUrl: string, after: number): num
     return null;
   }
 }
+
+export function nativeMediaCurrentSrcForDiagnostics(value: string): string | null {
+  if (!value || typeof location === "undefined") return null;
+  try {
+    const url = new URL(value, location.origin);
+    if (!/^\/api\/translator\/speech\/native\/[A-Za-z0-9_-]{24}\.mp3$/.test(url.pathname)) {
+      return `${url.origin}/<non-media-path>`;
+    }
+    return `${url.origin}/api/translator/speech/native/<media-id>.mp3`;
+  } catch {
+    return null;
+  }
+}
+
+export function nativeMediaErrorMessageForDiagnostics(value: string): string | null {
+  if (!value) return null;
+  return value
+    .replace(/https?:\/\/\S+/gi, "[media URL]")
+    .replace(/[A-Za-z0-9_-]{24}\.mp3/g, "<media-id>.mp3")
+    .slice(0, 200);
+}
+
+export function readNativeMediaResourceDiagnostics(mediaUrl: string, after: number) {
+  if (typeof location === "undefined" || typeof performance === "undefined") return null;
+  try {
+    const absolute = new URL(mediaUrl, location.origin).href;
+    const entries = performance.getEntriesByName(absolute, "resource") as PerformanceResourceTiming[];
+    const entry = entries.filter((candidate) => candidate.startTime >= after - 50).at(-1);
+    if (!entry) return { progressiveTtsMediaResourceObserved: false };
+    const status = (entry as PerformanceResourceTiming & { responseStatus?: number }).responseStatus;
+    const finite = (value: number | undefined) =>
+      typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+    return {
+      progressiveTtsMediaResourceObserved: true,
+      progressiveTtsMediaResourceResponseStatus:
+        typeof status === "number" && status >= 100 && status <= 599 ? status : null,
+      progressiveTtsMediaResourceRequestStartMs: finite(entry.requestStart),
+      progressiveTtsMediaResourceResponseStartMs: finite(entry.responseStart),
+      progressiveTtsMediaResourceResponseEndMs: finite(entry.responseEnd),
+      progressiveTtsMediaResourceTransferSizeBytes:
+        typeof entry.transferSize === "number" && Number.isFinite(entry.transferSize)
+          ? Math.max(0, entry.transferSize) : null,
+    };
+  } catch {
+    return null;
+  }
+}

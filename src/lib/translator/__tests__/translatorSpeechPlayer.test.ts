@@ -502,7 +502,7 @@ describe("TranslatorSpeechPlayer", () => {
 });
 
 describe("native progressive MP3 spike", () => {
-  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it("starts on playing, before stream completion, and never requests legacy", async () => {
     const h = createProgressiveHarness();
@@ -541,6 +541,45 @@ describe("native progressive MP3 spike", () => {
       progressiveTtsFallbackReason: "progressive_media_error",
     }));
     h.audios[0].onended?.call(h.audios[0], new Event("ended"));
+    await playback;
+  });
+
+  it("captures Safari MediaError and early media events before the unchanged fallback", async () => {
+    vi.stubGlobal("location", { origin: "https://preview.example" });
+    const h = createProgressiveHarness();
+    const diagnostics = vi.fn();
+    const playback = h.player.play(entry, 1, { onProgressiveDiagnostics: diagnostics });
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    const audio = h.audios[0];
+    Object.assign(audio, {
+      error: { code: 4, message: "Failed https://preview.example/api/translator/speech/native/aaaaaaaaaaaaaaaaaaaaaaaa.mp3?token=sensitive" },
+      networkState: 3, readyState: 0,
+      currentSrc: "https://preview.example/api/translator/speech/native/aaaaaaaaaaaaaaaaaaaaaaaa.mp3?token=sensitive",
+    });
+    audio.onloadstart?.call(audio, new Event("loadstart"));
+    audio.onstalled?.call(audio, new Event("stalled"));
+    audio.onerror?.call(audio, new Event("error"));
+    await vi.waitFor(() => expect(h.requestSpeech).toHaveBeenCalledOnce());
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsLoadStartAt: expect.any(String),
+    }));
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsStalledAt: expect.any(String),
+    }));
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsErrorAt: expect.any(String),
+    }));
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsMediaErrorCode: 4,
+      progressiveTtsMediaErrorMessage: "Failed [media URL]",
+      progressiveTtsMediaNetworkState: 3,
+      progressiveTtsMediaReadyState: 0,
+      progressiveTtsMediaCurrentSrc: "https://preview.example/api/translator/speech/native/<media-id>.mp3",
+    }));
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsFallbackReason: "progressive_media_error",
+    }));
+    h.player.stopPlayback();
     await playback;
   });
 

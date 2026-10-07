@@ -27,6 +27,7 @@ function context(url: string) {
 
 describe("native progressive TTS media contract", () => {
   beforeEach(() => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "spike/native-progressive-tts-ios");
     vi.stubEnv("CLASSIC_NATIVE_TTS_COOKIE_KEY", key);
@@ -36,6 +37,7 @@ describe("native progressive TTS media contract", () => {
     }));
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     requireUserMock.mockReset();
     synthesizeMock.mockReset();
@@ -85,6 +87,46 @@ describe("native progressive TTS media contract", () => {
     const response = await GET(mediaRequest(mediaUrl, cookie, { Range: "bytes=100-" }), context(mediaUrl));
     expect(response.status).toBe(416);
     expect(synthesizeMock).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith(
+      "[translator][native-media-diagnostic]",
+      expect.objectContaining({ phase: "range_rejected", status: 416, range: "other_byte_range" }),
+    );
+  });
+
+  it("classifies Safari's initial bytes=0-1 probe without leaking the ticket", async () => {
+    const staged = await stage("Secret translation text");
+    const { mediaUrl } = await staged.json();
+    const cookie = staged.headers.get("Set-Cookie")!.split(";")[0];
+    const { GET } = await import("../[mediaId]/route");
+    const response = await GET(mediaRequest(mediaUrl, cookie, {
+      Range: "bytes=0-1", Accept: "audio/*", "Sec-Fetch-Dest": "audio",
+    }), context(mediaUrl));
+    expect(response.status).toBe(416);
+    const logged = vi.mocked(console.info).mock.calls.map((call) => JSON.stringify(call));
+    expect(logged.join(" ")).toContain('"range":"bytes_0_1"');
+    expect(logged.join(" ")).toContain('"authStage":"ticket_valid"');
+    expect(logged.join(" ")).not.toContain("Secret translation text");
+    expect(logged.join(" ")).not.toContain(cookie);
+    expect(logged.join(" ")).not.toContain(mediaUrl);
+  });
+
+  it("observes a Safari HEAD probe without changing its response", async () => {
+    const staged = await stage();
+    const { mediaUrl } = await staged.json();
+    const cookie = staged.headers.get("Set-Cookie")!.split(";")[0];
+    const { HEAD } = await import("../[mediaId]/route");
+    const response = await HEAD(mediaRequest(mediaUrl, cookie, { Range: "bytes=0-1" }), context(mediaUrl));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBeNull();
+    expect(console.info).toHaveBeenCalledWith(
+      "[translator][native-media-diagnostic]",
+      expect.objectContaining({ phase: "head_route_entered", range: "bytes_0_1", cookieHeaderPresent: true }),
+    );
+    expect(console.info).toHaveBeenCalledWith(
+      "[translator][native-media-diagnostic]",
+      expect.objectContaining({ phase: "head_authorized", status: 200, authStage: "ticket_valid" }),
+    );
+    expect(synthesizeMock).not.toHaveBeenCalled();
   });
 
   it("returns the first MP3 bytes before upstream generation finishes", async () => {
@@ -108,6 +150,10 @@ describe("native progressive TTS media contract", () => {
     finishStream();
     expect((await reader.read()).value).toEqual(new Uint8Array([3, 4]));
     expect((await reader.read()).done).toBe(true);
+    expect(console.info).toHaveBeenCalledWith(
+      "[translator][native-media-diagnostic]",
+      expect.objectContaining({ phase: "stream_completed", status: 200, bytesEnqueued: 4 }),
+    );
   });
 
   it("rejects a wrong user or expired ticket", async () => {
@@ -123,6 +169,10 @@ describe("native progressive TTS media contract", () => {
     try { expect((await GET(mediaRequest(mediaUrl, cookie), context(mediaUrl))).status).toBe(404); }
     finally { vi.useRealTimers(); }
     expect(synthesizeMock).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith(
+      "[translator][native-media-diagnostic]",
+      expect.objectContaining({ phase: "rejected", status: 404, authStage: "ticket_invalid_or_expired" }),
+    );
   });
 
   it("falls back when the encrypted cookie would exceed the browser limit", async () => {

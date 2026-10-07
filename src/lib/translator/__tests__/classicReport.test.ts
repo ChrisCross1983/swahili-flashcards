@@ -375,6 +375,8 @@ describe("classic translator QA report", () => {
       progressiveTtsAttempted: false,
       progressiveTtsFallbackUsed: false,
       progressiveTtsPlaybackStartedBeforeStreamCompleted: null,
+      progressiveTtsMediaErrorCode: null,
+      progressiveTtsMediaResourceResponseStatus: null,
     });
   });
 
@@ -400,6 +402,35 @@ describe("classic translator QA report", () => {
     });
     expect(JSON.stringify(report)).toContain('"progressiveTtsStreamCompletedAt":"2026-10-07T10:00:03.000Z"');
     expect(report.reportRevision).toBe("5.2.7");
+  });
+
+  it("exports media-error diagnosis without exporting the opaque media ID", () => {
+    const turn = entry("media-error-turn", "audio_upload_fallback");
+    Object.assign(turn.diagnostics!, {
+      progressiveTtsAttempted: true,
+      progressiveTtsLoadStartAt: "2026-10-07T10:00:01.000Z",
+      progressiveTtsErrorAt: "2026-10-07T10:00:02.000Z",
+      progressiveTtsPlayInvokedAt: "2026-10-07T10:00:01.100Z",
+      progressiveTtsMediaErrorCode: 4,
+      progressiveTtsMediaErrorMessage: "Failed [media URL]",
+      progressiveTtsMediaNetworkState: 3,
+      progressiveTtsMediaReadyState: 0,
+      progressiveTtsMediaCurrentSrc: "https://preview.example/api/translator/speech/native/<media-id>.mp3",
+      progressiveTtsMediaResourceObserved: true,
+      progressiveTtsMediaResourceResponseStatus: 416,
+      progressiveTtsFallbackUsed: true,
+      progressiveTtsFallbackReason: "progressive_media_error",
+    });
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-10-07T10:00:00.000Z", userAgent: "QA", platform: "iPhone",
+      currentMode: "auto", ttsSpeed: 1, entries: [turn], failedTurns: [],
+    });
+    expect(report.turns[0]).toMatchObject({
+      progressiveTtsMediaErrorCode: 4,
+      progressiveTtsMediaResourceResponseStatus: 416,
+      progressiveTtsFallbackReason: "progressive_media_error",
+    });
+    expect(JSON.stringify(report)).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaa");
   });
 
   it("exports mixed realtime, fallback and failed turns with correct timings", () => {

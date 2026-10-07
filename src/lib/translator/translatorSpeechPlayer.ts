@@ -2,7 +2,10 @@ import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/
 import { getSpeechCacheKey } from "@/lib/translator/speechSpeed";
 import {
   NativeProgressiveSpeechError,
+  nativeMediaCurrentSrcForDiagnostics,
+  nativeMediaErrorMessageForDiagnostics,
   readFirstNativeServerAudioChunkAt,
+  readNativeMediaResourceDiagnostics,
   readNativeMediaResponseEnd,
 } from "@/lib/translator/nativeProgressiveSpeechClient";
 import {
@@ -22,6 +25,16 @@ type AudioElement = Pick<
   | "onplaying"
   | "oncanplay"
   | "onloadstart"
+  | "onloadedmetadata"
+  | "onloadeddata"
+  | "onprogress"
+  | "onstalled"
+  | "onsuspend"
+  | "onabort"
+  | "error"
+  | "networkState"
+  | "readyState"
+  | "currentSrc"
   | "pause"
   | "play"
   | "preload"
@@ -358,6 +371,12 @@ export class TranslatorSpeechPlayer {
         audio.onplaying = null;
         audio.oncanplay = null;
         audio.onloadstart = null;
+        audio.onloadedmetadata = null;
+        audio.onloadeddata = null;
+        audio.onprogress = null;
+        audio.onstalled = null;
+        audio.onsuspend = null;
+        audio.onabort = null;
         if (this.activeStop === stop) this.activeStop = null;
         if (this.activeAudio === audio) this.activeAudio = null;
       };
@@ -372,6 +391,13 @@ export class TranslatorSpeechPlayer {
         audio.onerror = null;
         audio.onplaying = null;
         audio.oncanplay = null;
+        audio.onloadstart = null;
+        audio.onloadedmetadata = null;
+        audio.onloadeddata = null;
+        audio.onprogress = null;
+        audio.onstalled = null;
+        audio.onsuspend = null;
+        audio.onabort = null;
         resetAudio(audio);
         audio.src = "";
         audio.load();
@@ -392,6 +418,32 @@ export class TranslatorSpeechPlayer {
         NATIVE_PROGRESSIVE_PLAYBACK_START_TIMEOUT_MS);
       this.activeStop = stop;
       this.activeAudio = audio;
+      const seenMediaEvents = new Set<string>();
+      const markMediaEvent = (key: keyof TranslationDiagnostics) => {
+        if (settled || operationId !== this.operationId || seenMediaEvents.has(key)) return;
+        seenMediaEvents.add(key);
+        options.onProgressiveDiagnostics?.({ [key]: new Date().toISOString() });
+      };
+      const mediaSnapshot = () => ({
+        progressiveTtsMediaErrorCode:
+          typeof audio.error?.code === "number" ? audio.error.code : null,
+        progressiveTtsMediaErrorMessage:
+          nativeMediaErrorMessageForDiagnostics(audio.error?.message ?? ""),
+        progressiveTtsMediaNetworkState:
+          typeof audio.networkState === "number" ? audio.networkState : null,
+        progressiveTtsMediaReadyState:
+          typeof audio.readyState === "number" ? audio.readyState : null,
+        progressiveTtsMediaCurrentSrc:
+          nativeMediaCurrentSrcForDiagnostics(audio.currentSrc),
+        ...(readNativeMediaResourceDiagnostics(mediaUrl, mediaRequestStarted) ?? {}),
+      });
+      audio.onloadstart = () => markMediaEvent("progressiveTtsLoadStartAt");
+      audio.onloadedmetadata = () => markMediaEvent("progressiveTtsLoadedMetadataAt");
+      audio.onloadeddata = () => markMediaEvent("progressiveTtsLoadedDataAt");
+      audio.onprogress = () => markMediaEvent("progressiveTtsProgressAt");
+      audio.onstalled = () => markMediaEvent("progressiveTtsStalledAt");
+      audio.onsuspend = () => markMediaEvent("progressiveTtsSuspendAt");
+      audio.onabort = () => markMediaEvent("progressiveTtsAbortAt");
       audio.oncanplay = () => {
         if (operationId === this.operationId && !settled) {
           options.onProgressiveDiagnostics?.({ progressiveTtsCanPlayAt: new Date().toISOString() });
@@ -414,7 +466,11 @@ export class TranslatorSpeechPlayer {
         });
         options.onPlaybackStarted?.();
       };
-      audio.onerror = () => fail(started ? "progressive_playback_failed_after_start" : "progressive_media_error");
+      audio.onerror = () => {
+        markMediaEvent("progressiveTtsErrorAt");
+        options.onProgressiveDiagnostics?.(mediaSnapshot());
+        fail(started ? "progressive_playback_failed_after_start" : "progressive_media_error");
+      };
       audio.onended = () => {
         if (settled || operationId !== this.operationId || this.disposed) return;
         if (!started) return fail("progressive_ended_before_playback");
@@ -450,13 +506,24 @@ export class TranslatorSpeechPlayer {
         fromCache: false,
       });
       options.onPlayRequested?.();
+      options.onProgressiveDiagnostics?.({ progressiveTtsPlayInvokedAt: new Date().toISOString() });
       try {
         void audio.play().catch((error) => {
+          if (!settled) options.onProgressiveDiagnostics?.({
+            progressiveTtsPlayRejectedAt: new Date().toISOString(),
+            progressiveTtsPlayErrorName: getSpeechErrorName(error),
+            ...mediaSnapshot(),
+          });
           if (!started) fail(isSpeechPlaybackBlockedError(error)
             ? "progressive_autoplay_rejected" : "progressive_play_rejected");
           else fail("progressive_playback_failed_after_start");
         });
       } catch (error) {
+        options.onProgressiveDiagnostics?.({
+          progressiveTtsPlayRejectedAt: new Date().toISOString(),
+          progressiveTtsPlayErrorName: getSpeechErrorName(error),
+          ...mediaSnapshot(),
+        });
         fail(isSpeechPlaybackBlockedError(error)
           ? "progressive_autoplay_rejected" : "progressive_play_rejected");
       }
