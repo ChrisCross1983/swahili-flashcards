@@ -372,7 +372,34 @@ describe("classic translator QA report", () => {
       translationFetchToResponseHeadersMs: null,
       translationResourceRequestStartMs: null,
       translationClientToServerTimingClock: "cross_clock_diagnostic_only",
+      progressiveTtsAttempted: false,
+      progressiveTtsFallbackUsed: false,
+      progressiveTtsPlaybackStartedBeforeStreamCompleted: null,
     });
+  });
+
+  it("serializes additive progressive playback proof without changing legacy report revision", () => {
+    const turn = entry("progressive-turn", "audio_upload_fallback");
+    Object.assign(turn.diagnostics!, {
+      progressiveTtsAttempted: true,
+      progressiveTtsPlaybackStartedAt: "2026-10-07T10:00:01.000Z",
+      progressiveTtsStreamCompletedAt: "2026-10-07T10:00:03.000Z",
+      progressiveTtsPlaybackStartedBeforeStreamCompleted: true,
+      progressiveTtsFallbackUsed: false,
+      progressiveTtsPlaybackStartMs: 350,
+    });
+    const report = buildClassicTranslatorReport({
+      startedAt: "2026-10-07T10:00:00.000Z", userAgent: "QA", platform: "iPhone",
+      currentMode: "auto", ttsSpeed: 1, entries: [turn], failedTurns: [],
+    });
+    expect(report.turns[0]).toMatchObject({
+      progressiveTtsAttempted: true,
+      progressiveTtsPlaybackStartedBeforeStreamCompleted: true,
+      progressiveTtsPlaybackStartMs: 350,
+      progressiveTtsFallbackUsed: false,
+    });
+    expect(JSON.stringify(report)).toContain('"progressiveTtsStreamCompletedAt":"2026-10-07T10:00:03.000Z"');
+    expect(report.reportRevision).toBe("5.2.7");
   });
 
   it("exports mixed realtime, fallback and failed turns with correct timings", () => {

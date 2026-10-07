@@ -379,6 +379,18 @@ export type ClassicTranslatorReportTurn = {
   ttsOutcome: TranslationDiagnostics["ttsOutcome"] | null;
   ttsSkipReason: string | null;
   ttsRequestedAt: string | null;
+  progressiveTtsAttempted: boolean;
+  progressiveTtsMediaUrlReadyAt: string | null;
+  progressiveTtsAudioLoadStartedAt: string | null;
+  progressiveTtsCanPlayAt: string | null;
+  progressiveTtsPlayingAt: string | null;
+  progressiveTtsPlaybackStartedAt: string | null;
+  progressiveTtsFallbackUsed: boolean;
+  progressiveTtsFallbackReason: string | null;
+  progressiveTtsPlaybackStartMs: number | null;
+  progressiveTtsFirstServerAudioChunkAt: string | null;
+  progressiveTtsStreamCompletedAt: string | null;
+  progressiveTtsPlaybackStartedBeforeStreamCompleted: boolean | null;
   ttsStartedAt: string | null;
   ttsReadyAt: string | null;
   ttsClientRequestStartedAt: string | null;
@@ -1195,6 +1207,19 @@ function turnFromValues(input: {
     ttsOutcome: d.ttsOutcome ?? d.ttsGenerationOutcome ?? null,
     ttsSkipReason: d.ttsSkipReason ?? null,
     ttsRequestedAt: d.ttsRequestedAt ?? null,
+    progressiveTtsAttempted: d.progressiveTtsAttempted === true,
+    progressiveTtsMediaUrlReadyAt: d.progressiveTtsMediaUrlReadyAt ?? null,
+    progressiveTtsAudioLoadStartedAt: d.progressiveTtsAudioLoadStartedAt ?? null,
+    progressiveTtsCanPlayAt: d.progressiveTtsCanPlayAt ?? null,
+    progressiveTtsPlayingAt: d.progressiveTtsPlayingAt ?? null,
+    progressiveTtsPlaybackStartedAt: d.progressiveTtsPlaybackStartedAt ?? null,
+    progressiveTtsFallbackUsed: d.progressiveTtsFallbackUsed === true,
+    progressiveTtsFallbackReason: d.progressiveTtsFallbackReason ?? null,
+    progressiveTtsPlaybackStartMs: finite(d.progressiveTtsPlaybackStartMs),
+    progressiveTtsFirstServerAudioChunkAt: d.progressiveTtsFirstServerAudioChunkAt ?? null,
+    progressiveTtsStreamCompletedAt: d.progressiveTtsStreamCompletedAt ?? null,
+    progressiveTtsPlaybackStartedBeforeStreamCompleted:
+      d.progressiveTtsPlaybackStartedBeforeStreamCompleted ?? null,
     ttsStartedAt: d.ttsStartedAt ?? null,
     ttsReadyAt: d.ttsReadyAt ?? null,
     ttsClientRequestStartedAt: d.ttsClientRequestStartedAt ?? null,

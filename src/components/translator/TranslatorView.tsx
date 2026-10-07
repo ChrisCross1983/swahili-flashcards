@@ -1360,6 +1360,11 @@ export default function TranslatorView({
             }, "playbackInterrupted");
           }
         },
+        (diagnostics) => {
+          if (!mountedRef.current || playbackRunIdRef.current !== runId) return;
+          if (diagnostics.progressiveTtsPlaybackStartedAt) speechReady = true;
+          updateEntryDiagnostics(entry, diagnostics, "progressiveTtsUpdated");
+        },
       );
       const latestDiagnostics = latestDiagnosticsByEntryRef.current.get(entry.id);
       const recovery = diagnosticEventsByTurnRef.current.get(entry.id)?.at(-1);

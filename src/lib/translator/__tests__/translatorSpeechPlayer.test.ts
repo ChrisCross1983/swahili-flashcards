@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TranslationEntry } from "@/lib/translator/types";
 import {
   TranslatorSpeechPlayer,
+  NATIVE_PROGRESSIVE_PLAYBACK_START_TIMEOUT_MS,
   type TranslatorSpeechPlayerDependencies,
 } from "@/lib/translator/translatorSpeechPlayer";
 import {
@@ -86,6 +87,33 @@ async function waitForAudio(audios: FakeAudio[], count: number) {
 
 function finishAudio(audio: FakeAudio) {
   audio.onended?.call(audio, new Event("ended"));
+}
+
+function createProgressiveHarness(playImpl: () => Promise<void> = async () => undefined) {
+  const audios: FakeAudio[] = [];
+  const requestSpeech = vi.fn(async () => ({
+    audio: new Blob(["legacy"], { type: "audio/mpeg" }),
+    diagnostics: { ttsModel: "gpt-4o-mini-tts", ttsGenerationMs: 10 },
+  }));
+  const requestProgressiveSpeech = vi.fn(async () =>
+    `/api/translator/speech/native/${"a".repeat(24)}.mp3`);
+  const createAudio = vi.fn((url?: string) => {
+    const audio = {
+      currentTime: 0, duration: 1, load: vi.fn(), pause: vi.fn(),
+      play: vi.fn(playImpl), preload: "", src: url ?? "",
+      onended: null, onerror: null, onplaying: null, oncanplay: null, onloadstart: null,
+    } as unknown as FakeAudio;
+    audios.push(audio);
+    return audio;
+  });
+  const player = new TranslatorSpeechPlayer({
+    requestSpeech, requestProgressiveSpeech,
+    readProgressiveResponseEnd: () => performance.now() + 100,
+    readProgressiveFirstChunkAt: async () => "2026-10-07T10:00:00.000Z",
+    createAudio, createObjectUrl: () => "blob:legacy",
+    revokeObjectUrl: vi.fn(),
+  });
+  return { audios, player, requestSpeech, requestProgressiveSpeech };
 }
 
 describe("TranslatorSpeechPlayer", () => {
@@ -470,5 +498,114 @@ describe("TranslatorSpeechPlayer", () => {
 
     await expect(playback).rejects.toMatchObject({ name: "AbortError" });
     expect(createAudio).not.toHaveBeenCalled();
+  });
+});
+
+describe("native progressive MP3 spike", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("starts on playing, before stream completion, and never requests legacy", async () => {
+    const h = createProgressiveHarness();
+    const diagnostics = vi.fn();
+    const started = vi.fn();
+    const completed = vi.fn();
+    const playback = h.player.play(entry, 1, {
+      autoplay: true, onProgressiveDiagnostics: diagnostics,
+      onPlaybackStarted: started, onPlaybackCompleted: completed,
+    });
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    expect(started).not.toHaveBeenCalled();
+    h.audios[0].oncanplay?.call(h.audios[0], new Event("canplay"));
+    h.audios[0].onplaying?.call(h.audios[0], new Event("playing"));
+    expect(started).toHaveBeenCalledOnce();
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ progressiveTtsPlaybackStartedAt: expect.any(String) }));
+    expect(completed).not.toHaveBeenCalled();
+    h.audios[0].onended?.call(h.audios[0], new Event("ended"));
+    await playback;
+    expect(completed).toHaveBeenCalledOnce();
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ progressiveTtsPlaybackStartedBeforeStreamCompleted: true }));
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+  });
+
+  it("falls back automatically on a pre-playback media error without double audio", async () => {
+    const h = createProgressiveHarness();
+    const diagnostics = vi.fn();
+    const playback = h.player.play(entry, 1, { onProgressiveDiagnostics: diagnostics });
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    h.audios[0].onerror?.call(h.audios[0], new Event("error"));
+    await vi.waitFor(() => expect(h.requestSpeech).toHaveBeenCalledOnce());
+    expect(h.audios).toHaveLength(1); // same prepared element reused
+    expect(h.audios[0].src).toBe("blob:legacy");
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsFallbackUsed: true,
+      progressiveTtsFallbackReason: "progressive_media_error",
+    }));
+    h.audios[0].onended?.call(h.audios[0], new Event("ended"));
+    await playback;
+  });
+
+  it("falls back when autoplay is rejected before playing", async () => {
+    let playCount = 0;
+    const h = createProgressiveHarness(async () => {
+      if (playCount++ === 0) throw new DOMException("blocked", "NotAllowedError");
+    });
+    const diagnostics = vi.fn();
+    const playback = h.player.play(entry, 1, { autoplay: true, onProgressiveDiagnostics: diagnostics });
+    await vi.waitFor(() => expect(h.requestSpeech).toHaveBeenCalledOnce());
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      progressiveTtsFallbackReason: "progressive_autoplay_rejected",
+    }));
+    h.player.stopPlayback();
+    await playback;
+  });
+
+  it("stops before playback, invalidating a late ticket without legacy start", async () => {
+    const h = createProgressiveHarness();
+    let resolveTicket!: (url: string) => void;
+    h.requestProgressiveSpeech.mockImplementation(() => new Promise((resolve) => { resolveTicket = resolve; }));
+    const playback = h.player.play(entry, 1);
+    h.player.stopPlayback();
+    resolveTicket(`/api/translator/speech/native/${"a".repeat(24)}.mp3`);
+    await expect(playback).rejects.toMatchObject({ name: "AbortError" });
+    expect(h.audios).toHaveLength(0);
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+  });
+
+  it("interrupts after playback and ignores the old ended event", async () => {
+    const h = createProgressiveHarness();
+    const interrupted = vi.fn();
+    const completed = vi.fn();
+    const playback = h.player.play(entry, 1, { onPlaybackInterrupted: interrupted, onPlaybackCompleted: completed });
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    const oldPlaying = h.audios[0].onplaying!;
+    oldPlaying.call(h.audios[0], new Event("playing"));
+    const oldEnded = h.audios[0].onended!;
+    h.player.stopPlayback();
+    oldEnded.call(h.audios[0], new Event("ended"));
+    await playback;
+    expect(interrupted).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back after confirmed progressive playback, even on media error", async () => {
+    const h = createProgressiveHarness();
+    const playback = h.player.play(entry, 1);
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    h.audios[0].onplaying?.call(h.audios[0], new Event("playing"));
+    h.audios[0].onerror?.call(h.audios[0], new Event("error"));
+    await expect(playback).rejects.toMatchObject({ reason: "progressive_playback_failed_after_start" });
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+  });
+
+  it("falls back on a pending play() after the startup timeout", async () => {
+    vi.useFakeTimers();
+    const h = createProgressiveHarness(() => new Promise<void>(() => undefined));
+    const playback = h.player.play(entry, 1);
+    await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(NATIVE_PROGRESSIVE_PLAYBACK_START_TIMEOUT_MS);
+    expect(h.requestSpeech).toHaveBeenCalledOnce();
+    h.player.stopPlayback();
+    await playback;
   });
 });

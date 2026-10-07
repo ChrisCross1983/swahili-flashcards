@@ -180,6 +180,18 @@ export type TranslationDiagnostics = {
   ttsOutcome?: TtsGenerationOutcome;
   ttsSkipReason?: string | null;
   ttsRequestedAt?: string;
+  progressiveTtsAttempted?: boolean;
+  progressiveTtsMediaUrlReadyAt?: string;
+  progressiveTtsAudioLoadStartedAt?: string;
+  progressiveTtsCanPlayAt?: string;
+  progressiveTtsPlayingAt?: string;
+  progressiveTtsPlaybackStartedAt?: string;
+  progressiveTtsFallbackUsed?: boolean;
+  progressiveTtsFallbackReason?: string;
+  progressiveTtsPlaybackStartMs?: number;
+  progressiveTtsFirstServerAudioChunkAt?: string;
+  progressiveTtsStreamCompletedAt?: string;
+  progressiveTtsPlaybackStartedBeforeStreamCompleted?: boolean;
   ttsStartedAt?: string;
   ttsReadyAt?: string;
   ttsClientRequestStartedAt?: string;

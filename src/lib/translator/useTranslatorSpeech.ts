@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { TranslationEntry } from "@/lib/translator/types";
+import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/types";
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
+import { requestNativeProgressiveSpeech } from "@/lib/translator/nativeProgressiveSpeechClient";
+import { nativeProgressiveTtsClientEnabled } from "@/lib/translator/nativeProgressiveTtsFlag";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
 import type {
@@ -20,6 +22,10 @@ export function useTranslatorSpeech() {
           signal,
           correlationId: `tts-${entry.id}`,
         }),
+      ...(nativeProgressiveTtsClientEnabled() ? {
+        requestProgressiveSpeech: (entry: TranslationEntry, speed: number, signal: AbortSignal) =>
+          requestNativeProgressiveSpeech(entry.translatedText, entry.targetLanguage, speed, signal),
+      } : {}),
       createObjectUrl: (blob) => URL.createObjectURL(blob),
       revokeObjectUrl: (url) => URL.revokeObjectURL(url),
       createAudio: (url) => new Audio(url),
@@ -60,6 +66,7 @@ export function useTranslatorSpeech() {
     onPlayRequested?: () => void,
     onPlaybackAttempt?: (identity: TranslatorSpeechPlaybackIdentity) => void,
     onPlaybackInterrupted?: (position: TranslatorSpeechPlaybackPosition) => void,
+    onProgressiveDiagnostics?: (diagnostics: Partial<TranslationDiagnostics>) => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
@@ -76,6 +83,7 @@ export function useTranslatorSpeech() {
       onPlayRequested,
       onPlaybackAttempt,
       onPlaybackInterrupted,
+      onProgressiveDiagnostics,
     });
   }, []);
 
