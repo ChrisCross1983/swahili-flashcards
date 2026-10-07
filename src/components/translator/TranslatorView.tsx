@@ -1510,7 +1510,10 @@ export default function TranslatorView({
     translationInFlightRef.current = true;
     const direction = getTranslationRequestDirection(state.mode);
     const audioBlobResult = stopRecording().then(
-      (audioBlob) => ({ ok: true as const, audioBlob }),
+      (audioBlob) => {
+        turnPerformance.markSafeAudioBlobReady();
+        return { ok: true as const, audioBlob };
+      },
       (error: unknown) => ({ ok: false as const, error }),
     );
     dispatch({ type: "STOP_AND_TRANSLATE" });
@@ -1707,6 +1710,12 @@ export default function TranslatorView({
         },
         onResponseCompleted: (now) =>
           turnPerformance.markTranslationClientResponseCompleted(now),
+        onNetworkTiming: (event, now, diagnostics) => {
+          if (event === "preparation_started") turnPerformance.markTranslationRequestPreparationStarted(now);
+          if (event === "fetch_invoked") turnPerformance.markTranslationFetchInvoked(now);
+          if (event === "response_headers") turnPerformance.markTranslationFetchResolved(now);
+          if (event === "resource_timing" && diagnostics) turnPerformance.setCaptureDiagnostics(diagnostics);
+        },
         onRetry: ({ failure }) => {
           retryState.failure = failure;
         },

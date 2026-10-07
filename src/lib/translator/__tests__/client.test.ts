@@ -27,6 +27,24 @@ const result = {
 };
 
 describe("translator client", () => {
+  it("emits additive audio request phase markers without changing the request", async () => {
+    const phases: string[] = [];
+    await requestAudioTranslation(
+      new Blob([new Uint8Array(256)], { type: "audio/webm;codecs=opus" }),
+      direction,
+      {
+        fetcher: async () => Response.json(result),
+        onNetworkTiming: (phase) => phases.push(phase),
+      },
+    );
+    expect(phases).toEqual([
+      "preparation_started",
+      "fetch_invoked",
+      "response_headers",
+      "resource_timing",
+    ]);
+  });
+
   it("sends the recorded file and uses the real API response", async () => {
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const formData = init?.body as FormData;

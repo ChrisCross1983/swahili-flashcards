@@ -25,6 +25,22 @@ type ClientPerformanceDiagnostics = Pick<
   | "translationStartedAt"
   | "translationReadyAt"
   | "translationClientRequestStartedAt"
+  | "safeAudioBlobReadyAt"
+  | "translationRequestPreparationStartedAt"
+  | "translationFetchInvokedAt"
+  | "translationFetchResolvedAt"
+  | "safeAudioBlobReadyToFetchInvokedMs"
+  | "translationRequestPreparationMs"
+  | "translationFetchToResponseHeadersMs"
+  | "translationFetchTotalMs"
+  | "translationResourceStartTimeMs"
+  | "translationResourceRequestStartMs"
+  | "translationResourceResponseStartMs"
+  | "translationResourceResponseEndMs"
+  | "translationResourceTransferSizeBytes"
+  | "translationResourceEncodedBodySizeBytes"
+  | "translationResourceDecodedBodySizeBytes"
+  | "translationResourceNextHopProtocol"
   | "translationStateCommittedAt"
   | "translationVisibleAt"
   | "transcriptFinalToTranslationRequestStartMs"
@@ -113,6 +129,10 @@ type TurnTimepointName =
   | "firstTranscriptDelta"
   | "transcriptFinal"
   | "translationRequestStarted"
+  | "safeAudioBlobReady"
+  | "translationRequestPreparationStarted"
+  | "translationFetchInvoked"
+  | "translationFetchResolved"
   | "translationCompleted"
   | "translationClientResponseCompleted"
   | "translationStateCommitted"
@@ -332,6 +352,22 @@ export class TranslatorTurnPerformance {
     this.markOnce("translationRequestStarted", now);
   }
 
+  markSafeAudioBlobReady(now = performance.now()) {
+    this.markOnce("safeAudioBlobReady", now);
+  }
+
+  markTranslationRequestPreparationStarted(now = performance.now()) {
+    this.markOnce("translationRequestPreparationStarted", now);
+  }
+
+  markTranslationFetchInvoked(now = performance.now()) {
+    this.markOnce("translationFetchInvoked", now);
+  }
+
+  markTranslationFetchResolved(now = performance.now()) {
+    this.markOnce("translationFetchResolved", now);
+  }
+
   markTranslationCompleted(now = performance.now()) {
     this.markOnce("translationCompleted", now);
   }
@@ -407,6 +443,22 @@ export class TranslatorTurnPerformance {
     const translationRequestMs = duration(
       this.timepoints.translationRequestStarted,
       this.timepoints.translationCompleted,
+    );
+    const safeAudioBlobReadyToFetchInvokedMs = duration(
+      this.timepoints.safeAudioBlobReady,
+      this.timepoints.translationFetchInvoked,
+    );
+    const translationRequestPreparationMs = duration(
+      this.timepoints.translationRequestPreparationStarted,
+      this.timepoints.translationFetchInvoked,
+    );
+    const translationFetchToResponseHeadersMs = duration(
+      this.timepoints.translationFetchInvoked,
+      this.timepoints.translationFetchResolved,
+    );
+    const translationFetchTotalMs = duration(
+      this.timepoints.translationFetchInvoked,
+      this.timepoints.translationClientResponseCompleted,
     );
     const transcriptFinalToTranslationRequestStartMs = duration(
       this.timepoints.transcriptFinal,
@@ -546,6 +598,14 @@ export class TranslatorTurnPerformance {
         "translationRequestStarted",
         "translationClientRequestStartedAt",
       ),
+      ...this.timestampDiagnostic("safeAudioBlobReady", "safeAudioBlobReadyAt"),
+      ...this.timestampDiagnostic("translationRequestPreparationStarted", "translationRequestPreparationStartedAt"),
+      ...this.timestampDiagnostic("translationFetchInvoked", "translationFetchInvokedAt"),
+      ...this.timestampDiagnostic("translationFetchResolved", "translationFetchResolvedAt"),
+      ...(safeAudioBlobReadyToFetchInvokedMs === undefined ? {} : { safeAudioBlobReadyToFetchInvokedMs }),
+      ...(translationRequestPreparationMs === undefined ? {} : { translationRequestPreparationMs }),
+      ...(translationFetchToResponseHeadersMs === undefined ? {} : { translationFetchToResponseHeadersMs }),
+      ...(translationFetchTotalMs === undefined ? {} : { translationFetchTotalMs }),
       ...this.timestampDiagnostic("translationCompleted", "translationReadyAt"),
       ...this.timestampDiagnostic(
         "translationStateCommitted",
@@ -653,6 +713,10 @@ export class TranslatorTurnPerformance {
       | "translationStartedAt"
       | "translationReadyAt"
       | "translationClientRequestStartedAt"
+      | "safeAudioBlobReadyAt"
+      | "translationRequestPreparationStartedAt"
+      | "translationFetchInvokedAt"
+      | "translationFetchResolvedAt"
       | "translationStateCommittedAt"
       | "translationVisibleAt"
       | "ttsStartedAt"

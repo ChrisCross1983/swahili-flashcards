@@ -28,6 +28,33 @@ function createEntry(id: string): TranslationEntry {
 }
 
 describe("translator turn performance", () => {
+  it("keeps safe-audio request phases on one clock and omits negative durations", () => {
+    const turn = new TranslatorTurnPerformance(100);
+    turn.markSafeAudioBlobReady(110);
+    turn.markTranslationRequestStarted(115);
+    turn.markTranslationRequestPreparationStarted(120);
+    turn.markTranslationFetchInvoked(130);
+    turn.markTranslationFetchResolved(240);
+    turn.markTranslationClientResponseCompleted(250);
+    expect(turn.getDiagnostics()).toMatchObject({
+      safeAudioBlobReadyAt: expect.any(String),
+      translationRequestPreparationStartedAt: expect.any(String),
+      translationFetchInvokedAt: expect.any(String),
+      translationFetchResolvedAt: expect.any(String),
+      safeAudioBlobReadyToFetchInvokedMs: 20,
+      translationRequestPreparationMs: 10,
+      translationFetchToResponseHeadersMs: 110,
+      translationFetchTotalMs: 120,
+    });
+
+    const outOfOrder = new TranslatorTurnPerformance(100);
+    outOfOrder.markTranslationFetchInvoked(90);
+    outOfOrder.markSafeAudioBlobReady(110);
+    outOfOrder.markTranslationFetchResolved(80);
+    expect(outOfOrder.getDiagnostics()).not.toHaveProperty("safeAudioBlobReadyToFetchInvokedMs");
+    expect(outOfOrder.getDiagnostics()).not.toHaveProperty("translationFetchToResponseHeadersMs");
+  });
+
   it("derives one turn's client durations from a single performance clock", () => {
     const turn = new TranslatorTurnPerformance({ recordButtonClicked: 0 });
 

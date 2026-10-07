@@ -2,9 +2,10 @@ import {
   requestAudioTranslation,
   requestTextTranslation,
   TranslatorClientError,
+  type TranslationNetworkTimingEvent,
 } from "@/lib/translator/client";
 import type { ClassicRealtimeTranscriptionResult } from "@/lib/translator/classicRealtimeTranscription";
-import type { TranslationRequestDirection, TranslationResult } from "@/lib/translator/types";
+import type { TranslationDiagnostics, TranslationRequestDirection, TranslationResult } from "@/lib/translator/types";
 import { isUserAbort, TranslatorOperationError } from "@/lib/translator/reliability";
 import type { RecordedAudioDiagnostics } from "@/lib/translator/recordedAudio";
 
@@ -65,6 +66,7 @@ export async function requestClassicTranslation(
     signal: AbortSignal;
     correlationId?: string;
     onResponseCompleted?: (now: number) => void;
+    onNetworkTiming?: (event: TranslationNetworkTimingEvent, now: number, diagnostics?: Partial<TranslationDiagnostics>) => void;
     recordedAudioDiagnostics?: RecordedAudioDiagnostics;
     simulatePrimaryUnsupportedLanguage?: boolean;
     onSemanticRescueStarted?: (context: Pick<SemanticRescueContext, "primaryTranscript" | "primaryFailure">) => void;
@@ -110,6 +112,7 @@ export async function requestClassicTranslation(
       signal: input.signal,
       correlationId: input.correlationId,
       onResponseCompleted: input.onResponseCompleted,
+      onNetworkTiming: input.onNetworkTiming,
       requestAttempt,
       requestPhase: "primary",
       recordedAudioDiagnostics: input.recordedAudioDiagnostics,
@@ -142,6 +145,7 @@ export async function requestClassicTranslation(
         signal: input.signal,
         correlationId: input.correlationId,
         onResponseCompleted: input.onResponseCompleted,
+        onNetworkTiming: input.onNetworkTiming,
         requestAttempt: 0,
         requestPhase: "semantic_rescue",
         recordedAudioDiagnostics: input.recordedAudioDiagnostics,

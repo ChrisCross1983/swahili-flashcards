@@ -104,6 +104,22 @@ function entry(
       translationStartedAt: "2023-11-14T22:13:21.100Z",
       translationReadyAt: "2023-11-14T22:13:21.410Z",
       translationClientRequestStartedAt: "2023-11-14T22:13:21.100Z",
+      safeAudioBlobReadyAt: "2023-11-14T22:13:21.101Z",
+      translationRequestPreparationStartedAt: "2023-11-14T22:13:21.102Z",
+      translationFetchInvokedAt: "2023-11-14T22:13:21.103Z",
+      translationFetchResolvedAt: "2023-11-14T22:13:21.400Z",
+      safeAudioBlobReadyToFetchInvokedMs: 2,
+      translationRequestPreparationMs: 1,
+      translationFetchToResponseHeadersMs: 297,
+      translationFetchTotalMs: 307,
+      translationResourceStartTimeMs: 110,
+      translationResourceRequestStartMs: 130,
+      translationResourceResponseStartMs: 390,
+      translationResourceResponseEndMs: 410,
+      translationResourceTransferSizeBytes: 1024,
+      translationResourceEncodedBodySizeBytes: 512,
+      translationResourceDecodedBodySizeBytes: 512,
+      translationResourceNextHopProtocol: "h2",
       translationRouteReceivedAt: "2023-11-14T22:13:21.110Z",
       translationAuthStartedAt: "2023-11-14T22:13:21.110Z",
       translationAuthCompletedAt: "2023-11-14T22:13:21.150Z",
@@ -338,6 +354,27 @@ describe("classic translator QA report", () => {
     vi.useRealTimers();
   });
 
+  it("serializes older turns without network-ingress fields as null", () => {
+    const old = entry("old-turn", "audio_upload_fallback");
+    if (!old.diagnostics) throw new Error("test entry missing diagnostics");
+    delete old.diagnostics.safeAudioBlobReadyAt;
+    delete old.diagnostics.translationFetchInvokedAt;
+    delete old.diagnostics.translationFetchToResponseHeadersMs;
+    delete old.diagnostics.translationResourceRequestStartMs;
+    const report = buildClassicTranslatorReport({
+      startedAt: "2023-11-14T22:13:00.000Z",
+      userAgent: "QA", platform: "QA", currentMode: "auto", ttsSpeed: 1,
+      entries: [old], failedTurns: [],
+    });
+    expect(report.turns[0]).toMatchObject({
+      safeAudioBlobReadyAt: null,
+      translationFetchInvokedAt: null,
+      translationFetchToResponseHeadersMs: null,
+      translationResourceRequestStartMs: null,
+      translationClientToServerTimingClock: "cross_clock_diagnostic_only",
+    });
+  });
+
   it("exports mixed realtime, fallback and failed turns with correct timings", () => {
     const realtime = entry("realtime-turn", "realtime");
     const fallback = entry("fallback-turn", "audio_upload_fallback");
@@ -458,6 +495,17 @@ describe("classic translator QA report", () => {
       audioFallbackSuccessCount: 1,
       ttsStreamingTurns: 2,
       streamingFallbackTurns: 0,
+    });
+    expect(report.turns.find((turn) => turn.turnId === "fallback-turn")).toMatchObject({
+      translationClientTimingClock: "browser_performance",
+      translationServerTimingClock: "server_performance",
+      translationClientToServerTimingClock: "cross_clock_diagnostic_only",
+      safeAudioBlobReadyToFetchInvokedMs: 2,
+      translationRequestPreparationMs: 1,
+      translationFetchToResponseHeadersMs: 297,
+      translationFetchTotalMs: 307,
+      translationResourceNextHopProtocol: "h2",
+      translationResourceTransferSizeBytes: 1024,
     });
     const realtimeReportTurn = report.turns.find(
       (turn) => turn.turnId === "realtime-turn",

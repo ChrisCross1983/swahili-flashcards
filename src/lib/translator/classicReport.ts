@@ -306,6 +306,25 @@ export type ClassicTranslatorReportTurn = {
   translationStartedAt: string | null;
   translationReadyAt: string | null;
   translationClientRequestStartedAt: string | null;
+  translationClientTimingClock: "browser_performance";
+  translationServerTimingClock: "server_performance";
+  translationClientToServerTimingClock: "cross_clock_diagnostic_only";
+  safeAudioBlobReadyAt: string | null;
+  translationRequestPreparationStartedAt: string | null;
+  translationFetchInvokedAt: string | null;
+  translationFetchResolvedAt: string | null;
+  safeAudioBlobReadyToFetchInvokedMs: number | null;
+  translationRequestPreparationMs: number | null;
+  translationFetchToResponseHeadersMs: number | null;
+  translationFetchTotalMs: number | null;
+  translationResourceStartTimeMs: number | null;
+  translationResourceRequestStartMs: number | null;
+  translationResourceResponseStartMs: number | null;
+  translationResourceResponseEndMs: number | null;
+  translationResourceTransferSizeBytes: number | null;
+  translationResourceEncodedBodySizeBytes: number | null;
+  translationResourceDecodedBodySizeBytes: number | null;
+  translationResourceNextHopProtocol: string | null;
   translationRouteReceivedAt: string | null;
   translationAuthStartedAt: string | null;
   translationAuthCompletedAt: string | null;
@@ -1088,6 +1107,25 @@ function turnFromValues(input: {
     translationStartedAt: d.translationStartedAt ?? null,
     translationReadyAt: d.translationReadyAt ?? null,
     translationClientRequestStartedAt: d.translationClientRequestStartedAt ?? null,
+    translationClientTimingClock: "browser_performance",
+    translationServerTimingClock: "server_performance",
+    translationClientToServerTimingClock: "cross_clock_diagnostic_only",
+    safeAudioBlobReadyAt: d.safeAudioBlobReadyAt ?? null,
+    translationRequestPreparationStartedAt: d.translationRequestPreparationStartedAt ?? null,
+    translationFetchInvokedAt: d.translationFetchInvokedAt ?? null,
+    translationFetchResolvedAt: d.translationFetchResolvedAt ?? null,
+    safeAudioBlobReadyToFetchInvokedMs: finite(d.safeAudioBlobReadyToFetchInvokedMs),
+    translationRequestPreparationMs: finite(d.translationRequestPreparationMs),
+    translationFetchToResponseHeadersMs: finite(d.translationFetchToResponseHeadersMs),
+    translationFetchTotalMs: finite(d.translationFetchTotalMs),
+    translationResourceStartTimeMs: finite(d.translationResourceStartTimeMs),
+    translationResourceRequestStartMs: finite(d.translationResourceRequestStartMs),
+    translationResourceResponseStartMs: finite(d.translationResourceResponseStartMs),
+    translationResourceResponseEndMs: finite(d.translationResourceResponseEndMs),
+    translationResourceTransferSizeBytes: finite(d.translationResourceTransferSizeBytes),
+    translationResourceEncodedBodySizeBytes: finite(d.translationResourceEncodedBodySizeBytes),
+    translationResourceDecodedBodySizeBytes: finite(d.translationResourceDecodedBodySizeBytes),
+    translationResourceNextHopProtocol: d.translationResourceNextHopProtocol ?? null,
     translationRouteReceivedAt: d.translationRouteReceivedAt ?? null,
     translationAuthStartedAt: d.translationAuthStartedAt ?? null,
     translationAuthCompletedAt: d.translationAuthCompletedAt ?? null,

@@ -26,6 +26,7 @@ import {
   isUsableRecordedAudio,
   type RecordedAudioDiagnostics,
 } from "@/lib/translator/recordedAudio";
+import { readTranslationResourceTiming } from "@/lib/translator/translationResourceTiming";
 
 const NETWORK_ERROR =
   "Die Übersetzung konnte nicht geladen werden. Bitte versuche es erneut.";
@@ -84,15 +85,35 @@ function retryAfterMs(response: Response) {
     : null;
 }
 
+export type TranslationNetworkTimingEvent =
+  | "preparation_started"
+  | "fetch_invoked"
+  | "response_headers"
+  | "resource_timing";
+
 type RequestOptions = {
   fetcher?: typeof fetch;
   signal?: AbortSignal;
   correlationId?: string;
   onResponseCompleted?: (now: number) => void;
+  onNetworkTiming?: (
+    event: TranslationNetworkTimingEvent,
+    now: number,
+    diagnostics?: Partial<TranslationDiagnostics>,
+  ) => void;
   requestAttempt?: number;
   requestPhase?: "primary" | "semantic_rescue";
   recordedAudioDiagnostics?: RecordedAudioDiagnostics;
 };
+
+function notifyNetworkTiming(
+  callback: RequestOptions["onNetworkTiming"],
+  event: TranslationNetworkTimingEvent,
+  now: number,
+  diagnostics?: Partial<TranslationDiagnostics>,
+) {
+  try { callback?.(event, now, diagnostics); } catch { /* telemetry is non-blocking */ }
+}
 
 export type AudioTranscriptionBenchmarkResult = {
   transcript: string;
@@ -203,6 +224,8 @@ async function readTranslationResponse(
   requestStartedAt: string,
   correlationId: string,
   onResponseCompleted?: (now: number) => void,
+  onNetworkTiming?: RequestOptions["onNetworkTiming"],
+  fetchInvokedAt?: number,
 ) {
   let firstByteAt: string | null = null;
   let responseCompletedAt: string;
@@ -227,6 +250,10 @@ async function readTranslationResponse(
     }
     responseCompletedAt = new Date().toISOString();
     onResponseCompleted?.(performance.now());
+    if (fetchInvokedAt !== undefined) {
+      notifyNetworkTiming(onNetworkTiming, "resource_timing", performance.now(),
+        readTranslationResourceTiming(fetchInvokedAt));
+    }
   } catch (error) {
     if (
       error &&
@@ -386,6 +413,8 @@ export async function requestAudioTranslation(
     });
   }
 
+  notifyNetworkTiming(options.onNetworkTiming, "preparation_started", performance.now());
+
   const formData = createSafeAudioFormData(
     audioBlob,
     direction,
@@ -393,7 +422,10 @@ export async function requestAudioTranslation(
     options.recordedAudioDiagnostics,
   );
   let response: Response;
+  let fetchInvokedAt: number;
   try {
+    fetchInvokedAt = performance.now();
+    notifyNetworkTiming(options.onNetworkTiming, "fetch_invoked", fetchInvokedAt);
     response = await (options.fetcher ?? fetch)("/api/translator/translate", {
       method: "POST",
       headers: {
@@ -404,6 +436,7 @@ export async function requestAudioTranslation(
       body: formData,
       signal: options.signal,
     });
+    notifyNetworkTiming(options.onNetworkTiming, "response_headers", performance.now());
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new TranslatorClientError(networkFailure("translation"));
@@ -415,6 +448,8 @@ export async function requestAudioTranslation(
     requestStartedAt,
     correlationId,
     options.onResponseCompleted,
+    options.onNetworkTiming,
+    fetchInvokedAt,
   );
 }
 
