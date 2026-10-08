@@ -411,6 +411,7 @@ export type ClassicTranslatorReportTurn = {
   ttsInputTextLength: number | null;
   segmentedTtsEligible: boolean | null;
   segmentedTtsUsed: boolean | null;
+  segmentedTtsSharedAudioElement: boolean | null;
   segmentedTtsSegmentCount: number | null;
   segmentedTtsSegment1TextLength: number | null;
   segmentedTtsSegment2TextLength: number | null;
@@ -1256,6 +1257,7 @@ function turnFromValues(input: {
     ttsInputTextLength: finite(d.ttsInputTextLength),
     segmentedTtsEligible: d.segmentedTtsEligible ?? null,
     segmentedTtsUsed: d.segmentedTtsUsed ?? null,
+    segmentedTtsSharedAudioElement: d.segmentedTtsSharedAudioElement ?? null,
     segmentedTtsSegmentCount: finite(d.segmentedTtsSegmentCount),
     segmentedTtsSegment1TextLength: finite(d.segmentedTtsSegment1TextLength),
     segmentedTtsSegment2TextLength: finite(d.segmentedTtsSegment2TextLength),

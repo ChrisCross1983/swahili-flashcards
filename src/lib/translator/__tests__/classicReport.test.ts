@@ -345,6 +345,7 @@ describe("classic translator QA report", () => {
       ...fallback.diagnostics!,
       segmentedTtsEligible: true,
       segmentedTtsUsed: true,
+      segmentedTtsSharedAudioElement: true,
       segmentedTtsSegmentCount: 2,
       segmentedTtsSegment1TextLength: 44,
       segmentedTtsSegment2TextLength: 265,
@@ -564,6 +565,7 @@ describe("classic translator QA report", () => {
         serverTranscriptionMs: 640,
         segmentedTtsEligible: true,
         segmentedTtsUsed: true,
+        segmentedTtsSharedAudioElement: true,
         segmentedTtsSegmentCount: 2,
         segmentedTtsSegment1TextLength: 44,
         segmentedTtsSegment2TextLength: 265,
@@ -587,6 +589,7 @@ describe("classic translator QA report", () => {
         segmentedTtsSegment2OpenAiTotalMs: 1_400,
       });
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
+    expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSharedAudioElement).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSegment2PlayInvokedAt).toBeNull();
 
     const serialized = JSON.stringify(report);

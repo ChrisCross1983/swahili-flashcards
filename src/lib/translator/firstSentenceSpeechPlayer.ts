@@ -12,8 +12,9 @@ type SegmentAudio = Pick<HTMLAudioElement,
   "oncanplay" | "onended" | "onerror" | "onloadstart" | "onplaying" |
   "pause" | "paused" | "play" | "preload" | "readyState" | "src">;
 
-type Asset = { audio: SegmentAudio; url: string; byteLength: number; mimeType: string };
+type Asset = { url: string; byteLength: number; mimeType: string };
 type Pair = [Asset, Asset];
+type CachedSpeech = { pair: Pair; audio: SegmentAudio };
 
 export type FirstSentenceSpeechDependencies = {
   requestSpeech: (text: string, entry: TranslationEntry, speed: number, signal: AbortSignal, segment: 1 | 2) => Promise<TranslatorSpeechAsset>;
@@ -39,13 +40,18 @@ function position(audio: SegmentAudio): TranslatorSpeechPlaybackPosition {
   return { currentTime: finite(audio.currentTime), duration: finite(audio.duration) };
 }
 
-function stopAudio(audio: SegmentAudio | null) {
+function clearAudioHandlers(audio: SegmentAudio | null) {
   if (!audio) return;
   audio.onended = null;
   audio.onerror = null;
   audio.onloadstart = null;
   audio.oncanplay = null;
   audio.onplaying = null;
+}
+
+function stopAudio(audio: SegmentAudio | null) {
+  if (!audio) return;
+  clearAudioHandlers(audio);
   audio.pause();
   try { audio.currentTime = 0; } catch { /* Metadata may not be ready. */ }
 }
@@ -69,13 +75,12 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-/** One logical playback operation, two full MP3 assets, never two audible elements. */
+/** One logical playback operation, two full MP3 assets, one audio element. */
 export class FirstSentenceSpeechPlayer {
-  private readonly cache = new Map<string, Pair>();
+  private readonly cache = new Map<string, CachedSpeech>();
   private operationId = 0;
   private requestController: AbortController | null = null;
   private activeAudio: SegmentAudio | null = null;
-  private queuedAudio: SegmentAudio | null = null;
   private preparedAudio: SegmentAudio | null = null;
   private activeCancel: (() => void) | null = null;
   private disposed = false;
@@ -100,10 +105,13 @@ export class FirstSentenceSpeechPlayer {
     const requestStart = performance.now();
     const key = getSpeechCacheKey(entry.id, speed);
     const fromCache = this.cache.has(key);
-    let pair = this.cache.get(key);
+    const cached = this.cache.get(key);
+    let pair = cached?.pair;
     let ownedByCache = fromCache;
     let first: Asset | null = pair?.[0] ?? null;
     let second: Asset | null = pair?.[1] ?? null;
+    let audio: SegmentAudio | null = cached?.audio ?? null;
+    let activeSegment: 1 | 2 | null = null;
     let firstStarted = false;
     let firstEndAt: number | null = null;
     let firstDuration: number | null = null;
@@ -128,13 +136,12 @@ export class FirstSentenceSpeechPlayer {
       const activePosition = this.activeAudio ? position(this.activeAudio) : { currentTime: null, duration: null };
       if (firstStarted) options.onPlaybackInterrupted?.({
         currentTime: activePosition.currentTime === null ? null :
-          (this.activeAudio === second?.audio && firstDuration !== null
+          (activeSegment === 2 && firstDuration !== null
             ? firstDuration + activePosition.currentTime : activePosition.currentTime),
-        duration: firstDuration !== null && second?.audio && Number.isFinite(second.audio.duration)
-          ? firstDuration + second.audio.duration : activePosition.duration,
+        duration: firstDuration !== null && activeSegment === 2 && audio && Number.isFinite(audio.duration)
+          ? firstDuration + audio.duration : activePosition.duration,
       });
-      stopAudio(this.activeAudio);
-      stopAudio(this.queuedAudio);
+      stopAudio(audio);
       for (const wait of pending) wait.reject(abortError());
       pending.clear();
     };
@@ -143,6 +150,7 @@ export class FirstSentenceSpeechPlayer {
       segmentedTtsEligible: true, segmentedTtsUsed: true, segmentedTtsSegmentCount: 2,
       segmentedTtsSegment1TextLength: split.first.length,
       segmentedTtsSegment2TextLength: split.rest.length,
+      segmentedTtsSharedAudioElement: true,
       segmentedTtsFallbackUsed: false,
       segmentedTtsFallbackReason: null,
       segmentedTtsFailureReason: null,
@@ -197,58 +205,53 @@ export class FirstSentenceSpeechPlayer {
         if (this.requestController === controller) this.requestController = null;
       }
     };
-    const prepare = (asset: TranslatorSpeechAsset, usePrepared: boolean): Asset => {
+    const prepareAsset = (asset: TranslatorSpeechAsset): Asset => {
       assertCurrent();
       const url = this.dependencies.createObjectUrl(asset.audio);
-      try {
-        const audio = usePrepared && this.preparedAudio
-          ? this.preparedAudio : this.dependencies.createAudio();
-        if (usePrepared) this.preparedAudio = null;
-        audio.preload = "auto";
-        if (!usePrepared) {
-          audio.onloadstart = () => {
-            if (current()) emit({ segmentedTtsSegment2LoadStartAt: new Date().toISOString() });
-          };
-          audio.oncanplay = () => {
-            if (current()) emit({ segmentedTtsSegment2CanPlayAt: new Date().toISOString(), ...secondAudioState(audio) });
-          };
-          audio.onerror = () => {
-            if (current()) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(audio) });
-          };
-        }
-        audio.src = url;
-        audio.load();
-        return { audio, url, byteLength: asset.audio.size, mimeType: asset.audio.type };
-      } catch (error) {
-        this.dependencies.revokeObjectUrl(url);
-        throw error;
-      }
+      return { url, byteLength: asset.audio.size, mimeType: asset.audio.type };
     };
-    const playAsset = (asset: Asset, onStart: () => void, segment: 1 | 2) => {
+    const setSource = (element: SegmentAudio, asset: Asset, segment: 1 | 2) => {
+      if (segment === 2) {
+        element.onloadstart = () => {
+          if (current()) emit({ segmentedTtsSegment2LoadStartAt: new Date().toISOString() });
+        };
+        element.oncanplay = () => {
+          if (current()) emit({ segmentedTtsSegment2CanPlayAt: new Date().toISOString(), ...secondAudioState(element) });
+        };
+        element.onerror = () => {
+          if (current()) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(element) });
+        };
+      }
+      element.preload = "auto";
+      element.src = asset.url;
+      element.load();
+    };
+    const playAsset = (element: SegmentAudio, onStart: () => void, segment: 1 | 2) => {
       const started = deferred<void>();
       const ended = deferred<TranslatorSpeechPlaybackPosition>();
       pending.add(started as Deferred<unknown>);
       pending.add(ended as Deferred<unknown>);
-      const audio = asset.audio;
-      this.queuedAudio = null;
-      this.activeAudio = audio;
+      this.activeAudio = element;
+      activeSegment = segment;
       if (segment === 2) {
-        audio.onplaying = () => {
-          if (current()) emit({ segmentedTtsSegment2PlayingAt: new Date().toISOString(), ...secondAudioState(audio) });
+        element.onplaying = () => {
+          if (current()) emit({ segmentedTtsSegment2PlayingAt: new Date().toISOString(), ...secondAudioState(element) });
         };
       }
-      audio.onended = () => {
+      element.onended = () => {
         if (!current()) return;
-        if (segment === 2) emit({ segmentedTtsSegment2EndedAt: new Date().toISOString(), ...secondAudioState(audio) });
-        const atEnd = position(audio);
-        stopAudio(audio);
-        if (this.activeAudio === audio) this.activeAudio = null;
+        if (segment === 2) emit({ segmentedTtsSegment2EndedAt: new Date().toISOString(), ...secondAudioState(element) });
+        const atEnd = position(element);
+        if (segment === 2) stopAudio(element);
+        else clearAudioHandlers(element);
+        if (this.activeAudio === element) this.activeAudio = null;
+        activeSegment = null;
         pending.delete(ended as Deferred<unknown>);
         ended.resolve(atEnd);
       };
-      audio.onerror = () => {
+      element.onerror = () => {
         if (!current()) return;
-        if (segment === 2) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(audio) });
+        if (segment === 2) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(element) });
         const error = new Error("Segmented speech audio could not be played");
         started.reject(error);
         ended.reject(error);
@@ -256,16 +259,16 @@ export class FirstSentenceSpeechPlayer {
       const rejectPlay = (error: unknown) => {
         if (segment === 2 && current()) emit({
           segmentedTtsSegment2PlayRejectedAt: new Date().toISOString(),
-          ...secondPlayError(error), ...secondAudioState(audio),
+          ...secondPlayError(error), ...secondAudioState(element),
         });
         started.reject(error);
         ended.reject(error);
       };
       try {
-        if (segment === 2) emit({ segmentedTtsSegment2PlayInvokedAt: new Date().toISOString(), ...secondAudioState(audio) });
-        void audio.play().then(() => {
+        if (segment === 2) emit({ segmentedTtsSegment2PlayInvokedAt: new Date().toISOString(), ...secondAudioState(element) });
+        void element.play().then(() => {
           if (!current()) { started.reject(abortError()); ended.reject(abortError()); return; }
-          if (segment === 2) emit({ segmentedTtsSegment2PlayResolvedAt: new Date().toISOString(), ...secondAudioState(audio) });
+          if (segment === 2) emit({ segmentedTtsSegment2PlayResolvedAt: new Date().toISOString(), ...secondAudioState(element) });
           pending.delete(started as Deferred<unknown>);
           onStart();
           started.resolve();
@@ -278,7 +281,14 @@ export class FirstSentenceSpeechPlayer {
       if (!first) {
         const firstAsset = await request(split.first, 1);
         options.onAudioPreparationStarted?.();
-        first = prepare(firstAsset, true);
+        first = prepareAsset(firstAsset);
+      }
+      if (!audio) {
+        audio = this.preparedAudio ?? this.dependencies.createAudio();
+        this.preparedAudio = null;
+      }
+      setSource(audio, first, 1);
+      if (!fromCache) {
         options.onAudioPreparationCompleted?.();
       }
       assertCurrent();
@@ -291,7 +301,7 @@ export class FirstSentenceSpeechPlayer {
         fromCache,
       });
       options.onPlayRequested?.();
-      const firstPlay = playAsset(first, () => {
+      const firstPlay = playAsset(audio, () => {
         firstStarted = true;
         const now = new Date().toISOString();
         emit({
@@ -311,9 +321,8 @@ export class FirstSentenceSpeechPlayer {
 
       // Deliberately avoid competing with the first request or its playback start.
       const secondReady = (async () => {
-        if (!second) second = prepare(await request(split.rest, 2), false);
+        if (!second) second = prepareAsset(await request(split.rest, 2));
         assertCurrent();
-        this.queuedAudio = second.audio;
         emit({
           ttsAudioByteLength: first!.byteLength + second.byteLength,
           ttsAudioMimeType: first!.mimeType || second.mimeType || "audio/mpeg",
@@ -330,7 +339,8 @@ export class FirstSentenceSpeechPlayer {
         throw secondResult.error;
       }
       if (!second) throw new Error("Second speech segment unavailable");
-      const secondPlay = playAsset(second, () => {
+      setSource(audio, second, 2);
+      const secondPlay = playAsset(audio, () => {
         emit({
           segmentedTtsSegment2PlaybackStartedAt: new Date().toISOString(),
           segmentedTtsGapMs: firstEndAt === null ? null : elapsed(firstEndAt),
@@ -342,7 +352,7 @@ export class FirstSentenceSpeechPlayer {
       completed = true;
       if (first && second && !pair) {
         pair = [first, second];
-        this.cache.set(key, pair);
+        this.cache.set(key, { pair, audio });
         ownedByCache = true;
       }
       const completedAt = new Date().toISOString();
@@ -371,10 +381,8 @@ export class FirstSentenceSpeechPlayer {
         this.operationId += 1;
         this.requestController?.abort();
         this.requestController = null;
-        stopAudio(this.activeAudio);
-        stopAudio(this.queuedAudio);
+        stopAudio(audio);
         this.activeAudio = null;
-        this.queuedAudio = null;
         this.activeCancel = null;
       }
       if (!ownedByCache) {
@@ -402,14 +410,13 @@ export class FirstSentenceSpeechPlayer {
     this.activeCancel?.();
     this.activeCancel = null;
     this.activeAudio = null;
-    this.queuedAudio = null;
   }
 
   clearCache() {
     this.stopPlayback();
-    for (const pair of this.cache.values()) for (const asset of pair) {
-      stopAudio(asset.audio);
-      this.dependencies.revokeObjectUrl(asset.url);
+    for (const cached of this.cache.values()) {
+      stopAudio(cached.audio);
+      for (const asset of cached.pair) this.dependencies.revokeObjectUrl(asset.url);
     }
     this.cache.clear();
     stopAudio(this.preparedAudio);
