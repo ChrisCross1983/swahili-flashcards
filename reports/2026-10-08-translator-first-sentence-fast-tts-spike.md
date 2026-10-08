@@ -26,7 +26,7 @@ Die Queue umfasst maximal Segment 1 und Segment 2. Segment 2 wird erst nach best
 
 - Fehler **vor** bestätigtem ersten Playback: Zwei-Asset-Vorgang beenden und automatisch den bestehenden vollständigen Legacy-Einzelrequest starten; Grund `segment1_before_playback_failed`.
 - Fehler **nach** erstem Playback, insbesondere Segment-2-Request/Playback: **kein** Volltext-Neustart; sonst würde bereits gesprochener Text wiederholt. Der Vorgang endet als Fehler mit separatem Segment-Grund. Kein doppeltes Audio.
-- Stop/Neuer Turn/Unmount: laufenden Request abortieren, beide Audioelemente stoppen, späte Antworten und Media-Events durch Operation-ID ignorieren. Ein absichtlicher Abort ist kein Anlass für einen Legacy-Restart.
+- Stop/Neuer Turn/Unmount: laufenden Request abortieren, beide Audioelemente stoppen, späte Antworten und Media-Events durch Operation-ID ignorieren. Ein absichtlicher Abort ist kein Anlass für einen Legacy-Restart. Nach bereits gestarteter erster Ausgabe bleibt das Playback-Outcome `interrupted`; die Generierung zählt nur dann als `success`, wenn beide Assets schon bereit waren, sonst als `aborted`.
 - Flag OFF: unveränderter `TranslatorSpeechPlayer` mit einem vollständigen Speech-Request.
 
 ## TELEMETRY
@@ -41,7 +41,7 @@ Gezielte Regressionen decken Eligibility/konservative Satzgrenzen, exakte Konkat
 
 ## PREVIEW
 
-Nur auf Vercel Preview **und** genau dem Branch `spike/first-sentence-fast-tts` setzt `next.config.ts` `NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS=true`; auf Production, `main`, anderen Previews und lokal ist der Wert `false`, selbst bei versehentlich gesetztem projektweitem Flag. Der Branch wird separat gepusht; Vercels Git-Integration erstellt daraus einen Preview-Build. Exakte Deployment-URL, Deployment-ID und Commit-SHA sind erst nach Push feststellbar und stehen in der begleitenden Abschlussantwort. Kein Merge und kein Production-Deployment.
+Nur auf Vercel Preview **und** genau dem Branch `spike/first-sentence-fast-tts` setzt `next.config.ts` `NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS=true`; auf Production, `main`, anderen Previews und lokal ist der Wert `false`, selbst bei versehentlich gesetztem projektweitem Flag. Der stabile Branch-Preview-Link ist [Classic `/translator`](https://swahili-flashcards-git-spik-cfbf8e-chriscross-projects-79715c15.vercel.app/translator); die exakte unveränderliche Deployment-URL, Deployment-ID und Commit-SHA des abschließenden Builds stehen in der begleitenden Abschlussantwort. Kein Merge und kein Production-Deployment.
 
 ## IPHONE QA PLAN
 

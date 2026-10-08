@@ -1384,8 +1384,8 @@ export default function TranslatorView({
       if (isSpeechAbortError(error)) {
         if (mountedRef.current) {
           updateEntryDiagnostics(entry, {
-            ttsGenerationOutcome: playbackStarted ? "success" : isCurrentRun ? "aborted" : "stale_result",
-            ttsOutcome: playbackStarted ? "success" : isCurrentRun ? "aborted" : "stale_result",
+            ttsGenerationOutcome: playbackStarted ? (speechReady ? "success" : "aborted") : isCurrentRun ? "aborted" : "stale_result",
+            ttsOutcome: playbackStarted ? (speechReady ? "success" : "aborted") : isCurrentRun ? "aborted" : "stale_result",
             ttsSkipReason: playbackStarted ? null : isCurrentRun ? "playback_aborted" : "stale_playback_result",
           }, playbackStarted ? "ttsInterruptedAfterStart" : isCurrentRun ? "ttsAborted" : "ttsStaleResult");
         }

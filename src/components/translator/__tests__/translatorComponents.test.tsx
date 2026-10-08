@@ -196,7 +196,7 @@ describe("translator components", () => {
     expect(playingUi).toContain("btn btn-secondary min-h-12");
     expect(playingUi).toContain("SHARED_CONVERSATION_LABELS.startRecording.de");
     expect(source).toContain('dispatch({ type: "PLAYBACK_STARTED" })');
-    expect(source).toContain('ttsGenerationOutcome: playbackStarted ? "success" : isCurrentRun ? "aborted" : "stale_result"');
+    expect(source).toContain('ttsGenerationOutcome: playbackStarted ? (speechReady ? "success" : "aborted") : isCurrentRun ? "aborted" : "stale_result"');
     expect(source).toContain('ttsSkipReason: playbackStarted ? null : isCurrentRun ? "playback_aborted" : "stale_playback_result"');
     expect(source).toContain('ttsPlaybackOutcome: "interrupted"');
     expect(source).toContain('ttsPlaybackOutcome: "completed"');
