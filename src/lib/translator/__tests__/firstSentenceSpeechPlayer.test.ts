@@ -48,11 +48,17 @@ function harness(requestOverride?: (segment: 1 | 2, signal: AbortSignal) => Prom
     revokeObjectUrl: (url) => { revoked.push(url); },
     createAudio: () => {
       const audio = {
-        currentTime: 0, duration: 4, load: vi.fn(), pause: vi.fn(),
+        currentTime: 0, duration: 4, readyState: 3, networkState: 1, paused: true,
+        currentSrc: "",
+        load: vi.fn(function (this: FakeAudio) {
+          Object.defineProperty(this, "currentSrc", { value: this.src, configurable: true });
+          this.onloadstart?.call(this, new Event("loadstart"));
+        }), pause: vi.fn(),
         play: vi.fn(function (this: FakeAudio) {
           return playOverride?.(this) ?? Promise.resolve();
         }),
-        onended: null, onerror: null, preload: "", src: "",
+        onended: null, onerror: null, onloadstart: null, oncanplay: null,
+        onplaying: null, preload: "", src: "",
       } as unknown as FakeAudio;
       audios.push(audio);
       return audio;
@@ -74,6 +80,10 @@ function end(audio: FakeAudio) {
   audio.onended?.call(audio, new Event("ended"));
 }
 
+function diagnosed<T extends keyof TranslationDiagnostics>(h: ReturnType<typeof harness>, key: T) {
+  return h.diagnostics.findLast((value) => value[key] !== undefined)?.[key];
+}
+
 async function firstStarted(h: ReturnType<typeof harness>) {
   await vi.waitFor(() => expect(h.onPlaybackStarted).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(h.requests).toHaveLength(2));
@@ -91,12 +101,22 @@ describe("FirstSentenceSpeechPlayer", () => {
     expect(h.audios[0].play).toHaveBeenCalledOnce();
     expect(h.audios[1]?.play).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(h.onSpeechReady).toHaveBeenCalledOnce());
+    expect(diagnosed(h, "segmentedTtsSegment2LoadStartAt")).toBeTruthy();
+    h.audios[1].oncanplay?.call(h.audios[1], new Event("canplay"));
+    expect(diagnosed(h, "segmentedTtsSegment2CanPlayAt")).toBeTruthy();
     expect(h.onPlaybackCompleted).not.toHaveBeenCalled();
     end(h.audios[0]);
     await vi.waitFor(() => expect(h.audios[1].play).toHaveBeenCalledOnce());
+    h.audios[1].onplaying?.call(h.audios[1], new Event("playing"));
+    expect(diagnosed(h, "segmentedTtsSegment2PlayInvokedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayResolvedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayingAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2AudioReadyState")).toBe(3);
+    expect(diagnosed(h, "segmentedTtsSegment2AudioCurrentSrc")).toBe("blob:seg-2");
     expect(h.diagnostics.some((value) => value.segmentedTtsSegment2ReadyBeforeSegment1End === true)).toBe(true);
     end(h.audios[1]);
     await playback;
+    expect(diagnosed(h, "segmentedTtsSegment2EndedAt")).toBeTruthy();
     expect(h.onPlaybackCompleted).toHaveBeenCalledOnce();
     expect(h.diagnostics.some((value) => value.segmentedTtsTotalPlaybackCompletedAt)).toBe(true);
   });
@@ -112,6 +132,8 @@ describe("FirstSentenceSpeechPlayer", () => {
     second.resolve(asset("second"));
     await vi.waitFor(() => expect(h.audios[1].play).toHaveBeenCalledOnce());
     expect(h.onSpeechReady).toHaveBeenCalledOnce();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayInvokedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayResolvedAt")).toBeTruthy();
     end(h.audios[1]);
     await playback;
     expect(h.diagnostics.some((value) => value.segmentedTtsSegment2ReadyBeforeSegment1End === false)).toBe(true);
@@ -211,6 +233,54 @@ describe("FirstSentenceSpeechPlayer", () => {
     await expect(playback).rejects.toThrow("second audio failed");
     expect(h.requests).toHaveLength(2);
     expect(h.onPlaybackCompleted).not.toHaveBeenCalled();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayRejectedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayErrorName")).toBe("Error");
+    expect(diagnosed(h, "segmentedTtsSegment2PlayErrorMessage")).toBe("second audio failed");
+  });
+
+  it("records a genuine segment 2 autoplay rejection without replaying spoken text", async () => {
+    const h = harness(undefined, (audio) => audio === h.audios[0]
+      ? Promise.resolve() : Promise.reject(new DOMException("User agent disallowed playback", "NotAllowedError")));
+    const playback = h.player.play(entry, 1, split, h.options);
+    await firstStarted(h);
+    await vi.waitFor(() => expect(h.audios).toHaveLength(2));
+    end(h.audios[0]);
+    await expect(playback).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(diagnosed(h, "segmentedTtsSegment2PlayInvokedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayResolvedAt")).toBeUndefined();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayRejectedAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayErrorName")).toBe("NotAllowedError");
+    expect(diagnosed(h, "segmentedTtsSegment2PlayErrorMessage")).toBe("User agent disallowed playback");
+    expect(h.requests).toHaveLength(2);
+  });
+
+  it("distinguishes a segment 2 media error from a play() rejection", async () => {
+    const pendingPlay = gate<void>();
+    const h = harness(undefined, (audio) => audio === h.audios[0]
+      ? Promise.resolve() : pendingPlay.promise);
+    const playback = h.player.play(entry, 1, split, h.options);
+    await firstStarted(h);
+    await vi.waitFor(() => expect(h.audios).toHaveLength(2));
+    end(h.audios[0]);
+    await vi.waitFor(() => expect(h.audios[1].play).toHaveBeenCalledOnce());
+    h.audios[1].onerror?.call(h.audios[1], new Event("error"));
+    await expect(playback).rejects.toThrow("Segmented speech audio could not be played");
+    expect(diagnosed(h, "segmentedTtsSegment2ErrorAt")).toBeTruthy();
+    expect(diagnosed(h, "segmentedTtsSegment2PlayRejectedAt")).toBeUndefined();
+    expect(h.requests).toHaveLength(2);
+  });
+
+  it("does not emit stale segment 2 media events after stop", async () => {
+    const h = harness();
+    const playback = h.player.play(entry, 1, split, h.options);
+    await firstStarted(h);
+    await vi.waitFor(() => expect(h.audios).toHaveLength(2));
+    const lateCanPlay = h.audios[1].oncanplay!;
+    h.player.stopPlayback();
+    lateCanPlay.call(h.audios[1], new Event("canplay"));
+    await expect(playback).rejects.toMatchObject({ name: "AbortError" });
+    expect(diagnosed(h, "segmentedTtsSegment2CanPlayAt")).toBeUndefined();
+    expect(h.audios[1].oncanplay).toBeNull();
   });
 
   it("aborts a late second response when a new turn supersedes the old one", async () => {

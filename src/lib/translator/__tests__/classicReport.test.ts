@@ -351,6 +351,16 @@ describe("classic translator QA report", () => {
       segmentedTtsSegment1PlaybackStartedAt: "2023-11-14T22:13:21.600Z",
       segmentedTtsSegment2ReadyBeforeSegment1End: true,
       segmentedTtsGapMs: 42,
+      segmentedTtsSegment2PlayInvokedAt: "2023-11-14T22:13:22.000Z",
+      segmentedTtsSegment2PlayRejectedAt: "2023-11-14T22:13:22.010Z",
+      segmentedTtsSegment2PlayErrorName: "NotAllowedError",
+      segmentedTtsSegment2PlayErrorMessage: "Playback blocked",
+      segmentedTtsSegment2AudioReadyState: 3,
+      segmentedTtsSegment2AudioNetworkState: 1,
+      segmentedTtsSegment2AudioPaused: true,
+      segmentedTtsSegment2AudioCurrentSrc: "blob:segment-2",
+      segmentedTtsSegment2LoadStartAt: "2023-11-14T22:13:20.000Z",
+      segmentedTtsSegment2CanPlayAt: "2023-11-14T22:13:21.000Z",
       segmentedTtsSegment1TtfbMs: 500,
       segmentedTtsSegment2OpenAiTotalMs: 1_400,
     };
@@ -559,10 +569,25 @@ describe("classic translator QA report", () => {
         segmentedTtsSegment2TextLength: 265,
         segmentedTtsSegment2ReadyBeforeSegment1End: true,
         segmentedTtsGapMs: 42,
+        segmentedTtsSegment2PlayInvokedAt: "2023-11-14T22:13:22.000Z",
+        segmentedTtsSegment2PlayResolvedAt: null,
+        segmentedTtsSegment2PlayRejectedAt: "2023-11-14T22:13:22.010Z",
+        segmentedTtsSegment2PlayErrorName: "NotAllowedError",
+        segmentedTtsSegment2PlayErrorMessage: "Playback blocked",
+        segmentedTtsSegment2AudioReadyState: 3,
+        segmentedTtsSegment2AudioNetworkState: 1,
+        segmentedTtsSegment2AudioPaused: true,
+        segmentedTtsSegment2AudioCurrentSrc: "blob:segment-2",
+        segmentedTtsSegment2LoadStartAt: "2023-11-14T22:13:20.000Z",
+        segmentedTtsSegment2CanPlayAt: "2023-11-14T22:13:21.000Z",
+        segmentedTtsSegment2PlayingAt: null,
+        segmentedTtsSegment2ErrorAt: null,
+        segmentedTtsSegment2EndedAt: null,
         segmentedTtsSegment1TtfbMs: 500,
         segmentedTtsSegment2OpenAiTotalMs: 1_400,
       });
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
+    expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSegment2PlayInvokedAt).toBeNull();
 
     const serialized = JSON.stringify(report);
     expect(serialized).not.toContain("secret-token");

@@ -422,6 +422,20 @@ export type ClassicTranslatorReportTurn = {
   segmentedTtsSegment2ReadyAt: string | null;
   segmentedTtsSegment2PlaybackStartedAt: string | null;
   segmentedTtsSegment2PlaybackCompletedAt: string | null;
+  segmentedTtsSegment2PlayInvokedAt: string | null;
+  segmentedTtsSegment2PlayResolvedAt: string | null;
+  segmentedTtsSegment2PlayRejectedAt: string | null;
+  segmentedTtsSegment2PlayErrorName: string | null;
+  segmentedTtsSegment2PlayErrorMessage: string | null;
+  segmentedTtsSegment2AudioReadyState: number | null;
+  segmentedTtsSegment2AudioNetworkState: number | null;
+  segmentedTtsSegment2AudioPaused: boolean | null;
+  segmentedTtsSegment2AudioCurrentSrc: string | null;
+  segmentedTtsSegment2LoadStartAt: string | null;
+  segmentedTtsSegment2CanPlayAt: string | null;
+  segmentedTtsSegment2PlayingAt: string | null;
+  segmentedTtsSegment2ErrorAt: string | null;
+  segmentedTtsSegment2EndedAt: string | null;
   segmentedTtsGapMs: number | null;
   segmentedTtsFirstAudioStartMs: number | null;
   segmentedTtsFirstSegmentRequestToReadyMs: number | null;
@@ -1253,6 +1267,22 @@ function turnFromValues(input: {
     segmentedTtsSegment2ReadyAt: d.segmentedTtsSegment2ReadyAt ?? null,
     segmentedTtsSegment2PlaybackStartedAt: d.segmentedTtsSegment2PlaybackStartedAt ?? null,
     segmentedTtsSegment2PlaybackCompletedAt: d.segmentedTtsSegment2PlaybackCompletedAt ?? null,
+    segmentedTtsSegment2PlayInvokedAt: d.segmentedTtsSegment2PlayInvokedAt ?? null,
+    segmentedTtsSegment2PlayResolvedAt: d.segmentedTtsSegment2PlayResolvedAt ?? null,
+    segmentedTtsSegment2PlayRejectedAt: d.segmentedTtsSegment2PlayRejectedAt ?? null,
+    segmentedTtsSegment2PlayErrorName: d.segmentedTtsSegment2PlayErrorName ?? null,
+    segmentedTtsSegment2PlayErrorMessage: d.segmentedTtsSegment2PlayErrorMessage
+      ? sanitizeClassicReportError(d.segmentedTtsSegment2PlayErrorMessage) : null,
+    segmentedTtsSegment2AudioReadyState: finite(d.segmentedTtsSegment2AudioReadyState),
+    segmentedTtsSegment2AudioNetworkState: finite(d.segmentedTtsSegment2AudioNetworkState),
+    segmentedTtsSegment2AudioPaused: d.segmentedTtsSegment2AudioPaused ?? null,
+    segmentedTtsSegment2AudioCurrentSrc: d.segmentedTtsSegment2AudioCurrentSrc?.startsWith("blob:")
+      ? d.segmentedTtsSegment2AudioCurrentSrc : null,
+    segmentedTtsSegment2LoadStartAt: d.segmentedTtsSegment2LoadStartAt ?? null,
+    segmentedTtsSegment2CanPlayAt: d.segmentedTtsSegment2CanPlayAt ?? null,
+    segmentedTtsSegment2PlayingAt: d.segmentedTtsSegment2PlayingAt ?? null,
+    segmentedTtsSegment2ErrorAt: d.segmentedTtsSegment2ErrorAt ?? null,
+    segmentedTtsSegment2EndedAt: d.segmentedTtsSegment2EndedAt ?? null,
     segmentedTtsGapMs: finite(d.segmentedTtsGapMs),
     segmentedTtsFirstAudioStartMs: finite(d.segmentedTtsFirstAudioStartMs),
     segmentedTtsFirstSegmentRequestToReadyMs: finite(d.segmentedTtsFirstSegmentRequestToReadyMs),

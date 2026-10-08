@@ -8,8 +8,9 @@ import type {
 } from "@/lib/translator/translatorSpeechPlayer";
 
 type SegmentAudio = Pick<HTMLAudioElement,
-  "currentTime" | "duration" | "load" | "onended" | "onerror" |
-  "pause" | "play" | "preload" | "src">;
+  "currentSrc" | "currentTime" | "duration" | "load" | "networkState" |
+  "oncanplay" | "onended" | "onerror" | "onloadstart" | "onplaying" |
+  "pause" | "paused" | "play" | "preload" | "readyState" | "src">;
 
 type Asset = { audio: SegmentAudio; url: string; byteLength: number; mimeType: string };
 type Pair = [Asset, Asset];
@@ -42,6 +43,9 @@ function stopAudio(audio: SegmentAudio | null) {
   if (!audio) return;
   audio.onended = null;
   audio.onerror = null;
+  audio.onloadstart = null;
+  audio.oncanplay = null;
+  audio.onplaying = null;
   audio.pause();
   try { audio.currentTime = 0; } catch { /* Metadata may not be ready. */ }
 }
@@ -108,6 +112,17 @@ export class FirstSentenceSpeechPlayer {
     const emit = (values: Partial<TranslationDiagnostics>) => options.onSegmentedDiagnostics?.(values);
     const current = () => !this.disposed && this.operationId === operation;
     const assertCurrent = () => { if (!current()) throw abortError(); };
+    const secondAudioState = (audio: SegmentAudio) => ({
+      segmentedTtsSegment2AudioReadyState: Number.isFinite(audio.readyState) ? audio.readyState : null,
+      segmentedTtsSegment2AudioNetworkState: Number.isFinite(audio.networkState) ? audio.networkState : null,
+      segmentedTtsSegment2AudioPaused: typeof audio.paused === "boolean" ? audio.paused : null,
+      segmentedTtsSegment2AudioCurrentSrc: audio.currentSrc?.startsWith("blob:") ? audio.currentSrc : null,
+    });
+    const secondPlayError = (error: unknown) => ({
+      segmentedTtsSegment2PlayErrorName: error && typeof error === "object" && "name" in error &&
+        typeof error.name === "string" ? error.name : "UnknownError",
+      segmentedTtsSegment2PlayErrorMessage: error instanceof Error ? error.message.slice(0, 300) : null,
+    });
     const cancel = () => {
       if (completed) return;
       const activePosition = this.activeAudio ? position(this.activeAudio) : { currentTime: null, duration: null };
@@ -190,6 +205,17 @@ export class FirstSentenceSpeechPlayer {
           ? this.preparedAudio : this.dependencies.createAudio();
         if (usePrepared) this.preparedAudio = null;
         audio.preload = "auto";
+        if (!usePrepared) {
+          audio.onloadstart = () => {
+            if (current()) emit({ segmentedTtsSegment2LoadStartAt: new Date().toISOString() });
+          };
+          audio.oncanplay = () => {
+            if (current()) emit({ segmentedTtsSegment2CanPlayAt: new Date().toISOString(), ...secondAudioState(audio) });
+          };
+          audio.onerror = () => {
+            if (current()) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(audio) });
+          };
+        }
         audio.src = url;
         audio.load();
         return { audio, url, byteLength: asset.audio.size, mimeType: asset.audio.type };
@@ -198,7 +224,7 @@ export class FirstSentenceSpeechPlayer {
         throw error;
       }
     };
-    const playAsset = (asset: Asset, onStart: () => void) => {
+    const playAsset = (asset: Asset, onStart: () => void, segment: 1 | 2) => {
       const started = deferred<void>();
       const ended = deferred<TranslatorSpeechPlaybackPosition>();
       pending.add(started as Deferred<unknown>);
@@ -206,8 +232,14 @@ export class FirstSentenceSpeechPlayer {
       const audio = asset.audio;
       this.queuedAudio = null;
       this.activeAudio = audio;
+      if (segment === 2) {
+        audio.onplaying = () => {
+          if (current()) emit({ segmentedTtsSegment2PlayingAt: new Date().toISOString(), ...secondAudioState(audio) });
+        };
+      }
       audio.onended = () => {
         if (!current()) return;
+        if (segment === 2) emit({ segmentedTtsSegment2EndedAt: new Date().toISOString(), ...secondAudioState(audio) });
         const atEnd = position(audio);
         stopAudio(audio);
         if (this.activeAudio === audio) this.activeAudio = null;
@@ -216,18 +248,29 @@ export class FirstSentenceSpeechPlayer {
       };
       audio.onerror = () => {
         if (!current()) return;
+        if (segment === 2) emit({ segmentedTtsSegment2ErrorAt: new Date().toISOString(), ...secondAudioState(audio) });
         const error = new Error("Segmented speech audio could not be played");
         started.reject(error);
         ended.reject(error);
       };
+      const rejectPlay = (error: unknown) => {
+        if (segment === 2 && current()) emit({
+          segmentedTtsSegment2PlayRejectedAt: new Date().toISOString(),
+          ...secondPlayError(error), ...secondAudioState(audio),
+        });
+        started.reject(error);
+        ended.reject(error);
+      };
       try {
+        if (segment === 2) emit({ segmentedTtsSegment2PlayInvokedAt: new Date().toISOString(), ...secondAudioState(audio) });
         void audio.play().then(() => {
           if (!current()) { started.reject(abortError()); ended.reject(abortError()); return; }
+          if (segment === 2) emit({ segmentedTtsSegment2PlayResolvedAt: new Date().toISOString(), ...secondAudioState(audio) });
           pending.delete(started as Deferred<unknown>);
           onStart();
           started.resolve();
-        }, (error) => { started.reject(error); ended.reject(error); });
-      } catch (error) { started.reject(error); ended.reject(error); }
+        }, rejectPlay);
+      } catch (error) { rejectPlay(error); }
       return { started: started.promise, ended: ended.promise };
     };
 
@@ -256,7 +299,7 @@ export class FirstSentenceSpeechPlayer {
           segmentedTtsFirstAudioStartMs: elapsed(requestStart),
         });
         options.onPlaybackStarted?.();
-      });
+      }, 1);
       await firstPlay.started;
       assertCurrent();
       const firstEnded = firstPlay.ended.then((value) => {
@@ -292,7 +335,7 @@ export class FirstSentenceSpeechPlayer {
           segmentedTtsSegment2PlaybackStartedAt: new Date().toISOString(),
           segmentedTtsGapMs: firstEndAt === null ? null : elapsed(firstEndAt),
         });
-      });
+      }, 2);
       await secondPlay.started;
       const secondEnd = await secondPlay.ended;
       assertCurrent();
