@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { TranslationEntry } from "@/lib/translator/types";
+import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/types";
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
+import { FIRST_SENTENCE_FAST_TTS_FLAG, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
+import { FirstSegmentNotStartedError, FirstSentenceSpeechPlayer } from "@/lib/translator/firstSentenceSpeechPlayer";
+import { createCorrelationId } from "@/lib/translator/performanceHeaders";
 import type {
   TranslatorSpeechPlaybackIdentity,
   TranslatorSpeechPlaybackPosition,
@@ -12,6 +15,8 @@ import type {
 
 export function useTranslatorSpeech() {
   const playerRef = useRef<TranslatorSpeechPlayer | null>(null);
+  const segmentedPlayerRef = useRef<FirstSentenceSpeechPlayer | null>(null);
+  const activeSegmentedRef = useRef(false);
 
   const createPlayer = useCallback(() =>
     new TranslatorSpeechPlayer({
@@ -26,20 +31,37 @@ export function useTranslatorSpeech() {
       isDocumentVisible: () => document.visibilityState === "visible",
     }), []);
 
+  const createSegmentedPlayer = useCallback(() =>
+    new FirstSentenceSpeechPlayer({
+      requestSpeech: (text, entry, speed, signal) =>
+        requestTranslatorSpeech(text, entry.targetLanguage, speed, {
+          signal,
+          correlationId: createCorrelationId("tts"),
+        }),
+      createObjectUrl: (blob) => URL.createObjectURL(blob),
+      revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+      createAudio: () => new Audio(),
+      isDocumentVisible: () => document.visibilityState === "visible",
+    }), []);
+
   if (playerRef.current === null) {
     playerRef.current = createPlayer();
   }
-
   useEffect(() => {
     // React Strict Mode deliberately runs setup -> cleanup -> setup in
     // development. Recreate the player after that simulated cleanup instead
     // of leaving the hook bound to the disposed first instance.
     if (playerRef.current === null) playerRef.current = createPlayer();
+    if (FIRST_SENTENCE_FAST_TTS_FLAG && segmentedPlayerRef.current === null) {
+      segmentedPlayerRef.current = createSegmentedPlayer();
+    }
     return () => {
       playerRef.current?.dispose();
       playerRef.current = null;
+      segmentedPlayerRef.current?.dispose();
+      segmentedPlayerRef.current = null;
     };
-  }, [createPlayer]);
+  }, [createPlayer, createSegmentedPlayer]);
 
   const playTranslation = useCallback((
     entry: TranslationEntry,
@@ -60,10 +82,11 @@ export function useTranslatorSpeech() {
     onPlayRequested?: () => void,
     onPlaybackAttempt?: (identity: TranslatorSpeechPlaybackIdentity) => void,
     onPlaybackInterrupted?: (position: TranslatorSpeechPlaybackPosition) => void,
+    onSegmentedDiagnostics?: (diagnostics: Partial<TranslationDiagnostics>) => void,
   ) => {
     const player = playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
-    return player.play(entry, speed, {
+    const options = {
       autoplay,
       onSpeechGenerated,
       onSpeechRequestStarted,
@@ -76,32 +99,55 @@ export function useTranslatorSpeech() {
       onPlayRequested,
       onPlaybackAttempt,
       onPlaybackInterrupted,
-    });
+      onSegmentedDiagnostics,
+    };
+    if (FIRST_SENTENCE_FAST_TTS_FLAG) {
+      const split = splitFirstSentenceForSpeech(entry.translatedText);
+      onSegmentedDiagnostics?.({ segmentedTtsEligible: split !== null, segmentedTtsUsed: split !== null });
+      const segmentedPlayer = segmentedPlayerRef.current;
+      if (split && segmentedPlayer) {
+        activeSegmentedRef.current = true;
+        return segmentedPlayer.play(entry, speed, split, options).catch((error: unknown) => {
+          if (!(error instanceof FirstSegmentNotStartedError)) throw error;
+          segmentedPlayer.stopPlayback();
+          activeSegmentedRef.current = false;
+          return player.play(entry, speed, options);
+        });
+      }
+    }
+    activeSegmentedRef.current = false;
+    return player.play(entry, speed, options);
   }, []);
 
   const preparePlaybackForUserGesture = useCallback(() => {
     playerRef.current?.prepareForUserGesture();
+    segmentedPlayerRef.current?.prepareForUserGesture();
   }, []);
 
   const pausePlayback = useCallback(() => {
-    return playerRef.current?.pausePlayback() ?? false;
+    return activeSegmentedRef.current
+      ? segmentedPlayerRef.current?.pausePlayback() ?? false
+      : playerRef.current?.pausePlayback() ?? false;
   }, []);
 
   const resumePlayback = useCallback(() => {
-    const player = playerRef.current;
+    const player = activeSegmentedRef.current ? segmentedPlayerRef.current : playerRef.current;
     if (!player) return Promise.reject(new Error("Speech player unavailable"));
     return player.resumePlayback();
   }, []);
 
   const stopPlayback = useCallback(() => {
     playerRef.current?.stopPlayback();
+    segmentedPlayerRef.current?.stopPlayback();
   }, []);
 
   const hasCachedTranslation = useCallback((entryId: string, speed: number) =>
-    playerRef.current?.hasCachedAudio(entryId, speed) === true, []);
+    playerRef.current?.hasCachedAudio(entryId, speed) === true ||
+    segmentedPlayerRef.current?.hasCachedAudio(entryId, speed) === true, []);
 
   const clearCache = useCallback(() => {
     playerRef.current?.clearCache();
+    segmentedPlayerRef.current?.clearCache();
   }, []);
 
   return {

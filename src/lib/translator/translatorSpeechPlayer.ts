@@ -1,4 +1,4 @@
-import type { TranslationEntry } from "@/lib/translator/types";
+import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/types";
 import { getSpeechCacheKey } from "@/lib/translator/speechSpeed";
 import {
   getSpeechErrorName,
@@ -66,6 +66,7 @@ export type TranslatorSpeechPlaybackOptions = {
   onPlaybackStarted?: () => void;
   onPlaybackCompleted?: (position: TranslatorSpeechPlaybackPosition) => void;
   onPlaybackInterrupted?: (position: TranslatorSpeechPlaybackPosition) => void;
+  onSegmentedDiagnostics?: (diagnostics: Partial<TranslationDiagnostics>) => void;
 };
 
 function createAbortError() {

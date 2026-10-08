@@ -1200,6 +1200,8 @@ export default function TranslatorView({
     playbackInFlightRef.current = true;
     let speechRequestStarted = false;
     let speechReady = hasCachedTranslation(entry.id, speechSpeed);
+    let playbackStarted = false;
+    let segmentedUsed = false;
     setPlaybackReady(false);
     setSpeechFeedback(null);
     updateEntryDiagnostics(entry, {
@@ -1274,6 +1276,7 @@ export default function TranslatorView({
         },
         () => {
           if (mountedRef.current && playbackRunIdRef.current === runId) {
+            playbackStarted = true;
             setPlaybackReady(true);
             dispatch({ type: "PLAYBACK_STARTED" });
             const performance = turnPerformanceByEntryRef.current.get(entry.id);
@@ -1360,6 +1363,12 @@ export default function TranslatorView({
             }, "playbackInterrupted");
           }
         },
+        (diagnostics) => {
+          if (diagnostics.segmentedTtsUsed === true) segmentedUsed = true;
+          if (mountedRef.current && playbackRunIdRef.current === runId) {
+            updateEntryDiagnostics(entry, diagnostics, "segmentedTtsDiagnostics");
+          }
+        },
       );
       const latestDiagnostics = latestDiagnosticsByEntryRef.current.get(entry.id);
       const recovery = diagnosticEventsByTurnRef.current.get(entry.id)?.at(-1);
@@ -1375,10 +1384,10 @@ export default function TranslatorView({
       if (isSpeechAbortError(error)) {
         if (mountedRef.current) {
           updateEntryDiagnostics(entry, {
-            ttsGenerationOutcome: isCurrentRun ? "aborted" : "stale_result",
-            ttsOutcome: isCurrentRun ? "aborted" : "stale_result",
-            ttsSkipReason: isCurrentRun ? "playback_aborted" : "stale_playback_result",
-          }, isCurrentRun ? "ttsAborted" : "ttsStaleResult");
+            ttsGenerationOutcome: playbackStarted ? "success" : isCurrentRun ? "aborted" : "stale_result",
+            ttsOutcome: playbackStarted ? "success" : isCurrentRun ? "aborted" : "stale_result",
+            ttsSkipReason: playbackStarted ? null : isCurrentRun ? "playback_aborted" : "stale_playback_result",
+          }, playbackStarted ? "ttsInterruptedAfterStart" : isCurrentRun ? "ttsAborted" : "ttsStaleResult");
         }
       } else if (mountedRef.current && isCurrentRun) {
         const failure = getTranslatorSpeechFailure(error, automatic, speechReady);
@@ -1396,12 +1405,14 @@ export default function TranslatorView({
             "autoplayBlocked",
           );
         } else {
-          const generationFailed = !speechReady;
+          const generationFailed = !speechReady && !playbackStarted;
           updateEntryDiagnostics(entry, {
-            ttsGenerationOutcome: generationFailed ? "request_failed" : "success",
+            ttsGenerationOutcome: !speechReady ? "request_failed" : "success",
             ttsPlaybackOutcome: generationFailed ? "not_attempted" : "failed",
-            ttsOutcome: generationFailed ? "request_failed" : "playback_failed",
-            ttsSkipReason: generationFailed
+            ttsOutcome: !speechReady ? "request_failed" : "playback_failed",
+            ttsSkipReason: segmentedUsed && playbackStarted
+              ? "segmented_segment2_failed"
+              : generationFailed
               ? (speechRequestStarted ? "speech_request_failed" : "speech_player_unavailable")
               : "browser_playback_failed",
           }, generationFailed ? "ttsRequestFailed" : "ttsPlaybackFailed");

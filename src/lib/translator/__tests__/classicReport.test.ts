@@ -341,6 +341,19 @@ describe("classic translator QA report", () => {
   it("exports mixed realtime, fallback and failed turns with correct timings", () => {
     const realtime = entry("realtime-turn", "realtime");
     const fallback = entry("fallback-turn", "audio_upload_fallback");
+    fallback.diagnostics = {
+      ...fallback.diagnostics!,
+      segmentedTtsEligible: true,
+      segmentedTtsUsed: true,
+      segmentedTtsSegmentCount: 2,
+      segmentedTtsSegment1TextLength: 44,
+      segmentedTtsSegment2TextLength: 265,
+      segmentedTtsSegment1PlaybackStartedAt: "2023-11-14T22:13:21.600Z",
+      segmentedTtsSegment2ReadyBeforeSegment1End: true,
+      segmentedTtsGapMs: 42,
+      segmentedTtsSegment1TtfbMs: 500,
+      segmentedTtsSegment2OpenAiTotalMs: 1_400,
+    };
     const report = buildClassicTranslatorReport({
       reportId: "report-qa",
       startedAt: "2023-11-14T22:13:00.000Z",
@@ -539,7 +552,17 @@ describe("classic translator QA report", () => {
         transcriptionFallbackUsed: true,
         fallbackReason: "realtime_not_ready_at_recording_start",
         serverTranscriptionMs: 640,
+        segmentedTtsEligible: true,
+        segmentedTtsUsed: true,
+        segmentedTtsSegmentCount: 2,
+        segmentedTtsSegment1TextLength: 44,
+        segmentedTtsSegment2TextLength: 265,
+        segmentedTtsSegment2ReadyBeforeSegment1End: true,
+        segmentedTtsGapMs: 42,
+        segmentedTtsSegment1TtfbMs: 500,
+        segmentedTtsSegment2OpenAiTotalMs: 1_400,
       });
+    expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
 
     const serialized = JSON.stringify(report);
     expect(serialized).not.toContain("secret-token");

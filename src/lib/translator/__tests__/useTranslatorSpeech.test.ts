@@ -6,10 +6,60 @@ afterEach(() => {
   vi.doUnmock("react");
   vi.doUnmock("@/lib/translator/speechClient");
   vi.doUnmock("@/lib/translator/translatorSpeechPlayer");
+  vi.doUnmock("@/lib/translator/firstSentenceSpeechPlayer");
+  vi.unstubAllEnvs();
   vi.resetModules();
 });
 
 describe("useTranslatorSpeech lifecycle", () => {
+  it("selects the two-asset player only behind the spike flag and automatically falls back before first playback", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "true");
+    const refs = [{ current: null }, { current: null }, { current: false }];
+    vi.doMock("react", () => ({
+      useRef: () => refs.shift(),
+      useCallback: <T,>(callback: T) => callback,
+      useEffect: (setup: () => void | (() => void)) => { setup(); },
+    }));
+    const legacyPlay = vi.fn(async () => undefined);
+    const segmentedPlay = vi.fn(async () => undefined);
+    vi.doMock("@/lib/translator/translatorSpeechPlayer", () => ({
+      TranslatorSpeechPlayer: class {
+        play = legacyPlay;
+        dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        pausePlayback = vi.fn(); resumePlayback = vi.fn(); stopPlayback = vi.fn();
+        hasCachedAudio = vi.fn(() => false); clearCache = vi.fn();
+      },
+    }));
+    class FirstSegmentNotStartedError extends Error {}
+    vi.doMock("@/lib/translator/firstSentenceSpeechPlayer", () => ({
+      FirstSegmentNotStartedError,
+      FirstSentenceSpeechPlayer: class {
+        play = segmentedPlay;
+        dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        pausePlayback = vi.fn(); resumePlayback = vi.fn(); stopPlayback = vi.fn();
+        hasCachedAudio = vi.fn(() => false); clearCache = vi.fn();
+      },
+    }));
+    const { useTranslatorSpeech } = await import("@/lib/translator/useTranslatorSpeech");
+    const speech = useTranslatorSpeech();
+    const first = "Leo ilikuwa siku yenye shughuli nyingi sana.";
+    const rest = " Asubuhi nilikwenda sokoni na kununua matunda mengi. Baadaye nilikutana na rafiki yangu na tukazungumza kwa muda mrefu. Jioni nilirudi nyumbani, nikapika chakula, na nikapumzika baada ya siku ndefu yenye shughuli nyingi na mazungumzo mazuri pamoja na marafiki zangu wa karibu.";
+    const entry = {
+      id: "turn-long", timestamp: 1, sourceLanguage: "de" as const,
+      targetLanguage: "sw" as const, originalText: "Original", translatedText: first + rest,
+      sourceWasDetected: false,
+    };
+    await speech.playTranslation(entry, 1, true);
+    expect(segmentedPlay).toHaveBeenCalledWith(entry, 1, { first, rest }, expect.any(Object));
+    expect(legacyPlay).not.toHaveBeenCalled();
+
+    segmentedPlay.mockRejectedValueOnce(new FirstSegmentNotStartedError());
+    await speech.playTranslation(entry, 1, true);
+    expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
+    await speech.playTranslation({ ...entry, translatedText: "Habari za asubuhi." }, 1, false);
+    expect(legacyPlay).toHaveBeenCalledTimes(2);
+  });
+
   it("disposes playback resources when the translator unmounts", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src/lib/translator/useTranslatorSpeech.ts"),
