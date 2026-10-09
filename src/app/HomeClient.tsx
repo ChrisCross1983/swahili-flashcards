@@ -1,51 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { fetchSetupCounts } from "@/lib/trainer/api";
 import { LIVE_TRANSLATOR_BETA } from "@/lib/translator/live/config";
 
 type Props = { ownerKey: string };
-
-type LeitnerStats = {
-  total: number;
-  dueTodayCount: number;
-  dueTomorrowCount: number;
-  dueLaterCount: number;
-  nextDueInDays: number | null;
-};
-
-type CardTypeFilter = "all" | "vocab" | "sentence";
-
-function getTypeFilter(typeParam: string | null): CardTypeFilter {
-  if (typeParam === "vocab") return "vocab";
-  if (typeParam === "sentence") return "sentence";
-  return "all";
-}
 
 export default function HomeClient({ ownerKey }: Props) {
   void ownerKey;
   const router = useRouter();
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [leitnerStats, setLeitnerStats] = useState<LeitnerStats | null>(null);
-
-  const leitnerUi = useMemo(() => {
-    if (!leitnerStats) {
-      return { total: 0, todayCount: 0, tomorrowCount: 0, laterCount: 0, nextText: "—" };
-    }
-
-    const total = Number(leitnerStats.total ?? 0);
-    const todayCount = Number(leitnerStats.dueTodayCount ?? 0);
-    const tomorrowCount = Number(leitnerStats.dueTomorrowCount ?? 0);
-    const laterCount = Number(leitnerStats.dueLaterCount ?? 0);
-
-    const nextDue = leitnerStats.nextDueInDays;
-    const nextText =
-      nextDue == null ? "—" : nextDue === 0 ? "heute" : nextDue === 1 ? "morgen" : `in ${nextDue} Tagen`;
-
-    return { total, todayCount, tomorrowCount, laterCount, nextText };
-  }, [leitnerStats]);
+  const [todayDueCount, setTodayDueCount] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -62,7 +30,7 @@ export default function HomeClient({ ownerKey }: Props) {
     let requestGeneration = 0;
     let activeRequest: AbortController | null = null;
 
-    async function loadLeitnerStats(force = false) {
+    async function loadDueCount(force = false) {
       if (requestInFlight && !force) return;
       const requestId = ++requestGeneration;
       activeRequest?.abort();
@@ -72,14 +40,9 @@ export default function HomeClient({ ownerKey }: Props) {
       lastRequestAt = Date.now();
 
       try {
-        const typeFilter = getTypeFilter("vocab"); // Home zeigt hier aktuell nur Vokabeln
-        const res = await fetch(
-          `/api/learn/stats?type=${typeFilter}`,
-          { cache: "no-store", signal: controller.signal }
-        );
-        const json = await res.json();
-        if (!res.ok || cancelled || requestId !== requestGeneration) return;
-        setLeitnerStats(json);
+        const counts = await fetchSetupCounts("vocab", undefined, controller.signal);
+        if (cancelled || requestId !== requestGeneration) return;
+        setTodayDueCount(counts.todayDue);
       } catch {
         // Keep the last known count when a refresh fails; a later focus can retry.
       } finally {
@@ -92,10 +55,10 @@ export default function HomeClient({ ownerKey }: Props) {
 
     function refreshWhenActive() {
       if (document.visibilityState !== "visible" || Date.now() - lastRequestAt < 1000) return;
-      void loadLeitnerStats(true);
+      void loadDueCount(true);
     }
 
-    void loadLeitnerStats();
+    void loadDueCount();
     window.addEventListener("focus", refreshWhenActive);
     document.addEventListener("visibilitychange", refreshWhenActive);
 
@@ -137,8 +100,8 @@ export default function HomeClient({ ownerKey }: Props) {
             <div className="mt-2 text-xl font-semibold">Vokabeltrainer</div>
             <div className="mt-2 text-sm text-muted">Trainiere deine gespeicherten Karten (Leitner).</div>
             <div className="mt-3 text-xs text-muted">
-              {leitnerUi.todayCount > 0
-                ? `${leitnerUi.todayCount} Karten heute dran · kurze Runde starten`
+              {todayDueCount > 0
+                ? `${todayDueCount} Karten heute dran · kurze Runde starten`
                 : "Keine Karten heute fällig"}
             </div>
           </button>

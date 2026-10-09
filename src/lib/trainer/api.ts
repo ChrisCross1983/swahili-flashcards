@@ -43,8 +43,11 @@ async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
     return json as T;
 }
 
-export async function fetchSetupCounts(cardType: CardType, groupIds?: string[]): Promise<SetupCounts> {
-    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds), { cache: "no-store" });
+export async function fetchSetupCounts(cardType: CardType, groupIds?: string[], signal?: AbortSignal): Promise<SetupCounts> {
+    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds), {
+        cache: "no-store",
+        ...(signal ? { signal } : {}),
+    });
     const json = await parseOrThrow<Partial<SetupCounts>>(res, "Setup counts failed");
     return {
         todayDue: json.todayDue ?? 0,

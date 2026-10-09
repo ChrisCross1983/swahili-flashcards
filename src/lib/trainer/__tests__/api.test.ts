@@ -57,4 +57,18 @@ describe("trainer api", () => {
             { cache: "no-store" },
         );
     });
+
+    it("lets Home cancel an outdated setup-count refresh", async () => {
+        const fetchMock = vi.fn(async () =>
+            new Response(JSON.stringify({ todayDue: 4 }), { status: 200 })
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const controller = new AbortController();
+
+        await expect(fetchSetupCounts("vocab", undefined, controller.signal)).resolves.toMatchObject({ todayDue: 4 });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/learn/setup-counts?type=vocab",
+            { cache: "no-store", signal: controller.signal },
+        );
+    });
 });
