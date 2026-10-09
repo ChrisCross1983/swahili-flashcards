@@ -8,12 +8,15 @@ afterEach(() => {
   vi.doUnmock("@/lib/translator/translatorSpeechPlayer");
   vi.doUnmock("@/lib/translator/firstSentenceSpeechPlayer");
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.resetModules();
 });
 
 describe("useTranslatorSpeech lifecycle", () => {
   it("selects the two-asset player only behind the spike flag and automatically falls back before first playback", async () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "true");
+    const location = { search: "?ttsMode=segmented" };
+    vi.stubGlobal("window", { location });
     const refs = [{ current: null }, { current: null }, { current: false }];
     vi.doMock("react", () => ({
       useRef: () => refs.shift(),
@@ -22,10 +25,12 @@ describe("useTranslatorSpeech lifecycle", () => {
     }));
     const legacyPlay = vi.fn(async () => undefined);
     const segmentedPlay = vi.fn(async () => undefined);
+    const legacyPrepare = vi.fn();
+    const segmentedPrepare = vi.fn();
     vi.doMock("@/lib/translator/translatorSpeechPlayer", () => ({
       TranslatorSpeechPlayer: class {
         play = legacyPlay;
-        dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        dispose = vi.fn(); prepareForUserGesture = legacyPrepare;
         pausePlayback = vi.fn(); resumePlayback = vi.fn(); stopPlayback = vi.fn();
         hasCachedAudio = vi.fn(() => false); clearCache = vi.fn();
       },
@@ -35,7 +40,7 @@ describe("useTranslatorSpeech lifecycle", () => {
       FirstSegmentNotStartedError,
       FirstSentenceSpeechPlayer: class {
         play = segmentedPlay;
-        dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        dispose = vi.fn(); prepareForUserGesture = segmentedPrepare;
         pausePlayback = vi.fn(); resumePlayback = vi.fn(); stopPlayback = vi.fn();
         hasCachedAudio = vi.fn(() => false); clearCache = vi.fn();
       },
@@ -49,15 +54,78 @@ describe("useTranslatorSpeech lifecycle", () => {
       targetLanguage: "sw" as const, originalText: "Original", translatedText: first + rest,
       sourceWasDetected: false,
     };
-    await speech.playTranslation(entry, 1, true);
+    const diagnostics = vi.fn();
+    const playWithDiagnostics = () => speech.playTranslation(
+      entry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      diagnostics,
+    );
+    await playWithDiagnostics();
+    expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "segmented" });
     expect(segmentedPlay).toHaveBeenCalledWith(entry, 1, { first, rest }, expect.any(Object));
     expect(legacyPlay).not.toHaveBeenCalled();
 
+    location.search = "?ttsMode=legacy";
+    speech.preparePlaybackForUserGesture();
+    expect(legacyPrepare).toHaveBeenCalledOnce();
+    expect(segmentedPrepare).not.toHaveBeenCalled();
+    diagnostics.mockClear();
+    await playWithDiagnostics();
+    expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
+    expect(diagnostics).toHaveBeenCalledTimes(1);
+    expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
+    expect(segmentedPlay).toHaveBeenCalledTimes(1);
+    expect(speech.hasCachedTranslation(entry, 1)).toBe(false);
+
+    location.search = "?ttsMode=invalid";
+    await playWithDiagnostics();
+    expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "default" });
+    expect(segmentedPlay).toHaveBeenCalledTimes(2);
+
+    location.search = "";
+    await playWithDiagnostics();
+    expect(segmentedPlay).toHaveBeenCalledTimes(3);
+
     segmentedPlay.mockRejectedValueOnce(new FirstSegmentNotStartedError());
-    await speech.playTranslation(entry, 1, true);
+    await playWithDiagnostics();
     expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
     await speech.playTranslation({ ...entry, translatedText: "Habari za asubuhi." }, 1, false);
-    expect(legacyPlay).toHaveBeenCalledTimes(2);
+    expect(legacyPlay).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores a QA mode query when the preview flag is off", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
+    vi.stubGlobal("window", { location: { search: "?ttsMode=segmented" } });
+    const refs = [{ current: null }, { current: null }, { current: false }];
+    vi.doMock("react", () => ({
+      useRef: () => refs.shift(),
+      useCallback: <T,>(callback: T) => callback,
+      useEffect: (setup: () => void | (() => void)) => { setup(); },
+    }));
+    const legacyPlay = vi.fn(async () => undefined);
+    const segmentedPlay = vi.fn(async () => undefined);
+    vi.doMock("@/lib/translator/translatorSpeechPlayer", () => ({
+      TranslatorSpeechPlayer: class {
+        play = legacyPlay;
+      },
+    }));
+    vi.doMock("@/lib/translator/firstSentenceSpeechPlayer", () => ({
+      FirstSentenceSpeechPlayer: class {
+        play = segmentedPlay;
+      },
+    }));
+    const { useTranslatorSpeech } = await import("@/lib/translator/useTranslatorSpeech");
+    const speech = useTranslatorSpeech();
+    const entry = {
+      id: "flag-off", timestamp: 1, sourceLanguage: "de" as const,
+      targetLanguage: "sw" as const, originalText: "Original",
+      translatedText: "Leo ilikuwa siku yenye shughuli nyingi sana. " + "Asubuhi nilikwenda sokoni. ".repeat(12),
+      sourceWasDetected: false,
+    };
+    await speech.playTranslation(entry, 1, true);
+    expect(legacyPlay).toHaveBeenCalledOnce();
+    expect(segmentedPlay).not.toHaveBeenCalled();
   });
 
   it("disposes playback resources when the translator unmounts", () => {

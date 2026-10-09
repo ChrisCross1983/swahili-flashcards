@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
+import { resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
 
 const first = "Leo ilikuwa siku yenye shughuli nyingi sana.";
 const rest = " Asubuhi nilikwenda sokoni na kununua matunda mengi. Baadaye nilikutana na rafiki yangu na tukazungumza kwa muda mrefu. Jioni nilirudi nyumbani, nikapika chakula, na nikapumzika baada ya siku ndefu yenye shughuli nyingi na mazungumzo mazuri pamoja na marafiki zangu wa karibu.";
 
 describe("first-sentence-fast speech eligibility", () => {
+  it("allows only the two preview QA modes behind the spike flag", () => {
+    expect(resolveTranslatorTtsQaMode("?ttsMode=segmented", true)).toBe("segmented");
+    expect(resolveTranslatorTtsQaMode("?ttsMode=legacy", true)).toBe("legacy");
+    expect(resolveTranslatorTtsQaMode("", true)).toBe("default");
+    expect(resolveTranslatorTtsQaMode("?ttsMode=unknown", true)).toBe("default");
+    expect(resolveTranslatorTtsQaMode("?ttsMode=segmented", false)).toBe("default");
+    expect(resolveTranslatorTtsQaMode("?ttsMode=legacy", false)).toBe("default");
+  });
   it("leaves short and medium one-sentence turns alone", () => {
     expect(splitFirstSentenceForSpeech("Habari za asubuhi.")).toBeNull();
     expect(splitFirstSentenceForSpeech("A".repeat(295) + ".")).toBeNull();

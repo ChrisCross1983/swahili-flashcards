@@ -5,7 +5,7 @@ import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
-import { FIRST_SENTENCE_FAST_TTS_FLAG, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
+import { FIRST_SENTENCE_FAST_TTS_FLAG, resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
 import { FirstSegmentNotStartedError, FirstSentenceSpeechPlayer } from "@/lib/translator/firstSentenceSpeechPlayer";
 import { createCorrelationId } from "@/lib/translator/performanceHeaders";
 import type {
@@ -17,6 +17,9 @@ export function useTranslatorSpeech() {
   const playerRef = useRef<TranslatorSpeechPlayer | null>(null);
   const segmentedPlayerRef = useRef<FirstSentenceSpeechPlayer | null>(null);
   const activeSegmentedRef = useRef(false);
+  const qaMode = () => resolveTranslatorTtsQaMode(
+    typeof window === "undefined" ? "" : window.location.search,
+  );
 
   const createPlayer = useCallback(() =>
     new TranslatorSpeechPlayer({
@@ -101,7 +104,9 @@ export function useTranslatorSpeech() {
       onPlaybackInterrupted,
       onSegmentedDiagnostics,
     };
-    if (FIRST_SENTENCE_FAST_TTS_FLAG) {
+    const mode = qaMode();
+    onSegmentedDiagnostics?.({ translatorTtsQaMode: mode });
+    if (FIRST_SENTENCE_FAST_TTS_FLAG && mode !== "legacy") {
       const split = splitFirstSentenceForSpeech(entry.translatedText);
       onSegmentedDiagnostics?.({ segmentedTtsEligible: split !== null, segmentedTtsUsed: split !== null });
       const segmentedPlayer = segmentedPlayerRef.current;
@@ -121,7 +126,7 @@ export function useTranslatorSpeech() {
 
   const preparePlaybackForUserGesture = useCallback(() => {
     playerRef.current?.prepareForUserGesture();
-    segmentedPlayerRef.current?.prepareForUserGesture();
+    if (qaMode() !== "legacy") segmentedPlayerRef.current?.prepareForUserGesture();
   }, []);
 
   const pausePlayback = useCallback(() => {
@@ -141,9 +146,11 @@ export function useTranslatorSpeech() {
     segmentedPlayerRef.current?.stopPlayback();
   }, []);
 
-  const hasCachedTranslation = useCallback((entryId: string, speed: number) =>
-    playerRef.current?.hasCachedAudio(entryId, speed) === true ||
-    segmentedPlayerRef.current?.hasCachedAudio(entryId, speed) === true, []);
+  const hasCachedTranslation = useCallback((entry: TranslationEntry, speed: number) =>
+    FIRST_SENTENCE_FAST_TTS_FLAG && qaMode() !== "legacy" &&
+    splitFirstSentenceForSpeech(entry.translatedText)
+      ? segmentedPlayerRef.current?.hasCachedAudio(entry.id, speed) === true
+      : playerRef.current?.hasCachedAudio(entry.id, speed) === true, []);
 
   const clearCache = useCallback(() => {
     playerRef.current?.clearCache();

@@ -2,6 +2,17 @@
 export const FIRST_SENTENCE_FAST_TTS_FLAG =
   process.env.NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS === "true";
 
+export type TranslatorTtsQaMode = "segmented" | "legacy" | "default";
+
+export function resolveTranslatorTtsQaMode(
+  search: string,
+  spikeEnabled = FIRST_SENTENCE_FAST_TTS_FLAG,
+): TranslatorTtsQaMode {
+  if (!spikeEnabled) return "default";
+  const mode = new URLSearchParams(search).get("ttsMode");
+  return mode === "segmented" || mode === "legacy" ? mode : "default";
+}
+
 // Match the existing speech route's stricter application limit, not the model limit.
 export const MAX_CLASSIC_SPEECH_TEXT_LENGTH = 4_000;
 

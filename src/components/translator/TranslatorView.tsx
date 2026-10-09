@@ -1199,7 +1199,7 @@ export default function TranslatorView({
     playbackRunIdRef.current = runId;
     playbackInFlightRef.current = true;
     let speechRequestStarted = false;
-    let speechReady = hasCachedTranslation(entry.id, speechSpeed);
+    let speechReady = hasCachedTranslation(entry, speechSpeed);
     let playbackStarted = false;
     let segmentedUsed = false;
     setPlaybackReady(false);

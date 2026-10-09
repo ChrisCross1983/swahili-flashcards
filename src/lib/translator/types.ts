@@ -245,6 +245,7 @@ export type TranslationDiagnostics = {
   ttsAudioByteLength?: number;
   ttsAudioMimeType?: string | null;
   ttsInputTextLength?: number;
+  translatorTtsQaMode?: "segmented" | "legacy" | "default";
   segmentedTtsEligible?: boolean;
   segmentedTtsUsed?: boolean;
   segmentedTtsSharedAudioElement?: boolean;

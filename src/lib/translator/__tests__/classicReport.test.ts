@@ -344,6 +344,7 @@ describe("classic translator QA report", () => {
     fallback.diagnostics = {
       ...fallback.diagnostics!,
       segmentedTtsEligible: true,
+      translatorTtsQaMode: "segmented",
       segmentedTtsUsed: true,
       segmentedTtsSharedAudioElement: true,
       segmentedTtsSegmentCount: 2,
@@ -563,6 +564,7 @@ describe("classic translator QA report", () => {
         transcriptionFallbackUsed: true,
         fallbackReason: "realtime_not_ready_at_recording_start",
         serverTranscriptionMs: 640,
+        translatorTtsQaMode: "segmented",
         segmentedTtsEligible: true,
         segmentedTtsUsed: true,
         segmentedTtsSharedAudioElement: true,
@@ -589,6 +591,7 @@ describe("classic translator QA report", () => {
         segmentedTtsSegment2OpenAiTotalMs: 1_400,
       });
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
+    expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.translatorTtsQaMode).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSharedAudioElement).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSegment2PlayInvokedAt).toBeNull();
 
