@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { translatorTtsQaAfterLoginUrl } from "@/lib/translator/firstSentenceFastTts";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -38,7 +39,7 @@ export default function LoginPage() {
     }
 
     setStatus("Eingeloggt ✅");
-    window.location.href = "/";
+    window.location.href = translatorTtsQaAfterLoginUrl(window.location.search);
   }
 
   return (
