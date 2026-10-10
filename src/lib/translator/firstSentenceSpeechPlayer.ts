@@ -79,7 +79,7 @@ function deferred<T>(): Deferred<T> {
 export class FirstSentenceSpeechPlayer {
   private readonly cache = new Map<string, CachedSpeech>();
   private operationId = 0;
-  private requestController: AbortController | null = null;
+  private readonly requestControllers = new Set<AbortController>();
   private activeAudio: SegmentAudio | null = null;
   private preparedAudio: SegmentAudio | null = null;
   private activeCancel: (() => void) | null = null;
@@ -116,6 +116,8 @@ export class FirstSentenceSpeechPlayer {
     let firstEndAt: number | null = null;
     let firstDuration: number | null = null;
     let completed = false;
+    let fullReadyEmitted = false;
+    let secondRequestError: unknown = null;
     const pending = new Set<Deferred<unknown>>();
     const emit = (values: Partial<TranslationDiagnostics>) => options.onSegmentedDiagnostics?.(values);
     const current = () => !this.disposed && this.operationId === operation;
@@ -159,7 +161,7 @@ export class FirstSentenceSpeechPlayer {
 
     const request = async (text: string, number: 1 | 2) => {
       const controller = new AbortController();
-      this.requestController = controller;
+      this.requestControllers.add(controller);
       const started = performance.now();
       const startedAt = new Date().toISOString();
       emit(number === 1
@@ -202,13 +204,22 @@ export class FirstSentenceSpeechPlayer {
         }).catch(() => undefined);
         return result;
       } finally {
-        if (this.requestController === controller) this.requestController = null;
+        this.requestControllers.delete(controller);
       }
     };
     const prepareAsset = (asset: TranslatorSpeechAsset): Asset => {
       assertCurrent();
       const url = this.dependencies.createObjectUrl(asset.audio);
       return { url, byteLength: asset.audio.size, mimeType: asset.audio.type };
+    };
+    const reportFullReady = () => {
+      if (!first || !second || fullReadyEmitted) return;
+      fullReadyEmitted = true;
+      emit({
+        ttsAudioByteLength: first.byteLength + second.byteLength,
+        ttsAudioMimeType: first.mimeType || second.mimeType || "audio/mpeg",
+      });
+      options.onSpeechReady?.(); // Both complete assets, never just segment 1.
     };
     const setSource = (element: SegmentAudio, asset: Asset, segment: 1 | 2) => {
       if (segment === 2) {
@@ -278,11 +289,27 @@ export class FirstSentenceSpeechPlayer {
     };
 
     try {
-      if (!first) {
-        const firstAsset = await request(split.first, 1);
+      // Issue segment 1 first, then begin segment 2 while it is still being
+      // generated. Only the first asset is ever attached to the audio element.
+      const firstRequest = first ? null : request(split.first, 1);
+      const secondReady = (async () => {
+        if (!second) second = prepareAsset(await request(split.rest, 2));
+        assertCurrent();
+        reportFullReady();
+        emit({ segmentedTtsSegment2ReadyBeforeSegment1End: firstEndAt === null });
+        return { error: null as unknown };
+      })().catch((error: unknown) => {
+        secondRequestError = error;
+        return { error };
+      });
+      if (firstRequest) {
+        const firstAsset = await firstRequest;
         options.onAudioPreparationStarted?.();
         first = prepareAsset(firstAsset);
+        reportFullReady();
       }
+      if (secondRequestError) throw secondRequestError;
+      if (!first) throw new Error("First speech segment unavailable");
       if (!audio) {
         audio = this.preparedAudio ?? this.dependencies.createAudio();
         this.preparedAudio = null;
@@ -318,19 +345,6 @@ export class FirstSentenceSpeechPlayer {
         emit({ segmentedTtsSegment1PlaybackCompletedAt: new Date().toISOString() });
         return value;
       });
-
-      // Deliberately avoid competing with the first request or its playback start.
-      const secondReady = (async () => {
-        if (!second) second = prepareAsset(await request(split.rest, 2));
-        assertCurrent();
-        emit({
-          ttsAudioByteLength: first!.byteLength + second.byteLength,
-          ttsAudioMimeType: first!.mimeType || second.mimeType || "audio/mpeg",
-        });
-        options.onSpeechReady?.(); // Full two-asset speech is ready, not merely segment 1.
-        emit({ segmentedTtsSegment2ReadyBeforeSegment1End: firstEndAt === null });
-        return { error: null as unknown };
-      })().catch((error: unknown) => ({ error }));
 
       const [firstEnd, secondResult] = await Promise.all([firstEnded, secondReady]);
       assertCurrent();
@@ -379,8 +393,8 @@ export class FirstSentenceSpeechPlayer {
         // A media error may finish this method while the other request is still
         // in flight. Invalidate it before any late asset can enter the queue.
         this.operationId += 1;
-        this.requestController?.abort();
-        this.requestController = null;
+        for (const controller of this.requestControllers) controller.abort();
+        this.requestControllers.clear();
         stopAudio(audio);
         this.activeAudio = null;
         this.activeCancel = null;
@@ -405,8 +419,8 @@ export class FirstSentenceSpeechPlayer {
 
   stopPlayback() {
     this.operationId += 1;
-    this.requestController?.abort();
-    this.requestController = null;
+    for (const controller of this.requestControllers) controller.abort();
+    this.requestControllers.clear();
     this.activeCancel?.();
     this.activeCancel = null;
     this.activeAudio = null;

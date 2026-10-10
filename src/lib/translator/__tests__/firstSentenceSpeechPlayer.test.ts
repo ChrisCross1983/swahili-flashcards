@@ -101,7 +101,7 @@ describe("FirstSentenceSpeechPlayer", () => {
   it("sends exact Terra text in two ordered requests and completes only after segment 2", async () => {
     const h = harness();
     const playback = h.player.play(entry, 1, split, h.options);
-    expect(h.requests.map((r) => r.segment)).toEqual([1]);
+    expect(h.requests.map((r) => r.segment)).toEqual([1, 2]);
     await firstStarted(h);
     expect(h.requests[0].text + h.requests[1].text).toBe(text);
     expect(h.audios[0].play).toHaveBeenCalledOnce();
@@ -157,12 +157,12 @@ describe("FirstSentenceSpeechPlayer", () => {
     expect(h.diagnostics.find((value) => typeof value.segmentedTtsGapMs === "number")?.segmentedTtsGapMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("does not request segment 2 until play() confirms the first playback", async () => {
+  it("requests segment 2 before the first playback is confirmed", async () => {
     const started = gate<void>();
     const h = harness(undefined, (audio) => audio.src === "blob:seg-1" ? started.promise : Promise.resolve());
     const playback = h.player.play(entry, 1, split, h.options);
     await vi.waitFor(() => expect(h.audios[0]?.play).toHaveBeenCalledOnce());
-    expect(h.requests).toHaveLength(1);
+    expect(h.requests).toHaveLength(2);
     expect(h.onPlaybackStarted).not.toHaveBeenCalled();
     started.resolve();
     await firstStarted(h);
@@ -172,10 +172,42 @@ describe("FirstSentenceSpeechPlayer", () => {
     await playback;
   });
 
+  it("prepares segment 2 while segment 1 is still generating without changing its source", async () => {
+    const first = gate<TranslatorSpeechAsset>();
+    const h = harness((segment) => segment === 1 ? first.promise : Promise.resolve(asset("second")));
+    const playback = h.player.play(entry, 1, split, h.options);
+    expect(h.requests.map((request) => request.segment)).toEqual([1, 2]);
+    await vi.waitFor(() => expect(diagnosed(h, "segmentedTtsSegment2ReadyAt")).toBeTruthy());
+    expect(h.audios).toHaveLength(0);
+    expect(h.onSpeechReady).not.toHaveBeenCalled();
+    first.resolve(asset("first"));
+    await firstStarted(h);
+    expect(h.onSpeechReady).toHaveBeenCalledOnce();
+    expect(h.audios[0].src).toBe("blob:seg-2"); // Segment 2's URL was allocated first.
+    end(h.audios[0]);
+    await vi.waitFor(() => expect(h.audios[0].play).toHaveBeenCalledTimes(2));
+    end(h.audios[0]);
+    await playback;
+  });
+
+  it("aborts both in-flight requests on stop before either segment is ready", async () => {
+    const first = gate<TranslatorSpeechAsset>();
+    const second = gate<TranslatorSpeechAsset>();
+    const h = harness((segment) => segment === 1 ? first.promise : second.promise);
+    const playback = h.player.play(entry, 1, split, h.options);
+    expect(h.requests).toHaveLength(2);
+    h.player.stopPlayback();
+    expect(h.requests.every((request) => request.signal.aborted)).toBe(true);
+    first.resolve(asset("stale first"));
+    second.resolve(asset("stale second"));
+    await expect(playback).rejects.toMatchObject({ name: "AbortError" });
+    expect(h.audios).toHaveLength(0);
+  });
+
   it("falls back when the first play() promise is rejected before playback", async () => {
     const h = harness(undefined, () => Promise.reject(new DOMException("blocked", "NotAllowedError")));
     await expect(h.player.play(entry, 1, split, h.options)).rejects.toBeInstanceOf(FirstSegmentNotStartedError);
-    expect(h.requests).toHaveLength(1);
+    expect(h.requests).toHaveLength(2);
     expect(h.onPlaybackStarted).not.toHaveBeenCalled();
     expect(h.diagnostics.some((value) => value.segmentedTtsFallbackReason === "segment1_before_playback_failed")).toBe(true);
   });
@@ -188,7 +220,7 @@ describe("FirstSentenceSpeechPlayer", () => {
     h.player.stopPlayback();
     pendingPlay.resolve();
     await expect(playback).rejects.toMatchObject({ name: "AbortError" });
-    expect(h.requests).toHaveLength(1);
+    expect(h.requests).toHaveLength(2);
     expect(h.onPlaybackStarted).not.toHaveBeenCalled();
     expect(h.onPlaybackInterrupted).not.toHaveBeenCalled();
   });
@@ -199,6 +231,7 @@ describe("FirstSentenceSpeechPlayer", () => {
     const playback = h.player.play(entry, 1, split, h.options);
     h.player.stopPlayback();
     expect(h.requests[0].signal.aborted).toBe(true);
+    expect(h.requests[1].signal.aborted).toBe(true);
     first.resolve(asset("late"));
     await expect(playback).rejects.toMatchObject({ name: "AbortError" });
     expect(h.audios).toHaveLength(0);

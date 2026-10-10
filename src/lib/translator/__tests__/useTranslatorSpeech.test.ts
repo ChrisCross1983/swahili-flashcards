@@ -73,7 +73,9 @@ describe("useTranslatorSpeech lifecycle", () => {
     diagnostics.mockClear();
     await playWithDiagnostics();
     expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
-    expect(diagnostics).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
+      segmentedTtsEligibilityReason: "qa_legacy_mode" });
+    expect(diagnostics).toHaveBeenCalledTimes(2);
     expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
     expect(segmentedPlay).toHaveBeenCalledTimes(1);
     expect(speech.hasCachedTranslation(entry, 1)).toBe(false);

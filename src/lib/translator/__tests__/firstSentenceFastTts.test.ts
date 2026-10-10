@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
+import { assessFirstSentenceForSpeech, resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
 
 const first = "Leo ilikuwa siku yenye shughuli nyingi sana.";
 const rest = " Asubuhi nilikwenda sokoni na kununua matunda mengi. Baadaye nilikutana na rafiki yangu na tukazungumza kwa muda mrefu. Jioni nilirudi nyumbani, nikapika chakula, na nikapumzika baada ya siku ndefu yenye shughuli nyingi na mazungumzo mazuri pamoja na marafiki zangu wa karibu.";
@@ -19,9 +19,21 @@ describe("first-sentence-fast speech eligibility", () => {
     expect(splitFirstSentenceForSpeech("A".repeat(305) + ".")).toBeNull();
   });
 
-  it("requires a short first sentence and at least 250 characters of remaining text", () => {
-    expect(splitFirstSentenceForSpeech("A".repeat(65) + ". " + "B".repeat(260) + ".")).toBeNull();
-    expect(splitFirstSentenceForSpeech("A".repeat(54) + ". " + "B".repeat(244) + ".")).toBeNull();
+  it("requires a short first sentence and a substantial complete remainder", () => {
+    expect(assessFirstSentenceForSpeech("A".repeat(90) + ". " + "B".repeat(250) + ".").reason)
+      .toBe("first_sentence_too_long");
+    expect(assessFirstSentenceForSpeech(first + " " + "B".repeat(210) + ".").reason)
+      .toBe("remainder_too_short");
+  });
+
+  it("treats comparable 297- and 311-character multi-sentence translations alike", () => {
+    for (const length of [297, 311]) {
+      const text = first + " " + "B".repeat(length - first.length - 2) + ".";
+      expect(text).toHaveLength(length);
+      expect(assessFirstSentenceForSpeech(text).reason).toBe("eligible");
+      const split = splitFirstSentenceForSpeech(text)!;
+      expect(split.first + split.rest).toBe(text);
+    }
   });
 
   it("returns exactly two unchanged parts for a suitable multi-sentence turn", () => {

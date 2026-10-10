@@ -344,6 +344,7 @@ describe("classic translator QA report", () => {
     fallback.diagnostics = {
       ...fallback.diagnostics!,
       segmentedTtsEligible: true,
+      segmentedTtsEligibilityReason: "eligible",
       translatorTtsQaMode: "segmented",
       segmentedTtsUsed: true,
       segmentedTtsSharedAudioElement: true,
@@ -566,6 +567,7 @@ describe("classic translator QA report", () => {
         serverTranscriptionMs: 640,
         translatorTtsQaMode: "segmented",
         segmentedTtsEligible: true,
+        segmentedTtsEligibilityReason: "eligible",
         segmentedTtsUsed: true,
         segmentedTtsSharedAudioElement: true,
         segmentedTtsSegmentCount: 2,

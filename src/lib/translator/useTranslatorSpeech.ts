@@ -5,7 +5,7 @@ import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
-import { FIRST_SENTENCE_FAST_TTS_FLAG, resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
+import { FIRST_SENTENCE_FAST_TTS_FLAG, assessFirstSentenceForSpeech, resolveTranslatorTtsQaMode, splitFirstSentenceForSpeech } from "@/lib/translator/firstSentenceFastTts";
 import { FirstSegmentNotStartedError, FirstSentenceSpeechPlayer } from "@/lib/translator/firstSentenceSpeechPlayer";
 import { createCorrelationId } from "@/lib/translator/performanceHeaders";
 import type {
@@ -107,8 +107,9 @@ export function useTranslatorSpeech() {
     const mode = qaMode();
     onSegmentedDiagnostics?.({ translatorTtsQaMode: mode });
     if (FIRST_SENTENCE_FAST_TTS_FLAG && mode !== "legacy") {
-      const split = splitFirstSentenceForSpeech(entry.translatedText);
-      onSegmentedDiagnostics?.({ segmentedTtsEligible: split !== null, segmentedTtsUsed: split !== null });
+      const { split, reason } = assessFirstSentenceForSpeech(entry.translatedText);
+      onSegmentedDiagnostics?.({ segmentedTtsEligible: split !== null, segmentedTtsUsed: split !== null,
+        segmentedTtsEligibilityReason: reason });
       const segmentedPlayer = segmentedPlayerRef.current;
       if (split && segmentedPlayer) {
         activeSegmentedRef.current = true;
@@ -119,6 +120,10 @@ export function useTranslatorSpeech() {
           return player.play(entry, speed, options);
         });
       }
+    }
+    if (FIRST_SENTENCE_FAST_TTS_FLAG && mode === "legacy") {
+      onSegmentedDiagnostics?.({ segmentedTtsEligible: false, segmentedTtsUsed: false,
+        segmentedTtsEligibilityReason: "qa_legacy_mode" });
     }
     activeSegmentedRef.current = false;
     return player.play(entry, speed, options);
