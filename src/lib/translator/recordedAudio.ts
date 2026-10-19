@@ -2,6 +2,7 @@ export type RecordedAudioDiagnostics = {
   recordingDurationMs?: number | null;
   chunkCount?: number | null;
   totalChunkBytes?: number | null;
+  audioQuality?: import("@/lib/translator/audioQuality").TranslatorAudioQualityMetrics | null;
 };
 
 export type RecordedAudioValidation =

@@ -420,6 +420,28 @@ describe("POST /api/translator/translate", () => {
     expect(autoTranslateMock).toHaveBeenCalledOnce();
   });
 
+  it("returns a recoverable recognition error for an STT hallucination", async () => {
+    transcribeMock.mockResolvedValue({
+      text: "mbili ".repeat(40), detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe", fallbackUsed: false,
+    });
+    const response = await post(
+      createFormData({ sourceLanguage: "auto", targetLanguage: "auto" }),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      code: "stt_transcript_implausible",
+      error: "Ich konnte dich nicht zuverlässig verstehen. Bitte sprich den Satz noch einmal.",
+      transcriptAnomaly: {
+        transcriptAnomalyDetected: true,
+        transcriptAnomalyReason: "extreme_token_repetition",
+        transcriptWordCount: 40,
+      },
+    });
+    expect(autoTranslateMock).not.toHaveBeenCalled();
+    expect(translateMock).not.toHaveBeenCalled();
+  });
+
   it("returns the recognized transcript when translation fails after STT", async () => {
     transcribeMock.mockResolvedValue({
       text: "Nyumba hii ni kubwa.", detectedLanguage: "sw",

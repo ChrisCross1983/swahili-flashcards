@@ -26,6 +26,7 @@ import {
   isUsableRecordedAudio,
   type RecordedAudioDiagnostics,
 } from "@/lib/translator/recordedAudio";
+import type { TranscriptAnomalyMetrics } from "@/lib/translator/transcriptAnomaly";
 
 const NETWORK_ERROR =
   "Die Übersetzung konnte nicht geladen werden. Bitte versuche es erneut.";
@@ -53,6 +54,8 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
   no_speech: "Es wurde keine Sprache erkannt. Bitte versuche es erneut.",
   unsupported_language:
     "Ich konnte die Sprache nicht sicher erkennen. Bitte sprich den Satz noch einmal.",
+  stt_transcript_implausible:
+    "Ich konnte dich nicht zuverlässig verstehen. Bitte sprich den Satz noch einmal.",
   transcription_failed: "Die Aufnahme konnte nicht verarbeitet werden.",
   translation_failed: "Die Übersetzung konnte nicht erstellt werden.",
   service_unavailable: "Die Übersetzung konnte nicht erstellt werden.",
@@ -60,14 +63,17 @@ const API_ERROR_MESSAGES: Record<TranslatorApiErrorCode, string> = {
 
 export class TranslatorClientError extends TranslatorOperationError {
   readonly recognizedTranscript: string | null;
+  readonly transcriptAnomaly: TranscriptAnomalyMetrics | null;
 
   constructor(
     failure: ConstructorParameters<typeof TranslatorOperationError>[0],
     recognizedTranscript: string | null = null,
+    transcriptAnomaly: TranscriptAnomalyMetrics | null = null,
   ) {
     super(failure);
     this.name = "TranslatorClientError";
     this.recognizedTranscript = recognizedTranscript;
+    this.transcriptAnomaly = transcriptAnomaly;
   }
 }
 
@@ -194,6 +200,13 @@ function createSafeAudioFormData(
   if (typeof diagnostics?.totalChunkBytes === "number") {
     formData.append("totalChunkBytes", String(diagnostics.totalChunkBytes));
   }
+  const quality = diagnostics?.audioQuality;
+  if (quality?.source !== "unavailable" && quality?.evidence === "measured" &&
+    typeof quality.silenceRatio === "number" &&
+    typeof quality.speechActivityRatio === "number") {
+    formData.append("audioSilenceRatio", String(quality.silenceRatio));
+    formData.append("audioSpeechActivityRatio", String(quality.speechActivityRatio));
+  }
   return formData;
 }
 
@@ -291,7 +304,10 @@ async function readTranslationResponse(
         Object.prototype.hasOwnProperty.call(API_ERROR_MESSAGES, code)
           ? API_ERROR_MESSAGES[code]
           : failure.message,
-    }, authFailureType), recognizedTranscript);
+    }, authFailureType), recognizedTranscript,
+    code === "stt_transcript_implausible" && errorBody?.transcriptAnomaly &&
+      typeof errorBody.transcriptAnomaly === "object"
+      ? errorBody.transcriptAnomaly as TranscriptAnomalyMetrics : null);
   }
 
   if (!isTranslationResult(body)) {

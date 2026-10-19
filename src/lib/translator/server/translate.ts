@@ -16,6 +16,8 @@ import {
   isEssenceSummaryEligible,
   validateEssenceSummary,
 } from "@/lib/translator/essenceSummary";
+import { analyzeTranscriptAnomaly } from "@/lib/translator/transcriptAnomaly";
+import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQuality";
 
 export type TranscriptionInput = {
   bytes: Uint8Array;
@@ -75,6 +77,7 @@ type TranslateRecordedAudioInput = {
   format: SupportedAudioFormat;
   direction: TranslationRequestDirection;
   recordingDurationMs?: number | null;
+  audioQuality?: TranslatorAudioQualityMetrics | null;
 };
 
 export type SafeAudioTranscriptionInput = Pick<
@@ -377,8 +380,21 @@ export async function translateRecordedAudio(
   instrumentation.onSttStarted?.();
   const safeTranscription = await transcribeSafeAudio(input, gateway);
   instrumentation.onSttCompleted?.();
+  const anomaly = analyzeTranscriptAnomaly({
+    transcript: safeTranscription.transcript,
+    autoMode: input.direction.sourceLanguage === "auto",
+    audioQuality: input.audioQuality,
+  });
+  if (anomaly.transcriptAnomalyDetected) {
+    throw new TranslatorPipelineError(
+      "stt_transcript_implausible",
+      "STT transcript is implausible",
+      null,
+      anomaly,
+    );
+  }
 
-  return translateTranscript(
+  const result = await translateTranscript(
     safeTranscription.transcript,
     input.direction,
     safeTranscription.output,
@@ -389,6 +405,8 @@ export async function translateRecordedAudio(
     input.recordingDurationMs,
     instrumentation,
   );
+  Object.assign(result.diagnostics, anomaly);
+  return result;
 }
 
 /** Uses the established safe audio-STT gateway without starting a translation. */

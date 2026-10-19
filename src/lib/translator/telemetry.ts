@@ -48,6 +48,16 @@ export type TranslatorTechnicalEvent = TranslatorBuildMetadata &
     semanticRescueSucceeded?: boolean;
     sameAudioComparisonAvailable?: boolean;
     transcriptScriptAnomalyDetected?: boolean;
+    transcriptAnomalyDetected?: boolean;
+    transcriptAnomalyReason?: string | null;
+    transcriptWordCount?: number;
+    transcriptUniqueWordCount?: number;
+    transcriptUniqueWordRatio?: number;
+    transcriptMaxRepeatedTokenRun?: number;
+    transcriptDominantTokenRatio?: number;
+    transcriptRepeatedPhraseDetected?: boolean;
+    transcriptUnexpectedScriptDetected?: boolean;
+    transcriptAudioSpeechMismatchDetected?: boolean;
     primaryFailureToRescueStartMs?: number | null;
     rescueTranscriptionMs?: number | null;
     rescueTranscriptToTranslationReadyMs?: number | null;

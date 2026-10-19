@@ -82,6 +82,42 @@ describe("translator server pipeline", () => {
     expect(gateway.autoTranslate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["mbili ".repeat(40), "extreme_token_repetition"],
+    ["Дякую за перегляд і до зустрічі у наступному відео!", "unexpected_script"],
+  ])("rejects implausible Safe-STT before Terra: %s", async (text, reason) => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text, detectedLanguage: null,
+      model: "gpt-4o-mini-transcribe", fallbackUsed: false,
+    });
+    await expect(translateRecordedAudio({
+      ...input, direction: { sourceLanguage: "auto", targetLanguage: "auto" },
+    }, gateway)).rejects.toMatchObject({
+      code: "stt_transcript_implausible",
+      transcriptAnomaly: { transcriptAnomalyReason: reason },
+    });
+    expect(gateway.autoTranslate).not.toHaveBeenCalled();
+    expect(gateway.translate).not.toHaveBeenCalled();
+  });
+
+  it("rejects measured silent audio with STT text before Terra", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.transcribe).mockResolvedValue({
+      text: "Habari yako rafiki yangu?", detectedLanguage: "sw",
+      model: "gpt-4o-mini-transcribe", fallbackUsed: false,
+    });
+    await expect(translateRecordedAudio({
+      ...input,
+      audioQuality: {
+        source: "realtime_analyser", evidence: "measured",
+        rmsDbfs: null, peakDbfs: null, clippingRatio: null,
+        silenceRatio: 1, speechActivityRatio: 0,
+      },
+    }, gateway)).rejects.toMatchObject({ code: "stt_transcript_implausible" });
+    expect(gateway.translate).not.toHaveBeenCalled();
+  });
+
   it("translates an authoritative transcript through the same Terra gateway without audio STT", async () => {
     const gateway = createGateway();
 
@@ -265,7 +301,7 @@ describe("translator server pipeline", () => {
 
     const result = await translateRecordedAudio(input, gateway);
 
-    expect(result.diagnostics).toEqual({
+    expect(result.diagnostics).toMatchObject({
       transcriptionModel: "whisper-1",
       translationModel: "gpt-5.6-terra",
       transcriptionMs: expect.any(Number),

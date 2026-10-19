@@ -348,6 +348,16 @@ export type TranslationDiagnostics = {
   rescueTranscriptToTranslationReadyMs?: number | null;
   semanticRescueTotalMs?: number | null;
   transcriptScriptAnomalyDetected?: boolean;
+  transcriptAnomalyDetected?: boolean;
+  transcriptAnomalyReason?: import("@/lib/translator/transcriptAnomaly").TranscriptAnomalyReason | null;
+  transcriptWordCount?: number;
+  transcriptUniqueWordCount?: number;
+  transcriptUniqueWordRatio?: number;
+  transcriptMaxRepeatedTokenRun?: number;
+  transcriptDominantTokenRatio?: number;
+  transcriptRepeatedPhraseDetected?: boolean;
+  transcriptUnexpectedScriptDetected?: boolean;
+  transcriptAudioSpeechMismatchDetected?: boolean;
   trackRebindStartedAt?: string | null;
   trackRebindCompletedAt?: string | null;
   trackRebindMs?: number | null;
@@ -408,6 +418,7 @@ export type TranslatorApiErrorCode =
   | "no_audio_captured"
   | "no_speech"
   | "unsupported_language"
+  | "stt_transcript_implausible"
   | "transcription_failed"
   | "translation_failed"
   | "service_unavailable";

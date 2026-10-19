@@ -206,6 +206,16 @@ export function parseTechnicalDiagnosticEvent(value: unknown): TranslatorTechnic
     semanticRescueSucceeded: item.semanticRescueSucceeded === true,
     sameAudioComparisonAvailable: item.sameAudioComparisonAvailable === true,
     transcriptScriptAnomalyDetected: item.transcriptScriptAnomalyDetected === true,
+    transcriptAnomalyDetected: item.transcriptAnomalyDetected === true,
+    transcriptAnomalyReason: nullableString(item.transcriptAnomalyReason, 100) ?? null,
+    transcriptWordCount: nullableCount(item.transcriptWordCount, 100_000) ?? undefined,
+    transcriptUniqueWordCount: nullableCount(item.transcriptUniqueWordCount, 100_000) ?? undefined,
+    transcriptUniqueWordRatio: nullableMetric(item.transcriptUniqueWordRatio ?? null) ?? undefined,
+    transcriptMaxRepeatedTokenRun: nullableCount(item.transcriptMaxRepeatedTokenRun, 100_000) ?? undefined,
+    transcriptDominantTokenRatio: nullableMetric(item.transcriptDominantTokenRatio ?? null) ?? undefined,
+    transcriptRepeatedPhraseDetected: item.transcriptRepeatedPhraseDetected === true,
+    transcriptUnexpectedScriptDetected: item.transcriptUnexpectedScriptDetected === true,
+    transcriptAudioSpeechMismatchDetected: item.transcriptAudioSpeechMismatchDetected === true,
     primaryFailureToRescueStartMs:
       nullableMetric(item.primaryFailureToRescueStartMs ?? null) as number | null,
     rescueTranscriptionMs:
