@@ -63,12 +63,9 @@ export function analyzeTranscriptAnomaly(input: {
   const nonLatinCount = letters.filter((character) => !/\p{Script=Latin}/u.test(character)).length;
   const unexpectedScript = input.autoMode && letters.length >= 12 &&
     nonLatinCount >= 10 && nonLatinCount / letters.length >= 0.8;
-  const quality = input.audioQuality;
-  const audioMismatch = wordCount >= 4 && quality?.source !== "unavailable" &&
-    quality?.evidence === "measured" &&
-    typeof quality.silenceRatio === "number" &&
-    typeof quality.speechActivityRatio === "number" &&
-    quality.silenceRatio >= 0.98 && quality.speechActivityRatio <= 0.01;
+  // Current audio metrics come from a live analyser, not the uploaded Safe-Audio
+  // Blob. Until a measurement is tied to that exact Blob, it cannot reject STT.
+  const audioMismatch = false;
   const phraseLoop = repeatedPhraseLoop(words);
   const extremeToken = wordCount >= 20 && maxRun >= 16 && dominantRatio >= 0.7;
   const combinedRepetition = wordCount >= 30 && uniqueCount <= 3 &&

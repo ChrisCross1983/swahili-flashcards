@@ -442,6 +442,21 @@ describe("POST /api/translator/translate", () => {
     expect(translateMock).not.toHaveBeenCalled();
   });
 
+  it("does not reject normal Safe-STT from live-analyser silence ratios", async () => {
+    const formData = createFormData();
+    formData.append("audioSilenceRatio", "1");
+    formData.append("audioSpeechActivityRatio", "0");
+
+    const response = await post(formData);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      originalText: "Tutakuja kesho asubuhi.",
+      diagnostics: { transcriptAudioSpeechMismatchDetected: false },
+    });
+    expect(translateMock).toHaveBeenCalledOnce();
+  });
+
   it("returns the recognized transcript when translation fails after STT", async () => {
     transcribeMock.mockResolvedValue({
       text: "Nyumba hii ni kubwa.", detectedLanguage: "sw",

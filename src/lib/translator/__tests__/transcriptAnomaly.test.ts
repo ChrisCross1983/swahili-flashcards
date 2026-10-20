@@ -32,19 +32,63 @@ describe("Safe-Audio transcript plausibility", () => {
     expect(check(transcript).transcriptAnomalyDetected).toBe(false);
   });
 
-  it("uses measured near silence only with a nontrivial transcript", () => {
+  it("ignores live-analyser silence for normal German and Kiswahili", () => {
     const audioQuality = {
       source: "realtime_analyser" as const,
       evidence: "measured" as const,
+      rmsDbfs: null,
+      peakDbfs: null,
       silenceRatio: 1,
       speechActivityRatio: 0,
     };
-    expect(check("Habari yako rafiki yangu?", audioQuality).transcriptAnomalyReason)
-      .toBe("speech_audio_mismatch");
-    expect(check("mbili mbili", audioQuality).transcriptAnomalyDetected).toBe(false);
+    for (const transcript of [
+      "Ich gehe heute zum Markt und komme morgen wieder zurück.",
+      "Habari yako rafiki yangu?",
+    ]) {
+      expect(check(transcript, audioQuality)).toMatchObject({
+        transcriptAnomalyDetected: false,
+        transcriptAudioSpeechMismatchDetected: false,
+      });
+    }
     expect(check("Habari yako rafiki yangu?", {
       ...audioQuality, silenceRatio: null, speechActivityRatio: null,
-    }).transcriptAnomalyDetected).toBe(false);
-    expect(check("mbili ".repeat(40), null).transcriptAnomalyDetected).toBe(true);
+    })).toMatchObject({
+      transcriptAnomalyDetected: false,
+      transcriptAudioSpeechMismatchDetected: false,
+    });
+    expect(check("Habari yako rafiki yangu?", null).transcriptAnomalyDetected)
+      .toBe(false);
+  });
+
+  it("keeps text and script guards active with unreliable audio metrics", () => {
+    const audioQuality = {
+      source: "realtime_analyser" as const,
+      evidence: "measured" as const,
+      rmsDbfs: null,
+      peakDbfs: null,
+      silenceRatio: 1,
+      speechActivityRatio: 0,
+    };
+    expect(check("mbili ".repeat(40), audioQuality)).toMatchObject({
+      transcriptAnomalyReason: "extreme_token_repetition",
+      transcriptAudioSpeechMismatchDetected: false,
+    });
+    expect(check("Дякую за перегляд і до зустрічі у наступному відео!", audioQuality))
+      .toMatchObject({
+        transcriptAnomalyReason: "unexpected_script",
+        transcriptAudioSpeechMismatchDetected: false,
+      });
+  });
+
+  it("does not infer same-upload evidence from a decoded_blob label", () => {
+    const audioQuality = {
+      source: "decoded_blob" as const, evidence: "measured" as const,
+      rmsDbfs: -90, peakDbfs: -80,
+      silenceRatio: 1, speechActivityRatio: 0,
+    };
+    expect(check("Habari yako rafiki yangu?", audioQuality)).toMatchObject({
+      transcriptAnomalyDetected: false,
+      transcriptAudioSpeechMismatchDetected: false,
+    });
   });
 });

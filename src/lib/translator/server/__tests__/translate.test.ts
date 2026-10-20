@@ -101,21 +101,28 @@ describe("translator server pipeline", () => {
     expect(gateway.translate).not.toHaveBeenCalled();
   });
 
-  it("rejects measured silent audio with STT text before Terra", async () => {
+  it.each([
+    ["Habari yako rafiki yangu?", "sw", "de"],
+    ["Ich gehe heute zum Markt.", "de", "sw"],
+  ] as const)("allows normal Safe-STT despite live-analyser silence: %s", async (text, sourceLanguage, targetLanguage) => {
     const gateway = createGateway();
     vi.mocked(gateway.transcribe).mockResolvedValue({
-      text: "Habari yako rafiki yangu?", detectedLanguage: "sw",
+      text, detectedLanguage: sourceLanguage,
       model: "gpt-4o-mini-transcribe", fallbackUsed: false,
     });
     await expect(translateRecordedAudio({
       ...input,
+      direction: { sourceLanguage, targetLanguage },
       audioQuality: {
         source: "realtime_analyser", evidence: "measured",
         rmsDbfs: null, peakDbfs: null, clippingRatio: null,
         silenceRatio: 1, speechActivityRatio: 0,
       },
-    }, gateway)).rejects.toMatchObject({ code: "stt_transcript_implausible" });
-    expect(gateway.translate).not.toHaveBeenCalled();
+    }, gateway)).resolves.toMatchObject({
+      originalText: text,
+      diagnostics: { transcriptAudioSpeechMismatchDetected: false },
+    });
+    expect(gateway.translate).toHaveBeenCalledOnce();
   });
 
   it("translates an authoritative transcript through the same Terra gateway without audio STT", async () => {
