@@ -538,6 +538,7 @@ export default function TranslatorView({
   const enqueueTechnicalEvent = useCallback((input: {
     turnId: string;
     entry?: TranslationEntry;
+    diagnostics?: Partial<TranslationDiagnostics>;
     failure?: TranslatorFailure | null;
     diagnosticEvent?: TranslatorDiagnosticEvent | null;
     errorStage?: string | null;
@@ -547,7 +548,7 @@ export default function TranslatorView({
     const installationId = installationIdRef.current;
     if (!installationId || !diagnosticsSettingsRef.current.diagnosticsSharingEnabled) return;
     const entry = input.entry;
-    const d = entry?.diagnostics;
+    const d = entry?.diagnostics ?? input.diagnostics;
     const platform = detectTranslatorPlatform(navigator.userAgent);
     const finite = (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -592,6 +593,16 @@ export default function TranslatorView({
         input.entry !== undefined,
       sameAudioComparisonAvailable: sttComparisonsByTurnRef.current.has(input.turnId),
       transcriptScriptAnomalyDetected: d?.transcriptScriptAnomalyDetected === true,
+      transcriptAnomalyDetected: d?.transcriptAnomalyDetected === true,
+      transcriptAnomalyReason: d?.transcriptAnomalyReason ?? null,
+      transcriptWordCount: d?.transcriptWordCount,
+      transcriptUniqueWordCount: d?.transcriptUniqueWordCount,
+      transcriptUniqueWordRatio: d?.transcriptUniqueWordRatio,
+      transcriptMaxRepeatedTokenRun: d?.transcriptMaxRepeatedTokenRun,
+      transcriptDominantTokenRatio: d?.transcriptDominantTokenRatio,
+      transcriptRepeatedPhraseDetected: d?.transcriptRepeatedPhraseDetected,
+      transcriptUnexpectedScriptDetected: d?.transcriptUnexpectedScriptDetected,
+      transcriptAudioSpeechMismatchDetected: d?.transcriptAudioSpeechMismatchDetected,
       primaryFailureToRescueStartMs: finite(d?.primaryFailureToRescueStartMs),
       rescueTranscriptionMs: finite(d?.rescueTranscriptionMs),
       rescueTranscriptToTranslationReadyMs: finite(
@@ -1694,6 +1705,7 @@ export default function TranslatorView({
           chunkCount: captureDiagnostics?.mediaRecorderChunkCount ?? null,
           totalChunkBytes:
             captureDiagnostics?.mediaRecorderTotalChunkBytes ?? null,
+          audioQuality: monitorResult.metrics,
         },
         simulatePrimaryUnsupportedLanguage: qaSemanticScenarioId !== null,
         onSemanticRescueStarted: ({ primaryFailure }) => {
@@ -2207,6 +2219,9 @@ export default function TranslatorView({
         const failureStage = invalidCapture ? "recording_stop" :
           recordedAudio.ok ? errorStage : "recording_stop";
         const diagnostics = turnPerformance.getDiagnostics();
+        if (error instanceof TranslatorClientError && error.transcriptAnomaly) {
+          Object.assign(diagnostics, error.transcriptAnomaly);
+        }
         const turnId =
           activeTurnIdRef.current ??
           globalThis.crypto?.randomUUID?.() ??
@@ -2345,6 +2360,7 @@ export default function TranslatorView({
         }
         enqueueTechnicalEvent({
           turnId,
+          diagnostics,
           failure,
           diagnosticEvent: failureEvent,
           errorStage: failureStage,

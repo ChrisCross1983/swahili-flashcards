@@ -35,6 +35,8 @@ import {
   validCorrelationId,
 } from "@/lib/translator/performanceHeaders";
 import { isUsableRecordedAudio } from "@/lib/translator/recordedAudio";
+import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQuality";
+import type { TranscriptAnomalyMetrics } from "@/lib/translator/transcriptAnomaly";
 
 export const runtime = "nodejs";
 
@@ -64,11 +66,13 @@ function errorResponse(
   error: string,
   recognizedTranscript: string | null = null,
   correlationId: string | null = null,
+  transcriptAnomaly: TranscriptAnomalyMetrics | null = null,
 ) {
   const response = NextResponse.json({
     error,
     code,
     ...(recognizedTranscript ? { recognizedTranscript } : {}),
+    ...(transcriptAnomaly ? { transcriptAnomaly } : {}),
   }, { status });
   if (correlationId) response.headers.set(TRANSLATOR_CORRELATION_HEADER, correlationId);
   return response;
@@ -425,13 +429,15 @@ async function translationResponse(
     const recognizedTranscript = error instanceof TranslatorPipelineError
       ? error.recognizedTranscript
       : null;
-    const httpStatus = code === "no_speech" || code === "unsupported_language"
+    const httpStatus = code === "no_speech" || code === "unsupported_language" ||
+      code === "stt_transcript_implausible"
       ? 422
       : code === "configuration" ? 503 : 502;
     console.error("[translator] request failed", {
       correlationId,
       apiCode: code,
-      stage: code === "transcription_failed" ? "transcription" : "translation",
+      stage: code === "transcription_failed" || code === "stt_transcript_implausible"
+        ? "transcription" : "translation",
       httpStatus,
       audioBytes: requestMetadata.audioBytes,
       normalizedMimeType: requestMetadata.normalizedMimeType,
@@ -442,6 +448,8 @@ async function translationResponse(
       upstreamRequestId: null,
       retryAttempt: requestMetadata.retryAttempt,
       requestPhase: requestMetadata.requestPhase,
+      ...(error instanceof TranslatorPipelineError && error.transcriptAnomaly
+        ? error.transcriptAnomaly : {}),
     });
 
     if (code === "no_speech") {
@@ -460,6 +468,16 @@ async function translationResponse(
         "Ich konnte die Sprache nicht sicher erkennen. Bitte sprich den Satz noch einmal.",
         recognizedTranscript,
         correlationId,
+      );
+    }
+    if (code === "stt_transcript_implausible") {
+      return errorResponse(
+        422,
+        "stt_transcript_implausible",
+        "Ich konnte dich nicht zuverlässig verstehen. Bitte sprich den Satz noch einmal.",
+        null,
+        correlationId,
+        error instanceof TranslatorPipelineError ? error.transcriptAnomaly : null,
       );
     }
     if (code === "transcription_failed") {
@@ -665,6 +683,17 @@ export async function POST(request: Request) {
   const recordingDurationMs = finiteFormNumber(formData.get("recordingDurationMs"));
   const chunkCount = finiteFormNumber(formData.get("chunkCount"));
   const totalChunkBytes = finiteFormNumber(formData.get("totalChunkBytes"));
+  const silenceRatio = finiteFormNumber(formData.get("audioSilenceRatio"));
+  const speechActivityRatio = finiteFormNumber(formData.get("audioSpeechActivityRatio"));
+  const audioQuality: TranslatorAudioQualityMetrics | null =
+    silenceRatio !== null && silenceRatio <= 1 &&
+    speechActivityRatio !== null && speechActivityRatio <= 1
+      ? {
+          source: "realtime_analyser", evidence: "measured",
+          rmsDbfs: null, peakDbfs: null, clippingRatio: null,
+          silenceRatio, speechActivityRatio,
+        }
+      : null;
   const autoDirection = sourceValue === "auto" && targetValue === "auto";
   const sourceLanguage = parseLanguage(sourceValue);
   const targetLanguage = parseLanguage(targetValue);
@@ -762,7 +791,7 @@ export async function POST(request: Request) {
         timingContext.stages.markPoint("summaryEligibilityDecisionCompleted"),
     };
     return translateRecordedAudio(
-      { audio, format, direction, recordingDurationMs },
+      { audio, format, direction, recordingDurationMs, audioQuality },
       gateway,
       instrumentation,
     );
