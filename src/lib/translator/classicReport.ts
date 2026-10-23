@@ -178,6 +178,8 @@ const PERFORMANCE_METRICS = [
   "stopToAudioBlobReadyMs",
   "audioBlobReadyToTranslationFetchStartMs",
   "translationFetchToResponseReceivedMs",
+  "translationServerHandlerMs",
+  "translationFetchOutsideHandlerMs",
   "translationResponseReceivedToVisibleMs",
   "primaryFailureToRescueStartMs",
   "rescueTranscriptionMs",
@@ -335,6 +337,10 @@ export type ClassicTranslatorReportTurn = {
   translationSchemaPreparationCompletedAt: string | null;
   translationOpenAiClientReadyAt: string | null;
   translationServerRequestReceivedAt: string | null;
+  translationFunctionRegion: string | null;
+  translationDeploymentId: string | null;
+  translationFunctionFirstInvocation: boolean | null;
+  translationRequestContentLengthBytes: number | null;
   translationServerParsingDoneAt: string | null;
   translationBodyParsingCompletedAt: string | null;
   translationModeLanguageDecisionCompletedAt: string | null;
@@ -526,6 +532,8 @@ export type ClassicTranslatorReportTurn = {
   stopToAudioBlobReadyMs: number | null;
   audioBlobReadyToTranslationFetchStartMs: number | null;
   translationFetchToResponseReceivedMs: number | null;
+  translationServerHandlerMs: number | null;
+  translationFetchOutsideHandlerMs: number | null;
   translationResponseReceivedToVisibleMs: number | null;
   transcriptFinalToTranslationReadyMs: number | null;
   clientToTranslationServerMs: number | null;
@@ -689,6 +697,14 @@ function finite(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null;
+}
+
+function translationFetchOutsideHandlerMs(d: Partial<TranslationDiagnostics>) {
+  const fetchMs = finite(d.translationFetchToResponseReceivedMs);
+  const handlerMs = finite(d.translationServerHandlerMs);
+  // This is a combined platform/network/upload/return residual, not upload time.
+  return fetchMs !== null && handlerMs !== null && fetchMs >= handlerMs
+    ? fetchMs - handlerMs : null;
 }
 
 function rate(numerator: number, denominator: number) {
@@ -1183,6 +1199,12 @@ function turnFromValues(input: {
     translationOpenAiClientReadyAt:
       d.translationOpenAiClientReadyAt ?? null,
     translationServerRequestReceivedAt: d.translationServerRequestReceivedAt ?? null,
+    translationFunctionRegion: d.translationFunctionRegion ?? null,
+    translationDeploymentId: d.translationDeploymentId ?? null,
+    translationFunctionFirstInvocation:
+      typeof d.translationFunctionFirstInvocation === "boolean"
+        ? d.translationFunctionFirstInvocation : null,
+    translationRequestContentLengthBytes: finite(d.translationRequestContentLengthBytes),
     translationServerParsingDoneAt: d.translationServerParsingDoneAt ?? null,
     translationBodyParsingCompletedAt: d.translationBodyParsingCompletedAt ?? null,
     translationModeLanguageDecisionCompletedAt:
@@ -1406,6 +1428,8 @@ function turnFromValues(input: {
     translationFetchToResponseReceivedMs: finite(
       d.translationFetchToResponseReceivedMs,
     ),
+    translationServerHandlerMs: finite(d.translationServerHandlerMs),
+    translationFetchOutsideHandlerMs: translationFetchOutsideHandlerMs(d),
     translationResponseReceivedToVisibleMs: finite(
       d.translationResponseReceivedToVisibleMs,
     ),

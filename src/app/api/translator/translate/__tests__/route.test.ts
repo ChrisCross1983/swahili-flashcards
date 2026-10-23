@@ -224,6 +224,10 @@ describe("POST /api/translator/translate", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Server-Timing")).toContain("app-pre");
     expect(response.headers.get("X-Translator-Translation-Timing")).toBeTruthy();
+    expect(JSON.parse(response.headers.get("X-Translator-Translation-Timing") ?? "{}")).toMatchObject({
+      translationServerHandlerMs: expect.any(Number),
+      translationFunctionFirstInvocation: true,
+    });
     await expect(response.json()).resolves.toMatchObject({
       originalText: "Tutakuja kesho asubuhi.",
       translatedText: "Wir kommen morgen früh.",
@@ -271,6 +275,30 @@ describe("POST /api/translator/translate", () => {
       { sourceLanguage: "sw", targetLanguage: "de" },
     );
     expect(requireUserMock).toHaveBeenCalledOnce();
+  });
+
+  it("adds region, deployment and request length without another request", async () => {
+    vi.stubEnv("VERCEL_REGION", "cpt1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_test");
+    try {
+      const first = await post(createFormData(), { "content-length": "1234" });
+      const second = await post(createFormData());
+      const firstTiming = JSON.parse(
+        first.headers.get("X-Translator-Translation-Timing") ?? "{}",
+      );
+      const secondTiming = JSON.parse(
+        second.headers.get("X-Translator-Translation-Timing") ?? "{}",
+      );
+      expect(firstTiming).toMatchObject({
+        translationFunctionRegion: "cpt1",
+        translationDeploymentId: "dpl_test",
+        translationRequestContentLengthBytes: 1234,
+        translationFunctionFirstInvocation: true,
+      });
+      expect(secondTiming.translationFunctionFirstInvocation).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("keeps server STT out of the post-instrumentation translation residual", async () => {

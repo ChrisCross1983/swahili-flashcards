@@ -37,7 +37,12 @@ describe("translator client", () => {
       expect(audio.type).toBe("audio/webm;codecs=opus");
       expect(formData.get("sourceLanguage")).toBe("sw");
       expect(formData.get("targetLanguage")).toBe("de");
-      return Response.json(result);
+      return Response.json(result, { headers: {
+        "X-Translator-Translation-Timing": JSON.stringify({
+          translationServerHandlerMs: 290,
+          translationFunctionRegion: "cpt1",
+        }),
+      } });
     });
 
     await expect(
@@ -51,7 +56,14 @@ describe("translator client", () => {
           onResponseCompleted: () => boundaries.push("response-completed"),
         },
       ),
-    ).resolves.toMatchObject(result);
+    ).resolves.toMatchObject({
+      ...result,
+      diagnostics: {
+        ...result.diagnostics,
+        translationServerHandlerMs: 290,
+        translationFunctionRegion: "cpt1",
+      },
+    });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(boundaries).toEqual([
       "fetch-started", "fetch", "response-received", "response-completed",

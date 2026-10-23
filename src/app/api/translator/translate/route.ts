@@ -40,6 +40,10 @@ import type { TranscriptAnomalyMetrics } from "@/lib/translator/transcriptAnomal
 
 export const runtime = "nodejs";
 
+// An instance's first handler call is only a cold-start hint, not a measured
+// platform cold-start duration.
+let translationModuleInvocationCount = 0;
+
 type TranslationPreOpenAiStage =
   | "auth"
   | "authClientPreparation"
@@ -56,9 +60,18 @@ type TranslationPreOpenAiStage =
 type TranslationTimingContext = {
   routeReceivedAt: string;
   routeReceivedMono: number;
+  functionFirstInvocation: boolean;
+  requestContentLengthBytes: number | null;
   hasJsonBody: boolean;
   stages: ServerStageTimings<TranslationPreOpenAiStage>;
 };
+
+function requestContentLengthBytes(request: Request): number | null {
+  const header = request.headers.get("content-length");
+  if (!header || !/^\d+$/.test(header)) return null;
+  const length = Number(header);
+  return Number.isSafeInteger(length) ? length : null;
+}
 
 function errorResponse(
   status: number,
@@ -401,6 +414,13 @@ async function translationResponse(
     const timing = {
       translationServerSerializationDoneAt: serializationDoneAt,
       translationServerResponseStartedAt: responseStartedAt,
+      translationServerHandlerMs: Math.round(
+        serializationDoneMono - timingContext.routeReceivedMono,
+      ),
+      translationFunctionRegion: process.env.VERCEL_REGION ?? null,
+      translationDeploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
+      translationFunctionFirstInvocation: timingContext.functionFirstInvocation,
+      translationRequestContentLengthBytes: timingContext.requestContentLengthBytes,
       ...(serverPostOpenAiMs === null
         ? {}
         : { translationServerPostOpenAiMs: Math.round(serverPostOpenAiMs) }),
@@ -515,6 +535,8 @@ export async function POST(request: Request) {
   const timingContext: TranslationTimingContext = {
     routeReceivedAt: requestReceivedAt,
     routeReceivedMono: requestReceivedMono,
+    functionFirstInvocation: translationModuleInvocationCount++ === 0,
+    requestContentLengthBytes: requestContentLengthBytes(request),
     hasJsonBody,
     stages: new ServerStageTimings<TranslationPreOpenAiStage>(),
   };

@@ -104,6 +104,14 @@ export type TranslationDiagnostics = {
   translationSchemaPreparationCompletedAt?: string | null;
   translationOpenAiClientReadyAt?: string | null;
   translationServerRequestReceivedAt?: string;
+  /** From route entry through response serialization, excluding platform work. */
+  translationServerHandlerMs?: number;
+  translationFunctionRegion?: string | null;
+  translationDeploymentId?: string | null;
+  /** First handler call in this module instance; not a cold-start duration. */
+  translationFunctionFirstInvocation?: boolean;
+  /** HTTP Content-Length, if exposed to the route; not an upload duration. */
+  translationRequestContentLengthBytes?: number | null;
   translationServerParsingDoneAt?: string;
   translationOpenAiRequestStartedAt?: string;
   translationOpenAiFirstEventAt?: string;
