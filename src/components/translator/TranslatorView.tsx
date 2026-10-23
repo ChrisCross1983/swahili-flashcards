@@ -1532,7 +1532,10 @@ export default function TranslatorView({
     translationInFlightRef.current = true;
     const direction = getTranslationRequestDirection(state.mode);
     const audioBlobResult = stopRecording().then(
-      (audioBlob) => ({ ok: true as const, audioBlob }),
+      (audioBlob) => {
+        turnPerformance.markAudioBlobReady();
+        return { ok: true as const, audioBlob };
+      },
       (error: unknown) => ({ ok: false as const, error }),
     );
     dispatch({ type: "STOP_AND_TRANSLATE" });
@@ -1730,6 +1733,9 @@ export default function TranslatorView({
         },
         onResponseCompleted: (now) =>
           turnPerformance.markTranslationClientResponseCompleted(now),
+        onFetchStarted: (now) => turnPerformance.markTranslationFetchStarted(now),
+        onResponseReceived: (now) =>
+          turnPerformance.markTranslationFetchResponseReceived(now),
         onRetry: ({ failure }) => {
           retryState.failure = failure;
         },
@@ -1922,7 +1928,12 @@ export default function TranslatorView({
         });
         updateEntryDiagnostics(
           entry,
-          { audioBlobSize: recordedAudio.audioBlob.size },
+          {
+            audioBlobSize: recordedAudio.audioBlob.size,
+            audioBlobReadyAt: turnPerformance.getDiagnostics().audioBlobReadyAt,
+            stopToAudioBlobReadyMs:
+              turnPerformance.getDiagnostics().stopToAudioBlobReadyMs,
+          },
           "audioBackupFinalized",
         );
         audioMetadataByTurnRef.current.set(entry.id, {

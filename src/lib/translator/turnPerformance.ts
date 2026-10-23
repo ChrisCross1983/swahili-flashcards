@@ -18,6 +18,9 @@ type ClientPerformanceDiagnostics = Pick<
   | "realtimeConnectionReadyAt"
   | "realtimeSetupMs"
   | "recordingStoppedAt"
+  | "audioBlobReadyAt"
+  | "stopToAudioBlobReadyMs"
+  | "audioBlobReadyToTranslationFetchStartMs"
   | "recordingDurationMs"
   | "firstTranscriptDeltaAt"
   | "transcriptFinalAt"
@@ -25,6 +28,10 @@ type ClientPerformanceDiagnostics = Pick<
   | "translationStartedAt"
   | "translationReadyAt"
   | "translationClientRequestStartedAt"
+  | "translationFetchStartedAt"
+  | "translationFetchResponseReceivedAt"
+  | "translationFetchToResponseReceivedMs"
+  | "translationResponseReceivedToVisibleMs"
   | "translationStateCommittedAt"
   | "translationVisibleAt"
   | "transcriptFinalToTranslationRequestStartMs"
@@ -110,9 +117,12 @@ type TurnTimepointName =
   | "realtimeConnectionReady"
   | "recordingStarted"
   | "recordingStopped"
+  | "audioBlobReady"
   | "firstTranscriptDelta"
   | "transcriptFinal"
   | "translationRequestStarted"
+  | "translationFetchStarted"
+  | "translationFetchResponseReceived"
   | "translationCompleted"
   | "translationClientResponseCompleted"
   | "translationStateCommitted"
@@ -254,6 +264,10 @@ export class TranslatorTurnPerformance {
     this.markOnce("recordingStopped", now);
   }
 
+  markAudioBlobReady(now = performance.now()) {
+    this.markOnce("audioBlobReady", now);
+  }
+
   markFirstTranscriptDelta(now = performance.now()) {
     this.markOnce("firstTranscriptDelta", now);
   }
@@ -330,6 +344,19 @@ export class TranslatorTurnPerformance {
 
   markTranslationRequestStarted(now = performance.now()) {
     this.markOnce("translationRequestStarted", now);
+  }
+
+  markTranslationFetchStarted(now = performance.now()) {
+    // A retry must pair its response with its own fetch start.
+    if (!validTime(now)) return;
+    delete this.timepoints.translationFetchResponseReceived;
+    delete this.timestamps.translationFetchResponseReceived;
+    this.timepoints.translationFetchStarted = now;
+    this.timestamps.translationFetchStarted = new Date().toISOString();
+  }
+
+  markTranslationFetchResponseReceived(now = performance.now()) {
+    this.markOnce("translationFetchResponseReceived", now);
   }
 
   markTranslationCompleted(now = performance.now()) {
@@ -422,6 +449,22 @@ export class TranslatorTurnPerformance {
     );
     const translationClientPostResponseMs = duration(
       this.timepoints.translationClientResponseCompleted,
+      this.timepoints.translationVisible,
+    );
+    const stopToAudioBlobReadyMs = duration(
+      this.timepoints.recordingStopped,
+      this.timepoints.audioBlobReady,
+    );
+    const audioBlobReadyToTranslationFetchStartMs = duration(
+      this.timepoints.audioBlobReady,
+      this.timepoints.translationFetchStarted,
+    );
+    const translationFetchToResponseReceivedMs = duration(
+      this.timepoints.translationFetchStarted,
+      this.timepoints.translationFetchResponseReceived,
+    );
+    const translationResponseReceivedToVisibleMs = duration(
+      this.timepoints.translationFetchResponseReceived,
       this.timepoints.translationVisible,
     );
     const recordingDurationMs = duration(
@@ -529,6 +572,10 @@ export class TranslatorTurnPerformance {
       ...(realtimeSetupMs === undefined ? {} : { realtimeSetupMs }),
       ...this.timestampDiagnostic("recordingStarted", "recordingStartedAt"),
       ...this.timestampDiagnostic("recordingStopped", "recordingStoppedAt"),
+      ...this.timestampDiagnostic("audioBlobReady", "audioBlobReadyAt"),
+      ...(stopToAudioBlobReadyMs === undefined ? {} : { stopToAudioBlobReadyMs }),
+      ...(audioBlobReadyToTranslationFetchStartMs === undefined
+        ? {} : { audioBlobReadyToTranslationFetchStartMs }),
       ...(recordingDurationMs === undefined ? {} : { recordingDurationMs }),
       ...this.timestampDiagnostic(
         "firstTranscriptDelta",
@@ -546,6 +593,15 @@ export class TranslatorTurnPerformance {
         "translationRequestStarted",
         "translationClientRequestStartedAt",
       ),
+      ...this.timestampDiagnostic("translationFetchStarted", "translationFetchStartedAt"),
+      ...this.timestampDiagnostic(
+        "translationFetchResponseReceived",
+        "translationFetchResponseReceivedAt",
+      ),
+      ...(translationFetchToResponseReceivedMs === undefined
+        ? {} : { translationFetchToResponseReceivedMs }),
+      ...(translationResponseReceivedToVisibleMs === undefined
+        ? {} : { translationResponseReceivedToVisibleMs }),
       ...this.timestampDiagnostic("translationCompleted", "translationReadyAt"),
       ...this.timestampDiagnostic(
         "translationStateCommitted",
@@ -648,11 +704,14 @@ export class TranslatorTurnPerformance {
       | "realtimeConnectionReadyAt"
       | "recordingStartedAt"
       | "recordingStoppedAt"
+      | "audioBlobReadyAt"
       | "firstTranscriptDeltaAt"
       | "transcriptFinalAt"
       | "translationStartedAt"
       | "translationReadyAt"
       | "translationClientRequestStartedAt"
+      | "translationFetchStartedAt"
+      | "translationFetchResponseReceivedAt"
       | "translationStateCommittedAt"
       | "translationVisibleAt"
       | "ttsStartedAt"

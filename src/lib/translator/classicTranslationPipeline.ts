@@ -65,6 +65,8 @@ export async function requestClassicTranslation(
     signal: AbortSignal;
     correlationId?: string;
     onResponseCompleted?: (now: number) => void;
+    onFetchStarted?: (now: number) => void;
+    onResponseReceived?: (now: number) => void;
     recordedAudioDiagnostics?: RecordedAudioDiagnostics;
     simulatePrimaryUnsupportedLanguage?: boolean;
     onSemanticRescueStarted?: (context: Pick<SemanticRescueContext, "primaryTranscript" | "primaryFailure">) => void;
@@ -110,6 +112,8 @@ export async function requestClassicTranslation(
       signal: input.signal,
       correlationId: input.correlationId,
       onResponseCompleted: input.onResponseCompleted,
+      onFetchStarted: input.onFetchStarted,
+      onResponseReceived: input.onResponseReceived,
       requestAttempt,
       requestPhase: "primary",
       recordedAudioDiagnostics: input.recordedAudioDiagnostics,
@@ -142,6 +146,8 @@ export async function requestClassicTranslation(
         signal: input.signal,
         correlationId: input.correlationId,
         onResponseCompleted: input.onResponseCompleted,
+        onFetchStarted: input.onFetchStarted,
+        onResponseReceived: input.onResponseReceived,
         requestAttempt: 0,
         requestPhase: "semantic_rescue",
         recordedAudioDiagnostics: input.recordedAudioDiagnostics,

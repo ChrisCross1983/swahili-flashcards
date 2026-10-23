@@ -95,6 +95,8 @@ type RequestOptions = {
   signal?: AbortSignal;
   correlationId?: string;
   onResponseCompleted?: (now: number) => void;
+  onFetchStarted?: (now: number) => void;
+  onResponseReceived?: (now: number) => void;
   requestAttempt?: number;
   requestPhase?: "primary" | "semantic_rescue";
   recordedAudioDiagnostics?: RecordedAudioDiagnostics;
@@ -410,6 +412,7 @@ export async function requestAudioTranslation(
   );
   let response: Response;
   try {
+    options.onFetchStarted?.(performance.now());
     response = await (options.fetcher ?? fetch)("/api/translator/translate", {
       method: "POST",
       headers: {
@@ -420,6 +423,7 @@ export async function requestAudioTranslation(
       body: formData,
       signal: options.signal,
     });
+    options.onResponseReceived?.(performance.now());
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new TranslatorClientError(networkFailure("translation"));

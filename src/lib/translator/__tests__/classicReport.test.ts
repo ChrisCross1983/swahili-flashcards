@@ -75,6 +75,9 @@ function entry(
       realtimeSetupMs: realtime ? undefined : 5_000,
       recordingStartedAt: "2023-11-14T22:13:20.000Z",
       recordingStoppedAt: "2023-11-14T22:13:21.000Z",
+      audioBlobReadyAt: realtime ? undefined : "2023-11-14T22:13:21.050Z",
+      stopToAudioBlobReadyMs: realtime ? undefined : 50,
+      audioBlobReadyToTranslationFetchStartMs: realtime ? undefined : 50,
       recordingDurationMs: 1_000,
       microphoneAcquisitionAttemptId: `mic-${id}`,
       microphoneAcquisitionMs: 50,
@@ -104,6 +107,10 @@ function entry(
       translationStartedAt: "2023-11-14T22:13:21.100Z",
       translationReadyAt: "2023-11-14T22:13:21.410Z",
       translationClientRequestStartedAt: "2023-11-14T22:13:21.100Z",
+      translationFetchStartedAt: realtime ? undefined : "2023-11-14T22:13:21.100Z",
+      translationFetchResponseReceivedAt: realtime ? undefined : "2023-11-14T22:13:21.407Z",
+      translationFetchToResponseReceivedMs: realtime ? undefined : 307,
+      translationResponseReceivedToVisibleMs: realtime ? undefined : 13,
       translationRouteReceivedAt: "2023-11-14T22:13:21.110Z",
       translationAuthStartedAt: "2023-11-14T22:13:21.110Z",
       translationAuthCompletedAt: "2023-11-14T22:13:21.150Z",
@@ -593,6 +600,23 @@ describe("classic translator QA report", () => {
         segmentedTtsSegment2OpenAiTotalMs: 1_400,
       });
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
+    expect(report.turns.find((turn) => turn.turnId === "fallback-turn"))
+      .toMatchObject({
+        audioBlobReadyAt: "2023-11-14T22:13:21.050Z",
+        translationFetchStartedAt: "2023-11-14T22:13:21.100Z",
+        translationFetchResponseReceivedAt: "2023-11-14T22:13:21.407Z",
+        stopToAudioBlobReadyMs: 50,
+        audioBlobReadyToTranslationFetchStartMs: 50,
+        translationFetchToResponseReceivedMs: 307,
+        translationResponseReceivedToVisibleMs: 13,
+      });
+    expect(report.turns.find((turn) => turn.turnId === "fallback-turn")?.criticalPath)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ stage: "recording_stop_to_blob", durationMs: 50 }),
+        expect.objectContaining({ stage: "audio_blob_to_translation_fetch", durationMs: 50 }),
+        expect.objectContaining({ stage: "translation_fetch_to_response", durationMs: 307 }),
+        expect.objectContaining({ stage: "translation_response_to_visible", durationMs: 13 }),
+      ]));
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.translatorTtsQaMode).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSharedAudioElement).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsSegment2PlayInvokedAt).toBeNull();

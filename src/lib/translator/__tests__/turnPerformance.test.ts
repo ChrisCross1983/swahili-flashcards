@@ -48,9 +48,12 @@ describe("translator turn performance", () => {
     turn.markRecordingStarted(50);
     turn.markFirstTranscriptDelta(80);
     turn.markRecordingStopped(100);
+    turn.markAudioBlobReady(110);
     turn.markTranscriptFinal(115);
     turn.setTranscriptionOutcome("realtime");
     turn.markTranslationRequestStarted(120);
+    turn.markTranslationFetchStarted(140);
+    turn.markTranslationFetchResponseReceived(650);
     turn.markTranslationClientResponseCompleted(700);
     turn.markTranslationCompleted(700);
     turn.markTranslationStateCommitted(705);
@@ -69,6 +72,10 @@ describe("translator turn performance", () => {
       recordClickToRecordingStartedMs: 50,
       getUserMediaToRecordingStartedMs: 49,
       recordingDurationMs: 50,
+      stopToAudioBlobReadyMs: 10,
+      audioBlobReadyToTranslationFetchStartMs: 30,
+      translationFetchToResponseReceivedMs: 510,
+      translationResponseReceivedToVisibleMs: 70,
       stopToTranscriptFinalMs: 15,
       translationRequestMs: 580,
       transcriptFinalToTranslationReadyMs: 585,
@@ -105,6 +112,9 @@ describe("translator turn performance", () => {
       getUserMediaReadyAt: expect.any(String),
       mediaRecorderPreparedAt: expect.any(String),
       recordingStoppedAt: expect.any(String),
+      audioBlobReadyAt: expect.any(String),
+      translationFetchStartedAt: expect.any(String),
+      translationFetchResponseReceivedAt: expect.any(String),
       firstTranscriptDeltaAt: expect.any(String),
       transcriptFinalAt: expect.any(String),
       translationStartedAt: expect.any(String),
@@ -113,6 +123,20 @@ describe("translator turn performance", () => {
       ttsReadyAt: expect.any(String),
       playbackStartedAt: expect.any(String),
       playbackCompletedAt: expect.any(String),
+    });
+  });
+
+  it("pairs a retry response with the latest fetch start", () => {
+    const turn = new TranslatorTurnPerformance(100);
+    turn.markAudioBlobReady(110);
+    turn.markTranslationFetchStarted(120);
+    turn.markTranslationFetchResponseReceived(150);
+    turn.markTranslationFetchStarted(200);
+    expect(turn.getDiagnostics()).not.toHaveProperty("translationFetchToResponseReceivedMs");
+    turn.markTranslationFetchResponseReceived(260);
+    expect(turn.getDiagnostics()).toMatchObject({
+      translationFetchToResponseReceivedMs: 60,
+      audioBlobReadyToTranslationFetchStartMs: 90,
     });
   });
 

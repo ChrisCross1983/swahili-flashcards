@@ -175,6 +175,10 @@ const PERFORMANCE_METRICS = [
   "recordClickToRecordingStartedMs",
   "realtimeSetupMs",
   "recordingDurationMs",
+  "stopToAudioBlobReadyMs",
+  "audioBlobReadyToTranslationFetchStartMs",
+  "translationFetchToResponseReceivedMs",
+  "translationResponseReceivedToVisibleMs",
   "primaryFailureToRescueStartMs",
   "rescueTranscriptionMs",
   "rescueTranscriptToTranslationReadyMs",
@@ -301,11 +305,14 @@ export type ClassicTranslatorReportTurn = {
   mediaRecorderPreparedAt: string | null;
   recordingStartedAt: string | null;
   recordingStoppedAt: string | null;
+  audioBlobReadyAt: string | null;
   firstTranscriptDeltaAt: string | null;
   transcriptFinalAt: string | null;
   translationStartedAt: string | null;
   translationReadyAt: string | null;
   translationClientRequestStartedAt: string | null;
+  translationFetchStartedAt: string | null;
+  translationFetchResponseReceivedAt: string | null;
   translationRouteReceivedAt: string | null;
   translationAuthStartedAt: string | null;
   translationAuthCompletedAt: string | null;
@@ -516,6 +523,10 @@ export type ClassicTranslatorReportTurn = {
   sttCandidateComparison: SttCandidateComparison | null;
   learningSignal: TranslatorLearningSignal | null;
   stopToTranscriptFinalMs: number | null;
+  stopToAudioBlobReadyMs: number | null;
+  audioBlobReadyToTranslationFetchStartMs: number | null;
+  translationFetchToResponseReceivedMs: number | null;
+  translationResponseReceivedToVisibleMs: number | null;
   transcriptFinalToTranslationReadyMs: number | null;
   clientToTranslationServerMs: number | null;
   translationClientToServerMs: number | null;
@@ -872,6 +883,10 @@ function buildCriticalPath(d: Partial<TranslationDiagnostics>) {
       : null;
   return [
     criticalPathStage("record_start_overhead", d.recordButtonClickedAt, d.recordingStartedAt, d.recordClickToRecordingStartedMs),
+    criticalPathStage("recording_stop_to_blob", d.recordingStoppedAt, d.audioBlobReadyAt, d.stopToAudioBlobReadyMs),
+    criticalPathStage("audio_blob_to_translation_fetch", d.audioBlobReadyAt, d.translationFetchStartedAt, d.audioBlobReadyToTranslationFetchStartMs),
+    criticalPathStage("translation_fetch_to_response", d.translationFetchStartedAt, d.translationFetchResponseReceivedAt, d.translationFetchToResponseReceivedMs),
+    criticalPathStage("translation_response_to_visible", d.translationFetchResponseReceivedAt, d.translationVisibleAt, d.translationResponseReceivedToVisibleMs),
     criticalPathStage("realtime_transcript_finalize", d.recordingStoppedAt, d.transcriptFinalAt, d.stopToTranscriptFinalMs),
     criticalPathStage("translation_client_to_server", d.translationClientRequestStartedAt, d.translationServerRequestReceivedAt, d.clientToTranslationServerMs),
     criticalPathStage("translation_server_pre_openai", d.translationServerRequestReceivedAt, d.translationOpenAiRequestStartedAt, d.translationServerPreOpenAiMs),
@@ -1127,11 +1142,14 @@ function turnFromValues(input: {
     mediaRecorderPreparedAt: d.mediaRecorderPreparedAt ?? null,
     recordingStartedAt: d.recordingStartedAt ?? null,
     recordingStoppedAt: d.recordingStoppedAt ?? null,
+    audioBlobReadyAt: d.audioBlobReadyAt ?? null,
     firstTranscriptDeltaAt: d.firstTranscriptDeltaAt ?? null,
     transcriptFinalAt: d.transcriptFinalAt ?? null,
     translationStartedAt: d.translationStartedAt ?? null,
     translationReadyAt: d.translationReadyAt ?? null,
     translationClientRequestStartedAt: d.translationClientRequestStartedAt ?? null,
+    translationFetchStartedAt: d.translationFetchStartedAt ?? null,
+    translationFetchResponseReceivedAt: d.translationFetchResponseReceivedAt ?? null,
     translationRouteReceivedAt: d.translationRouteReceivedAt ?? null,
     translationAuthStartedAt: d.translationAuthStartedAt ?? null,
     translationAuthCompletedAt: d.translationAuthCompletedAt ?? null,
@@ -1381,6 +1399,16 @@ function turnFromValues(input: {
     sttCandidateComparison,
     learningSignal: null,
     stopToTranscriptFinalMs: finite(d.stopToTranscriptFinalMs),
+    stopToAudioBlobReadyMs: finite(d.stopToAudioBlobReadyMs),
+    audioBlobReadyToTranslationFetchStartMs: finite(
+      d.audioBlobReadyToTranslationFetchStartMs,
+    ),
+    translationFetchToResponseReceivedMs: finite(
+      d.translationFetchToResponseReceivedMs,
+    ),
+    translationResponseReceivedToVisibleMs: finite(
+      d.translationResponseReceivedToVisibleMs,
+    ),
     transcriptFinalToTranslationReadyMs: finite(
       d.transcriptFinalToTranslationReadyMs,
     ),

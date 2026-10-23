@@ -28,7 +28,9 @@ const result = {
 
 describe("translator client", () => {
   it("sends the recorded file and uses the real API response", async () => {
+    const boundaries: string[] = [];
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      boundaries.push("fetch");
       const formData = init?.body as FormData;
       const audio = formData.get("audio") as File;
       expect(audio.name).toBe("recording.webm");
@@ -42,10 +44,18 @@ describe("translator client", () => {
       requestAudioTranslation(
         new Blob([new Uint8Array(256)], { type: "audio/webm;codecs=opus" }),
         direction,
-        { fetcher },
+        {
+          fetcher,
+          onFetchStarted: () => boundaries.push("fetch-started"),
+          onResponseReceived: () => boundaries.push("response-received"),
+          onResponseCompleted: () => boundaries.push("response-completed"),
+        },
       ),
     ).resolves.toMatchObject(result);
     expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(boundaries).toEqual([
+      "fetch-started", "fetch", "response-received", "response-completed",
+    ]);
   });
 
   it("sends an authoritative realtime transcript without an audio upload", async () => {
