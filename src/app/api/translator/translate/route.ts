@@ -39,7 +39,6 @@ import type { TranslatorAudioQualityMetrics } from "@/lib/translator/audioQualit
 import type { TranscriptAnomalyMetrics } from "@/lib/translator/transcriptAnomaly";
 
 export const runtime = "nodejs";
-export const preferredRegion = "fra1";
 
 // An instance's first handler call is only a cold-start hint, not a measured
 // platform cold-start duration.
