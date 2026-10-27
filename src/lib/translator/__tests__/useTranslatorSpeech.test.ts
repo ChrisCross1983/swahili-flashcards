@@ -13,6 +13,59 @@ afterEach(() => {
 });
 
 describe("useTranslatorSpeech lifecycle", () => {
+  it("uses the clause preview flag after sentence assessment and reports the selected mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW", "true");
+    vi.stubGlobal("window", { location: { search: "" } });
+    const refs = [{ current: null }, { current: null }, { current: false }];
+    vi.doMock("react", () => ({
+      useRef: () => refs.shift(),
+      useCallback: <T,>(callback: T) => callback,
+      useEffect: (setup: () => void | (() => void)) => { setup(); },
+    }));
+    const legacyPlay = vi.fn(async () => undefined);
+    const segmentedPlay = vi.fn(async () => undefined);
+    vi.doMock("@/lib/translator/translatorSpeechPlayer", () => ({
+      TranslatorSpeechPlayer: class {
+        play = legacyPlay; dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        hasCachedAudio = vi.fn(() => false);
+      },
+    }));
+    vi.doMock("@/lib/translator/firstSentenceSpeechPlayer", () => ({
+      FirstSentenceSpeechPlayer: class {
+        play = segmentedPlay; dispose = vi.fn(); prepareForUserGesture = vi.fn();
+        hasCachedAudio = vi.fn(() => false);
+      },
+    }));
+    const { useTranslatorSpeech } = await import("@/lib/translator/useTranslatorSpeech");
+    const speech = useTranslatorSpeech();
+    const text = "Tumemaliza tu kula chakula cha mchana, sasa tunaenda kutembea kidogo, halafu tutaenda mjini kwa muda mfupi kununua vitu.";
+    const entry = {
+      id: "clause-turn", timestamp: 1, sourceLanguage: "de" as const,
+      targetLanguage: "sw" as const, originalText: "Original", translatedText: text,
+      sourceWasDetected: false,
+    };
+    const diagnostics = vi.fn();
+    await speech.playTranslation(entry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, diagnostics);
+    expect(segmentedPlay).toHaveBeenCalledWith(entry, 1, {
+      first: "Tumemaliza tu kula chakula cha mchana,",
+      rest: " sasa tunaenda kutembea kidogo, halafu tutaenda mjini kwa muda mfupi kununua vitu.",
+    }, expect.any(Object));
+    expect(legacyPlay).not.toHaveBeenCalled();
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      segmentationMode: "clause", clauseBoundary: "comma_sasa", segmentedTtsUsed: true,
+    }));
+
+    const sentenceEntry = { ...entry, id: "sentence-turn", translatedText:
+      "Leo ilikuwa siku yenye shughuli nyingi sana. Asubuhi nilikwenda sokoni na kununua matunda mengi. Baadaye nilikutana na rafiki yangu na tukazungumza kwa muda mrefu. Jioni nilirudi nyumbani, nikapika chakula, na nikapumzika baada ya siku ndefu yenye shughuli nyingi na mazungumzo mazuri pamoja na marafiki zangu wa karibu." };
+    await speech.playTranslation(sentenceEntry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, diagnostics);
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ segmentationMode: "sentence" }));
+  });
+
   it("selects the two-asset player only behind the spike flag and automatically falls back before first playback", async () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "true");
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED", "true");
@@ -75,7 +128,7 @@ describe("useTranslatorSpeech lifecycle", () => {
     await playWithDiagnostics();
     expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
     expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
-      segmentedTtsEligibilityReason: "qa_legacy_mode" });
+      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full", clauseBoundary: null });
     expect(diagnostics).toHaveBeenCalledTimes(2);
     expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
     expect(segmentedPlay).toHaveBeenCalledTimes(1);

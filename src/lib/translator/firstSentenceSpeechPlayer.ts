@@ -113,6 +113,7 @@ export class FirstSentenceSpeechPlayer {
     let audio: SegmentAudio | null = cached?.audio ?? null;
     let activeSegment: 1 | 2 | null = null;
     let firstStarted = false;
+    let firstPlaybackStartedAt: number | null = null;
     let firstEndAt: number | null = null;
     let firstDuration: number | null = null;
     let completed = false;
@@ -185,6 +186,7 @@ export class FirstSentenceSpeechPlayer {
           segmentedTtsSegment2TtfbMs: result.diagnostics.ttsOpenAiTimeToFirstByteMs ?? null,
           segmentedTtsSegment2OpenAiTotalMs: result.diagnostics.ttsOpenAiTotalMs ?? null,
           segmentedTtsSegment2ClientDownloadMs: result.diagnostics.ttsClientDownloadTotalMs ?? null,
+          segmentedTtsSegment2RequestToReadyMs: elapsed(started),
         });
         void result.serverDiagnostics?.then((diagnostics) => {
           if (!current() || !diagnostics) return;
@@ -330,6 +332,7 @@ export class FirstSentenceSpeechPlayer {
       options.onPlayRequested?.();
       const firstPlay = playAsset(audio, () => {
         firstStarted = true;
+        firstPlaybackStartedAt = performance.now();
         const now = new Date().toISOString();
         emit({
           segmentedTtsSegment1PlaybackStartedAt: now,
@@ -373,6 +376,8 @@ export class FirstSentenceSpeechPlayer {
       emit({
         segmentedTtsSegment2PlaybackCompletedAt: completedAt,
         segmentedTtsTotalPlaybackCompletedAt: completedAt,
+        segmentedTtsPlaybackDurationMs: firstPlaybackStartedAt === null
+          ? null : elapsed(firstPlaybackStartedAt),
       });
       options.onPlaybackCompleted?.({
         currentTime: firstEnd.currentTime !== null && secondEnd.currentTime !== null

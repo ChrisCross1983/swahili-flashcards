@@ -358,6 +358,8 @@ describe("classic translator QA report", () => {
       segmentedTtsEligible: true,
       segmentedTtsEligibilityReason: "eligible",
       translatorTtsQaMode: "segmented",
+      segmentationMode: "clause",
+      clauseBoundary: "comma_sasa",
       segmentedTtsUsed: true,
       segmentedTtsSharedAudioElement: true,
       segmentedTtsSegmentCount: 2,
@@ -378,6 +380,8 @@ describe("classic translator QA report", () => {
       segmentedTtsSegment2CanPlayAt: "2023-11-14T22:13:21.000Z",
       segmentedTtsSegment1TtfbMs: 500,
       segmentedTtsSegment2OpenAiTotalMs: 1_400,
+      segmentedTtsSegment2RequestToReadyMs: 1_700,
+      segmentedTtsPlaybackDurationMs: 3_200,
     };
     const report = buildClassicTranslatorReport({
       reportId: "report-qa",
@@ -578,6 +582,8 @@ describe("classic translator QA report", () => {
         fallbackReason: "realtime_not_ready_at_recording_start",
         serverTranscriptionMs: 640,
         translatorTtsQaMode: "segmented",
+        segmentationMode: "clause",
+        clauseBoundary: "comma_sasa",
         segmentedTtsEligible: true,
         segmentedTtsEligibilityReason: "eligible",
         segmentedTtsUsed: true,
@@ -603,6 +609,8 @@ describe("classic translator QA report", () => {
         segmentedTtsSegment2EndedAt: null,
         segmentedTtsSegment1TtfbMs: 500,
         segmentedTtsSegment2OpenAiTotalMs: 1_400,
+        segmentedTtsSegment2RequestToReadyMs: 1_700,
+        segmentedTtsPlaybackDurationMs: 3_200,
       });
     expect(report.turns.find((turn) => turn.turnId === "realtime-turn")?.segmentedTtsUsed).toBeNull();
     expect(report.turns.find((turn) => turn.turnId === "fallback-turn"))

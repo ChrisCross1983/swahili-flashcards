@@ -423,6 +423,8 @@ export type ClassicTranslatorReportTurn = {
   ttsAudioMimeType: string | null;
   ttsInputTextLength: number | null;
   translatorTtsQaMode: "segmented" | "legacy" | "default" | null;
+  segmentationMode: "sentence" | "clause" | "full" | null;
+  clauseBoundary: string | null;
   segmentedTtsEligible: boolean | null;
   segmentedTtsEligibilityReason: string | null;
   segmentedTtsUsed: boolean | null;
@@ -455,6 +457,8 @@ export type ClassicTranslatorReportTurn = {
   segmentedTtsGapMs: number | null;
   segmentedTtsFirstAudioStartMs: number | null;
   segmentedTtsFirstSegmentRequestToReadyMs: number | null;
+  segmentedTtsSegment2RequestToReadyMs: number | null;
+  segmentedTtsPlaybackDurationMs: number | null;
   segmentedTtsTotalPlaybackCompletedAt: string | null;
   segmentedTtsFallbackUsed: boolean | null;
   segmentedTtsFallbackReason: string | null;
@@ -1298,6 +1302,8 @@ function turnFromValues(input: {
     ttsAudioMimeType: d.ttsAudioMimeType ?? null,
     ttsInputTextLength: finite(d.ttsInputTextLength),
     translatorTtsQaMode: d.translatorTtsQaMode ?? null,
+    segmentationMode: d.segmentationMode ?? null,
+    clauseBoundary: d.clauseBoundary ?? null,
     segmentedTtsEligible: d.segmentedTtsEligible ?? null,
     segmentedTtsEligibilityReason: d.segmentedTtsEligibilityReason ?? null,
     segmentedTtsUsed: d.segmentedTtsUsed ?? null,
@@ -1332,6 +1338,8 @@ function turnFromValues(input: {
     segmentedTtsGapMs: finite(d.segmentedTtsGapMs),
     segmentedTtsFirstAudioStartMs: finite(d.segmentedTtsFirstAudioStartMs),
     segmentedTtsFirstSegmentRequestToReadyMs: finite(d.segmentedTtsFirstSegmentRequestToReadyMs),
+    segmentedTtsSegment2RequestToReadyMs: finite(d.segmentedTtsSegment2RequestToReadyMs),
+    segmentedTtsPlaybackDurationMs: finite(d.segmentedTtsPlaybackDurationMs),
     segmentedTtsTotalPlaybackCompletedAt: d.segmentedTtsTotalPlaybackCompletedAt ?? null,
     segmentedTtsFallbackUsed: d.segmentedTtsFallbackUsed ?? null,
     segmentedTtsFallbackReason: d.segmentedTtsFallbackReason ?? null,

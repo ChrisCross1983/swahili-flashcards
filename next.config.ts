@@ -24,9 +24,15 @@ const nextConfig: NextConfig = {
         process.env.VERCEL_GIT_COMMIT_REF === "spike/first-sentence-fast-tts")
         ? "true"
         : "false",
+    NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW:
+      process.env.VERCEL_ENV === "preview" &&
+      process.env.VERCEL_GIT_COMMIT_REF === "perf/translator-region-fra1-test"
+        ? "true"
+        : "false",
     NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED:
       process.env.VERCEL_ENV === "preview" &&
-      process.env.VERCEL_GIT_COMMIT_REF === "spike/first-sentence-fast-tts"
+      (process.env.VERCEL_GIT_COMMIT_REF === "spike/first-sentence-fast-tts" ||
+        process.env.VERCEL_GIT_COMMIT_REF === "perf/translator-region-fra1-test")
         ? "true"
         : "false",
   },

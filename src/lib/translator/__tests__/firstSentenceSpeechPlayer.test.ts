@@ -129,8 +129,10 @@ describe("FirstSentenceSpeechPlayer", () => {
     expect(diagnosed(h, "segmentedTtsSegment2AudioCurrentSrc")).toBe("blob:seg-2");
     expect(diagnosed(h, "segmentedTtsSharedAudioElement")).toBe(true);
     expect(h.diagnostics.some((value) => value.segmentedTtsSegment2ReadyBeforeSegment1End === true)).toBe(true);
+    expect(diagnosed(h, "segmentedTtsSegment2RequestToReadyMs")).toBeGreaterThanOrEqual(0);
     end(h.audios[0]);
     await playback;
+    expect(diagnosed(h, "segmentedTtsPlaybackDurationMs")).toBeGreaterThanOrEqual(0);
     expect(diagnosed(h, "segmentedTtsSegment2EndedAt")).toBeTruthy();
     expect(h.onPlaybackCompleted).toHaveBeenCalledOnce();
     expect(h.diagnostics.some((value) => value.segmentedTtsTotalPlaybackCompletedAt)).toBe(true);

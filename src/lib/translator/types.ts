@@ -261,6 +261,8 @@ export type TranslationDiagnostics = {
   ttsAudioMimeType?: string | null;
   ttsInputTextLength?: number;
   translatorTtsQaMode?: "segmented" | "legacy" | "default";
+  segmentationMode?: "sentence" | "clause" | "full";
+  clauseBoundary?: string | null;
   segmentedTtsEligible?: boolean;
   segmentedTtsEligibilityReason?: string;
   segmentedTtsUsed?: boolean;
@@ -293,6 +295,8 @@ export type TranslationDiagnostics = {
   segmentedTtsGapMs?: number | null;
   segmentedTtsFirstAudioStartMs?: number;
   segmentedTtsFirstSegmentRequestToReadyMs?: number;
+  segmentedTtsSegment2RequestToReadyMs?: number;
+  segmentedTtsPlaybackDurationMs?: number | null;
   segmentedTtsTotalPlaybackCompletedAt?: string;
   segmentedTtsFallbackUsed?: boolean;
   segmentedTtsFallbackReason?: string | null;
