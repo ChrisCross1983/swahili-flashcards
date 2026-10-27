@@ -25,6 +25,11 @@ export function translatorTtsQaAfterLoginUrl(search: string): string {
   return mode === "default" ? "/" : `/translator?ttsMode=${mode}`;
 }
 
+export function translatorTtsQaTranslatorUrl(search: string): string {
+  const mode = resolveTranslatorTtsQaMode(search);
+  return mode === "default" ? "/translator" : `/translator?ttsMode=${mode}`;
+}
+
 // Match the existing speech route's stricter application limit, not the model limit.
 export const MAX_CLASSIC_SPEECH_TEXT_LENGTH = 4_000;
 

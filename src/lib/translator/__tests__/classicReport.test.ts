@@ -350,6 +350,33 @@ describe("classic translator QA report", () => {
     vi.useRealTimers();
   });
 
+  it("keeps the legacy QA mode and full-text selection in the exported report", () => {
+    const legacy = entry("legacy-turn", "audio_upload_fallback");
+    legacy.diagnostics = {
+      ...legacy.diagnostics!,
+      translatorTtsQaMode: "legacy",
+      segmentationMode: "full",
+      segmentedTtsEligible: false,
+      segmentedTtsUsed: false,
+      segmentedTtsEligibilityReason: "qa_legacy_mode",
+    };
+    const report = buildClassicTranslatorReport({
+      startedAt: "2023-11-14T22:13:00.000Z",
+      userAgent: "QA Browser",
+      platform: "QA Platform",
+      currentMode: "auto",
+      ttsSpeed: 1,
+      entries: [legacy],
+      failedTurns: [],
+    });
+    expect(report.turns[0]).toMatchObject({
+      translatorTtsQaMode: "legacy",
+      segmentationMode: "full",
+      segmentedTtsUsed: false,
+      segmentedTtsEligibilityReason: "qa_legacy_mode",
+    });
+  });
+
   it("exports mixed realtime, fallback and failed turns with correct timings", () => {
     const realtime = entry("realtime-turn", "realtime");
     const fallback = entry("fallback-turn", "audio_upload_fallback");

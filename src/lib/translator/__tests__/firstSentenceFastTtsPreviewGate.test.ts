@@ -78,7 +78,7 @@ describe("first-sentence speech preview gate", () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "true");
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED", "true");
     vi.resetModules();
-    const { translatorTtsQaLoginUrl, translatorTtsQaAfterLoginUrl } =
+    const { translatorTtsQaLoginUrl, translatorTtsQaAfterLoginUrl, translatorTtsQaTranslatorUrl } =
       await import("@/lib/translator/firstSentenceFastTts");
     expect(translatorTtsQaLoginUrl("?ttsMode=segmented"))
       .toBe("/login?ttsMode=segmented");
@@ -88,22 +88,27 @@ describe("first-sentence speech preview gate", () => {
       .toBe("/login?ttsMode=legacy");
     expect(translatorTtsQaAfterLoginUrl("?ttsMode=legacy"))
       .toBe("/translator?ttsMode=legacy");
+    expect(translatorTtsQaTranslatorUrl("?ttsMode=legacy"))
+      .toBe("/translator?ttsMode=legacy");
     expect(translatorTtsQaLoginUrl("?ttsMode=invalid"))
       .toBe("/login");
     expect(translatorTtsQaAfterLoginUrl("?ttsMode=invalid"))
       .toBe("/");
     expect(translatorTtsQaLoginUrl("")).toBe("/login");
     expect(translatorTtsQaAfterLoginUrl("")).toBe("/");
+    expect(translatorTtsQaTranslatorUrl("")).toBe("/translator");
   });
 
   it("does not alter login redirects when the spike flag is off", async () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
     vi.resetModules();
-    const { translatorTtsQaLoginUrl, translatorTtsQaAfterLoginUrl } =
+    const { translatorTtsQaLoginUrl, translatorTtsQaAfterLoginUrl, translatorTtsQaTranslatorUrl } =
       await import("@/lib/translator/firstSentenceFastTts");
     expect(translatorTtsQaLoginUrl("?ttsMode=legacy"))
       .toBe("/login");
     expect(translatorTtsQaAfterLoginUrl("?ttsMode=legacy"))
       .toBe("/");
+    expect(translatorTtsQaTranslatorUrl("?ttsMode=legacy"))
+      .toBe("/translator");
   });
 });

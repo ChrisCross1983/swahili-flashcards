@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { fetchSetupCounts } from "@/lib/trainer/api";
 import { LIVE_TRANSLATOR_BETA } from "@/lib/translator/live/config";
+import { translatorTtsQaTranslatorUrl } from "@/lib/translator/firstSentenceFastTts";
 
 type Props = { ownerKey: string };
 
@@ -125,7 +126,7 @@ export default function HomeClient({ ownerKey }: Props) {
           </button>
 
           <button
-            onClick={() => router.push("/translator")}
+            onClick={() => router.push(translatorTtsQaTranslatorUrl(window.location.search))}
             className="panel text-left rounded-[32px] p-8 transition hover:shadow-warm"
           >
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-success-strong">Unterwegs</div>

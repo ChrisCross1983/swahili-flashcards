@@ -16,7 +16,9 @@ describe("useTranslatorSpeech lifecycle", () => {
   it("uses the clause preview flag after sentence assessment and reports the selected mode", async () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW", "true");
-    vi.stubGlobal("window", { location: { search: "" } });
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED", "true");
+    const location = { search: "" };
+    vi.stubGlobal("window", { location });
     const refs = [{ current: null }, { current: null }, { current: false }];
     vi.doMock("react", () => ({
       useRef: () => refs.shift(),
@@ -64,6 +66,17 @@ describe("useTranslatorSpeech lifecycle", () => {
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, diagnostics);
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ segmentationMode: "sentence" }));
+
+    location.search = "?ttsMode=legacy";
+    diagnostics.mockClear();
+    await speech.playTranslation(entry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, diagnostics);
+    expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
+    expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
+      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full", clauseBoundary: null });
+    expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
+    expect(segmentedPlay).toHaveBeenCalledTimes(2);
   });
 
   it("selects the two-asset player only behind the spike flag and automatically falls back before first playback", async () => {
