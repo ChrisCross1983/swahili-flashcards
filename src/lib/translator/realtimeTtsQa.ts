@@ -1,5 +1,16 @@
 export const REALTIME_TTS_QA_MODEL = "gpt-realtime-2.1-mini";
 export const REALTIME_TTS_QA_VOICE = "alloy";
+export const REALTIME_TTS_QA_PATH = "/translator/qa/realtime-tts";
+
+export function realtimeTtsQaLoginUrl() {
+  return `/login?next=${encodeURIComponent(REALTIME_TTS_QA_PATH)}`;
+}
+
+export function realtimeTtsQaReturnAfterLogin(search: string, previewEnabled = process.env.NEXT_PUBLIC_REALTIME_TTS_QA_PREVIEW_ENABLED === "true") {
+  return previewEnabled && new URLSearchParams(search).get("next") === REALTIME_TTS_QA_PATH
+    ? REALTIME_TTS_QA_PATH
+    : null;
+}
 
 export const REALTIME_TTS_QA_CASES = [
   { id: "de-everyday", language: "de", text: "Wir haben gerade zu Mittag gegessen, gehen jetzt noch etwas spazieren und anschließend kurz in die Stadt." },
