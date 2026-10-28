@@ -30,6 +30,11 @@ const nextConfig: NextConfig = {
         process.env.VERCEL_GIT_COMMIT_REF === "perf/translator-region-fra1-test")
         ? "true"
         : "false",
+    NEXT_PUBLIC_REALTIME_TTS_QA_PREVIEW_ENABLED:
+      process.env.VERCEL_ENV === "preview" &&
+      process.env.VERCEL_GIT_COMMIT_REF === "perf/translator-region-fra1-test"
+        ? "true"
+        : "false",
   },
 };
 
