@@ -13,9 +13,8 @@ afterEach(() => {
 });
 
 describe("useTranslatorSpeech lifecycle", () => {
-  it("uses the clause preview flag after sentence assessment and reports the selected mode", async () => {
-    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
-    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW", "true");
+  it("uses only sentence boundaries, falls back for single sentences, and honors legacy QA", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "true");
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED", "true");
     const location = { search: "" };
     vi.stubGlobal("window", { location });
@@ -43,7 +42,7 @@ describe("useTranslatorSpeech lifecycle", () => {
     const speech = useTranslatorSpeech();
     const text = "Tumemaliza tu kula chakula cha mchana, sasa tunaenda kutembea kidogo, halafu tutaenda mjini kwa muda mfupi kununua vitu.";
     const entry = {
-      id: "clause-turn", timestamp: 1, sourceLanguage: "de" as const,
+      id: "single-sentence-turn", timestamp: 1, sourceLanguage: "de" as const,
       targetLanguage: "sw" as const, originalText: "Original", translatedText: text,
       sourceWasDetected: false,
     };
@@ -51,14 +50,17 @@ describe("useTranslatorSpeech lifecycle", () => {
     await speech.playTranslation(entry, 1, true,
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, diagnostics);
-    expect(segmentedPlay).toHaveBeenCalledWith(entry, 1, {
-      first: "Tumemaliza tu kula chakula cha mchana,",
-      rest: " sasa tunaenda kutembea kidogo, halafu tutaenda mjini kwa muda mfupi kununua vitu.",
-    }, expect.any(Object));
-    expect(legacyPlay).not.toHaveBeenCalled();
+    expect(segmentedPlay).not.toHaveBeenCalled();
+    expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
-      segmentationMode: "clause", clauseBoundary: "comma_sasa", segmentedTtsUsed: true,
+      segmentationMode: "full", segmentedTtsUsed: false,
     }));
+
+    const shortEntry = { ...entry, id: "short-turn", translatedText: "Habari za asubuhi." };
+    await speech.playTranslation(shortEntry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, diagnostics);
+    expect(legacyPlay).toHaveBeenCalledWith(shortEntry, 1, expect.any(Object));
 
     const sentenceEntry = { ...entry, id: "sentence-turn", translatedText:
       "Leo ilikuwa siku yenye shughuli nyingi sana. Asubuhi nilikwenda sokoni na kununua matunda mengi. Baadaye nilikutana na rafiki yangu na tukazungumza kwa muda mrefu. Jioni nilirudi nyumbani, nikapika chakula, na nikapumzika baada ya siku ndefu yenye shughuli nyingi na mazungumzo mazuri pamoja na marafiki zangu wa karibu." };
@@ -66,17 +68,18 @@ describe("useTranslatorSpeech lifecycle", () => {
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, diagnostics);
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ segmentationMode: "sentence" }));
+    expect(segmentedPlay).toHaveBeenCalledWith(sentenceEntry, 1, expect.any(Object), expect.any(Object));
 
     location.search = "?ttsMode=legacy";
     diagnostics.mockClear();
-    await speech.playTranslation(entry, 1, true,
+    await speech.playTranslation(sentenceEntry, 1, true,
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, diagnostics);
     expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
     expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
-      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full", clauseBoundary: null });
-    expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
-    expect(segmentedPlay).toHaveBeenCalledTimes(2);
+      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full" });
+    expect(legacyPlay).toHaveBeenCalledWith(sentenceEntry, 1, expect.any(Object));
+    expect(segmentedPlay).toHaveBeenCalledTimes(1);
   });
 
   it("selects the two-asset player only behind the spike flag and automatically falls back before first playback", async () => {
@@ -141,7 +144,7 @@ describe("useTranslatorSpeech lifecycle", () => {
     await playWithDiagnostics();
     expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
     expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
-      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full", clauseBoundary: null });
+      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full" });
     expect(diagnostics).toHaveBeenCalledTimes(2);
     expect(legacyPlay).toHaveBeenCalledWith(entry, 1, expect.any(Object));
     expect(segmentedPlay).toHaveBeenCalledTimes(1);
@@ -169,9 +172,10 @@ describe("useTranslatorSpeech lifecycle", () => {
     expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "default" });
   });
 
-  it("ignores a QA mode query when the preview flag is off", async () => {
+  it("reports legacy full-text playback on the fra1 preview with sentence splitting off", async () => {
     vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS", "false");
-    vi.stubGlobal("window", { location: { search: "?ttsMode=segmented" } });
+    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED", "true");
+    vi.stubGlobal("window", { location: { search: "?ttsMode=legacy" } });
     const refs = [{ current: null }, { current: null }, { current: false }];
     vi.doMock("react", () => ({
       useRef: () => refs.shift(),
@@ -198,9 +202,15 @@ describe("useTranslatorSpeech lifecycle", () => {
       translatedText: "Leo ilikuwa siku yenye shughuli nyingi sana. " + "Asubuhi nilikwenda sokoni. ".repeat(12),
       sourceWasDetected: false,
     };
-    await speech.playTranslation(entry, 1, true);
+    const diagnostics = vi.fn();
+    await speech.playTranslation(entry, 1, true,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, diagnostics);
     expect(legacyPlay).toHaveBeenCalledOnce();
     expect(segmentedPlay).not.toHaveBeenCalled();
+    expect(diagnostics).toHaveBeenCalledWith({ translatorTtsQaMode: "legacy" });
+    expect(diagnostics).toHaveBeenCalledWith({ segmentedTtsEligible: false, segmentedTtsUsed: false,
+      segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full" });
   });
 
   it("disposes playback resources when the translator unmounts", () => {

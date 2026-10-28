@@ -1,8 +1,6 @@
 /** Conservative two-asset speech selection; deployment-scoped in next.config.ts. */
 export const FIRST_SENTENCE_FAST_TTS_FLAG =
   process.env.NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS === "true";
-export const CLAUSE_TTS_PREVIEW_FLAG =
-  process.env.NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW === "true";
 
 export type TranslatorTtsQaMode = "segmented" | "legacy" | "default";
 
@@ -66,75 +64,4 @@ export function assessFirstSentenceForSpeech(text: string): {
 
 export function splitFirstSentenceForSpeech(text: string): FirstSentenceSplit | null {
   return assessFirstSentenceForSpeech(text).split;
-}
-
-const CLAUSE_CONNECTORS = {
-  sw: ["sasa", "halafu", "kisha"],
-  de: ["jetzt", "danach", "anschließend", "dann"],
-} as const;
-
-export type ClauseSpeechAssessment = {
-  split: FirstSentenceSplit | null;
-  reason: string;
-  boundary: string | null;
-};
-
-/** Preview-only heuristic. Punctuation and keywords cannot prove clause independence. */
-export function assessClauseForSpeech(
-  text: string,
-  language: "de" | "sw",
-): ClauseSpeechAssessment {
-  const reject = (reason: string): ClauseSpeechAssessment => ({
-    split: null, reason, boundary: null,
-  });
-  if (text.length < 120) return reject("clause_text_too_short");
-  if (text.length > MAX_CLASSIC_SPEECH_TEXT_LENGTH) return reject("text_too_long");
-  if (text.trim() !== text || /[\n;:—–()[\]{}"“”]/u.test(text) ||
-      !/[.!?]$/u.test(text) || /[.!?]/u.test(text.slice(0, -1))) {
-    return reject("clause_unsafe_format");
-  }
-  // A broad veto is intentional for this pilot: do not split corrections,
-  // quantities, times, medication, or recognizable negation across requests.
-  if (/\d|[€$£]/u.test(text) ||
-      /\b(?:tzs|tsh|eur|euro|usd|shilingi|schilling|dollar|geld|preis|bei\s+uhr|saa)\b/iu.test(text) ||
-      /\b(?:dawa|daktari|kidonge|vidonge|dozi|hospitali|kliniki|arzt|ärztin|doktor|medikament|tablette|dosierung|krankenhaus)\b/iu.test(text) ||
-      /\b(?:nicht|kein\p{L}*|nie|niemals|ohne|si|sio|hapana|hakuna|bila|kamwe|usi\p{L}+|hawa\p{L}+|hatu\p{L}+|haku\p{L}+|siku\p{L}+)\b/iu.test(text)) {
-    return reject("clause_critical_fact");
-  }
-
-  const connectors: readonly string[] = CLAUSE_CONNECTORS[language];
-  const lower = text.toLocaleLowerCase();
-  const matches = connectors.flatMap((connector) => {
-    const token = `, ${connector} `;
-    const indexes: Array<{ index: number; connector: string }> = [];
-    let index = lower.indexOf(token);
-    while (index !== -1) {
-      indexes.push({ index, connector });
-      index = lower.indexOf(token, index + token.length);
-    }
-    return indexes;
-  }).sort((a, b) => a.index - b.index);
-  if (matches.length === 0) return reject("clause_no_allowed_boundary");
-  // Any other comma can be an enumeration or a dependent clause.
-  const commaIndexes = [...text.matchAll(/,/gu)].map((match) => match.index);
-  if (commaIndexes.some((index) => !matches.some((match) => match.index === index))) {
-    return reject("clause_possible_enumeration");
-  }
-
-  const { index, connector } = matches[0];
-  const first = text.slice(0, index + 1);
-  const rest = text.slice(index + 1);
-  if (first.length < 30 || !first.trim() || !rest.trim()) {
-    return reject("clause_first_too_short");
-  }
-  if (first.length / text.length > 0.4) return reject("clause_first_too_long");
-  if (rest.length < 80) return reject("clause_remainder_too_short");
-  if (/\b(?:kwa sababu|weil|dass|wenn|falls|und|oder|na|au)\s*,$/iu.test(first)) {
-    return reject("clause_incomplete_prefix");
-  }
-  return {
-    split: { first, rest },
-    reason: "eligible_clause",
-    boundary: `comma_${connector}`,
-  };
 }

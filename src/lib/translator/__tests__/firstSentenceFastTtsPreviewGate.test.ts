@@ -12,12 +12,6 @@ async function qaFlag() {
   return config.env?.NEXT_PUBLIC_TRANSLATOR_TTS_QA_ENABLED;
 }
 
-async function clauseFlag() {
-  vi.resetModules();
-  const config = (await import("../../../../next.config")).default;
-  return config.env?.NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW;
-}
-
 describe("first-sentence speech preview gate", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -29,7 +23,6 @@ describe("first-sentence speech preview gate", () => {
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "spike/first-sentence-fast-tts");
     expect(await spikeFlag()).toBe("true");
     expect(await qaFlag()).toBe("true");
-    expect(await clauseFlag()).toBe("false");
   });
 
   it("enables the qualified path on production main", async () => {
@@ -37,21 +30,17 @@ describe("first-sentence speech preview gate", () => {
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "main");
     expect(await spikeFlag()).toBe("true");
     expect(await qaFlag()).toBe("false");
-    expect(await clauseFlag()).toBe("false");
   });
 
-  it("enables clauses only on the isolated fra1 preview", async () => {
+  it("keeps only QA navigation enabled on the isolated fra1 preview", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "perf/translator-region-fra1-test");
     expect(await spikeFlag()).toBe("false");
-    expect(await clauseFlag()).toBe("true");
     expect(await qaFlag()).toBe("true");
 
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "main");
-    vi.stubEnv("NEXT_PUBLIC_TRANSLATOR_CLAUSE_TTS_PREVIEW", "true");
     expect(await spikeFlag()).toBe("true");
-    expect(await clauseFlag()).toBe("false");
     expect(await qaFlag()).toBe("false");
   });
 

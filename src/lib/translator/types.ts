@@ -261,8 +261,7 @@ export type TranslationDiagnostics = {
   ttsAudioMimeType?: string | null;
   ttsInputTextLength?: number;
   translatorTtsQaMode?: "segmented" | "legacy" | "default";
-  segmentationMode?: "sentence" | "clause" | "full";
-  clauseBoundary?: string | null;
+  segmentationMode?: "sentence" | "full";
   segmentedTtsEligible?: boolean;
   segmentedTtsEligibilityReason?: string;
   segmentedTtsUsed?: boolean;

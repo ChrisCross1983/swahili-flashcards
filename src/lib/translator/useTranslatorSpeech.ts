@@ -5,7 +5,7 @@ import type { TranslationDiagnostics, TranslationEntry } from "@/lib/translator/
 import { requestTranslatorSpeech } from "@/lib/translator/speechClient";
 import type { TranslatorSpeechGenerationDiagnostics } from "@/lib/translator/speechClient";
 import { TranslatorSpeechPlayer } from "@/lib/translator/translatorSpeechPlayer";
-import { CLAUSE_TTS_PREVIEW_FLAG, FIRST_SENTENCE_FAST_TTS_FLAG, assessClauseForSpeech, assessFirstSentenceForSpeech, resolveTranslatorTtsQaMode } from "@/lib/translator/firstSentenceFastTts";
+import { FIRST_SENTENCE_FAST_TTS_FLAG, assessFirstSentenceForSpeech, resolveTranslatorTtsQaMode } from "@/lib/translator/firstSentenceFastTts";
 import { FirstSegmentNotStartedError, FirstSentenceSpeechPlayer } from "@/lib/translator/firstSentenceSpeechPlayer";
 import { createCorrelationId } from "@/lib/translator/performanceHeaders";
 import type {
@@ -55,7 +55,7 @@ export function useTranslatorSpeech() {
     // development. Recreate the player after that simulated cleanup instead
     // of leaving the hook bound to the disposed first instance.
     if (playerRef.current === null) playerRef.current = createPlayer();
-    if ((FIRST_SENTENCE_FAST_TTS_FLAG || CLAUSE_TTS_PREVIEW_FLAG) && segmentedPlayerRef.current === null) {
+    if (FIRST_SENTENCE_FAST_TTS_FLAG && segmentedPlayerRef.current === null) {
       segmentedPlayerRef.current = createSegmentedPlayer();
     }
     return () => {
@@ -106,19 +106,15 @@ export function useTranslatorSpeech() {
     };
     const mode = qaMode();
     onSegmentedDiagnostics?.({ translatorTtsQaMode: mode });
-    if ((FIRST_SENTENCE_FAST_TTS_FLAG || CLAUSE_TTS_PREVIEW_FLAG) && mode !== "legacy") {
+    if (FIRST_SENTENCE_FAST_TTS_FLAG && mode !== "legacy") {
       const sentence = assessFirstSentenceForSpeech(entry.translatedText);
-      const clause = !sentence.split && sentence.reason === "no_clear_sentence_boundary" && CLAUSE_TTS_PREVIEW_FLAG
-        ? assessClauseForSpeech(entry.translatedText, entry.targetLanguage)
-        : null;
-      const split = sentence.split ?? clause?.split ?? null;
+      const { split, reason } = sentence;
       const segmentedPlayer = segmentedPlayerRef.current;
       onSegmentedDiagnostics?.({
         segmentedTtsEligible: split !== null,
         segmentedTtsUsed: split !== null && segmentedPlayer !== null,
-        segmentedTtsEligibilityReason: sentence.split ? sentence.reason : clause?.reason ?? sentence.reason,
-        segmentationMode: sentence.split ? "sentence" : clause?.split ? "clause" : "full",
-        clauseBoundary: clause?.split ? clause.boundary : null,
+        segmentedTtsEligibilityReason: reason,
+        segmentationMode: split ? "sentence" : "full",
       });
       if (split && segmentedPlayer) {
         activeSegmentedRef.current = true;
@@ -131,13 +127,12 @@ export function useTranslatorSpeech() {
         });
       }
     }
-    if ((FIRST_SENTENCE_FAST_TTS_FLAG || CLAUSE_TTS_PREVIEW_FLAG) && mode === "legacy") {
+    if (mode === "legacy") {
       onSegmentedDiagnostics?.({ segmentedTtsEligible: false, segmentedTtsUsed: false,
-        segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full", clauseBoundary: null });
-    }
-    if (!FIRST_SENTENCE_FAST_TTS_FLAG && !CLAUSE_TTS_PREVIEW_FLAG) {
+        segmentedTtsEligibilityReason: "qa_legacy_mode", segmentationMode: "full" });
+    } else if (!FIRST_SENTENCE_FAST_TTS_FLAG) {
       onSegmentedDiagnostics?.({ segmentedTtsEligible: false, segmentedTtsUsed: false,
-        segmentedTtsEligibilityReason: "feature_disabled", segmentationMode: "full", clauseBoundary: null });
+        segmentedTtsEligibilityReason: "feature_disabled", segmentationMode: "full" });
     }
     activeSegmentedRef.current = false;
     return player.play(entry, speed, options);
@@ -166,12 +161,8 @@ export function useTranslatorSpeech() {
   }, []);
 
   const hasCachedTranslation = useCallback((entry: TranslationEntry, speed: number) => {
-    const sentence = assessFirstSentenceForSpeech(entry.translatedText);
-    const clause = !sentence.split && sentence.reason === "no_clear_sentence_boundary" && CLAUSE_TTS_PREVIEW_FLAG
-      ? assessClauseForSpeech(entry.translatedText, entry.targetLanguage)
-      : null;
-    return (FIRST_SENTENCE_FAST_TTS_FLAG || CLAUSE_TTS_PREVIEW_FLAG) && qaMode() !== "legacy" &&
-      (sentence.split !== null || clause?.split != null)
+    return FIRST_SENTENCE_FAST_TTS_FLAG && qaMode() !== "legacy" &&
+      assessFirstSentenceForSpeech(entry.translatedText).split !== null
       ? segmentedPlayerRef.current?.hasCachedAudio(entry.id, speed) === true
       : playerRef.current?.hasCachedAudio(entry.id, speed) === true;
   }, []);
