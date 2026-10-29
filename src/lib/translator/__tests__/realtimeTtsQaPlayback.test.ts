@@ -45,6 +45,14 @@ describe("QA WebRTC playback", () => {
     s.time(1500); s.event("response.output_audio.done"); expect(s.playback.data.requestToCompleteAudioMs).toBe(500);
     s.event("output_audio_buffer.stopped"); expect(s.playback.data.playbackEndedAt).toBeNull();
   });
+  it("does not interrupt an already playing live track at output start", async () => {
+    const s = setup(); s.bind(); await Promise.resolve(); s.request();
+    const attempts = s.audio.play.mock.calls.length;
+    s.event("output_audio_buffer.started"); s.event("output_audio_buffer.started");
+    expect(s.audio.pause).not.toHaveBeenCalled();
+    expect(s.audio.play).toHaveBeenCalledTimes(attempts);
+    expect(s.playback.data.firstAudiblePlaybackAt).toBeNull();
+  });
   it("cleans tracks, element and listeners and ignores pending play resolutions", async () => {
     const s = setup(); s.bind(); s.request(); s.playback.dispose(); const calls = s.changed.mock.calls.length;
     s.audio.dispatchEvent(new Event("playing")); s.track.dispatchEvent(new Event("unmute"));

@@ -25,10 +25,10 @@ describe("first-sentence speech preview gate", () => {
     expect(await qaFlag()).toBe("true");
   });
 
-  it("enables the qualified path on production main", async () => {
+  it("disables segmentation on production main", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "main");
-    expect(await spikeFlag()).toBe("true");
+    expect(await spikeFlag()).toBe("false");
     expect(await qaFlag()).toBe("false");
   });
 
@@ -40,7 +40,7 @@ describe("first-sentence speech preview gate", () => {
 
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "main");
-    expect(await spikeFlag()).toBe("true");
+    expect(await spikeFlag()).toBe("false");
     expect(await qaFlag()).toBe("false");
   });
 

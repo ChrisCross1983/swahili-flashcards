@@ -116,8 +116,8 @@ export class RealtimeTtsQaPlayback {
       this.data.firstAudioReceivedAt ??= this.iso();
       this.data.requestToFirstAudioMs ??= this.now() - this.requestedAt;
       this.status("Audio empfangen (Server-Output gestartet)");
-      // Setup may already have been playing silence: force a new real playing event.
-      this.audio.pause(); void this.play("output-start");
+      // Never interrupt a live track just to manufacture a playing timestamp.
+      if (this.audio.paused) void this.play("output-start");
     }
     if (event.type === "response.output_audio_transcript.delta" && typeof event.delta === "string") this.data.outputTranscript += event.delta;
     if (event.type === "response.output_audio_transcript.done" && typeof event.transcript === "string") this.data.outputTranscript = event.transcript;

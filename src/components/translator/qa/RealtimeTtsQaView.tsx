@@ -1,5 +1,6 @@
 "use client";
 
+import ReportTextExport from "../ReportTextExport";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   REALTIME_TTS_QA_CASES,
@@ -157,6 +158,7 @@ export default function RealtimeTtsQaView() {
     <button type="button" onClick={() => void runRef.current?.playback.play("manual")} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Audio abspielen</button>
     <audio ref={audioRef} controls autoPlay playsInline className="w-full" />
     <h2 className="text-xl font-semibold">Messungen dieser Seite</h2>
+    <ReportTextExport getText={() => JSON.stringify(reports, null, 2)} filename="realtime-tts-qa.txt" />
     <p className="text-sm">Playing bezeichnet ein echtes Browser-Ereignis, keinen Nachweis hörbaren Tons. FirstAudio stammt aus dem response-spezifischen Server-Output-Start; Completion und Buffer-Stopped belegen keine lokale Wiedergabe. Ohne echtes ended bleibt playbackEndedAt null. Ein Live-Stream ist nach Ende nicht erneut abspielbar.</p>
     <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-100 p-3 text-sm">{JSON.stringify(reports, null, 2)}</pre>
   </main>;

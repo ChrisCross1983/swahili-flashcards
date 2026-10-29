@@ -15,11 +15,8 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA:
       process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
       process.env.VERCEL_GIT_COMMIT_SHA,
-    // The qualified fast path is enabled on production main. The spike preview
-    // remains available for comparison; unrelated previews and local builds stay off.
+    // Continuous speech is the production default; segmentation remains preview-only.
     NEXT_PUBLIC_TRANSLATOR_FIRST_SENTENCE_FAST_TTS:
-      (process.env.VERCEL_ENV === "production" &&
-        process.env.VERCEL_GIT_COMMIT_REF === "main") ||
       (process.env.VERCEL_ENV === "preview" &&
         process.env.VERCEL_GIT_COMMIT_REF === "spike/first-sentence-fast-tts")
         ? "true"
