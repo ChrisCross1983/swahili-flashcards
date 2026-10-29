@@ -5,9 +5,10 @@ import {
   REALTIME_TTS_QA_CASES,
   REALTIME_TTS_QA_MODEL,
   REALTIME_TTS_QA_VOICE,
-  disposeRealtimeTtsQaRun,
   realtimeTtsQaResponse,
 } from "@/lib/translator/realtimeTtsQa";
+
+import { RealtimeTtsQaPlayback } from "@/lib/translator/realtimeTtsQaPlayback";
 
 type Measurement = {
   caseId: string;
@@ -18,39 +19,36 @@ type Measurement = {
   voice: string;
   transport: "webrtc";
   sessionStartAt: string;
-  requestStartAt?: string;
-  responseStartAt?: string;
-  firstAudioReceivedAt?: string;
-  firstAudiblePlaybackAt?: string;
-  completeAudioReceivedAt?: string;
-  playbackEndedAt?: string;
-  outputTranscript?: string;
-  transcriptExactMatch?: boolean;
-  error?: string;
-  aborted?: boolean;
-  totalLatencyMs?: number;
+
 };
 
-type ActiveRun = { controller: AbortController; peer: RTCPeerConnection; timer?: number; audio: HTMLAudioElement };
+type ActiveRun = { controller: AbortController; peer: RTCPeerConnection; playback: RealtimeTtsQaPlayback };
+type Report = Measurement & RealtimeTtsQaPlayback["data"] & { transcriptExactMatch: boolean };
 
 export default function RealtimeTtsQaView() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const runRef = useRef<ActiveRun | null>(null);
   const [busy, setBusy] = useState(false);
-  const [report, setReport] = useState<Measurement | null>(null);
-  const [reports, setReports] = useState<Measurement[]>([]);
+  const [report, setReport] = useState<Report | null>(null);
+  const [reports, setReports] = useState<Report[]>([]);
   const [message, setMessage] = useState("Bereit");
-  const playbackActiveRef = useRef(false);
 
   const stop = useCallback(() => {
     const run = runRef.current;
     if (!run) return;
     runRef.current = null;
-    disposeRealtimeTtsQaRun(run);
+    run.controller.abort();
+    run.peer.ontrack = null;
+    run.peer.onconnectionstatechange = null;
+    run.playback.dispose();
+    run.peer.close();
     setBusy(false);
   }, []);
 
-  useEffect(() => () => stop(), [stop]);
+  useEffect(() => {
+    window.addEventListener("pagehide", stop);
+    return () => { window.removeEventListener("pagehide", stop); stop(); };
+  }, [stop]);
   useEffect(() => {
     if (report) setReports((previous) => {
       const index = previous.findIndex((item) => item.sessionStartAt === report.sessionStartAt);
@@ -65,10 +63,6 @@ export default function RealtimeTtsQaView() {
     if (!audio) return;
     const controller = new AbortController();
     const peer = new RTCPeerConnection();
-    const run: ActiveRun = { controller, peer, audio };
-    runRef.current = run;
-    playbackActiveRef.current = false;
-    const started = performance.now();
     const metrics: Measurement = {
       caseId: testCase.id,
       language: testCase.language,
@@ -79,19 +73,14 @@ export default function RealtimeTtsQaView() {
       transport: "webrtc",
       sessionStartAt: new Date().toISOString(),
     };
-    const update = () => { if (runRef.current === run) setReport({ ...metrics }); };
-    setReport({ ...metrics });
+    const playback = new RealtimeTtsQaPlayback(audio, crypto.randomUUID(), () => {
+      if (runRef.current === run) setReport({ ...metrics, ...playback.data, debug: [...playback.data.debug], transcriptExactMatch: playback.data.outputTranscript === testCase.text });
+    }, setMessage);
+    const run: ActiveRun = { controller, peer, playback };
+    runRef.current = run;
     setBusy(true);
     setMessage("Verbinde…");
-    const recordAudibleStart = () => {
-      if (playbackActiveRef.current && metrics.firstAudioReceivedAt && !metrics.firstAudiblePlaybackAt) {
-        metrics.firstAudiblePlaybackAt = new Date().toISOString();
-        metrics.totalLatencyMs = Math.round(performance.now() - started);
-        update();
-      }
-    };
-    audio.onplaying = () => { playbackActiveRef.current = true; recordAudibleStart(); };
-    audio.onended = () => { metrics.playbackEndedAt = new Date().toISOString(); update(); };
+    playback.prime(); // Synchronous user gesture, before any fetch/SDP await.
 
     try {
       const session = await fetch("/api/translator/qa/realtime-tts/session", {
@@ -103,47 +92,19 @@ export default function RealtimeTtsQaView() {
 
       // This test deliberately creates no microphone track.
       peer.addTransceiver("audio", { direction: "recvonly" });
-      peer.ontrack = (event) => {
-        if (runRef.current !== run) return;
-        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void audio.play().catch(() => setMessage("Autoplay blockiert: Audio unten manuell starten."));
-        run.timer = window.setInterval(async () => {
-          if (runRef.current !== run || metrics.firstAudioReceivedAt) return;
-          const stats = await peer.getStats();
-          stats.forEach((stat) => {
-            if (stat.type === "inbound-rtp" && stat.kind === "audio" && stat.bytesReceived > 0 && !metrics.firstAudioReceivedAt) {
-              metrics.firstAudioReceivedAt = new Date().toISOString();
-              update();
-              recordAudibleStart();
-            }
-          });
-        }, 100);
+      peer.ontrack = (event) => { if (runRef.current === run) playback.bind(event); };
+      peer.onconnectionstatechange = () => {
+        if (runRef.current === run && peer.connectionState === "failed") setMessage("WebRTC-Verbindung fehlgeschlagen");
       };
       const channel = peer.createDataChannel("oai-events");
       channel.onmessage = ({ data }) => {
         if (runRef.current !== run) return;
         try {
           const event = JSON.parse(String(data)) as Record<string, unknown>;
-          if (event.type === "session.created") setMessage("Session bereit");
-          if (event.type === "response.created") { metrics.responseStartAt = new Date().toISOString(); update(); }
-          if (event.type === "response.output_audio_transcript.delta" && typeof event.delta === "string") {
-            metrics.outputTranscript = (metrics.outputTranscript ?? "") + event.delta;
-            update();
-          }
-          if (event.type === "response.output_audio_transcript.done" && typeof event.transcript === "string") {
-            metrics.outputTranscript = event.transcript;
-            metrics.transcriptExactMatch = event.transcript === metrics.inputText;
-            update();
-          }
-          if (event.type === "response.output_audio.done") { metrics.completeAudioReceivedAt = new Date().toISOString(); update(); }
-          if (event.type === "response.done") {
-            const response = event.response as { status?: string } | undefined;
-            if (response?.status !== "completed") { metrics.error = `Response: ${response?.status ?? "unknown"}`; update(); }
-            setMessage("Antwort abgeschlossen");
-          }
-          if (event.type === "error") { metrics.error = "Realtime-Sessionfehler"; setMessage(metrics.error); update(); }
-        } catch { metrics.error = "Ungültiges Session-Event"; update(); }
+          playback.event(event);
+        } catch { setMessage("Ungültiges Session-Event"); }
       };
+      controller.signal.addEventListener("abort", () => { channel.onmessage = null; channel.close(); }, { once: true });
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       const sdp = await fetch("https://api.openai.com/v1/realtime/calls", {
@@ -155,21 +116,30 @@ export default function RealtimeTtsQaView() {
       if (!sdp.ok) throw new Error(`WebRTC HTTP ${sdp.status}`);
       await peer.setRemoteDescription({ type: "answer", sdp: await sdp.text() });
       if (channel.readyState !== "open") await new Promise<void>((resolve, reject) => {
-        channel.addEventListener("open", () => resolve(), { once: true });
-        channel.addEventListener("error", () => reject(new Error("Data Channel Fehler")), { once: true });
-        controller.signal.addEventListener("abort", () => reject(new Error("Abgebrochen")), { once: true });
+        const cleanup = () => {
+          channel.removeEventListener("open", opened);
+          channel.removeEventListener("error", failed);
+          controller.signal.removeEventListener("abort", aborted);
+        };
+        const opened = () => { cleanup(); resolve(); };
+        const failed = () => { cleanup(); reject(new Error("Data Channel Fehler")); };
+        const aborted = () => { cleanup(); reject(new Error("Abgebrochen")); };
+        channel.addEventListener("open", opened);
+        channel.addEventListener("error", failed);
+        controller.signal.addEventListener("abort", aborted, { once: true });
+        if (controller.signal.aborted) aborted();
       });
       if (runRef.current !== run) return;
-      metrics.requestStartAt = new Date().toISOString();
-      update();
-      channel.send(JSON.stringify(realtimeTtsQaResponse(testCase.text, testCase.language)));
+      const request = realtimeTtsQaResponse(testCase.text, testCase.language);
+      playback.request();
+      channel.send(JSON.stringify({ ...request, response: { ...request.response, metadata: { qaRunId: playback.runId } } }));
       setMessage("Audio wird erzeugt…");
     } catch (error) {
       if (runRef.current !== run) return;
-      metrics.aborted = controller.signal.aborted;
-      metrics.error = error instanceof Error ? error.message : "Unbekannter Fehler";
-      setReport({ ...metrics });
-      setMessage(metrics.error);
+      playback.data.aborted = controller.signal.aborted;
+      playback.data.error = error instanceof Error ? error.message : "Unbekannter Fehler";
+      setReport({ ...metrics, ...playback.data, transcriptExactMatch: false });
+      setMessage(playback.data.error);
       stop();
     }
   };
@@ -183,11 +153,11 @@ export default function RealtimeTtsQaView() {
       <p>{testCase.text}</p>
       <button type="button" disabled={busy} onClick={() => void start(testCase)} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">Sprechen</button>
     </div>)}</div>
-    <button type="button" onClick={() => { if (report) setReport({ ...report, aborted: !report.completeAudioReceivedAt }); stop(); }} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Stoppen / Abbrechen</button>
-    <button type="button" onClick={() => setReport((current) => current ? { ...current, playbackEndedAt: new Date().toISOString() } : current)} disabled={!report?.firstAudiblePlaybackAt} className="rounded border px-3 py-2 disabled:opacity-50">Wiedergabe hörbar beendet</button>
-    <audio ref={audioRef} controls playsInline className="w-full" />
+    <button type="button" onClick={() => { if (report) setReport({ ...report, aborted: !report.serverOutputBufferStoppedAt }); stop(); }} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Stoppen / Abbrechen</button>
+    <button type="button" onClick={() => void runRef.current?.playback.play("manual")} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Audio abspielen</button>
+    <audio ref={audioRef} controls autoPlay playsInline className="w-full" />
     <h2 className="text-xl font-semibold">Messungen dieser Seite</h2>
-    <p className="text-sm">„Erstes hörbares Playback“ ist aus empfangenen Audiopaketen und dem Browser-Playing-Ereignis geschätzt. „Audio vollständig“ stammt aus dem Realtime-Output-Done-Ereignis; für WebRTC gibt es keinen separaten Nachweis, dass jedes Paket schon abgespielt wurde. Das Ausgabe-Transcript ersetzt keine Hörprüfung.</p>
+    <p className="text-sm">Playing bezeichnet ein echtes Browser-Ereignis, keinen Nachweis hörbaren Tons. FirstAudio stammt aus dem response-spezifischen Server-Output-Start; Completion und Buffer-Stopped belegen keine lokale Wiedergabe. Ohne echtes ended bleibt playbackEndedAt null. Ein Live-Stream ist nach Ende nicht erneut abspielbar.</p>
     <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-100 p-3 text-sm">{JSON.stringify(reports, null, 2)}</pre>
   </main>;
 }

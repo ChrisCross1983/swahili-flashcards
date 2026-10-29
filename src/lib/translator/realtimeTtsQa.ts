@@ -53,7 +53,8 @@ export function realtimeTtsQaResponse(text: string, language: "de" | "sw") {
   return {
     type: "response.create",
     response: {
-      conversation: "none",
+      // One fresh session per test: use the standard WebRTC output buffer.
+      conversation: "auto",
       output_modalities: ["audio"],
       tools: [],
       instructions,

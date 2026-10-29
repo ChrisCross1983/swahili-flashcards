@@ -14,12 +14,12 @@ describe("isolated realtime TTS QA", () => {
     expect(realtimeTtsQaPreviewEnabled({})).toBe(false);
   });
 
-  it("sends the input unchanged as a single out-of-band audio response", () => {
+  it("sends the input unchanged as a single audio response on the standard WebRTC output path", () => {
     for (const testCase of REALTIME_TTS_QA_CASES) {
       const event = realtimeTtsQaResponse(testCase.text, testCase.language);
       expect(event.response.input[0].content[0].text).toBe(testCase.text);
       expect(event.response.output_modalities).toEqual(["audio"]);
-      expect(event.response.conversation).toBe("none");
+      expect(event.response.conversation).toBe("auto");
       expect(event.response.tools).toEqual([]);
     }
     expect(REALTIME_TTS_QA_CASES.filter((item) => item.language === "de")).toHaveLength(5);
