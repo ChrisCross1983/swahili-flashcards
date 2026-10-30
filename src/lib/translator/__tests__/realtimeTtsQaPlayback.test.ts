@@ -62,3 +62,26 @@ describe("QA WebRTC playback", () => {
     expect(s.playback.data.totalLatencyMs).toBeNull();
   });
 });
+
+describe("response starts only after remote readiness", () => {
+  it("does not accept primer playing, and waits for remote play plus playing", async () => {
+    const s = setup(); s.playback.prime(); s.audio.dispatchEvent(new Event("playing"));
+    await Promise.resolve();
+    const ready = vi.fn(); const controller = new AbortController();
+    const waiting = s.playback.waitUntilReady(controller.signal).then(ready);
+    await Promise.resolve(); expect(ready).not.toHaveBeenCalled();
+    s.bind(); await Promise.resolve(); expect(ready).not.toHaveBeenCalled();
+    s.audio.dispatchEvent(new Event("playing")); await waiting;
+    expect(ready).toHaveBeenCalledOnce();
+    expect(s.playback.data.firstAudiblePlaybackAt).toBeNull();
+    expect(s.playback.data.firstResponseMediaEventAt).toBeNull();
+    expect(s.audio.srcObject).toBe(s.stream);
+  });
+  it("rejects pending readiness on abort and dispose", async () => {
+    const s = setup(); const controller = new AbortController();
+    const waiting = s.playback.waitUntilReady(controller.signal);
+    controller.abort(); await expect(waiting).rejects.toThrow("Abgebrochen");
+    const another = s.playback.waitUntilReady(new AbortController().signal);
+    s.playback.dispose(); await expect(another).rejects.toThrow("Abgebrochen");
+  });
+});

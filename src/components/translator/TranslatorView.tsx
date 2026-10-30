@@ -1,6 +1,5 @@
 "use client";
 
-import ReportTextExport from "./ReportTextExport";
 import Link from "next/link";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import TranslationCard from "@/components/translator/TranslationCard";
@@ -3383,7 +3382,6 @@ export default function TranslatorView({
             </div>
           ) : null}
           <div className="mt-4">
-              <ReportTextExport getText={() => JSON.stringify(buildCurrentReport(), null, 2)} filename="translator-report.txt" />
               <button
                 type="button"
                 className="btn btn-secondary min-h-12 w-full"

@@ -1,6 +1,13 @@
 /** One response per QA session. Media events are never inferred from RTP silence. */
 export class RealtimeTtsQaPlayback {
   readonly data = {
+    remotePlaybackReadyAt: null as string | null,
+    remoteTrackActiveAfterRequestAt: null as string | null,
+    firstResponseMediaEventAt: null as string | null,
+    firstResponseMediaEvent: null as string | null,
+    responsePlayingAt: null as string | null,
+    outputAudioBufferStartedAt: null as string | null,
+    audibleStartMeasurement: "not_observable" as const,
     requestStartAt: null as string | null, responseStartAt: null as string | null,
     responseId: null as string | null, firstAudioReceivedAt: null as string | null,
     firstAudiblePlaybackAt: null as string | null, completeAudioReceivedAt: null as string | null,
@@ -15,6 +22,33 @@ export class RealtimeTtsQaPlayback {
   private stream: MediaStream | null = null;
   private listeners: Array<() => void> = [];
   private audioActive = false;
+  private remotePlaying = false;
+  private remotePlayResolved = false;
+  private readiness = new EventTarget();
+  private checkReady() {
+    if (this.disposed || !this.stream || !this.remotePlaying || !this.remotePlayResolved || this.audio.paused) return;
+    this.data.remotePlaybackReadyAt ??= this.iso();
+    this.readiness.dispatchEvent(new Event("ready"));
+    this.changed();
+  }
+  waitUntilReady(signal: AbortSignal): Promise<void> {
+    if (signal.aborted || this.disposed) return Promise.reject(new Error("Abgebrochen"));
+    if (this.data.remotePlaybackReadyAt && !this.audio.paused) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); this.readiness.removeEventListener("ready", ready); this.readiness.removeEventListener("disposed", abort); signal.removeEventListener("abort", abort); };
+      const ready = () => { cleanup(); resolve(); };
+      const abort = () => { cleanup(); reject(new Error("Abgebrochen")); };
+      const timer = setTimeout(() => { cleanup(); reject(new Error("Remote-Playback nicht bereit; Test erneut starten und Audio freigeben.")); }, 20000);
+      this.readiness.addEventListener("ready", ready);
+      this.readiness.addEventListener("disposed", abort);
+      signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+  private responseMediaEvent(name: string) {
+    if (this.requestedAt === null || !this.stream) return;
+    this.data.firstResponseMediaEventAt ??= this.iso();
+    this.data.firstResponseMediaEvent ??= name;
+  }
   constructor(private audio: HTMLAudioElement, readonly runId: string,
     private changed: () => void, private status: (value: string) => void,
     private now = () => Date.now()) {
@@ -25,10 +59,13 @@ export class RealtimeTtsQaPlayback {
     for (const name of ["playing", "waiting", "stalled", "error", "ended", "pause"]) {
       this.listen(audio, name, () => {
         this.log(name);
+        if (name === "playing" && this.stream && this.audio.srcObject === this.stream) {
+          this.remotePlaying = true; this.checkReady(); this.responseMediaEvent("playing");
+        }
         if (name === "playing" && this.requestedAt !== null && this.data.responseId && this.audioActive) {
-          this.data.firstAudiblePlaybackAt ??= this.iso();
+          this.data.responsePlayingAt ??= this.iso();
           this.data.requestToPlayingMs ??= this.now() - this.requestedAt;
-          this.data.totalLatencyMs = this.data.requestToPlayingMs;
+          // A browser event cannot establish physical audibility.
           this.status("Wiedergabe läuft (Browser-playing)");
         }
         if (name === "ended" && this.data.firstAudioReceivedAt) this.data.playbackEndedAt = this.iso();
@@ -74,7 +111,13 @@ export class RealtimeTtsQaPlayback {
     this.audio.loop = false;
     this.audio.srcObject = this.stream;
     this.log("ontrack", { trackId: event.track.id });
-    for (const name of ["mute", "unmute", "ended"]) this.listen(event.track, name, () => this.log(`track:${name}`));
+    for (const name of ["mute", "unmute", "ended"]) this.listen(event.track, name, () => {
+      if (name === "unmute" && this.requestedAt !== null) {
+        this.data.remoteTrackActiveAfterRequestAt ??= this.iso();
+        this.responseMediaEvent("track:unmute");
+      }
+      this.log(`track:${name}`);
+    });
     void this.play("remote-track");
   }
   async play(reason = "manual") {
@@ -84,6 +127,10 @@ export class RealtimeTtsQaPlayback {
     this.log("play-attempt", { reason });
     try {
       await this.audio.play();
+      if (this.disposed) return;
+      if (reason !== "prime" && this.stream && this.audio.srcObject === this.stream) {
+        this.remotePlayResolved = true; this.checkReady();
+      }
       this.log("play-success", { reason });
     } catch (error) {
       if (this.disposed) return;
@@ -96,7 +143,7 @@ export class RealtimeTtsQaPlayback {
     }
   }
   request() {
-    this.requestedAt = this.now(); this.data.requestStartAt = this.iso(); this.changed();
+    this.requestedAt = this.now(); this.data.requestStartAt = this.iso(); this.log("response-request-sent");
   }
   event(event: Record<string, unknown>) {
     if (this.disposed) return;
@@ -113,6 +160,7 @@ export class RealtimeTtsQaPlayback {
     this.log(String(event.type));
     if (event.type === "output_audio_buffer.started") {
       this.audioActive = true;
+      this.data.outputAudioBufferStartedAt ??= this.iso();
       this.data.firstAudioReceivedAt ??= this.iso();
       this.data.requestToFirstAudioMs ??= this.now() - this.requestedAt;
       this.status("Audio empfangen (Server-Output gestartet)");
@@ -138,6 +186,7 @@ export class RealtimeTtsQaPlayback {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.readiness.dispatchEvent(new Event("disposed"));
     this.listeners.forEach(remove => remove()); this.listeners = [];
     this.stream?.getTracks().forEach(track => track.stop());
     this.audio.pause(); this.audio.srcObject = null; this.audio.loop = false;
