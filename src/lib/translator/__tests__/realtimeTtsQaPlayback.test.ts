@@ -8,14 +8,14 @@ class Audio extends EventTarget {
   pause = vi.fn(() => { this.paused = true; }); load = vi.fn(); setAttribute = vi.fn(); removeAttribute = vi.fn();
 }
 function setup() {
-  const audio = new Audio(); const status = vi.fn(); const changed = vi.fn(); let time = 1000;
-  const playback = new RealtimeTtsQaPlayback(audio as unknown as HTMLAudioElement, "run", changed, status, () => time);
+  const audio = new Audio(); const status = vi.fn(); const changed = vi.fn(); const completed = vi.fn(); let time = 1000;
+  const playback = new RealtimeTtsQaPlayback(audio as unknown as HTMLAudioElement, "run", changed, status, () => time, completed);
   const track = Object.assign(new EventTarget(), { kind: "audio", id: "track", enabled: false, muted: false, readyState: "live", stop: vi.fn() });
   const stream = { id: "remote", getAudioTracks: () => [track], getTracks: () => [track] };
   const bind = () => playback.bind({ track, streams: [stream] } as unknown as RTCTrackEvent);
   const request = () => { playback.request(); playback.event({ type: "response.created", response: { id: "response", metadata: { qaRunId: "run" } } }); };
   const event = (type: string, response_id = "response") => playback.event({ type, response_id });
-  return { audio, status, playback, track, stream, bind, request, event, changed, time: (value: number) => { time = value; } };
+  return { completed, audio, status, playback, track, stream, bind, request, event, changed, time: (value: number) => { time = value; } };
 }
 describe("QA WebRTC playback", () => {
   it("primes synchronously and binds the remote stream to the same unmuted element", () => {
@@ -84,4 +84,16 @@ describe("response starts only after remote readiness", () => {
     const another = s.playback.waitUntilReady(new AbortController().signal);
     s.playback.dispose(); await expect(another).rejects.toThrow("Abgebrochen");
   });
+});
+
+it.each([false, true])("finishes once only after response.done AND buffer drain (reversed=%s)", (reversed) => {
+  const s = setup(); s.request();
+  const done = () => s.playback.event({ type: "response.done", response: { id: "response", status: "completed" } });
+  const drain = () => s.event("output_audio_buffer.stopped");
+  (reversed ? drain : done)(); expect(s.completed).not.toHaveBeenCalled();
+  (reversed ? done : drain)(); expect(s.completed).toHaveBeenCalledOnce();
+  done(); drain(); expect(s.completed).toHaveBeenCalledOnce();
+  s.playback.dispose();
+  const second = setup(); second.request(); done(); drain();
+  expect(second.completed).not.toHaveBeenCalled();
 });

@@ -23,7 +23,7 @@ describe("preview-only realtime TTS secret route", () => {
     enabledMock.mockReturnValue(false);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    expect((await POST()).status).toBe(404);
+    expect((await POST(new Request("https://test/session", { method: "POST", body: JSON.stringify({ language: "de" }) }))).status).toBe(404);
     expect(requireUserMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -33,10 +33,10 @@ describe("preview-only realtime TTS secret route", () => {
     requireUserMock.mockResolvedValueOnce({ user: null, response: unauthorized });
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ value: "ek_test" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    expect(await POST()).toBe(unauthorized);
+    expect(await POST(new Request("https://test/session", { method: "POST", body: JSON.stringify({ language: "de" }) }))).toBe(unauthorized);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    const response = await POST();
+    const response = await POST(new Request("https://test/session", { method: "POST", body: JSON.stringify({ language: "de" }) }));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.json()).toMatchObject({ clientSecret: "ek_test", model: "gpt-realtime-2.1-mini" });
@@ -49,4 +49,12 @@ describe("preview-only realtime TTS secret route", () => {
     expect(JSON.stringify(body)).not.toContain("translate");
     expect(JSON.stringify(body)).not.toContain("transcribe");
   });
+  it.each([["de", 1], ["sw", 0.9]])("configures %s speed before any response", async (language, speed) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ value: "ek_test" })));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("https://test/session", { method: "POST", body: JSON.stringify({ language }) }));
+    expect((await response.json()).configuredSpeechSpeed).toBe(speed);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).session.audio.output.speed).toBe(speed);
+  });
+
 });

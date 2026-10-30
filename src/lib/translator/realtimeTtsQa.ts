@@ -48,8 +48,10 @@ export function disposeRealtimeTtsQaRun(run: {
   run.audio.load();
 }
 
+export function realtimeTtsQaSpeed(language: "de" | "sw") { return language === "sw" ? 0.9 : 1.0; }
+
 export function realtimeTtsQaResponse(text: string, language: "de" | "sw") {
-  const instructions = `You are a text-to-speech reader. Speak only the exact supplied ${language === "de" ? "German" : "Kiswahili"} text. Do not translate, answer, paraphrase, add, omit, or correct any words. Read numbers, times, and names as written. Produce audio only.`;
+  const instructions = `You are a text-to-speech reader. Speak only the exact supplied ${language === "de" ? "German" : "Kiswahili"} text. Do not translate, answer, paraphrase, add, omit, or correct any words. Read numbers, times, and names as written. Produce audio only.${language === "sw" ? " Speak naturally, calmly and clearly in Kiswahili. Do not rush. Do not change, add or omit any words." : ""}`;
   return {
     type: "response.create",
     response: {
@@ -61,4 +63,13 @@ export function realtimeTtsQaResponse(text: string, language: "de" | "sw") {
       input: [{ type: "message", role: "user", content: [{ type: "input_text", text }] }],
     },
   } as const;
+}
+
+export function mergeRealtimeTtsQaReport<T extends { runId: string }>(reports: T[], report: T): T[] {
+  return reports.some(item => item.runId === report.runId)
+    ? reports.map(item => item.runId === report.runId ? report : item)
+    : [...reports, report];
+}
+export function needsRealtimeTtsQaUnlock(busy: boolean, data: { completedAt: string | null; remotePlaybackReadyAt: string | null; playbackBlocked: boolean } | null) {
+  return busy && !!data && !data.completedAt && (!data.remotePlaybackReadyAt || data.playbackBlocked);
 }

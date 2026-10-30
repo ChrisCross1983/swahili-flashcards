@@ -7,11 +7,17 @@ import {
   REALTIME_TTS_QA_MODEL,
   REALTIME_TTS_QA_VOICE,
   realtimeTtsQaResponse,
+  realtimeTtsQaSpeed,
+  mergeRealtimeTtsQaReport,
+  needsRealtimeTtsQaUnlock,
 } from "@/lib/translator/realtimeTtsQa";
 
 import { RealtimeTtsQaPlayback } from "@/lib/translator/realtimeTtsQaPlayback";
 
 type Measurement = {
+  runId: string;
+  requestedSpeechSpeed: number;
+  configuredSpeechSpeed: number | null;
   caseId: string;
   language: "de" | "sw";
   inputText: string;
@@ -23,7 +29,7 @@ type Measurement = {
 
 };
 
-type ActiveRun = { controller: AbortController; peer: RTCPeerConnection; playback: RealtimeTtsQaPlayback };
+type ActiveRun = { controller: AbortController; peer: RTCPeerConnection; playback: RealtimeTtsQaPlayback; finishTimer?: ReturnType<typeof setTimeout> };
 type Report = Measurement & RealtimeTtsQaPlayback["data"] & { transcriptExactMatch: boolean };
 
 export default function RealtimeTtsQaView() {
@@ -38,6 +44,7 @@ export default function RealtimeTtsQaView() {
     const run = runRef.current;
     if (!run) return;
     runRef.current = null;
+    clearTimeout(run.finishTimer);
     run.controller.abort();
     run.peer.ontrack = null;
     run.peer.onconnectionstatechange = null;
@@ -51,11 +58,7 @@ export default function RealtimeTtsQaView() {
     return () => { window.removeEventListener("pagehide", stop); stop(); };
   }, [stop]);
   useEffect(() => {
-    if (report) setReports((previous) => {
-      const index = previous.findIndex((item) => item.sessionStartAt === report.sessionStartAt);
-      if (index < 0) return [...previous, report];
-      return previous.map((item, itemIndex) => itemIndex === index ? report : item);
-    });
+    if (report) setReports(previous => mergeRealtimeTtsQaReport(previous, report));
   }, [report]);
 
   const start = async (testCase: (typeof REALTIME_TTS_QA_CASES)[number]) => {
@@ -65,6 +68,9 @@ export default function RealtimeTtsQaView() {
     const controller = new AbortController();
     const peer = new RTCPeerConnection();
     const metrics: Measurement = {
+      runId: crypto.randomUUID(),
+      requestedSpeechSpeed: realtimeTtsQaSpeed(testCase.language),
+      configuredSpeechSpeed: null,
       caseId: testCase.id,
       language: testCase.language,
       inputText: testCase.text,
@@ -74,9 +80,18 @@ export default function RealtimeTtsQaView() {
       transport: "webrtc",
       sessionStartAt: new Date().toISOString(),
     };
-    const playback = new RealtimeTtsQaPlayback(audio, crypto.randomUUID(), () => {
+    const playback = new RealtimeTtsQaPlayback(audio, metrics.runId, () => {
       if (runRef.current === run) setReport({ ...metrics, ...playback.data, debug: [...playback.data.debug], transcriptExactMatch: playback.data.outputTranscript === testCase.text });
-    }, setMessage);
+    }, setMessage, () => Date.now(), () => {
+      // Both response.done and server buffer drain arrived. Allow the final
+      // WebRTC packets a short grace period; this is not a measured audio end.
+      run.finishTimer = setTimeout(() => {
+        if (runRef.current !== run) return;
+        stop(); setMessage(playback.data.outputTranscript === testCase.text
+          ? "Abgeschlossen – Text stimmt überein. Nächsten Test starten."
+          : "Abgeschlossen – Achtung: Output-Transcript weicht vom Input ab.");
+      }, 300);
+    });
     const run: ActiveRun = { controller, peer, playback };
     runRef.current = run;
     setBusy(true);
@@ -86,9 +101,11 @@ export default function RealtimeTtsQaView() {
     try {
       const session = await fetch("/api/translator/qa/realtime-tts/session", {
         method: "POST", signal: controller.signal, cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: testCase.language }),
       });
       if (!session.ok) throw new Error(`Session HTTP ${session.status}`);
-      const { clientSecret } = (await session.json()) as { clientSecret: string };
+      const { clientSecret, configuredSpeechSpeed } = (await session.json()) as { clientSecret: string; configuredSpeechSpeed: number };
+      metrics.configuredSpeechSpeed = configuredSpeechSpeed;
       if (!clientSecret || runRef.current !== run) throw new Error("Session abgebrochen");
 
       // This test deliberately creates no microphone track.
@@ -158,8 +175,8 @@ export default function RealtimeTtsQaView() {
       <button type="button" disabled={busy} onClick={() => void start(testCase)} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">Sprechen</button>
     </div>)}</div>
     <button type="button" onClick={() => { if (report) setReport({ ...report, aborted: !report.serverOutputBufferStoppedAt }); stop(); }} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Stoppen / Abbrechen</button>
-    <button type="button" onClick={() => void runRef.current?.playback.play("manual")} disabled={!busy} className="rounded border px-3 py-2 disabled:opacity-50">Audio abspielen</button>
-    <audio ref={audioRef} controls autoPlay playsInline className="w-full" />
+    {report?.runId === runRef.current?.playback.runId && needsRealtimeTtsQaUnlock(busy, report) && <button type="button" onClick={() => void runRef.current?.playback.play("manual")} className="rounded border px-3 py-2 disabled:opacity-50">Audio freigeben</button>}
+    <audio ref={audioRef} autoPlay playsInline className="w-full" />
     <h2 className="text-xl font-semibold">Messungen dieser Seite</h2>
     <ReportTextExport getText={() => JSON.stringify(reports, null, 2)}  />
     <p className="text-sm">Playing bezeichnet ein echtes Browser-Ereignis, keinen Nachweis hörbaren Tons. FirstAudio stammt aus dem response-spezifischen Server-Output-Start; Completion und Buffer-Stopped belegen keine lokale Wiedergabe. Ohne echtes ended bleibt playbackEndedAt null. Ein Live-Stream ist nach Ende nicht erneut abspielbar.</p>

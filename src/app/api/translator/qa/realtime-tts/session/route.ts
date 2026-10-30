@@ -5,16 +5,24 @@ import {
   REALTIME_TTS_QA_MODEL,
   REALTIME_TTS_QA_VOICE,
   realtimeTtsQaPreviewEnabled,
+  realtimeTtsQaSpeed,
 } from "@/lib/translator/realtimeTtsQa";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(request: Request) {
   if (!realtimeTtsQaPreviewEnabled()) {
     return NextResponse.json({ error: "Nicht verfügbar." }, { status: 404 });
   }
   const { user, response } = await requireUser();
   if (response) return response;
+  let language: "de" | "sw";
+  try {
+    const body = await request.json();
+    if (body?.language !== "de" && body?.language !== "sw") throw new Error("invalid language");
+    language = body.language;
+  } catch { return NextResponse.json({ error: "Ungültige Sprache." }, { status: 400 }); }
+  const configuredSpeechSpeed = realtimeTtsQaSpeed(language);
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "Nicht verfügbar." }, { status: 503 });
 
@@ -36,7 +44,7 @@ export async function POST() {
           tool_choice: "none",
           audio: {
             input: { turn_detection: null },
-            output: { voice: REALTIME_TTS_QA_VOICE },
+            output: { voice: REALTIME_TTS_QA_VOICE, speed: configuredSpeechSpeed },
           },
         },
       }),
@@ -47,7 +55,7 @@ export async function POST() {
     if (!body || typeof body !== "object" || !("value" in body) || typeof body.value !== "string") {
       return NextResponse.json({ error: "Ungültige Session." }, { status: 503 });
     }
-    return NextResponse.json({ clientSecret: body.value, model: REALTIME_TTS_QA_MODEL, voice: REALTIME_TTS_QA_VOICE }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ clientSecret: body.value, model: REALTIME_TTS_QA_MODEL, voice: REALTIME_TTS_QA_VOICE, configuredSpeechSpeed }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "Session nicht verfügbar." }, { status: 503 });
   }

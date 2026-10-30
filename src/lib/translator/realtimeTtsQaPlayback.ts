@@ -1,6 +1,10 @@
 /** One response per QA session. Media events are never inferred from RTP silence. */
 export class RealtimeTtsQaPlayback {
   readonly data = {
+    responseDoneAt: null as string | null,
+    completedAt: null as string | null,
+    effectiveSpeechSpeed: null as number | null,
+    playbackBlocked: false,
     remotePlaybackReadyAt: null as string | null,
     remoteTrackActiveAfterRequestAt: null as string | null,
     firstResponseMediaEventAt: null as string | null,
@@ -51,7 +55,7 @@ export class RealtimeTtsQaPlayback {
   }
   constructor(private audio: HTMLAudioElement, readonly runId: string,
     private changed: () => void, private status: (value: string) => void,
-    private now = () => Date.now()) {
+    private now = () => Date.now(), private completed: () => void = () => {}) {
     audio.autoplay = true;
     audio.setAttribute("playsinline", "");
     audio.muted = false;
@@ -131,11 +135,13 @@ export class RealtimeTtsQaPlayback {
       if (reason !== "prime" && this.stream && this.audio.srcObject === this.stream) {
         this.remotePlayResolved = true; this.checkReady();
       }
+      if (reason !== "prime") this.data.playbackBlocked = false;
       this.log("play-success", { reason });
     } catch (error) {
       if (this.disposed) return;
       const name = error instanceof Error ? error.name : "UnknownError";
       const message = error instanceof Error ? error.message : String(error);
+      if (reason !== "prime") this.data.playbackBlocked = true;
       this.log("play-failure", { reason, name, message });
       if (reason !== "prime") this.status(name === "NotAllowedError"
         ? "Wiedergabe von iOS blockiert – bitte Audio abspielen"
@@ -147,6 +153,11 @@ export class RealtimeTtsQaPlayback {
   }
   event(event: Record<string, unknown>) {
     if (this.disposed) return;
+    if (event.type === "session.created" || event.type === "session.updated") {
+      const session = event.session as { audio?: { output?: { speed?: number } } } | undefined;
+      this.data.effectiveSpeechSpeed = session?.audio?.output?.speed ?? null;
+      this.changed(); return;
+    }
     if (event.type === "error") {
       this.data.error = JSON.stringify(event.error); this.log("session-error", { error: event.error });
       this.status(`Realtime-Fehler: ${this.data.error}`); return;
@@ -173,6 +184,7 @@ export class RealtimeTtsQaPlayback {
       this.data.completeAudioReceivedAt ??= this.iso();
       this.data.requestToCompleteAudioMs ??= this.now() - this.requestedAt;
     }
+    if (event.type === "response.done" && response?.status === "completed") this.data.responseDoneAt = this.iso();
     if (event.type === "response.done" && response?.status !== "completed") {
       this.data.error = `Response: ${response?.status}`; this.status(this.data.error);
     }
@@ -182,6 +194,9 @@ export class RealtimeTtsQaPlayback {
       this.status("Server-Audio beendet; kein Replay im Live-Stream. Für Wiederholung neu starten.");
     }
     this.changed();
+    if (this.data.responseDoneAt && this.data.serverOutputBufferStoppedAt && !this.data.completedAt) {
+      this.data.completedAt = this.iso(); this.changed(); this.completed();
+    }
   }
   dispose() {
     if (this.disposed) return;
