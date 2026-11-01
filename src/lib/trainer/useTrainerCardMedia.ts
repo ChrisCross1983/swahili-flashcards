@@ -5,13 +5,6 @@ import { useEffect, useRef, useState } from "react";
 const AUDIO_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 
-export type SuggestItem = {
-    pageId: string;
-    importUrl: string;
-    thumb: string;
-    title: string;
-};
-
 export function useTrainerCardMedia({
     onStatus,
     onAudioUpdated,
@@ -21,13 +14,10 @@ export function useTrainerCardMedia({
 }) {
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [suggestOpen, setSuggestOpen] = useState(false);
-    const [suggestLoading, setSuggestLoading] = useState(false);
-    const [selectedSuggestUrl, setSelectedSuggestUrl] = useState<string | null>(null);
-    const [selectedSuggestPath, setSelectedSuggestPath] = useState<string | null>(null);
-    const [suggestItems, setSuggestItems] = useState<SuggestItem[]>([]);
-    const [suggestError, setSuggestError] = useState<string | null>(null);
-    const [suggestedImagePath, setSuggestedImagePath] = useState<string | null>(null);
+    const [generationLoading, setGenerationLoading] = useState(false);
+    const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
+    const [generationError, setGenerationError] = useState<string | null>(null);
+    const generationLock = useRef(false);
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
@@ -73,13 +63,8 @@ export function useTrainerCardMedia({
     function resetImageInputs() {
         setImageFile(null);
         setPreviewUrl(null);
-        setSuggestOpen(false);
-        setSuggestLoading(false);
-        setSuggestItems([]);
-        setSuggestError(null);
-        setSelectedSuggestUrl(null);
-        setSelectedSuggestPath(null);
-        setSuggestedImagePath(null);
+        setGeneratedPreview(null);
+        setGenerationError(null);
     }
 
     function resetAudioInputs() {
@@ -113,71 +98,44 @@ export function useTrainerCardMedia({
         return json.path as string;
     }
 
-    async function openImageSuggestions(german: string, swahili: string) {
-        setSuggestError(null);
-        setSuggestItems([]);
-        setSuggestLoading(true);
-        setSuggestOpen(true);
-
-        const trimmedGerman = german.trim();
-        const trimmedSwahili = swahili.trim();
-        const query = trimmedGerman || trimmedSwahili;
-        if (!query) {
-            setSuggestLoading(false);
-            setSuggestError("Bitte zuerst Deutsch oder Swahili ausfüllen.");
-            return;
-        }
-
-        const params = new URLSearchParams();
-        if (trimmedGerman) params.set("german", trimmedGerman);
-        if (trimmedSwahili) params.set("swahili", trimmedSwahili);
-        params.set("q", query);
-
-        const res = await fetch(`/api/images/suggest?${params.toString()}`);
-        const json = await res.json();
-
-        setSuggestLoading(false);
-
-        if (!res.ok) {
-            setSuggestError(json.error ?? "Bildvorschläge konnten nicht geladen werden.");
-            return;
-        }
-
-        setSuggestItems(json.items ?? []);
-    }
-
-    async function chooseSuggestedImage(imageUrl: string, thumbUrl?: string) {
+    async function generateIllustration(german: string, swahili: string) {
+        if (generationLock.current) return;
+        generationLock.current = true;
+        setGenerationLoading(true);
+        setGenerationError(null);
+        setGeneratedPreview(null);
         try {
-            onStatus("Übernehme Bild...");
-            setSuggestError(null);
-
-            const res = await fetch("/api/images/import", {
+            const res = await fetch("/api/images/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ imageUrl }),
+                body: JSON.stringify({ german, swahili, type: "vocab" }),
             });
-            const json = await res.json();
-
-            if (!res.ok) {
-                onStatus("");
-                setSuggestError(json.error ?? "Bild konnte nicht übernommen werden.");
+            const json = await res.json() as { preview?: string; code?: string };
+            if (json.code === "unsuitable") {
+                setGenerationError("Für diesen Begriff ist keine klare Illustration sinnvoll.");
                 return;
             }
-
-            setSelectedSuggestUrl(imageUrl);
-            setSelectedSuggestPath(json.path);
-            setSuggestedImagePath(json.path);
-            if (thumbUrl) setPreviewUrl(thumbUrl);
-            setImageFile(null);
-            onStatus("Bild übernommen ✅");
-            setSuggestOpen(false);
-        } catch (e) {
-            console.error(e);
-            onStatus("Bildübernahme fehlgeschlagen.");
+            if (!res.ok || !json.preview?.startsWith("data:image/webp;base64,")) throw new Error("failed");
+            setGeneratedPreview(json.preview);
+        } catch {
+            setGenerationError("Die Illustration konnte nicht erstellt werden. Bitte versuche es erneut.");
         } finally {
-            setSuggestLoading(false);
+            generationLock.current = false;
+            setGenerationLoading(false);
         }
     }
+
+    function acceptIllustration() {
+        if (!generatedPreview) return;
+        const binary = atob(generatedPreview.split(",")[1]);
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        setImageFile(new File([bytes], "illustration.webp", { type: "image/webp" }));
+        setGeneratedPreview(null);
+        setGenerationError(null);
+        onStatus("Illustration übernommen – mit der Karte speichern.");
+    }
+
+    function discardIllustration() { setGeneratedPreview(null); setGenerationError(null); }
 
     function getSupportedAudioMimeType() {
         const candidates = [
@@ -279,19 +237,9 @@ export function useTrainerCardMedia({
         setImageFile,
         previewUrl,
         setPreviewUrl,
-        suggestOpen,
-        setSuggestOpen,
-        suggestLoading,
-        selectedSuggestUrl,
-        setSelectedSuggestUrl,
-        selectedSuggestPath,
-        setSelectedSuggestPath,
-        suggestItems,
-        setSuggestItems,
-        suggestError,
-        setSuggestError,
-        suggestedImagePath,
-        setSuggestedImagePath,
+        generationLoading,
+        generatedPreview,
+        generationError,
         editAudioPath,
         setEditAudioPath,
         pendingAudioBlob,
@@ -303,8 +251,9 @@ export function useTrainerCardMedia({
         resetAudioInputs,
         resetMediaInputs,
         uploadImage,
-        openImageSuggestions,
-        chooseSuggestedImage,
+        generateIllustration,
+        acceptIllustration,
+        discardIllustration,
         playAudioPath,
         playPendingAudio,
         startRecordingForCreate,

@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
+import { isOwnedCardImagePath } from "@/lib/cards/imagePath";
 
 type CreateCardBody = {
     german: string;
@@ -31,6 +32,10 @@ export async function POST(req: Request) {
             { error: "german and swahili are required" },
             { status: 400 }
         );
+    }
+
+    if (body.imagePath !== undefined && body.imagePath !== null && !isOwnedCardImagePath(body.imagePath, ownerKey)) {
+        return NextResponse.json({ error: "Ungültiger Bildpfad." }, { status: 400 });
     }
 
     const { data: card, error } = await supabaseServer
@@ -237,6 +242,10 @@ export async function PATCH(req: Request) {
 
     if (!body.id) {
         return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    if (body.imagePath !== undefined && body.imagePath !== null && !isOwnedCardImagePath(body.imagePath, ownerKey)) {
+        return NextResponse.json({ error: "Ungültiger Bildpfad." }, { status: 400 });
     }
 
     const updates: Record<string, string | null> = {};

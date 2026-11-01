@@ -87,7 +87,6 @@ type TextInput = {
 };
 
 type MediaSaveAdapter = {
-    suggestedImagePath: string | null;
     imageFile: File | null;
     pendingAudioBlob: Blob | null;
     pendingAudioType: string | null;
@@ -209,7 +208,7 @@ export function useTrainerCardSaveFlow({
             if (await runDuplicateCheck(skipWarning, null)) return;
 
             setSaveStatus("saving");
-            const imagePath = media.suggestedImagePath ?? (await media.uploadImage());
+            const imagePath = await media.uploadImage();
             const response = await fetch("/api/cards", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -300,9 +299,7 @@ export function useTrainerCardSaveFlow({
 
             setSaveStatus("saving");
             let imagePath: string | null | undefined = undefined;
-            if (media.suggestedImagePath) {
-                imagePath = media.suggestedImagePath;
-            } else if (media.imageFile) {
+            if (media.imageFile) {
                 imagePath = (await media.uploadImage()) ?? null;
             }
 

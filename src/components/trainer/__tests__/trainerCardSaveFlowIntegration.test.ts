@@ -52,7 +52,7 @@ describe("TrainerCardFormSheet save-flow integration", () => {
 
     it("guards interactions during active save/check and clears stale feedback on input changes", () => {
         expect(saveFlowSource).toContain("createSaveFlowSubmitGuard");
-        expect(formSource).toContain("disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy}");
+        expect(formSource).toContain("disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy || media.generationLoading}");
         expect(formSource).toContain("if (saveFlow.isSaveBusy) return");
         expect(formSource).toContain("handlePrimaryFieldChange(setGerman");
         expect(formSource).toContain("clearDuplicateCheck()");

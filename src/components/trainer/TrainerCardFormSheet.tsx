@@ -22,6 +22,7 @@ import { useTrainerCardDuplicateCheck } from "@/lib/trainer/useTrainerCardDuplic
 import { useTrainerCardFormNotes } from "@/lib/trainer/useTrainerCardFormNotes";
 import { useTrainerCardMedia } from "@/lib/trainer/useTrainerCardMedia";
 import { useTrainerCardSaveFlow } from "@/lib/trainer/useTrainerCardSaveFlow";
+import IllustrationControls from "@/components/trainer/IllustrationControls";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
@@ -133,7 +134,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         groups,
         formNoteText: formNoteDraft.mainNotes,
         media: {
-            suggestedImagePath: media.suggestedImagePath,
             imageFile: media.imageFile,
             pendingAudioBlob: media.pendingAudioBlob,
             pendingAudioType: media.pendingAudioType,
@@ -156,7 +156,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     });
 
     const editingCard = cards.find((card) => String(card.id) === String(editingId)) ?? null;
-    const editingImagePath = media.selectedSuggestPath ?? (editingCard?.image_path ?? null);
+    const editingImagePath = editingCard?.image_path ?? null;
     const formSelectedGroups = useMemo(
         () => groups.filter((group) => formGroupIds.includes(group.id)),
         [groups, formGroupIds]
@@ -188,12 +188,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function handleCreateSuccess() {
         showToast("Karte gespeichert ✅");
-        media.setSelectedSuggestUrl(null);
-        media.setSelectedSuggestPath(null);
-        media.setSuggestItems([]);
         setStatus("Karte gespeichert ✅");
         media.setImageFile(null);
-        media.setSuggestedImagePath(null);
         clearDuplicateCheck();
         setGerman("");
         setSwahili("");
@@ -228,11 +224,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setSwahiliExample("");
         setOptionalExamplesOpen(false);
         media.setImageFile(null);
-        media.setSuggestedImagePath(null);
-        media.setSelectedSuggestUrl(null);
-        media.setSelectedSuggestPath(null);
-        media.setSuggestItems([]);
-        media.setSuggestError(null);
+        media.discardIllustration();
         clearDuplicateCheck();
     }
 
@@ -288,6 +280,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function handlePrimaryFieldChange(setter: (value: string) => void, value: string) {
         setter(value);
+        media.discardIllustration();
         clearDuplicateCheck();
         saveFlow.clearFeedbackForInputChange();
     }
@@ -318,9 +311,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         if (card.id) void loadFormNotes(String(card.id));
 
         const existingPath = resolveExistingImagePath(card);
-
-        media.setSelectedSuggestPath(existingPath);
-        media.setSelectedSuggestUrl(null);
 
         if (existingPath) {
             media.setPreviewUrl(`${IMAGE_BASE_URL}/${existingPath}`);
@@ -359,9 +349,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             media.setPreviewUrl(null);
         }
 
-        media.setSuggestedImagePath(null);
-        media.setSelectedSuggestUrl(null);
-        media.setSelectedSuggestPath(existingPath);
+        media.discardIllustration();
         setOpen(true);
     }
 
@@ -773,7 +761,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         accept="image/*"
                         id="trainer-card-image-upload"
                         className="hidden"
-                        onChange={(e) => media.setImageFile(e.target.files?.[0] ?? null)}
+                        onChange={(e) => { media.discardIllustration(); media.setImageFile(e.target.files?.[0] ?? null); }}
                     />
 
                     {editingId && (
@@ -877,19 +865,15 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         )}
                     </label>
 
-                    <button
-                        type="button"
-                        className="mt-6 w-full rounded-xl border p-3"
-                        onClick={() => void media.openImageSuggestions(german, swahili)}
-                    >
-                        ✨ Bild vorschlagen
-                    </button>
-
-                    {media.suggestedImagePath ? (
-                        <div className="mt-2 text-xs text-muted">
-                            Vorschlagsbild ausgewählt ✅
-                        </div>
-                    ) : null}
+                    {cardType === "vocab" ? <IllustrationControls
+                        canGenerate={Boolean(german.trim() && swahili.trim())}
+                        loading={media.generationLoading}
+                        preview={media.generatedPreview}
+                        error={media.generationError}
+                        onGenerate={() => void media.generateIllustration(german, swahili)}
+                        onAccept={media.acceptIllustration}
+                        onDiscard={media.discardIllustration}
+                    /> : null}
 
                     {editingImagePath ? (
                         <div className="mt-3">
@@ -906,7 +890,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         <button
                             className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
                             onClick={saveFlow.saveCard}
-                            disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy}
+                            disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy || media.generationLoading}
                             type="button"
                         >
                             {editingId ? "Speichern" : saveCardLabel}
@@ -935,37 +919,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 </div>
             </FullScreenSheet>
 
-            <FullScreenSheet
-                open={media.suggestOpen}
-                title="Bildvorschläge"
-                onClose={() => media.setSuggestOpen(false)}
-            >
-                {media.suggestLoading ? (
-                    <div className="mt-4 text-sm text-muted" > Lade Vorschläge…</div>
-                ) : media.suggestError ? (
-                    <div className="mt-4 hint-card border-cta bg-accent-cta-soft text-accent-cta">
-                        {media.suggestError}
-                    </div>
-                ) : media.suggestItems.length === 0 ? (
-                    <div className="mt-4 text-sm text-muted">
-                        Keine Treffer. Versuch ein anderes Wort (z.B. Singular) oder Swahili/Deutsch tauschen.
-                    </div>
-                ) : (
-                    <div className="mt-6 grid grid-cols-2 gap-4">
-                        {media.suggestItems.map((item) => (
-                            <button
-                                key={item.pageId}
-                                type="button"
-                                className="rounded-xl border overflow-hidden hover:shadow-soft transition"
-                                onClick={() => media.chooseSuggestedImage(item.importUrl, item.thumb)}
-                            >
-                                <img src={item.thumb} alt={item.title} className="w-full h-28 object-cover" />
-                                <div className="p-2 text-xs text-muted line-clamp-2">{item.title}</div>
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </FullScreenSheet>
         </>
     );
 });
