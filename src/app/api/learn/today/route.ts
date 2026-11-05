@@ -18,6 +18,7 @@ type DueCard = {
     image_path?: string | null;
     audio_path?: string | null;
     type?: string | null;
+    sentence_explanation?: unknown;
 };
 
 function normalizeDueCard(cards: DueCard | DueCard[]): DueCard | null {
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
       card_id,
       level,
       due_date,
-      cards!inner(id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, type)
+      cards!inner(id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, type)
     `
     )
     .eq("owner_key", ownerKey)
@@ -84,6 +85,7 @@ export async function GET(req: Request) {
       imagePath: card.image_path ?? null,
       audio_path: card.audio_path ?? null,
       type: card.type ?? null,
+      sentence_explanation: card.sentence_explanation ?? null,
       groups: groupsByCard.get(String(row.card_id)) ?? [],
     }];
   });

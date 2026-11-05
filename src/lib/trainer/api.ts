@@ -1,4 +1,5 @@
 import type { CardType, LeitnerStats, SessionSummary, SetupCounts, TodayItem } from "./types";
+import type { SentenceExplanation } from "@/lib/sentence/explanation";
 
 type CardGroup = NonNullable<TodayItem["groups"]>[number];
 
@@ -9,6 +10,7 @@ type CardListItem = {
     german_example?: string | null;
     swahili_example?: string | null;
     image_path?: string | null;
+    sentence_explanation?: SentenceExplanation | null;
     audio_path?: string | null;
     groups?: CardGroup[];
 };
@@ -77,6 +79,7 @@ export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: strin
             german_example: c.german_example ?? null,
             swahili_example: c.swahili_example ?? null,
             imagePath: c.image_path ?? null,
+            sentence_explanation: c.sentence_explanation ?? null,
             audio_path: c.audio_path ?? null,
             groups: c.groups ?? [],
         }));
@@ -95,6 +98,7 @@ export async function fetchLastMissedItems(cardType: CardType, groupIds?: string
         german_example: c.german_example ?? null,
         swahili_example: c.swahili_example ?? null,
         imagePath: c.image_path ?? null,
+        sentence_explanation: c.sentence_explanation ?? null,
         audio_path: c.audio_path ?? null,
         groups: c.groups ?? [],
     }));

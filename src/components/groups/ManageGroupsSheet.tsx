@@ -5,6 +5,10 @@ import FullScreenSheet from "@/components/FullScreenSheet";
 import type { Group } from "@/lib/groups/types";
 import { createGroup, deleteGroup, updateGroup } from "@/lib/groups/api";
 import type { CardType } from "@/lib/trainer/types";
+import { isGroupColorKey, type GroupColorKey } from "@/lib/groups/colors";
+import GroupColorDot from "@/components/groups/GroupColorDot";
+import GroupColorPicker from "@/components/groups/GroupColorPicker";
+import { cleanGroupName, normalizeGroupName } from "@/lib/groups/names";
 
 type Props = {
     open: boolean;
@@ -26,10 +30,12 @@ export default function ManageGroupsSheet({
     cardType,
 }: Props) {
     const [name, setName] = useState("");
+    const [newColor, setNewColor] = useState<GroupColorKey | null>(null);
     const [status, setStatus] = useState("");
     const [busyId, setBusyId] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
+    const [editingColor, setEditingColor] = useState<GroupColorKey | null>(null);
 
     const sortedGroups = useMemo(
         () => [...groups].sort((a, b) => a.name.localeCompare(b.name)),
@@ -37,9 +43,13 @@ export default function ManageGroupsSheet({
     );
 
     async function onCreate() {
-        const trimmed = name.trim();
+        const trimmed = cleanGroupName(name);
         if (!trimmed) {
             setStatus("Bitte Gruppennamen eingeben.");
+            return;
+        }
+        if (groups.some((group) => normalizeGroupName(group.name) === normalizeGroupName(trimmed))) {
+            setStatus("Eine Gruppe mit diesem Namen existiert bereits.");
             return;
         }
 
@@ -47,9 +57,10 @@ export default function ManageGroupsSheet({
         setStatus("");
 
         try {
-            const group = await createGroup(cardType, { name: trimmed });
+            const group = await createGroup(cardType, { name: trimmed, color: newColor });
             onUpdated([...groups, group]);
             setName("");
+            setNewColor(null);
             setStatus(`Gruppe „${group.name}“ erstellt.`);
         } catch (error) {
             setStatus(error instanceof Error ? error.message : "Fehler beim Erstellen.");
@@ -61,18 +72,26 @@ export default function ManageGroupsSheet({
     function startRename(group: Group) {
         setEditingId(group.id);
         setEditingName(group.name);
+        setEditingColor(isGroupColorKey(group.color) ? group.color : null);
         setStatus("");
     }
 
     async function submitRename(group: Group) {
-        const trimmed = editingName.trim();
+        const trimmed = cleanGroupName(editingName);
         if (!trimmed) {
             setStatus("Name darf nicht leer sein.");
             return;
         }
+        if (groups.some((entry) => entry.id !== group.id && normalizeGroupName(entry.name) === normalizeGroupName(trimmed))) {
+            setStatus("Eine Gruppe mit diesem Namen existiert bereits.");
+            return;
+        }
 
-        if (trimmed === group.name) {
-            setStatus("Keine Änderung am Namen.");
+        const previousColor = isGroupColorKey(group.color) ? group.color : null;
+        const nameChanged = trimmed !== group.name;
+        const colorChanged = editingColor !== previousColor;
+        if (!nameChanged && !colorChanged) {
+            setStatus("Keine Änderung an der Gruppe.");
             setEditingId(null);
             return;
         }
@@ -80,10 +99,13 @@ export default function ManageGroupsSheet({
         setBusyId(group.id);
         setStatus("");
         try {
-            const updated = await updateGroup(cardType, group.id, { name: trimmed });
+            const updated = await updateGroup(cardType, group.id, {
+                ...(nameChanged ? { name: trimmed } : {}),
+                ...(colorChanged ? { color: editingColor } : {}),
+            });
             onUpdated(groups.map((entry) => (entry.id === updated.id ? updated : entry)));
             setEditingId(null);
-            setStatus(`Gruppe umbenannt: ${updated.name}.`);
+            setStatus(`Gruppe „${updated.name}“ aktualisiert.`);
         } catch (error) {
             setStatus(error instanceof Error ? error.message : "Fehler beim Umbenennen.");
         } finally {
@@ -118,7 +140,7 @@ export default function ManageGroupsSheet({
                 <div className="text-sm font-semibold tracking-wide">Neue Gruppe</div>
                 <div className="flex gap-2">
                     <input
-                        className="flex-1 rounded-xl border border-soft bg-base px-3 py-2"
+                        className="min-w-0 flex-1 rounded-xl border border-soft bg-base px-3 py-2"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="z.B. Begrüßung"
@@ -127,6 +149,7 @@ export default function ManageGroupsSheet({
                         {busyId === "create" ? "Anlegen…" : "Anlegen"}
                     </button>
                 </div>
+                <GroupColorPicker value={newColor} onChange={setNewColor} />
                 {status ? <p className="status-note">{status}</p> : null}
             </div>
 
@@ -147,7 +170,7 @@ export default function ManageGroupsSheet({
                                             onChange={(event) => setEditingName(event.target.value)}
                                         />
                                     ) : (
-                                        <div className="font-semibold">{group.name}</div>
+                                        <div className="flex items-center gap-2 font-semibold"><GroupColorDot color={group.color} />{group.name}</div>
                                     )}
                                     <p className="text-xs text-muted mt-1">{count} Karten</p>
                                 </div>
@@ -181,7 +204,7 @@ export default function ManageGroupsSheet({
                                         </>
                                     ) : (
                                         <button type="button" className="btn btn-ghost text-sm" onClick={() => startRename(group)}>
-                                            Umbenennen
+                                            Bearbeiten
                                         </button>
                                     )}
 
@@ -195,6 +218,7 @@ export default function ManageGroupsSheet({
                                     </button>
                                 </div>
                             </div>
+                            {isEditing ? <GroupColorPicker value={editingColor} onChange={setEditingColor} /> : null}
                         </div>
                     );
                 })}

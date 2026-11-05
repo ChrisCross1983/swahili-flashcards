@@ -4,6 +4,34 @@ import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 import { isOwnedCardImagePath } from "@/lib/cards/imagePath";
+import { explanationMatchesSentences, parseSentenceExplanation } from "@/lib/sentence/explanation";
+import { sameSentencePair } from "@/lib/sentence/cardFormUx";
+import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
+
+async function rejectSentenceLanguageMismatch(ownerKey: string, german: string, swahili: string) {
+    try {
+        const result = await getOrCheckSentenceLanguages(ownerKey, german, swahili);
+        if (result.status === "input_issue") {
+            return NextResponse.json({ code: "sentence_language_mismatch", ...result, error: "Bitte korrigiere zuerst die Sprachzuordnung." }, { status: 422 });
+        }
+        return null;
+    } catch (error) {
+        if (error instanceof SentenceLanguageRateLimitError) {
+            return NextResponse.json({ code: "rate_limited", error: "Bitte warte kurz und versuche es später erneut." }, { status: 429 });
+        }
+        console.error("[api/cards] sentence_language_check_unavailable");
+        return NextResponse.json({ code: "sentence_language_check_unavailable", error: "Sprachzuordnung konnte nicht geprüft werden. Bitte erneut versuchen." }, { status: 503 });
+    }
+}
+
+async function findExistingSentencePair(ownerKey: string, german: string, swahili: string, excludeId?: string) {
+    const { data, error } = await supabaseServer.from("cards")
+        .select("id,german_text,swahili_text")
+        .eq("owner_key", ownerKey).eq("type", "sentence");
+    const match = (data ?? []).find((card) => String(card.id) !== excludeId
+        && sameSentencePair({ german, swahili }, card));
+    return { match, error };
+}
 
 type CreateCardBody = {
     german: string;
@@ -11,6 +39,7 @@ type CreateCardBody = {
     germanExample?: string | null;
     swahiliExample?: string | null;
     imagePath?: string | null;
+    sentenceExplanation?: unknown;
     type?: "vocab" | "sentence";
 };
 
@@ -33,9 +62,23 @@ export async function POST(req: Request) {
             { status: 400 }
         );
     }
+    if (type === "sentence" && (german.length > 500 || swahili.length > 500)) {
+        return NextResponse.json({ error: "Satz ist zu lang." }, { status: 400 });
+    }
 
     if (body.imagePath !== undefined && body.imagePath !== null && !isOwnedCardImagePath(body.imagePath, ownerKey)) {
         return NextResponse.json({ error: "Ungültiger Bildpfad." }, { status: 400 });
+    }
+    const sentenceExplanation = body.sentenceExplanation == null ? null : parseSentenceExplanation(body.sentenceExplanation);
+    if (body.sentenceExplanation != null && (type !== "sentence" || !sentenceExplanation || !explanationMatchesSentences(sentenceExplanation, german, swahili))) {
+        return NextResponse.json({ error: "Ungültige Lernerklärung." }, { status: 400 });
+    }
+    if (type === "sentence") {
+        const duplicate = await findExistingSentencePair(ownerKey, german, swahili);
+        if (duplicate.error) return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
+        if (duplicate.match) return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+        const languageError = await rejectSentenceLanguageMismatch(ownerKey, german, swahili);
+        if (languageError) return languageError;
     }
 
     const { data: card, error } = await supabaseServer
@@ -47,9 +90,10 @@ export async function POST(req: Request) {
             german_example: germanExample || null,
             swahili_example: swahiliExample || null,
             image_path: body.imagePath ?? null,
+            sentence_explanation: sentenceExplanation,
             type,
         })
-        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, created_at, type")
+        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, created_at, type")
         .single();
 
     if (error) {
@@ -120,7 +164,7 @@ export async function GET(req: Request) {
 
     let query = supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, created_at, type")
+        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, created_at, type")
         .eq("owner_key", ownerKey);
 
     if (id) query = query.eq("id", id);
@@ -230,6 +274,7 @@ type UpdateCardBody = {
     germanExample?: string | null;
     swahiliExample?: string | null;
     imagePath?: string | null;
+    sentenceExplanation?: unknown;
     type?: "vocab" | "sentence";
 };
 
@@ -248,12 +293,52 @@ export async function PATCH(req: Request) {
         return NextResponse.json({ error: "Ungültiger Bildpfad." }, { status: 400 });
     }
 
-    const updates: Record<string, string | null> = {};
+    let sentenceExplanation: ReturnType<typeof parseSentenceExplanation> = null;
+    let existing: { type: string; german_text: string; swahili_text: string } | null = null;
+    if ("sentenceExplanation" in body || typeof body.german === "string" || typeof body.swahili === "string" || body.type === "vocab" || body.type === "sentence") {
+        const { data, error: lookupError } = await supabaseServer.from("cards")
+            .select("type,german_text,swahili_text")
+            .eq("id", body.id).eq("owner_key", ownerKey).single();
+        if (lookupError || !data) return NextResponse.json({ error: "Karte nicht gefunden." }, { status: 404 });
+        existing = data;
+    }
+    if ("sentenceExplanation" in body && existing) {
+        if (existing.type !== "sentence" || body.type === "vocab") return NextResponse.json({ error: "Nur Satzkarten können Lernerklärungen haben." }, { status: 400 });
+        sentenceExplanation = body.sentenceExplanation == null ? null : parseSentenceExplanation(body.sentenceExplanation);
+        if (body.sentenceExplanation != null && (!sentenceExplanation || !explanationMatchesSentences(sentenceExplanation, body.german ?? existing.german_text, body.swahili ?? existing.swahili_text))) {
+            return NextResponse.json({ error: "Ungültige Lernerklärung." }, { status: 400 });
+        }
+    }
+    if (existing && (body.type ?? existing.type) === "sentence"
+        && (typeof body.german === "string" || typeof body.swahili === "string" || body.type === "sentence")) {
+        const duplicate = await findExistingSentencePair(ownerKey, body.german?.trim() ?? existing.german_text,
+            body.swahili?.trim() ?? existing.swahili_text, String(body.id));
+        if (duplicate.error) return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
+        if (duplicate.match) return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+    }
+    if (existing && (body.type ?? existing.type) === "sentence"
+        && (body.type === "sentence" || typeof body.german === "string" || typeof body.swahili === "string")) {
+        const nextGerman = body.german?.trim() ?? existing.german_text;
+        const nextSwahili = body.swahili?.trim() ?? existing.swahili_text;
+        if (!nextGerman || !nextSwahili || nextGerman.length > 500 || nextSwahili.length > 500) {
+            return NextResponse.json({ error: "Bitte beide Sätze prüfen (maximal 500 Zeichen)." }, { status: 400 });
+        }
+        const languageError = await rejectSentenceLanguageMismatch(ownerKey, nextGerman, nextSwahili);
+        if (languageError) return languageError;
+    }
+
+    const updates: Record<string, unknown> = {};
     if (typeof body.german === "string") updates.german_text = body.german.trim();
     if (typeof body.swahili === "string") updates.swahili_text = body.swahili.trim();
     if ("germanExample" in body) updates.german_example = sanitizeExampleMarkup(body.germanExample ?? "") || null;
     if ("swahiliExample" in body) updates.swahili_example = sanitizeExampleMarkup(body.swahiliExample ?? "") || null;
     if ("imagePath" in body) updates.image_path = body.imagePath ?? null;
+    if ("sentenceExplanation" in body) updates.sentence_explanation = sentenceExplanation;
+    else if (existing?.type === "sentence" && (
+        (typeof body.german === "string" && body.german.trim() !== existing.german_text) ||
+        (typeof body.swahili === "string" && body.swahili.trim() !== existing.swahili_text) ||
+        body.type === "vocab"
+    )) updates.sentence_explanation = null;
     if (body.type === "vocab" || body.type === "sentence") updates.type = body.type;
 
     const { data, error } = await supabaseServer

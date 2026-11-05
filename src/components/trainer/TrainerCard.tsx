@@ -3,6 +3,8 @@
 import { useState } from "react";
 import CardText from "@/components/ui/CardText";
 import FormattedExampleText from "@/components/ui/FormattedExampleText";
+import SentenceExplanationDisclosure from "@/components/trainer/SentenceExplanationDisclosure";
+import type { SentenceExplanation } from "@/lib/sentence/explanation";
 
 type Props = {
     reveal: boolean;
@@ -14,6 +16,7 @@ type Props = {
     imageBaseUrl: string;
     learningTypeLabel?: string | null;
     onOpenLearningHelp?: () => void;
+    sentenceExplanation?: SentenceExplanation | null;
 };
 
 type ExampleDisclosureProps = {
@@ -63,9 +66,11 @@ export default function TrainerCard({
     imageBaseUrl,
     learningTypeLabel,
     onOpenLearningHelp,
+    sentenceExplanation,
 }: Props) {
     const [showPromptExample, setShowPromptExample] = useState(false);
     const [showAnswerExample, setShowAnswerExample] = useState(false);
+    const [showSentenceExplanation, setShowSentenceExplanation] = useState(false);
 
     return (
         <div className="rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6" data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
@@ -107,6 +112,12 @@ export default function TrainerCard({
                                 <img src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" className="h-40 w-full rounded-2xl object-cover" />
                             </div>
                         ) : null}
+
+                        {sentenceExplanation ? <SentenceExplanationDisclosure
+                            explanation={sentenceExplanation}
+                            open={showSentenceExplanation}
+                            onToggle={() => setShowSentenceExplanation((open) => !open)}
+                        /> : null}
 
                         {onOpenLearningHelp ? (
                             <div className="flex items-center justify-between gap-3" data-testid="learning-secondary-actions">

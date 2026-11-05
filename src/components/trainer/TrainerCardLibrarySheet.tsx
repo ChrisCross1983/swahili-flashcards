@@ -6,8 +6,9 @@ import CardText from "@/components/ui/CardText";
 import type { Group } from "@/lib/groups/types";
 import { visibleBadgeSummary } from "@/lib/trainer/setup";
 import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import SentenceLibrarySheet from "@/components/trainer/SentenceLibrarySheet";
 
-type TrainerCardLibrarySheetProps = {
+export type TrainerCardLibrarySheetProps = {
     open: boolean;
     title: string;
     cardsLoadState: "idle" | "loading" | "loaded" | "error";
@@ -40,9 +41,13 @@ type TrainerCardLibrarySheetProps = {
     onEditCard: (card: TrainerLibraryCard) => void;
     onDeleteCard: (cardId: string) => void;
     onOpenCardGroupsEditor: (card: TrainerLibraryCard) => void;
+    onCreateSentence: () => void;
 };
 
-export default function TrainerCardLibrarySheet({
+export default function TrainerCardLibrarySheet(props: TrainerCardLibrarySheetProps) {
+    if (props.isSentenceTrainer) return <SentenceLibrarySheet key={props.open ? "sentence-library-open" : "sentence-library-closed"} {...props} />;
+
+    const {
     open,
     title,
     cardsLoadState,
@@ -75,7 +80,7 @@ export default function TrainerCardLibrarySheet({
     onEditCard,
     onDeleteCard,
     onOpenCardGroupsEditor,
-}: TrainerCardLibrarySheetProps) {
+    } = props;
     return (
         <FullScreenSheet
             open={open}
@@ -280,13 +285,13 @@ export default function TrainerCardLibrarySheet({
                                 >
                                     Löschen
                                 </button>
-                                <button
+                                {!isSentenceTrainer ? <button
                                     className="rounded-xl border px-3 py-2 text-sm"
                                     onClick={() => onOpenCardGroupsEditor(card)}
                                     disabled={selectionMode}
                                 >
                                     Gruppen bearbeiten
-                                </button>
+                                </button> : null}
                             </div>
                         </div>
                     ))}

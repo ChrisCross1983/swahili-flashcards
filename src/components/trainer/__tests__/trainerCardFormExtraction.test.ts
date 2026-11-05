@@ -43,6 +43,47 @@ describe("trainer card form extraction", () => {
         }
     });
 
+    it("keeps sentence explanation generation scoped to sentence cards and separate from saving", () => {
+        expect(formSource).toContain('cardType === "sentence" ? <section');
+        expect(formSource).toContain('fetch("/api/sentence/explanation/generate"');
+        expect(formSource).toContain("Lernerklärung wird erstellt …");
+        expect(formSource).toContain("setSentenceExplanation(explanationPreview)");
+        expect(formSource).toContain("setExplanationPreview(null)");
+        expect(formSource).toContain("Verwerfen");
+        expect(saveFlowSource).toContain('cardType === "sentence" && sentenceExplanationDirty');
+    });
+
+    it("shows sentence supplements in learning order without a nested options step", () => {
+        const titles = ["Grammatik verstehen", "Notizen", "Gruppe", "Aussprache", "Bild"];
+        const positions = titles.map((title) => formSource.indexOf(`title="${title}"`));
+        expect(positions.every((position) => position > formSource.indexOf("{isSentence ? duplicateFeedbackPanel : null}"))).toBe(true);
+        expect(positions).toEqual([...positions].sort((a, b) => a - b));
+        expect(formSource).toContain('icon="grammar" featured');
+        expect(formSource).toContain('icon="notes"');
+        expect(formSource).toContain('icon="group"');
+        expect(formSource).toContain('icon="audio"');
+        expect(formSource).toContain('icon="image"');
+        expect(formSource).not.toContain('title="Mehr Optionen"');
+        expect(formSource).toContain("{!isSentence ? (");
+        expect(formSource).toContain("Optional: Beispielsätze hinzufügen");
+        expect(formSource).toContain("{isSentence || formNoteOpen ? (");
+        expect(formSource).toContain("formNoteText: formNoteDraft.mainNotes");
+        expect(formSource).toContain("<SentenceExplanationContent explanation={explanationPreview} />");
+    });
+
+    it("keeps new-sentence success visible at the top and resets the next card", () => {
+        expect(formSource).toContain("setCreateSuccessVisible(true)");
+        expect(formSource).toContain("setActiveSupplement(null)");
+        expect(formSource).toContain("focusNextSentence(sheetScrollRef.current, germanInputRef.current)");
+        expect(formSource).toContain("setGerman(\"\")");
+        expect(formSource).toContain("setSwahili(\"\")");
+        expect(formSource).toContain("✓ Satz gespeichert");
+        expect(formSource).toContain("Du kannst direkt den nächsten Satz anlegen.");
+        expect(formSource.indexOf("✓ Satz gespeichert")).toBeLessThan(formSource.indexOf("{isSentence ? \"Satzpaar\""));
+        expect(formSource).toContain("setCreateSuccessVisible(false); germanInputRef.current?.focus()");
+        expect(formSource).toContain("if (isSentence && !closeOnCreateSuccess)");
+    });
+
     it("keeps create ordering: POST card, assign groups, upload audio, then save notes", () => {
         expect(saveFlowSource).toContain('method: "POST"');
         expect(saveFlowSource).toContain("await assignCardsToGroup(cardType, groupId, [createdCardId])");
@@ -101,8 +142,8 @@ describe("trainer card form extraction", () => {
 
         expect(topStatusIndex).toBeGreaterThan(swahiliFieldIndex);
         expect(topStatusIndex).toBeLessThan(optionalContextIndex);
-        expect(formSource.indexOf("{duplicateFeedbackPanel}")).toBeLessThan(optionalContextIndex);
-        expect(formSource.indexOf("{duplicateFeedbackPanel}")).toBeLessThan(mediaIndex);
+        expect(formSource.indexOf("{isSentence ? duplicateFeedbackPanel : null}")).toBeLessThan(optionalContextIndex);
+        expect(formSource.indexOf("{!isSentence ? duplicateFeedbackPanel : null}")).toBeLessThan(mediaIndex);
         expect(formSource).toContain("aria-live=\"polite\"");
         expect(formSource).toContain("Du kannst direkt die nächste Karte anlegen.");
     });

@@ -24,6 +24,21 @@ describe("trainer api", () => {
         expect(items[1]).toMatchObject({ cardId: "2", german_example: "Ich trinke ==Wasser==.", swahili_example: "Ninakunywa ==maji==.", imagePath: "img/2", audio_path: "audio/2" });
     });
 
+    it("loads an optional saved sentence explanation for drill without generating it", async () => {
+        const explanation = { version: 1, naturalTranslation: "Was bedeutet das?", breakdown: [{ surface: "nini?", meaning: "was?", explanation: "Fragewort." }], learningTip: null };
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify({ cards: [
+            { id: "s1", german_text: "Was bedeutet das?", swahili_text: "Hilo linamaanisha nini?", sentence_explanation: explanation },
+            { id: "s2", german_text: "Hallo!", swahili_text: "Habari!", sentence_explanation: null },
+        ] }), { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const items = await fetchAllCardsForDrill("sentence");
+        expect(items[0].sentence_explanation).toEqual(explanation);
+        expect(items[1].sentence_explanation).toBeNull();
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(fetchMock).toHaveBeenCalledWith("/api/cards/all?type=sentence", { cache: "no-store" });
+    });
+
     it("surfaces backend errors with status for all-cards drill load", async () => {
         vi.stubGlobal("fetch", vi.fn(async () =>
             new Response(JSON.stringify({ error: "Karten konnten nicht vollständig geladen werden (Gruppen)." }), { status: 500 })

@@ -157,15 +157,17 @@ describe("mobile critical-flow regression coverage", () => {
         const germanIndex = form.indexOf("placeholder=\"z.B. Guten Morgen\"");
         const swahiliIndex = form.indexOf("placeholder=\"z.B. Habari za asubuhi\"");
         const topStatusIndex = form.indexOf("topStatusText ? (");
-        const duplicatePanelIndex = form.indexOf("{duplicateFeedbackPanel}");
+        const sentenceDuplicatePanelIndex = form.indexOf("{isSentence ? duplicateFeedbackPanel : null}");
+        const vocabDuplicatePanelIndex = form.indexOf("{!isSentence ? duplicateFeedbackPanel : null}");
         const optionalExamplesIndex = form.indexOf("Optional: Beispielsätze hinzufügen");
 
         expect(germanIndex).toBeGreaterThan(-1);
         expect(swahiliIndex).toBeGreaterThan(germanIndex);
         expect(topStatusIndex).toBeGreaterThan(swahiliIndex);
         expect(topStatusIndex).toBeLessThan(optionalExamplesIndex);
-        expect(duplicatePanelIndex).toBeGreaterThan(swahiliIndex);
-        expect(duplicatePanelIndex).toBeLessThan(optionalExamplesIndex);
+        expect(sentenceDuplicatePanelIndex).toBeLessThan(germanIndex);
+        expect(vocabDuplicatePanelIndex).toBeGreaterThan(swahiliIndex);
+        expect(vocabDuplicatePanelIndex).toBeLessThan(optionalExamplesIndex);
 
         expect(duplicateHook).toContain("Prüfe auf ähnliche Karten …");
         expect(duplicateHook).toContain("Mögliche Dublette gefunden");

@@ -10,6 +10,7 @@ import {
     shouldSaveCreateNote,
 } from "@/lib/trainer/cardFormBehavior";
 import type { DuplicateCheckResult } from "@/lib/trainer/useTrainerCardDuplicateCheck";
+import type { SentenceExplanation } from "@/lib/sentence/explanation";
 import type { CardType } from "@/lib/trainer/types";
 
 export type SaveFlowStatus =
@@ -103,6 +104,8 @@ type UseTrainerCardSaveFlowInput = {
     formGroupIds: string[];
     groups: Group[];
     formNoteText: string;
+    sentenceExplanation: SentenceExplanation | null;
+    sentenceExplanationDirty: boolean;
     media: MediaSaveAdapter;
     checkExistingGerman: (german: string, swahili: string, excludeId: string | null) => Promise<DuplicateCheckResult>;
     saveFormNotes: (cardId: string, noteText?: string) => Promise<boolean>;
@@ -145,6 +148,8 @@ export function useTrainerCardSaveFlow({
     formGroupIds,
     groups,
     formNoteText,
+    sentenceExplanation,
+    sentenceExplanationDirty,
     media,
     checkExistingGerman,
     saveFormNotes,
@@ -182,7 +187,7 @@ export function useTrainerCardSaveFlow({
     }
 
     async function runDuplicateCheck(skipWarning: boolean, excludeId: string | null) {
-        if (skipWarning) return false;
+        if (skipWarning && cardType !== "sentence") return false;
         setSaveStatus("checking");
         const duplicateResult = await checkExistingGerman(text.german.trim(), text.swahili.trim(), excludeId);
         const blockedStatus = saveFlowStatusForDuplicateResult(duplicateResult);
@@ -216,6 +221,7 @@ export function useTrainerCardSaveFlow({
                     ...text,
                     imagePath,
                     type: cardType,
+                    ...(cardType === "sentence" && sentenceExplanation ? { sentenceExplanation } : {}),
                 })),
             });
             const json = await readJson(response);
@@ -223,7 +229,7 @@ export function useTrainerCardSaveFlow({
             if (!response.ok) {
                 if (response.status === 409) {
                     setDuplicateCheckKind("strict");
-                    setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
+                    setDuplicateHint(cardType === "sentence" ? "Diese Satzkarte existiert bereits." : json.error ?? "Diese Karte existiert bereits.");
                     setSaveStatus("blocked_by_duplicate");
                     return;
                 }
@@ -310,6 +316,7 @@ export function useTrainerCardSaveFlow({
                     ...text,
                     id: editingId,
                     ...(imagePath !== undefined ? { imagePath } : {}),
+                    ...(cardType === "sentence" && sentenceExplanationDirty ? { sentenceExplanation } : {}),
                 })),
             });
             const json = await readJson(response);
@@ -317,7 +324,7 @@ export function useTrainerCardSaveFlow({
             if (!response.ok) {
                 if (response.status === 409) {
                     setDuplicateCheckKind("strict");
-                    setDuplicateHint(json.error ?? "Diese Karte existiert bereits.");
+                    setDuplicateHint(cardType === "sentence" ? "Diese Satzkarte existiert bereits." : json.error ?? "Diese Karte existiert bereits.");
                     setSaveStatus("blocked_by_duplicate");
                     return;
                 }

@@ -1,4 +1,5 @@
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
+import type { SentenceExplanation } from "@/lib/sentence/explanation";
 
 export type CardFormTextInput = {
     german: string;
@@ -10,6 +11,7 @@ export type CardFormTextInput = {
 export function buildCreateCardPayload(input: CardFormTextInput & {
     imagePath: string | null;
     type: "vocab" | "sentence";
+    sentenceExplanation?: SentenceExplanation | null;
 }) {
     return {
         german: input.german.trim(),
@@ -18,14 +20,16 @@ export function buildCreateCardPayload(input: CardFormTextInput & {
         swahiliExample: sanitizeExampleMarkup(input.swahiliExample) || null,
         imagePath: input.imagePath,
         type: input.type,
+        ...(input.type === "sentence" && input.sentenceExplanation ? { sentenceExplanation: input.sentenceExplanation } : {}),
     };
 }
 
 export function buildUpdateCardPayload(input: CardFormTextInput & {
     id: string;
     imagePath?: string | null;
+    sentenceExplanation?: SentenceExplanation | null;
 }) {
-    const payload: Record<string, string | null> = {
+    const payload: Record<string, unknown> = {
         id: input.id,
         german: input.german.trim(),
         swahili: input.swahili.trim(),
@@ -34,6 +38,7 @@ export function buildUpdateCardPayload(input: CardFormTextInput & {
     };
 
     if ("imagePath" in input) payload.imagePath = input.imagePath ?? null;
+    if ("sentenceExplanation" in input) payload.sentenceExplanation = input.sentenceExplanation ?? null;
     return payload;
 }
 

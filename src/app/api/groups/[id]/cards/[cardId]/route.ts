@@ -17,6 +17,6 @@ export async function DELETE(_: Request, { params }: Params) {
         .eq("group_id", groupId)
         .eq("card_id", cardId);
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "group_assignment_failed" }, { status: 500 });
     return NextResponse.json({ ok: true });
 }

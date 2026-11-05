@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { classifyImportRows, normalizeImportValue, type ParsedImportRow } from "@/lib/cards/import";
+import { isGroupColorKey } from "@/lib/groups/colors";
 
 type CommitRequest = {
     rows?: Array<ParsedImportRow & { selectedAction?: "keep" | "skip" }>;
@@ -27,6 +28,9 @@ export async function POST(req: Request) {
         body = (await req.json()) as CommitRequest;
     } catch {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    }
+    if (body.createGroup?.color != null && !isGroupColorKey(body.createGroup.color)) {
+        return NextResponse.json({ error: "Ungültige Gruppenfarbe." }, { status: 400 });
     }
 
     const rows = Array.isArray(body.rows)
@@ -114,7 +118,7 @@ export async function POST(req: Request) {
             .single();
 
         if (groupCreateError) {
-            return NextResponse.json({ error: `Importiert, aber Gruppe konnte nicht erstellt werden: ${groupCreateError.message}` }, { status: 500 });
+            return NextResponse.json({ error: "Importiert, aber die Gruppe konnte nicht erstellt werden." }, { status: 500 });
         }
 
         resolvedGroupId = String(group.id);
@@ -130,7 +134,7 @@ export async function POST(req: Request) {
             .maybeSingle();
 
         if (groupError) {
-            return NextResponse.json({ error: `Importiert, aber Gruppe konnte nicht geladen werden: ${groupError.message}` }, { status: 500 });
+            return NextResponse.json({ error: "Importiert, aber die Gruppe konnte nicht geladen werden." }, { status: 500 });
         }
 
         if (!group) {
@@ -148,7 +152,7 @@ export async function POST(req: Request) {
             .upsert(joinRows, { onConflict: "owner_key,card_id,group_id", ignoreDuplicates: true });
 
         if (groupAssignError) {
-            return NextResponse.json({ error: `Importiert, aber Gruppen-Zuordnung fehlgeschlagen: ${groupAssignError.message}` }, { status: 500 });
+            return NextResponse.json({ error: "Importiert, aber die Gruppenzuordnung ist fehlgeschlagen." }, { status: 500 });
         }
     }
 

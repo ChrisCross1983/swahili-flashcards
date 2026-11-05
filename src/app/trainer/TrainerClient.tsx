@@ -1772,7 +1772,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                 <span className="truncate">Bearbeiten</span>
                                                             </button>
 
-                                                            <button
+                                                            {cardType !== "sentence" ? <button
                                                                 type="button"
                                                                 className="btn btn-utility min-h-8 min-w-0 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs whitespace-nowrap"
                                                                 onClick={openCurrentCardGroupsEditor}
@@ -1782,7 +1782,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             >
                                                                 <span aria-hidden="true">#</span>
                                                                 <span className="truncate">Gruppen</span>
-                                                            </button>
+                                                            </button> : null}
                                                         </div>
                                                     </div>
 
@@ -1797,6 +1797,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             learningTypeLabel={null}
+                                                            sentenceExplanation={cardType === "sentence" ? currentItem?.sentence_explanation ?? null : null}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
                                                         />
                                                     </div>
@@ -1932,6 +1933,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 swahili_text: updated.swahili_text,
                                                 german_example: updated.german_example ?? null,
                                                 swahili_example: updated.swahili_example ?? null,
+                                                sentence_explanation: updated.sentence_explanation ?? null,
                                                 groups: nextGroups,
                                             };
                                         })
@@ -1999,15 +2001,24 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                                 onDeleteCard={(cardId) => void deleteCard(cardId)}
                                 onOpenCardGroupsEditor={openCardGroupsEditorForCard}
+                                onCreateSentence={() => {
+                                    setOpenCards(false);
+                                    cardLibrary.resetForClose();
+                                    cardFormRef.current?.openCreate();
+                                }}
                             />
 
                             <ManageGroupsSheet
+                                key={manageGroupsOpen ? "groups-open-session" : "groups-closed-session"}
                                 open={manageGroupsOpen}
                                 groups={groups}
                                 cardType={cardType}
                                 groupCardCounts={groupCardCounts}
                                 onClose={() => setManageGroupsOpen(false)}
-                                onUpdated={setGroups}
+                                onUpdated={(nextGroups) => {
+                                    setGroups(nextGroups);
+                                    void loadCards(undefined, { silent: true });
+                                }}
                                 onOpenGroup={(groupId) => {
                                     cardLibrary.setGroupFilter([groupId]);
                                     setManageGroupsOpen(false);

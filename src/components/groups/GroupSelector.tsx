@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import type { Group } from "@/lib/groups/types";
 import GroupBadge from "@/components/groups/GroupBadge";
 import { createGroup } from "@/lib/groups/api";
+import GroupColorPicker from "@/components/groups/GroupColorPicker";
+import type { GroupColorKey } from "@/lib/groups/colors";
 import type { CardType } from "@/lib/trainer/types";
+import { cleanGroupName, normalizeGroupName } from "@/lib/groups/names";
 
 type Props = {
     groups: Group[];
@@ -40,6 +43,7 @@ export default function GroupSelector({
     cardType,
 }: Props) {
     const [newGroupName, setNewGroupName] = useState("");
+    const [newGroupColor, setNewGroupColor] = useState<GroupColorKey | null>(null);
     const [createStatus, setCreateStatus] = useState<string | null>(null);
     const [createBusy, setCreateBusy] = useState(false);
     const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds]);
@@ -54,18 +58,15 @@ export default function GroupSelector({
     }
 
     async function handleCreate() {
-        const trimmed = newGroupName.trim();
+        const trimmed = cleanGroupName(newGroupName);
         if (!trimmed) {
             setCreateStatus("Bitte Gruppennamen eingeben.");
             return;
         }
 
-        const duplicate = groups.find((group) => group.name.trim().toLowerCase() === trimmed.toLowerCase());
+        const duplicate = groups.find((group) => normalizeGroupName(group.name) === normalizeGroupName(trimmed));
         if (duplicate) {
-            setCreateStatus(`„${duplicate.name}“ existiert bereits.`);
-            if (autoSelectCreated && !selectedSet.has(duplicate.id)) {
-                onChange([...selectedIds, duplicate.id]);
-            }
+            setCreateStatus("Eine Gruppe mit diesem Namen existiert bereits.");
             return;
         }
 
@@ -73,9 +74,10 @@ export default function GroupSelector({
         setCreateStatus(null);
 
         try {
-            const created = await createGroup(cardType, { name: trimmed });
+            const created = await createGroup(cardType, { name: trimmed, color: newGroupColor });
             onGroupCreated?.(created);
             setNewGroupName("");
+            setNewGroupColor(null);
 
             if (autoSelectCreated) {
                 onChange(Array.from(new Set([...selectedIds, created.id])));
@@ -152,6 +154,7 @@ export default function GroupSelector({
                             {createBusy ? "Erstelle…" : "Erstellen"}
                         </button>
                     </div>
+                    <div className="mt-3"><GroupColorPicker value={newGroupColor} onChange={setNewGroupColor} /></div>
                     {createStatus ? <p className="mt-2 text-xs text-muted">{createStatus}</p> : null}
                 </div>
             ) : null}

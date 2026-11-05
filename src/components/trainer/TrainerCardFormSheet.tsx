@@ -1,10 +1,11 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import CardText from "@/components/ui/CardText";
 import ExampleField from "@/components/ExampleField";
 import GroupBadge from "@/components/groups/GroupBadge";
+import GroupColorDot from "@/components/groups/GroupColorDot";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import type { Group } from "@/lib/groups/types";
 import { visibleBadgeSummary } from "@/lib/trainer/setup";
@@ -23,9 +24,15 @@ import { useTrainerCardFormNotes } from "@/lib/trainer/useTrainerCardFormNotes";
 import { useTrainerCardMedia } from "@/lib/trainer/useTrainerCardMedia";
 import { useTrainerCardSaveFlow } from "@/lib/trainer/useTrainerCardSaveFlow";
 import IllustrationControls from "@/components/trainer/IllustrationControls";
+import SentenceExplanationContent from "@/components/trainer/SentenceExplanationContent";
+import SentenceFormDisclosure, { SentenceFeatureIcon, SentenceFormGroup } from "@/components/trainer/SentenceFormDisclosure";
+import { parseSentenceExplanation, type SentenceExplanation } from "@/lib/sentence/explanation";
+import { focusNextSentence, languageBlocksSentenceSave, sentenceExplanationErrorCopy, sentencePairKey, shouldCheckSentenceLanguages, shouldShowGrammarTip, swapSentencePair, type SentenceLanguageValidation } from "@/lib/sentence/cardFormUx";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
+// A new version gives users who missed the earlier subdued hint one clear introduction.
+const GRAMMAR_TIP_SEEN_KEY = "sentence-grammar-tip-seen-v2";
 
 type EditSource = "cards" | "create";
 
@@ -62,6 +69,8 @@ type Props = {
     onStatus: (message: string) => void;
 };
 
+type Supplement = "grammar" | "notes" | "audio" | "group" | "image";
+
 const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(function TrainerCardFormSheet(
     {
         cardType,
@@ -97,6 +106,30 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     const [formGroupIds, setFormGroupIds] = useState<string[]>([]);
     const [editingOriginalGroupIds, setEditingOriginalGroupIds] = useState<string[]>([]);
     const [optionalExamplesOpen, setOptionalExamplesOpen] = useState(false);
+    const [activeSupplement, setActiveSupplement] = useState<Supplement | null>(null);
+    const [sentenceExplanation, setSentenceExplanation] = useState<SentenceExplanation | null>(null);
+    const [explanationPreview, setExplanationPreview] = useState<SentenceExplanation | null>(null);
+    const [explanationDirty, setExplanationDirty] = useState(false);
+    const [explanationLoading, setExplanationLoading] = useState(false);
+    const [explanationError, setExplanationError] = useState<string | null>(null);
+    const [explanationFieldError, setExplanationFieldError] = useState<"german" | "swahili" | null>(null);
+    const [grammarTipSeen, setGrammarTipSeen] = useState(true);
+    const [languageValidation, setLanguageValidation] = useState<SentenceLanguageValidation | null>(null);
+    const [languageValidationRetry, setLanguageValidationRetry] = useState(0);
+    const [createSuccessVisible, setCreateSuccessVisible] = useState(false);
+    const explanationLock = useRef(false);
+    const explanationRequest = useRef(0);
+    const germanInputRef = useRef<HTMLTextAreaElement>(null);
+    const swahiliInputRef = useRef<HTMLTextAreaElement>(null);
+    const grammarTriggerRef = useRef<HTMLButtonElement>(null);
+    const grammarCreateRef = useRef<HTMLButtonElement>(null);
+    const grammarCardRef = useRef<HTMLElement>(null);
+    const sheetScrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        try { setGrammarTipSeen(window.localStorage.getItem(GRAMMAR_TIP_SEEN_KEY) === "1"); }
+        catch { setGrammarTipSeen(false); }
+    }, []);
 
     const {
         formNoteOpen,
@@ -133,6 +166,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         formGroupIds,
         groups,
         formNoteText: formNoteDraft.mainNotes,
+        sentenceExplanation,
+        sentenceExplanationDirty: explanationDirty,
         media: {
             imageFile: media.imageFile,
             pendingAudioBlob: media.pendingAudioBlob,
@@ -162,8 +197,77 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         [groups, formGroupIds]
     );
     const formGroupSummary = useMemo(() => visibleBadgeSummary(formSelectedGroups, 2), [formSelectedGroups]);
+    const isSentence = cardType === "sentence";
+    const pairKey = sentencePairKey(german, swahili);
+    const needsLanguageCheck = shouldCheckSentenceLanguages(isSentence, german, swahili);
+    const currentLanguageValidation = languageValidation?.pairKey === pairKey ? languageValidation : null;
+    const languageSaveBlocked = languageBlocksSentenceSave(needsLanguageCheck, pairKey, currentLanguageValidation);
+    const likelySwapped = currentLanguageValidation?.status === "likely_swapped";
+    const otherLanguageMismatch = currentLanguageValidation?.status === "language_mismatch";
+    const languageCheckUnavailable = currentLanguageValidation?.status === "unavailable";
+    const showGrammarTip = !languageSaveBlocked && shouldShowGrammarTip({
+        isSentence, editingId, german, swahili, hasExplanation: Boolean(sentenceExplanation), tipSeen: grammarTipSeen,
+    });
+    useEffect(() => {
+        if (!open || !isSentence || !german.trim() || !swahili.trim()) {
+            setLanguageValidation(null);
+            return;
+        }
+        const key = sentencePairKey(german, swahili);
+        const controller = new AbortController();
+        let cancelled = false;
+        setLanguageValidation({ pairKey: key, status: "checking" });
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await fetch("/api/sentence/language-check", {
+                    method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+                    body: JSON.stringify({ type: "sentence", german, swahili }),
+                });
+                const result = await response.json().catch(() => null) as { status?: string; reason?: string } | null;
+                if (cancelled) return;
+                if (!response.ok || !result || (result.status !== "ok" && !(result.status === "input_issue" && (result.reason === "likely_swapped" || result.reason === "language_mismatch")))) {
+                    setLanguageValidation({ pairKey: key, status: "unavailable" });
+                    return;
+                }
+                const status = result.status === "input_issue" ? result.reason as "likely_swapped" | "language_mismatch" : "ok";
+                setLanguageValidation({ pairKey: key, status });
+            } catch {
+                if (!cancelled) setLanguageValidation({ pairKey: key, status: "unavailable" });
+            }
+        }, 700);
+        return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
+    }, [open, isSentence, german, swahili, languageValidationRetry]);
+    useEffect(() => {
+        if (!open || !showGrammarTip || activeSupplement === "grammar") return;
+        const timer = window.setTimeout(() => {
+            const scroll = sheetScrollRef.current;
+            const card = grammarCardRef.current;
+            if (!scroll || !card) return;
+            const viewport = scroll.getBoundingClientRect();
+            const target = card.getBoundingClientRect();
+            if (target.bottom > viewport.bottom - 16) {
+                const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+                scroll.scrollBy({ top: target.bottom - viewport.bottom + 24, behavior: reducedMotion ? "auto" : "smooth" });
+            }
+        }, 140);
+        return () => window.clearTimeout(timer);
+    }, [open, showGrammarTip, activeSupplement]);
+    useEffect(() => {
+        if (isSentence && duplicateHint && (duplicateCheckKind === "strict" || duplicateCheckKind === "failure")) {
+            sheetScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+        }
+    }, [isSentence, duplicateHint, duplicateCheckKind]);
+    const toggleSupplement = (section: Supplement) => setActiveSupplement((current) => {
+        if (media.isRecording && current === "audio") return current;
+        return current === section ? null : section;
+    });
 
     function resetForCreate() {
+        setActiveSupplement(null);
+        setCreateSuccessVisible(false);
+        setLanguageValidation(null);
+        setExplanationFieldError(null);
+        resetExplanation();
         setStatus("");
         saveFlow.resetSaveFeedback();
         clearDuplicateCheck();
@@ -181,14 +285,102 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
     }
 
+    function resetExplanation(value: unknown = null) {
+        explanationRequest.current++;
+        setSentenceExplanation(parseSentenceExplanation(value));
+        setExplanationPreview(null);
+        setExplanationError(null);
+        setExplanationFieldError(null);
+        setExplanationDirty(false);
+    }
+
+    function markGrammarTipSeen() {
+        setGrammarTipSeen(true);
+        try { window.localStorage.setItem(GRAMMAR_TIP_SEEN_KEY, "1"); } catch { /* Browser storage is optional. */ }
+    }
+
+    async function generateSentenceExplanation() {
+        if (explanationLock.current || cardType !== "sentence" || languageSaveBlocked) return;
+        if (!german.trim()) {
+            setExplanationFieldError("german");
+            setExplanationError("Bitte gib zuerst den deutschen Satz ein.");
+            germanInputRef.current?.focus();
+            return;
+        }
+        if (!swahili.trim()) {
+            setExplanationFieldError("swahili");
+            setExplanationError("Bitte gib zuerst den Kiswahili-Satz ein.");
+            swahiliInputRef.current?.focus();
+            return;
+        }
+        markGrammarTipSeen();
+        setExplanationFieldError(null);
+        explanationLock.current = true;
+        setExplanationLoading(true);
+        setExplanationPreview(null);
+        setExplanationError(null);
+        const requestId = ++explanationRequest.current;
+        try {
+            const response = await fetch("/api/sentence/explanation/generate", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "sentence", german, swahili }),
+            });
+            const data = await response.json().catch(() => ({})) as { explanation?: unknown; code?: string; status?: string; reason?: string };
+            if (!response.ok) {
+                if (requestId === explanationRequest.current) setExplanationError(sentenceExplanationErrorCopy(data.code));
+                return;
+            }
+            if (data.status === "input_issue" && data.reason === "likely_swapped") {
+                if (requestId === explanationRequest.current) {
+                    setLanguageValidation({ pairKey: sentencePairKey(german, swahili), status: "likely_swapped" });
+                    setExplanationError(null);
+                }
+                return;
+            }
+            const parsed = parseSentenceExplanation(data.explanation);
+            if (!parsed) {
+                if (requestId === explanationRequest.current) setExplanationError(sentenceExplanationErrorCopy("invalid_explanation"));
+                return;
+            }
+            if (requestId === explanationRequest.current) setExplanationPreview(parsed);
+        } catch {
+            if (requestId === explanationRequest.current) setExplanationError(sentenceExplanationErrorCopy("network"));
+        } finally {
+            explanationLock.current = false;
+            setExplanationLoading(false);
+        }
+    }
+
+    function acceptSentenceExplanation() {
+        if (!explanationPreview) return;
+        setSentenceExplanation(explanationPreview);
+        setExplanationPreview(null);
+        setExplanationDirty(true);
+    }
+
+    function removeSentenceExplanation() {
+        setSentenceExplanation(null);
+        setExplanationPreview(null);
+        setExplanationDirty(true);
+    }
+
     function showToast(message: string) {
         setStatus(message);
         window.setTimeout(() => setStatus(""), 2500);
     }
 
     function handleCreateSuccess() {
-        showToast("Karte gespeichert ✅");
-        setStatus("Karte gespeichert ✅");
+        resetExplanation();
+        setLanguageValidation(null);
+        if (isSentence) {
+            setStatus("");
+            saveFlow.resetSaveFeedback();
+            setCreateSuccessVisible(true);
+            setActiveSupplement(null);
+        } else {
+            showToast("Karte gespeichert ✅");
+            setStatus("Karte gespeichert ✅");
+        }
         media.setImageFile(null);
         clearDuplicateCheck();
         setGerman("");
@@ -202,7 +394,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setEditingOriginalGroupIds([]);
         resetFormNotes();
         clearDuplicateCheck();
-        setStatus("Karte gespeichert ✅");
+        if (isSentence && !closeOnCreateSuccess) {
+            window.requestAnimationFrame(() => {
+                focusNextSentence(sheetScrollRef.current, germanInputRef.current);
+            });
+        }
         if (closeOnCreateSuccess) {
             setOpen(false);
             onCreateFlowComplete?.();
@@ -218,6 +414,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }
 
     function clearUpdatedFormFields() {
+        resetExplanation();
         setGerman("");
         setSwahili("");
         setGermanExample("");
@@ -280,9 +477,36 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function handlePrimaryFieldChange(setter: (value: string) => void, value: string) {
         setter(value);
+        setLanguageValidation(null);
+        setExplanationFieldError(null);
+        setExplanationError(null);
+        setCreateSuccessVisible(false);
+        if (cardType === "sentence") {
+            explanationRequest.current++;
+            setExplanationPreview(null);
+            setSentenceExplanation(null);
+            setExplanationDirty(true);
+        }
         media.discardIllustration();
         clearDuplicateCheck();
         saveFlow.clearFeedbackForInputChange();
+    }
+
+    function swapSentenceLanguages() {
+        if (!isSentence) return;
+        const swapped = swapSentencePair({ german, swahili });
+        setGerman(swapped.german);
+        setSwahili(swapped.swahili);
+        setLanguageValidation(null);
+        setExplanationFieldError(null);
+        setExplanationError(null);
+        setExplanationPreview(null);
+        setSentenceExplanation(null);
+        setExplanationDirty(true);
+        explanationRequest.current++;
+        clearDuplicateCheck();
+        saveFlow.clearFeedbackForInputChange();
+        window.requestAnimationFrame(() => germanInputRef.current?.focus());
     }
 
     function handleSecondaryFieldChange(setter: (value: string) => void, value: string) {
@@ -291,6 +515,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }
 
     function startEdit(card: any, source: EditSource = "cards") {
+        setActiveSupplement(null);
+        setCreateSuccessVisible(false);
+        setLanguageValidation(null);
+        resetExplanation(card.sentence_explanation);
         const nextGroupIds = extractCardGroupIds(card);
         const textState = hydrateTextStateFromCard(card);
         setEditSource(source);
@@ -321,6 +549,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function startEditFromLearn({ item, german, swahili, germanExample, swahiliExample }: EditFromLearnInput) {
         if (!item) return;
+        setActiveSupplement(null);
+        setCreateSuccessVisible(false);
+        setLanguageValidation(null);
+        resetExplanation(item.sentence_explanation);
         const cardId = String(item.cardId ?? item.id);
         const nextGroupIds = extractCardGroupIds(item);
         const textState = hydrateTextStateFromLearn({ german, swahili, germanExample, swahiliExample });
@@ -463,7 +695,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         resetFormNotes();
     }
 
-    const topStatusText = saveFlow.saveStatusCopy?.message ?? (duplicateCheckLoading ? "Prüfe auf ähnliche Karten …" : status);
+    const topStatusText = isSentence && (duplicateCheckKind === "strict" || duplicateCheckKind === "failure") ? null
+        : saveFlow.saveStatusCopy?.message ?? (duplicateCheckLoading ? (isSentence ? "Prüfe auf vorhandene Satzkarten …" : "Prüfe auf ähnliche Karten …") : status);
     const topStatusDetail = saveFlow.saveStatusCopy?.detail ?? (status === "Karte gespeichert ✅" ? "Du kannst direkt die nächste Karte anlegen." : null);
     const topStatusTone = saveFlow.saveStatus === "error"
         ? "border-red-200 bg-red-50 text-red-800"
@@ -479,8 +712,36 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         : duplicateCheckKind === "failure"
             ? "border-red-200 bg-red-50"
             : "border-soft bg-surface-elevated";
+    const audioActionClass = isSentence ? "btn btn-secondary min-h-11 text-sm" : "rounded-xl border px-3 py-2";
 
-    const duplicateFeedbackPanel = duplicateHint ? (
+    function openDuplicateCard(card: any) {
+        setCreateDraft(createDraftFromTextState({ german, swahili, germanExample, swahiliExample }, formNoteDraft.mainNotes));
+        const full = cards.find((entry) => String(entry.id) === String(card.id)) ?? card;
+        startEdit(full, "create");
+        clearDuplicateCheck();
+        setOpen(true);
+    }
+
+    const duplicateFeedbackPanel = duplicateHint ? isSentence ? (
+        <div className="sentence-success-banner mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950 shadow-[0_8px_24px_rgba(120,79,22,0.10)]" role="alert" data-testid="sentence-duplicate-warning">
+            <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-100 text-sm font-bold" aria-hidden="true">!</span>
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold">{duplicateHint}</p>
+                    {duplicateCheckKind === "failure" ? <p className="mt-1 text-xs">Bitte versuche die Prüfung erneut.</p> : null}
+                    {duplicateCheckKind === "strict" && Array.isArray(duplicatePreview) && duplicatePreview.length > 0 ?
+                        <p className="mt-1 truncate text-xs">{duplicatePreview[0].german_text} · {duplicatePreview[0].swahili_text}</p> : null}
+                </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 pl-11">
+                {duplicateCheckKind === "strict" && Array.isArray(duplicatePreview) && duplicatePreview[0] ?
+                    <button type="button" className="btn btn-primary min-h-11 text-xs" onClick={() => openDuplicateCard(duplicatePreview[0])}>Vorhandene Karte öffnen</button> : null}
+                {duplicateCheckKind === "failure" ?
+                    <button type="button" className="btn btn-secondary min-h-11 text-xs" onClick={() => void checkExistingGermanDetailed(german, swahili, editingId)}>Erneut prüfen</button> : null}
+                <button type="button" className="btn btn-ghost min-h-11 text-xs" onClick={() => { clearDuplicateCheck(); germanInputRef.current?.focus(); }}>Eingabe ändern</button>
+            </div>
+        </div>
+    ) : (
         <div
             className={`mt-4 rounded-xl border p-4 space-y-3 ${duplicatePanelTone}`}
             aria-live={duplicateCheckKind === "strict" ? "assertive" : "polite"}
@@ -490,7 +751,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 <p className="text-xs text-muted">Nicht zwingend eine Dublette – bitte kurz prüfen.</p>
             ) : null}
             {duplicateCheckKind === "failure" ? (
-                <p className="text-xs text-muted">Du kannst trotzdem speichern, aber die Prüfung wurde nicht vollständig ausgeführt.</p>
+                <p className="text-xs text-muted">{isSentence ? "Bitte versuche die Prüfung erneut." : "Du kannst trotzdem speichern, aber die Prüfung wurde nicht vollständig ausgeführt."}</p>
             ) : null}
 
             {Array.isArray(duplicatePreview) && duplicatePreview.length > 0 && (
@@ -504,13 +765,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             key={card.id}
                             type="button"
                             className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
-                            onClick={() => {
-                                setCreateDraft(createDraftFromTextState({ german, swahili, germanExample, swahiliExample }, formNoteDraft.mainNotes));
-                                const full = cards.find((entry) => String(entry.id) === String(card.id)) ?? card;
-                                startEdit(full, "create");
-                                clearDuplicateCheck();
-                                setOpen(true);
-                            }}
+                            onClick={() => openDuplicateCard(card)}
                         >
                             {card.image_path ? (
                                 <img
@@ -527,6 +782,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             <div className="text-sm min-w-0" >
                                 <CardText className="font-medium">{card.german_text}</CardText>
                                 <CardText className="text-muted">{card.swahili_text}</CardText>
+                                {isSentence && duplicateCheckKind === "strict" ? <span className="mt-1 block text-xs font-semibold">Vorhandene Karte öffnen</span> : null}
                             </div>
                         </button>
                     ))}
@@ -543,43 +799,84 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     Korrigieren
                 </button>
 
-                <button
+                {!isSentence ? <button
                     className="btn btn-primary flex-1 text-sm"
                     onClick={saveFlow.saveDespiteWarning}
                     disabled={saveFlow.isSaveBusy}
                 >
                     Trotzdem speichern
-                </button>
+                </button> : null}
             </div>
         </div>
     ) : null;
+
+    const formActionButtons = <div className={isSentence ? "grid grid-cols-2 gap-3 sm:gap-4" : "mt-6 grid grid-cols-2 gap-4"} data-testid={isSentence ? "sentence-action-footer" : undefined}>
+        <button
+            className={`btn btn-primary min-h-12 py-3 text-sm active:scale-[0.99] sm:text-base disabled:bg-surface-elevated disabled:text-muted disabled:border ${isSentence ? "shadow-[0_7px_17px_rgba(191,84,32,0.20)]" : ""}`}
+            onClick={saveFlow.saveCard}
+            disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy || media.generationLoading || explanationLoading || languageSaveBlocked}
+            type="button"
+        >
+            {editingId ? "Speichern" : saveCardLabel}
+        </button>
+        <button className="btn btn-ghost min-h-12 py-3 text-sm active:scale-[0.99] sm:text-base" type="button" onClick={handleCancelEdit} disabled={saveFlow.isSaveBusy}>
+            Abbrechen
+        </button>
+        {isSentence && languageSaveBlocked ? <p className="col-span-2 -mt-1 text-center text-xs font-medium text-[color:var(--accent-danger-strong)]" role="status">
+            {likelySwapped || otherLanguageMismatch ? "Bitte korrigiere zuerst die Sprachzuordnung." : languageCheckUnavailable ? "Sprachzuordnung nicht geprüft. Bitte erneut prüfen oder Eingaben ändern." : "Sprachzuordnung wird geprüft …"}
+        </p> : null}
+    </div>;
 
     return (
         <>
             <FullScreenSheet
                 open={open}
-                title={editingId ? editTitle : createTitle}
+                title={isSentence ? (editingId ? "Satz bearbeiten" : "Neuen Satz anlegen") : (editingId ? editTitle : createTitle)}
+                subtitle={isSentence ? "Deutsch ↔ Kiswahili" : undefined}
+                presentation={isSentence ? "sentence" : "standard"}
                 onClose={handleCancelEdit}
+                scrollContainerRef={sheetScrollRef}
+                footer={isSentence ? <div className="sentence-action-bar">{formActionButtons}</div> : undefined}
             >
-                <div className="rounded-2xl border p-6 shadow-soft bg-surface">
-                    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Schritt 1 · Kartenpaar</div>
-                    <label className="block text-sm font-medium">Deutsch</label>
+                <div className={`rounded-2xl border p-4 shadow-soft bg-surface sm:p-6 ${isSentence ? "sentence-form-surface" : ""}`}>
+                    {isSentence && !editingId && createSuccessVisible ? <div className="sentence-success-banner mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-950 shadow-[0_8px_24px_rgba(31,111,63,0.10)]" role="status" aria-live="polite">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-800" aria-hidden="true">✓</span>
+                        <div className="min-w-0 flex-1"><div className="font-bold">✓ Satz gespeichert</div><p className="mt-0.5 text-sm">Du kannst direkt den nächsten Satz anlegen.</p></div>
+                        <button type="button" className="btn btn-secondary min-h-11 text-sm" onClick={() => { setCreateSuccessVisible(false); germanInputRef.current?.focus(); }}>OK</button>
+                    </div> : null}
+                    {isSentence ? duplicateFeedbackPanel : null}
+                    <div className={isSentence ? "sentence-pair-card" : ""}>
+                    <div className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">{isSentence ? "Satzpaar" : "Schritt 1 · Kartenpaar"}</div>
+                    <div className={isSentence ? "sentence-input-wrap" : ""}>
+                    <div className="flex items-center gap-2"><label htmlFor={`trainer-${cardType}-german`} className="block text-sm font-semibold">Deutsch</label>{isSentence ? <span className="sentence-language-chip" aria-hidden="true">DE</span> : null}</div>
                     <textarea
-                        className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
+                        id={`trainer-${cardType}-german`}
+                        ref={germanInputRef}
+                        aria-invalid={explanationFieldError === "german"}
+                        className={`mt-2 w-full whitespace-pre-wrap ${explanationFieldError === "german" ? "border-red-500 ring-2 ring-red-200" : ""} ${isSentence ? "sentence-textarea" : "min-h-[96px] resize-y rounded-xl border p-3 md:min-h-[120px]"}`}
                         value={german}
                         onChange={(e) => handlePrimaryFieldChange(setGerman, e.target.value)}
                         placeholder="z.B. Guten Morgen"
-                        rows={3}
+                        rows={isSentence ? 2 : 3}
                     />
+                    {explanationFieldError === "german" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den deutschen Satz ein.</p> : null}
+                    </div>
 
-                    <label className="block text-sm font-medium mt-4">Swahili</label>
+                    <div className={isSentence ? "sentence-input-wrap mt-4" : "mt-4"}>
+                    <div className="flex items-center gap-2"><label htmlFor={`trainer-${cardType}-swahili`} className="block text-sm font-semibold">Kiswahili</label>{isSentence ? <span className="sentence-language-chip" aria-hidden="true">SW</span> : null}</div>
                     <textarea
-                        className="mt-1 w-full rounded-xl border p-3 whitespace-pre-wrap min-h-[96px] md:min-h-[120px] resize-y"
+                        id={`trainer-${cardType}-swahili`}
+                        ref={swahiliInputRef}
+                        aria-invalid={explanationFieldError === "swahili"}
+                        className={`mt-2 w-full whitespace-pre-wrap ${explanationFieldError === "swahili" ? "border-red-500 ring-2 ring-red-200" : ""} ${isSentence ? "sentence-textarea" : "min-h-[96px] resize-y rounded-xl border p-3 md:min-h-[120px]"}`}
                         value={swahili}
                         onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. Habari za asubuhi"
-                        rows={3}
+                        rows={isSentence ? 2 : 3}
                     />
+                    {explanationFieldError === "swahili" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den Kiswahili-Satz ein.</p> : null}
+                    </div>
+                    </div>
 
                     {topStatusText ? (
                         <div className={`mt-4 rounded-xl border p-3 text-sm ${topStatusTone}`} aria-live="polite">
@@ -590,9 +887,57 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     ) : null}
 
-                    {duplicateFeedbackPanel}
+                    {languageSaveBlocked ? <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-amber-950" role="status">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-100"><SentenceFeatureIcon name="swap" className="h-5 w-5" /></span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold">{likelySwapped ? "Deutsch und Kiswahili scheinen vertauscht zu sein." : otherLanguageMismatch ? "Mindestens ein Satz scheint im falschen Sprachfeld zu stehen." : languageCheckUnavailable ? "Sprachzuordnung konnte nicht geprüft werden." : "Sprachzuordnung wird geprüft …"}</p>
+                            <p className="text-xs">{likelySwapped || otherLanguageMismatch ? "Bitte korrigiere zuerst die Sprachzuordnung." : languageCheckUnavailable ? "Bitte versuche es erneut oder korrigiere die Eingaben." : "Speichern ist nach der Prüfung wieder möglich."}</p>
+                        </div>
+                        {likelySwapped ? <button type="button" className="btn btn-secondary min-h-11 text-xs" onClick={swapSentenceLanguages}>Felder tauschen</button> : null}
+                        {languageCheckUnavailable ? <button type="button" className="btn btn-secondary min-h-11 text-xs" onClick={() => setLanguageValidationRetry((value) => value + 1)}>Erneut prüfen</button> : null}
+                    </div> : null}
 
-                    <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
+                    {!isSentence ? duplicateFeedbackPanel : null}
+
+                    <input
+                        type="file"
+                        accept="image/*"
+                        id="trainer-card-image-upload"
+                        className="hidden"
+                        onChange={(e) => { media.discardIllustration(); media.setImageFile(e.target.files?.[0] ?? null); }}
+                    />
+
+                    <SentenceFormGroup sentence={isSentence}>
+                    <SentenceFormDisclosure sentence={isSentence} title="Grammatik verstehen" icon="grammar" featured description="AI zerlegt Satzbau und Wortbestandteile." status={sentenceExplanation ? "Erklärung vorhanden" : "Nicht erstellt"} badge={showGrammarTip && activeSupplement !== "grammar" ? "Empfohlen" : undefined} open={activeSupplement === "grammar"} onToggle={() => { if (showGrammarTip) markGrammarTipSeen(); toggleSupplement("grammar"); }} sectionRef={grammarCardRef} triggerRef={grammarTriggerRef} coachmark={showGrammarTip ? <div className="sentence-coachmark" role="note" data-testid="sentence-grammar-coachmark">
+                        <p className="text-sm font-bold">Grammatik leichter verstehen</p>
+                        <p className="mt-1 text-xs leading-relaxed text-[color:var(--text-muted)]">Lass dir Satzbau und Wortbestandteile automatisch erklären.</p>
+                        <div className="mt-3 flex flex-wrap gap-2"><button type="button" className="btn btn-primary min-h-11 text-xs" onClick={() => { markGrammarTipSeen(); setActiveSupplement("grammar"); window.requestAnimationFrame(() => { grammarCreateRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); grammarCreateRef.current?.focus({ preventScroll: true }); }); }}>Ausprobieren</button><button type="button" className="btn btn-utility min-h-11 text-xs" onClick={() => { markGrammarTipSeen(); window.requestAnimationFrame(() => grammarTriggerRef.current?.focus()); }}>Später</button></div>
+                    </div> : undefined}>
+                    {cardType === "sentence" ? <section className="pt-1" aria-label="Grammatik verstehen">
+                        <p className="text-sm text-[color:var(--text-muted)]">Lass dir den Satz kurz zerlegen und erklären.</p>
+                        {sentenceExplanation ? <div className="mt-3">
+                            <SentenceExplanationContent explanation={sentenceExplanation} />
+                            <button type="button" className="btn btn-ghost mt-2" onClick={removeSentenceExplanation}>Erklärung entfernen</button>
+                        </div> : null}
+                        <button ref={grammarCreateRef} type="button" className="btn btn-secondary mt-3" disabled={explanationLoading || saveFlow.isSaveBusy || languageSaveBlocked} onClick={() => void generateSentenceExplanation()}>
+                            {explanationLoading ? "Lernerklärung wird erstellt …" : sentenceExplanation ? "Neu erstellen" : "Erklärung erstellen"}
+                        </button>
+                        {explanationError && !explanationFieldError ? <p role="alert" className="mt-2 text-sm text-accent-cta">{explanationError}</p> : null}
+                        {explanationPreview ? <div className="mt-3 rounded-xl border border-soft bg-surface p-3">
+                            <div className="mb-2 text-xs font-semibold uppercase text-muted">Vorschau</div>
+                            <SentenceExplanationContent explanation={explanationPreview} />
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" className="btn btn-primary" onClick={acceptSentenceExplanation}>Übernehmen</button>
+                                <button type="button" className="btn btn-secondary" onClick={() => void generateSentenceExplanation()} disabled={explanationLoading || languageSaveBlocked}>Neu erzeugen</button>
+                                <button type="button" className="btn btn-ghost" onClick={() => setExplanationPreview(null)}>Verwerfen</button>
+                            </div>
+                        </div> : null}
+                    </section> : null}
+
+                    </SentenceFormDisclosure>
+
+                    {!isSentence ? (
+                    <div className={isSentence ? "pt-1" : "mt-4 rounded-xl border border-soft bg-surface-elevated p-3"}>
                         <button
                             type="button"
                             className="flex w-full items-start justify-between gap-3 text-left"
@@ -624,9 +969,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             </div>
                         ) : null}
                     </div>
+                    ) : null}
 
+                    <SentenceFormDisclosure sentence={isSentence} title="Notizen" icon="notes" status={formNoteDraft.mainNotes.trim() ? "Notiz vorhanden" : "Noch keine Notiz"} open={activeSupplement === "notes"} onToggle={() => toggleSupplement("notes")}>
                     <div className="mt-4 rounded-xl border border-soft bg-surface-elevated p-3">
-                        <button
+                        {!isSentence ? <button
                             type="button"
                             className="flex w-full items-start justify-between gap-3 text-left"
                             onClick={() => setFormNoteOpen((isOpen) => !isOpen)}
@@ -638,9 +985,9 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                 <span className="mt-1 block text-xs text-muted">Card-spezifische Merkhilfe oder Stolperstelle.</span>
                             </span>
                             <span className="pt-0.5 text-sm text-muted" aria-hidden="true">{formNoteOpen ? "▾" : "▸"}</span>
-                        </button>
+                        </button> : null}
 
-                        {formNoteOpen ? (
+                        {isSentence || formNoteOpen ? (
                             <div className="mt-3">
                                 {formNoteLoading ? (
                                     <div className="text-sm text-muted">Notizen werden geladen…</div>
@@ -648,7 +995,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                     <>
                                         <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Notiz</label>
                                         <textarea
-                                            className="min-h-[220px] w-full resize-y rounded-xl border border-soft bg-surface p-3 text-base text-primary md:text-sm"
+                                            className={isSentence ? "sentence-textarea min-h-[120px]" : "min-h-[220px] w-full resize-y rounded-xl border border-soft bg-surface p-3 text-base text-primary md:text-sm"}
                                             placeholder="Kurze Merkhilfe, Stolperstein oder Eselsbrücke…"
                                             value={formNoteDraft.mainNotes}
                                             onChange={(event) => {
@@ -664,9 +1011,12 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         ) : null}
                     </div>
 
-                    <div className="mt-4 rounded-xl border p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="space-y-2">
+                    </SentenceFormDisclosure>
+
+                    <SentenceFormDisclosure sentence={isSentence} title="Gruppe" icon="group" status={formSelectedGroups.length ? <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">{formGroupSummary.visible.map((group) => <span key={group.id} className="inline-flex min-w-0 items-center gap-1"><GroupColorDot color={group.color} />{group.name}</span>)}{formGroupSummary.overflow > 0 ? <span>+{formGroupSummary.overflow}</span> : null}</span> : "Keine Gruppe"} open={activeSupplement === "group"} onToggle={() => toggleSupplement("group")}>
+                    <div className={isSentence ? "pt-1" : "mt-4 rounded-xl border p-3"}>
+                        <div className={isSentence ? "space-y-3" : "flex flex-wrap items-center justify-between gap-3"}>
+                            {!isSentence ? <div className="space-y-2">
                                 <div className="text-sm font-medium">Gruppen</div>
                                 <div className="flex min-h-7 flex-wrap items-center gap-1.5">
                                     {formGroupSummary.visible.length > 0 ? (
@@ -680,50 +1030,54 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                         <span className="inline-flex h-6 items-center rounded-full border border-soft bg-surface px-2.5 text-[11px] font-medium text-muted">Keine Gruppe</span>
                                     )}
                                 </div>
-                            </div>
-                            <CompactGroupPicker
+                            </div> : null}
+                            {!isSentence || activeSupplement === "group" ? <CompactGroupPicker
+                                inline={isSentence}
                                 groups={groups}
                                 selectedIds={formGroupIds}
                                 onChange={setFormGroupIds}
                                 cardType={cardType}
-                                triggerLabel={formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
+                                triggerLabel={isSentence ? "Gruppe wählen" : formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}
                                 allowCreate
                                 onGroupCreated={(group) => onGroupsChange([...groups, group].sort((a, b) => a.name.localeCompare(b.name)))}
-                            />
+                            /> : null}
                         </div>
                     </div>
 
-                    <div className="mt-6 text-sm font-medium">Medien</div>
-                    {!editingId && (
-                        <div className="mt-2 rounded-xl border p-3">
-                            <div className="text-sm font-medium">Aussprache</div>
+                    </SentenceFormDisclosure>
 
-                            <div className="mt-3 flex items-center gap-4">
+                    <SentenceFormDisclosure sentence={isSentence} title="Aussprache" icon="audio" status={media.pendingAudioBlob || media.editAudioPath ? "Audio vorhanden" : "Keine Aufnahme"} open={activeSupplement === "audio"} onToggle={() => toggleSupplement("audio")}>
+                    {!isSentence ? <div className="mt-6 text-sm font-medium">Medien</div> : null}
+                    {!editingId && (
+                        <div className={isSentence ? "pt-1" : "mt-2 rounded-xl border p-3"}>
+                            {!isSentence ? <div className="text-sm font-medium">Aussprache</div> : null}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
                                 {media.pendingAudioBlob ? (
                                     <>
                                         <button
                                             type="button"
-                                            className="rounded-xl border px-3 py-2"
+                                            className={audioActionClass}
                                             onClick={media.playPendingAudio}
                                         >
-                                            🔊 Abspielen
+                                            {isSentence ? "Abspielen" : "🔊 Abspielen"}
                                         </button>
 
                                         {!media.isRecording ? (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.startRecordingForCreate}
                                             >
-                                                🎙️ Neu aufnehmen
+                                                {isSentence ? "Neu aufnehmen" : "🎙️ Neu aufnehmen"}
                                             </button>
                                         ) : (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.stopRecordingForCreate}
                                             >
-                                                ⏹️ Stop
+                                                {isSentence ? "Stop" : "⏹️ Stop"}
                                             </button>
                                         )}
                                     </>
@@ -732,18 +1086,18 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                         {!media.isRecording ? (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.startRecordingForCreate}
                                             >
-                                                🎙️ Aufnahme starten
+                                                {isSentence ? "Aufnahme starten" : "🎙️ Aufnahme starten"}
                                             </button>
                                         ) : (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.stopRecordingForCreate}
                                             >
-                                                ⏹️ Stop
+                                                {isSentence ? "Stop" : "⏹️ Stop"}
                                             </button>
                                         )}
                                     </>
@@ -756,44 +1110,36 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     )}
 
-                    <input
-                        type="file"
-                        accept="image/*"
-                        id="trainer-card-image-upload"
-                        className="hidden"
-                        onChange={(e) => { media.discardIllustration(); media.setImageFile(e.target.files?.[0] ?? null); }}
-                    />
-
                     {editingId && (
-                        <div className="mt-2 rounded-xl border p-2">
-                            <div className="text-sm font-medium">Aussprache</div>
+                        <div className={isSentence ? "pt-1" : "mt-2 rounded-xl border p-2"}>
+                            {!isSentence ? <div className="text-sm font-medium">Aussprache</div> : null}
 
-                            <div className="mt-4 flex items-center gap-3">
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
                                 {media.editAudioPath ? (
                                     <>
                                         <button
                                             type="button"
-                                            className="rounded-xl border px-3 py-2"
+                                            className={audioActionClass}
                                             onClick={() => media.playAudioPath(media.editAudioPath)}
                                         >
-                                            🔊 Abspielen
+                                            {isSentence ? "Abspielen" : "🔊 Abspielen"}
                                         </button>
 
                                         {!media.isRecording ? (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={() => void media.startRecordingForEdit(editingId)}
                                             >
-                                                🎙️ Neu aufnehmen
+                                                {isSentence ? "Neu aufnehmen" : "🎙️ Neu aufnehmen"}
                                             </button>
                                         ) : (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.stopRecordingForEdit}
                                             >
-                                                ⏹️ Stop & Speichern
+                                                {isSentence ? "Stop & Speichern" : "⏹️ Stop & Speichern"}
                                             </button>
                                         )}
                                     </>
@@ -802,18 +1148,18 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                         {!media.isRecording ? (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={() => void media.startRecordingForEdit(editingId)}
                                             >
-                                                🎙️ Aufnahme starten
+                                                {isSentence ? "Aufnahme starten" : "🎙️ Aufnahme starten"}
                                             </button>
                                         ) : (
                                             <button
                                                 type="button"
-                                                className="rounded-xl border px-3 py-2"
+                                                className={audioActionClass}
                                                 onClick={media.stopRecordingForEdit}
                                             >
-                                                ⏹️ Stop & Speichern
+                                                {isSentence ? "Stop & Speichern" : "⏹️ Stop & Speichern"}
                                             </button>
                                         )}
                                     </>
@@ -826,7 +1172,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     )}
 
-                    <div className="mt-4 text-sm font-medium">Bild</div>
+                    </SentenceFormDisclosure>
+
+                    <SentenceFormDisclosure sentence={isSentence} title="Bild" icon="image" status={media.imageFile || editingImagePath ? "Bild vorhanden" : "Kein Bild"} open={activeSupplement === "image"} onToggle={() => toggleSupplement("image")}>
+                    {!isSentence ? <div className="mt-4 text-sm font-medium">Bild</div> : null}
 
                     <label
                         htmlFor="trainer-card-image-upload"
@@ -854,7 +1203,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                             </>
                         ) : (
                             <>
-                                <div className="text-3xl">🖼️</div>
+                                <div className={isSentence ? "grid h-11 w-11 place-items-center rounded-xl bg-[color:var(--surface-elevated)] text-[color:var(--accent-secondary)]" : "text-3xl"}>{isSentence ? <SentenceFeatureIcon name="image" className="h-6 w-6" /> : "🖼️"}</div>
                                 <div className="text-sm">
                                     <div className="font-medium">Bild hinzufügen</div>
                                     <div className="text-xs text-muted">
@@ -886,25 +1235,11 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     ) : null}
 
-                    <div className="mt-6 grid grid-cols-2 gap-4">
-                        <button
-                            className="btn btn-primary py-3 text-base disabled:bg-surface-elevated disabled:text-muted disabled:border"
-                            onClick={saveFlow.saveCard}
-                            disabled={!german.trim() || !swahili.trim() || saveFlow.isSaveBusy || media.generationLoading}
-                            type="button"
-                        >
-                            {editingId ? "Speichern" : saveCardLabel}
-                        </button>
+                    </SentenceFormDisclosure>
 
-                        <button
-                            className="btn btn-ghost py-3 text-base"
-                            type="button"
-                            onClick={handleCancelEdit}
-                            disabled={saveFlow.isSaveBusy}
-                        >
-                            Abbrechen
-                        </button>
-                    </div>
+                    </SentenceFormGroup>
+
+                    {!isSentence ? formActionButtons : null}
 
                     {editingId && (
                         <button

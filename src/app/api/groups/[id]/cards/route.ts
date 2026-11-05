@@ -33,7 +33,7 @@ export async function POST(req: Request, { params }: Params) {
 
     const { data: group, error: groupError } = await groupQuery.maybeSingle();
 
-    if (groupError) return NextResponse.json({ error: groupError.message }, { status: 500 });
+    if (groupError) return NextResponse.json({ error: "group_lookup_failed" }, { status: 500 });
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const { data: cards, error: cardsError } = await supabaseServer
@@ -42,7 +42,7 @@ export async function POST(req: Request, { params }: Params) {
         .eq("owner_key", user.id)
         .in("id", cardIds);
 
-    if (cardsError) return NextResponse.json({ error: cardsError.message }, { status: 500 });
+    if (cardsError) return NextResponse.json({ error: "cards_lookup_failed" }, { status: 500 });
 
     const existingCardIds = new Set(
         (cards ?? [])
@@ -65,7 +65,7 @@ export async function POST(req: Request, { params }: Params) {
         .from("card_groups")
         .upsert(payload, { onConflict: "owner_key,card_id,group_id", ignoreDuplicates: true });
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "group_assignment_failed" }, { status: 500 });
 
     return NextResponse.json({ assignedCount: validCardIds.length, skippedCount: cardIds.length - validCardIds.length });
 }

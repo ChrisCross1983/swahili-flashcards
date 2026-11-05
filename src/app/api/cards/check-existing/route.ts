@@ -25,7 +25,7 @@ export async function POST(req: Request) {
 
   let query = supabaseServer
     .from("cards")
-    .select("id, german_text, swahili_text, image_path, audio_path, created_at, type")
+    .select("id, german_text, swahili_text, image_path, audio_path, sentence_explanation, created_at, type")
     .eq("owner_key", ownerKey);
 
   if (type === "sentence") {

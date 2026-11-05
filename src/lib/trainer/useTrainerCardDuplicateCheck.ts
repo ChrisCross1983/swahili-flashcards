@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CardType } from "@/lib/trainer/types";
+import { sameSentencePair } from "@/lib/sentence/cardFormUx";
 
 export type DuplicateCheckKind = "strict" | "similar" | "failure" | null;
 export type DuplicateCheckResult = "none" | "strict" | "similar" | "failure";
@@ -32,7 +33,7 @@ export function useTrainerCardDuplicateCheck({
         const resolvedGerman = germanText.trim();
         const resolvedSwahili = swahiliText.trim();
         setDuplicateCheckLoading(true);
-        onStatus("Prüfe auf ähnliche Karten …");
+        onStatus(cardType === "sentence" ? "Prüfe auf vorhandene Satzkarten …" : "Prüfe auf ähnliche Karten …");
 
         try {
             const res = await fetch("/api/cards/check-existing", {
@@ -51,10 +52,26 @@ export function useTrainerCardDuplicateCheck({
             if (!res.ok) {
                 console.error(json.error);
                 setDuplicateCheckKind("failure");
-                setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+                setDuplicateHint(cardType === "sentence" ? "Duplikatprüfung konnte nicht abgeschlossen werden." : "Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
                 setDuplicatePreview(null);
                 onStatus("");
                 return "failure";
+            }
+
+            if (cardType === "sentence") {
+                const exact = (Array.isArray(json.strictCards) ? json.strictCards : []).filter((card: {
+                    german_text: string; swahili_text: string;
+                }) => sameSentencePair({ german: resolvedGerman, swahili: resolvedSwahili }, card));
+                if (exact.length > 0) {
+                    setDuplicateCheckKind("strict");
+                    setDuplicateHint("Diese Satzkarte existiert bereits.");
+                    setDuplicatePreview(exact);
+                    onStatus("");
+                    return "strict";
+                }
+                clearDuplicateCheck();
+                onStatus("");
+                return "none";
             }
 
             if (json.exists) {
@@ -79,7 +96,7 @@ export function useTrainerCardDuplicateCheck({
         } catch (error) {
             console.error(error);
             setDuplicateCheckKind("failure");
-            setDuplicateHint("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
+            setDuplicateHint(cardType === "sentence" ? "Duplikatprüfung konnte nicht abgeschlossen werden." : "Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
             setDuplicatePreview(null);
             onStatus("");
             return "failure";

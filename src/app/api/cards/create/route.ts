@@ -4,6 +4,7 @@ import { canonicalizeToSwDe } from "@/lib/cards/saveFlow";
 import { requireUser } from "@/lib/api/auth";
 import { findExistingMatch } from "@/lib/cards/existence";
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
+import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
 
 type CreateCardBody = {
     type?: "vocab" | "sentence";
@@ -87,6 +88,9 @@ export async function POST(req: Request) {
     if (!canonical.sw || !canonical.de) {
         return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
+    if (type === "sentence" && (canonical.de.length > 500 || canonical.sw.length > 500)) {
+        return NextResponse.json({ error: "Satz ist zu lang." }, { status: 400 });
+    }
 
     if (!checkRateLimit(ownerKey)) {
         return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
@@ -117,6 +121,21 @@ export async function POST(req: Request) {
             status: "exists",
             existing_id: existingMatch.existingId,
         });
+    }
+
+    if (type === "sentence") {
+        try {
+            const languageCheck = await getOrCheckSentenceLanguages(ownerKey, canonical.de, canonical.sw);
+            if (languageCheck.status === "input_issue") {
+                return NextResponse.json({ code: "sentence_language_mismatch", ...languageCheck, error: "Bitte korrigiere zuerst die Sprachzuordnung." }, { status: 422 });
+            }
+        } catch (error) {
+            if (error instanceof SentenceLanguageRateLimitError) {
+                return NextResponse.json({ code: "rate_limited", error: "Bitte warte kurz und versuche es später erneut." }, { status: 429 });
+            }
+            console.error("[api/cards/create] sentence_language_check_unavailable");
+            return NextResponse.json({ code: "sentence_language_check_unavailable", error: "Sprachzuordnung konnte nicht geprüft werden. Bitte erneut versuchen." }, { status: 503 });
+        }
     }
 
     const { data: card, error } = await supabaseServer

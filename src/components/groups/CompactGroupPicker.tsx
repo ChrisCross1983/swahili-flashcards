@@ -3,7 +3,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Group } from "@/lib/groups/types";
 import { createGroup } from "@/lib/groups/api";
+import GroupColorDot from "@/components/groups/GroupColorDot";
+import GroupColorPicker from "@/components/groups/GroupColorPicker";
+import type { GroupColorKey } from "@/lib/groups/colors";
 import type { CardType } from "@/lib/trainer/types";
+import { cleanGroupName, normalizeGroupName } from "@/lib/groups/names";
 
 type Props = {
     groups: Group[];
@@ -16,6 +20,7 @@ type Props = {
     allowCreate?: boolean;
     onGroupCreated?: (group: Group) => void;
     autoSelectCreated?: boolean;
+    inline?: boolean;
 };
 
 export default function CompactGroupPicker({
@@ -29,17 +34,19 @@ export default function CompactGroupPicker({
     allowCreate = false,
     onGroupCreated,
     autoSelectCreated = true,
+    inline = false,
 }: Props) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const panelId = useId();
     const [open, setOpen] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
+    const [newGroupColor, setNewGroupColor] = useState<GroupColorKey | null>(null);
     const [createStatus, setCreateStatus] = useState<string | null>(null);
     const [createBusy, setCreateBusy] = useState(false);
     const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds]);
 
     useEffect(() => {
-        if (!open) return;
+        if (inline || !open) return;
 
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as Node;
@@ -56,10 +63,10 @@ export default function CompactGroupPicker({
 
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [open, panelId]);
+    }, [inline, open, panelId]);
 
     useEffect(() => {
-        if (!open) return;
+        if (inline || !open) return;
 
         function handleKeyDown(event: KeyboardEvent) {
             if (event.key === "Escape") {
@@ -70,9 +77,13 @@ export default function CompactGroupPicker({
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [open]);
+    }, [inline, open]);
 
     function toggle(id: string) {
+        if (inline && cardType === "sentence") {
+            onChange([id]);
+            return;
+        }
         if (selectedSet.has(id)) {
             onChange(selectedIds.filter((value) => value !== id));
             return;
@@ -81,18 +92,15 @@ export default function CompactGroupPicker({
     }
 
     async function handleCreate() {
-        const trimmed = newGroupName.trim();
+        const trimmed = cleanGroupName(newGroupName);
         if (!trimmed) {
             setCreateStatus("Bitte Gruppennamen eingeben.");
             return;
         }
 
-        const duplicate = groups.find((group) => group.name.trim().toLowerCase() === trimmed.toLowerCase());
+        const duplicate = groups.find((group) => normalizeGroupName(group.name) === normalizeGroupName(trimmed));
         if (duplicate) {
-            setCreateStatus(`„${duplicate.name}“ existiert bereits.`);
-            if (autoSelectCreated && !selectedSet.has(duplicate.id)) {
-                onChange([...selectedIds, duplicate.id]);
-            }
+            setCreateStatus("Eine Gruppe mit diesem Namen existiert bereits.");
             return;
         }
 
@@ -100,12 +108,13 @@ export default function CompactGroupPicker({
         setCreateStatus(null);
 
         try {
-            const created = await createGroup(cardType, { name: trimmed });
+            const created = await createGroup(cardType, { name: trimmed, color: newGroupColor });
             onGroupCreated?.(created);
             setNewGroupName("");
+            setNewGroupColor(null);
 
             if (autoSelectCreated) {
-                onChange(Array.from(new Set([...selectedIds, created.id])));
+                onChange(inline && cardType === "sentence" ? [created.id] : Array.from(new Set([...selectedIds, created.id])));
             }
             setCreateStatus(`Gruppe „${created.name}“ erstellt.`);
         } catch (error) {
@@ -116,8 +125,8 @@ export default function CompactGroupPicker({
     }
 
     return (
-        <div ref={containerRef} className="relative inline-flex">
-            <button
+        <div ref={containerRef} className={inline ? "w-full min-w-0" : "relative inline-flex"}>
+            {!inline ? <button
                 type="button"
                 className="btn btn-ghost text-sm whitespace-nowrap"
                 onClick={() => setOpen((prev) => !prev)}
@@ -126,16 +135,28 @@ export default function CompactGroupPicker({
                 aria-controls={open ? panelId : undefined}
             >
                 {triggerLabel}
-            </button>
+            </button> : null}
 
-            {open ? (
+            {inline || open ? (
                 <div
                     id={panelId}
-                    className="fixed inset-x-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+1rem))] z-[135] max-h-[calc(100dvh-6rem)] overflow-auto rounded-2xl border border-soft bg-base p-3 shadow-warm md:left-auto md:right-[max(1rem,env(safe-area-inset-right))] md:top-[max(5rem,calc(env(safe-area-inset-top)+2rem))] md:w-[min(24rem,calc(100vw-2rem))]"
-                    data-viewport-safe-group-picker
+                    className={inline
+                        ? "w-full min-w-0 rounded-xl border border-soft bg-surface p-3"
+                        : "fixed inset-x-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+1rem))] z-[135] max-h-[calc(100dvh-6rem)] overflow-auto rounded-2xl border border-soft bg-base p-3 shadow-warm md:left-auto md:right-[max(1rem,env(safe-area-inset-right))] md:top-[max(5rem,calc(env(safe-area-inset-top)+2rem))] md:w-[min(24rem,calc(100vw-2rem))]"}
+                    data-viewport-safe-group-picker={inline ? undefined : true}
+                    data-inline-group-picker={inline ? true : undefined}
                 >
                     <div className="mb-2 text-sm font-semibold">{title}</div>
                     <div className="max-h-56 space-y-1 overflow-auto pr-1" role="listbox" aria-multiselectable="true">
+                        {inline ? <button
+                            type="button"
+                            role="option"
+                            aria-selected={selectedIds.length === 0}
+                            className={`flex min-h-10 w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left text-sm transition ${selectedIds.length === 0
+                                ? "border-cta bg-accent-cta-soft text-default"
+                                : "border-soft bg-surface hover:bg-surface-elevated"}`}
+                            onClick={() => onChange([])}
+                        ><span>Keine Gruppe</span><span aria-hidden="true">{selectedIds.length === 0 ? "✓" : ""}</span></button> : null}
                         {groups.map((group) => {
                             const isSelected = selectedSet.has(group.id);
                             return (
@@ -144,13 +165,13 @@ export default function CompactGroupPicker({
                                     key={group.id}
                                     role="option"
                                     aria-selected={isSelected}
-                                    className={`flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left text-sm transition ${isSelected
+                                    className={`flex min-h-10 w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left text-sm transition ${isSelected
                                         ? "border-cta bg-accent-cta-soft text-default"
                                         : "border-soft bg-surface hover:bg-surface-elevated"
                                         }`}
                                     onClick={() => toggle(group.id)}
                                 >
-                                    <span className="truncate">{group.name}</span>
+                                    <span className="inline-flex min-w-0 items-center gap-2"><GroupColorDot color={group.color} /><span className="truncate">{group.name}</span></span>
                                     <span className="pl-2 text-xs" aria-hidden="true">{isSelected ? "✓" : ""}</span>
                                 </button>
                             );
@@ -163,7 +184,7 @@ export default function CompactGroupPicker({
                             <div className="text-xs font-semibold tracking-wide text-muted">Neue Gruppe erstellen</div>
                             <div className="mt-2 flex gap-2">
                                 <input
-                                    className="flex-1 rounded-lg border border-soft bg-surface px-2.5 py-1.5 text-sm"
+                                    className="min-w-0 flex-1 rounded-lg border border-soft bg-surface px-2.5 py-1.5 text-sm"
                                     value={newGroupName}
                                     onChange={(event) => setNewGroupName(event.target.value)}
                                     placeholder="z.B. Begrüßung"
@@ -177,15 +198,16 @@ export default function CompactGroupPicker({
                                     {createBusy ? "…" : "Erstellen"}
                                 </button>
                             </div>
+                            <div className="mt-3"><GroupColorPicker value={newGroupColor} onChange={setNewGroupColor} /></div>
                             {createStatus ? <p className="mt-2 text-xs text-muted">{createStatus}</p> : null}
                         </div>
                     ) : null}
 
-                    <div className="mt-3 flex justify-end border-t border-soft pt-3">
+                    {!inline ? <div className="mt-3 flex justify-end border-t border-soft pt-3">
                         <button type="button" className="btn btn-primary text-sm" onClick={() => setOpen(false)}>
                             Fertig
                         </button>
-                    </div>
+                    </div> : null}
                 </div>
             ) : null}
         </div>

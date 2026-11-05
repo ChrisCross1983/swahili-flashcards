@@ -1,3 +1,5 @@
+import type { SentenceExplanation } from "@/lib/sentence/explanation";
+
 export type CardType = "vocab" | "sentence";
 
 export type Direction = "DE_TO_SW" | "SW_TO_DE";
@@ -24,6 +26,7 @@ export type TodayItem = {
     de_example?: string | null;
     sw_example?: string | null;
     type?: CardType;
+    sentence_explanation?: SentenceExplanation | null;
     imagePath?: string | null;
     image_path?: string | null;
     image?: string | null;

@@ -31,7 +31,7 @@ export async function GET(req: Request) {
 
   let query = supabaseServer
     .from("cards")
-    .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, type")
+    .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, type")
     .eq("owner_key", ownerKey);
 
   query = applyCardTypeFilter(query, resolvedType);

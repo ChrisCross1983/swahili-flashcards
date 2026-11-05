@@ -27,7 +27,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerCardFormSource).toContain("<CompactGroupPicker");
         expect(compactGroupPickerSource).toContain("aria-multiselectable=\"true\"");
         expect(compactGroupPickerSource).toContain("aria-selected={isSelected}");
-        expect(trainerCardFormSource).toContain("{formSelectedGroups.length > 0 ? \"Gruppen bearbeiten\" : \"➕ Gruppe\"}");
+        expect(trainerCardFormSource).toContain('triggerLabel={isSentence ? "Gruppe wählen" : formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}');
         expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
         expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
     });

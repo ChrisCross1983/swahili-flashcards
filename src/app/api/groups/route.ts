@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { resolveCardTypeFilter } from "@/lib/server/cardFilters";
+import { isGroupColorKey } from "@/lib/groups/colors";
+import { cleanGroupName, isGroupNameConflict, normalizeGroupName } from "@/lib/groups/names";
 
 export async function GET(req: Request) {
     const { user, response } = await requireUser();
@@ -25,7 +27,7 @@ export async function GET(req: Request) {
 
     const { data, error } = await query;
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "groups_unavailable" }, { status: 500 });
     return NextResponse.json({ groups: data ?? [] });
 }
 
@@ -34,11 +36,25 @@ export async function POST(req: Request) {
     if (response) return response;
 
     const body = await req.json().catch(() => ({}));
-    const name = String(body?.name ?? "").trim();
+    const name = cleanGroupName(String(body?.name ?? ""));
     const resolvedType = body?.type === "sentence" ? "sentence" : "vocab";
 
     if (!name) {
         return NextResponse.json({ error: "name is required" }, { status: 400 });
+    }
+    if (body?.color != null && !isGroupColorKey(body.color)) {
+        return NextResponse.json({ error: "Ungültige Gruppenfarbe." }, { status: 400 });
+    }
+
+    // The database remains authoritative; this also makes case and whitespace behavior
+    // consistent before insert, including names in another card scope.
+    const { data: existingGroups, error: lookupError } = await supabaseServer
+        .from("groups")
+        .select("id, name")
+        .eq("owner_key", user.id);
+    if (lookupError) return NextResponse.json({ error: "groups_unavailable" }, { status: 500 });
+    if ((existingGroups ?? []).some((group) => normalizeGroupName(group.name) === normalizeGroupName(name))) {
+        return NextResponse.json({ error: "group_name_exists" }, { status: 409 });
     }
 
     const { data, error } = await supabaseServer
@@ -48,12 +64,15 @@ export async function POST(req: Request) {
             name,
             type_scope: resolvedType,
             description: typeof body?.description === "string" ? body.description.trim() || null : null,
-            color: typeof body?.color === "string" ? body.color.trim() || null : null,
+            color: body?.color ?? null,
         })
         .select("id, name, description, color, sort_order, created_at, updated_at, type_scope")
         .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json(
+        { error: isGroupNameConflict(error) ? "group_name_exists" : "group_save_failed" },
+        { status: isGroupNameConflict(error) ? 409 : 500 },
+    );
 
     return NextResponse.json({ group: data }, { status: 201 });
 }
