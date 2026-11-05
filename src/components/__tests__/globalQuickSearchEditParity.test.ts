@@ -42,7 +42,7 @@ describe("GlobalQuickSearch edit parity", () => {
         expect(duplicateHook).toContain("Ähnliche Karten gefunden");
         expect(trainerForm).toContain("<CompactGroupPicker");
         expect(trainerForm).toContain("Karte aktualisiert ✅");
-        expect(mediaHook).toContain("openImageSuggestions");
+        expect(mediaHook).toContain("generateIllustration");
         expect(mediaHook).toContain("startRecordingForEdit");
     });
 
