@@ -14,7 +14,7 @@ describe("getTrainerCopy", () => {
             cardItemLabel: "Karten",
             editTitle: "Karte bearbeiten",
             createTitle: "Neue Wörter",
-            saveCardLabel: "Karte speichern",
+            saveCardLabel: "Wort speichern",
         });
     });
 

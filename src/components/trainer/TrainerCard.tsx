@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import CardText from "@/components/ui/CardText";
 import FormattedExampleText from "@/components/ui/FormattedExampleText";
 import SentenceExplanationDisclosure from "@/components/trainer/SentenceExplanationDisclosure";
@@ -12,11 +12,14 @@ type Props = {
     answer: string;
     promptExample?: string | null;
     answerExample?: string | null;
+    showExamples?: boolean;
     imagePath: string | null;
     imageBaseUrl: string;
     learningTypeLabel?: string | null;
     onOpenLearningHelp?: () => void;
     sentenceExplanation?: SentenceExplanation | null;
+    learningFeature?: ReactNode;
+    autoOpenExplanation?: boolean;
 };
 
 type ExampleDisclosureProps = {
@@ -62,15 +65,18 @@ export default function TrainerCard({
     answer,
     promptExample,
     answerExample,
+    showExamples = true,
     imagePath,
     imageBaseUrl,
     learningTypeLabel,
     onOpenLearningHelp,
     sentenceExplanation,
+    learningFeature,
+    autoOpenExplanation = false,
 }: Props) {
     const [showPromptExample, setShowPromptExample] = useState(false);
     const [showAnswerExample, setShowAnswerExample] = useState(false);
-    const [showSentenceExplanation, setShowSentenceExplanation] = useState(false);
+    const [showSentenceExplanation, setShowSentenceExplanation] = useState(autoOpenExplanation);
 
     return (
         <div className="rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6" data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
@@ -80,7 +86,7 @@ export default function TrainerCard({
                     <div className="mt-3 text-3xl font-semibold leading-tight text-primary sm:text-4xl">
                         <CardText>{prompt}</CardText>
                     </div>
-                    {promptExample?.trim() ? (
+                    {showExamples && promptExample?.trim() ? (
                         <ExampleDisclosure
                             id="prompt-example"
                             open={showPromptExample}
@@ -97,7 +103,7 @@ export default function TrainerCard({
                             <div className="mt-2 text-2xl font-semibold leading-tight text-primary sm:text-3xl">
                                 <CardText>{answer}</CardText>
                             </div>
-                            {answerExample?.trim() ? (
+                            {showExamples && answerExample?.trim() ? (
                                 <ExampleDisclosure
                                     id="answer-example"
                                     open={showAnswerExample}
@@ -109,7 +115,7 @@ export default function TrainerCard({
 
                         {imagePath ? (
                             <div>
-                                <img src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" className="h-40 w-full rounded-2xl object-cover" />
+                                <img src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" className="trainer-learning-image" />
                             </div>
                         ) : null}
 
@@ -118,6 +124,8 @@ export default function TrainerCard({
                             open={showSentenceExplanation}
                             onToggle={() => setShowSentenceExplanation((open) => !open)}
                         /> : null}
+
+                        {learningFeature}
 
                         {onOpenLearningHelp ? (
                             <div className="flex items-center justify-between gap-3" data-testid="learning-secondary-actions">

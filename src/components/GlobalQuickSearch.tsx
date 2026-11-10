@@ -19,6 +19,7 @@ type CardResult = {
     swahili_text: string;
     german_example?: string | null;
     swahili_example?: string | null;
+    has_note?: boolean;
     image_path: string | null;
     audio_path: string | null;
     groups?: Group[];
@@ -422,6 +423,13 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                     setResults((prev) => prev.map(applyAudio));
                     setKnownCards((prev) => prev.map(applyAudio));
                     setSelected((prev) => prev ? applyAudio(prev) : prev);
+                }}
+                onNoteSaved={(cardId, mainNotes) => {
+                    const hasNote = mainNotes.trim().length > 0;
+                    const applyNote = (card: CardResult) => String(card.id) === cardId ? { ...card, has_note: hasNote } : card;
+                    setResults((prev) => prev.map(applyNote));
+                    setKnownCards((prev) => prev.map(applyNote));
+                    setSelected((prev) => prev ? applyNote(prev) : prev);
                 }}
                 onOpenCards={() => { }}
                 onReturnToLearn={() => { }}

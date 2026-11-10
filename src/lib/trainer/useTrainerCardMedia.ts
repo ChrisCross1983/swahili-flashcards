@@ -2,6 +2,29 @@
 
 import { useEffect, useRef, useState } from "react";
 
+export function illustrationPreviewFile(preview: string): File {
+    const base64 = preview.match(/^data:image\/webp;base64,([A-Za-z0-9+/=]+)$/)?.[1];
+    if (!base64) throw new Error("invalid_preview");
+    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+    return new File([bytes], "illustration.webp", { type: "image/webp" });
+}
+
+export async function uploadImageFile(imageFile: File): Promise<string> {
+    const formData = new FormData();
+    formData.append("file", imageFile);
+    let res: Response;
+    try {
+        res = await fetch("/api/upload-image", { method: "POST", body: formData });
+    } catch {
+        throw new Error("image_upload_failed");
+    }
+    const json = await res.json().catch(() => ({})) as { error?: string; path?: string };
+    if (!res.ok || !json.path) {
+        throw new Error(json.error === "image_too_large" ? "image_too_large" : "image_upload_failed");
+    }
+    return json.path;
+}
+
 const AUDIO_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 
@@ -17,11 +40,23 @@ export function useTrainerCardMedia({
     const [generationLoading, setGenerationLoading] = useState(false);
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
     const [generationError, setGenerationError] = useState<string | null>(null);
+    const [generationCooldownSeconds, setGenerationCooldownSeconds] = useState(0);
+    const generationRetryAt = useRef(0);
     const generationLock = useRef(false);
+    const generationSequence = useRef(0);
     const [editAudioPath, setEditAudioPath] = useState<string | null>(null);
     const [pendingAudioBlob, setPendingAudioBlob] = useState<Blob | null>(null);
     const [pendingAudioType, setPendingAudioType] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+
+    const cooldownActive = generationCooldownSeconds > 0;
+    useEffect(() => {
+        if (!cooldownActive) return;
+        const timer = window.setInterval(() => {
+            setGenerationCooldownSeconds(Math.max(0, Math.ceil((generationRetryAt.current - Date.now()) / 1000)));
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, [cooldownActive]);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
@@ -61,6 +96,7 @@ export function useTrainerCardMedia({
     }
 
     function resetImageInputs() {
+        generationSequence.current++;
         setImageFile(null);
         setPreviewUrl(null);
         setGeneratedPreview(null);
@@ -80,27 +116,13 @@ export function useTrainerCardMedia({
     }
 
     async function uploadImage(): Promise<string | null> {
-        if (!imageFile) return null;
-
-        const formData = new FormData();
-        formData.append("file", imageFile);
-
-        const res = await fetch("/api/upload-image", {
-            method: "POST",
-            body: formData,
-        });
-
-        const json = await res.json();
-        if (!res.ok) {
-            throw new Error(json.error ?? "Upload failed");
-        }
-
-        return json.path as string;
+        return imageFile ? uploadImageFile(imageFile) : null;
     }
 
     async function generateIllustration(german: string, swahili: string) {
-        if (generationLock.current) return;
+        if (generationLock.current || Date.now() < generationRetryAt.current) return;
         generationLock.current = true;
+        const sequence = ++generationSequence.current;
         setGenerationLoading(true);
         setGenerationError(null);
         setGeneratedPreview(null);
@@ -110,15 +132,26 @@ export function useTrainerCardMedia({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ german, swahili, type: "vocab" }),
             });
-            const json = await res.json() as { preview?: string; code?: string };
-            if (json.code === "unsuitable") {
+            const json = await res.json().catch(() => ({})) as { preview?: string; error?: string; retryAfterSeconds?: number };
+            if (sequence !== generationSequence.current) return;
+            if (json.error === "unsuitable") {
                 setGenerationError("Für diesen Begriff ist keine klare Illustration sinnvoll.");
+                return;
+            }
+            if (!res.ok && (json.error === "image_generation_local_rate_limited" || json.error === "image_generation_upstream_rate_limited")) {
+                const wait = Number.isFinite(json.retryAfterSeconds) ? Number(json.retryAfterSeconds) : Number(res.headers.get("Retry-After"));
+                const seconds = Number.isFinite(wait) && wait > 0 ? Math.min(Math.ceil(wait), 86_400) : 30;
+                generationRetryAt.current = Date.now() + seconds * 1000;
+                setGenerationCooldownSeconds(seconds);
+                setGenerationError(json.error === "image_generation_upstream_rate_limited"
+                    ? "Die Bilderstellung ist gerade ausgelastet. Bitte versuche es gleich noch einmal."
+                    : "Du hast vorerst alle Illustrationen erstellt. Bitte versuche es später erneut.");
                 return;
             }
             if (!res.ok || !json.preview?.startsWith("data:image/webp;base64,")) throw new Error("failed");
             setGeneratedPreview(json.preview);
         } catch {
-            setGenerationError("Die Illustration konnte nicht erstellt werden. Bitte versuche es erneut.");
+            if (sequence === generationSequence.current) setGenerationError("Die Illustration konnte gerade nicht erstellt werden.");
         } finally {
             generationLock.current = false;
             setGenerationLoading(false);
@@ -127,15 +160,13 @@ export function useTrainerCardMedia({
 
     function acceptIllustration() {
         if (!generatedPreview) return;
-        const binary = atob(generatedPreview.split(",")[1]);
-        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        setImageFile(new File([bytes], "illustration.webp", { type: "image/webp" }));
+        setImageFile(illustrationPreviewFile(generatedPreview));
         setGeneratedPreview(null);
         setGenerationError(null);
         onStatus("Illustration übernommen – mit der Karte speichern.");
     }
 
-    function discardIllustration() { setGeneratedPreview(null); setGenerationError(null); }
+    function discardIllustration() { generationSequence.current++; setGeneratedPreview(null); setGenerationError(null); }
 
     function getSupportedAudioMimeType() {
         const candidates = [
@@ -236,8 +267,8 @@ export function useTrainerCardMedia({
         imageFile,
         setImageFile,
         previewUrl,
-        setPreviewUrl,
         generationLoading,
+        generationCooldownSeconds,
         generatedPreview,
         generationError,
         editAudioPath,

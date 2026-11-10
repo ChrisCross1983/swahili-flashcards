@@ -13,8 +13,8 @@ describe("card illustration security", () => {
 
   it("builds a fixed style without a client prompt", () => {
     const prompt = illustrationPrompt({ german: "Katze", swahili: "paka" });
-    expect(prompt).toContain("educational cartoon-style");
-    expect(prompt).toContain("no text");
+    expect(prompt).toContain("premium editorial illustration");
+    expect(prompt).toContain("No letters, words, labels");
     expect(prompt).toContain('German word "Katze"');
   });
 

@@ -7,6 +7,7 @@ import { isOwnedCardImagePath } from "@/lib/cards/imagePath";
 import { explanationMatchesSentences, parseSentenceExplanation } from "@/lib/sentence/explanation";
 import { sameSentencePair } from "@/lib/sentence/cardFormUx";
 import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
+import { getCardNotePresence } from "@/lib/server/cardNoteStatus";
 
 async function rejectSentenceLanguageMismatch(ownerKey: string, german: string, swahili: string) {
     try {
@@ -193,6 +194,14 @@ export async function GET(req: Request) {
 
     const cards = data ?? [];
 
+    let noteCardIds: Set<string>;
+    try {
+        noteCardIds = await getCardNotePresence(ownerKey, cards);
+    } catch (notesError) {
+        console.error("[api/cards] note status enrichment failed", { error: notesError });
+        return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 });
+    }
+
     let groupsByCard: Map<string, Array<{ id: string; name: string; color: string | null }>>;
     try {
         groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType);
@@ -210,12 +219,12 @@ export async function GET(req: Request) {
     }
 
     if (id) {
-        const card = cards[0] ? { ...cards[0], groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;
+        const card = cards[0] ? { ...cards[0], has_note: noteCardIds.has(String(cards[0].id)), groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;
         return NextResponse.json({ card });
     }
 
     return NextResponse.json({
-        cards: cards.map((card) => ({ ...card, groups: groupsByCard.get(String(card.id)) ?? [] })),
+        cards: cards.map((card) => ({ ...card, has_note: noteCardIds.has(String(card.id)), groups: groupsByCard.get(String(card.id)) ?? [] })),
     });
 }
 

@@ -69,9 +69,10 @@ describe("sentence card optional sections", () => {
         }
     });
 
-    it("keeps the existing vocabulary form content visible", () => {
+    it("keeps vocabulary supplements collapsed until opened", () => {
         const vocab = renderToStaticMarkup(<SentenceFormDisclosure sentence={false} title="Eigene Notizen" open={false} onToggle={() => {}}>{content}</SentenceFormDisclosure>);
         expect(vocab).toContain("Gespeicherte Notiz");
-        expect(vocab).not.toContain("aria-expanded");
+        expect(vocab).toContain('aria-expanded="false"');
+        expect(vocab).toContain("word-feature-card");
     });
 });

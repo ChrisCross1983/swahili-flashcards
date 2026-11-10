@@ -56,6 +56,8 @@ export function getSaveFlowStatusCopy(
                 : "Bitte Notizen/Gruppen/Audio kurz prüfen.",
         };
     }
+    if (errorMessage === "image_too_large") return { message: "Das Bild ist zu groß." };
+    if (errorMessage === "image_upload_failed") return { message: "Das Bild konnte nicht hochgeladen werden." };
     return { message: errorMessage || "Karte konnte nicht gespeichert werden." };
 }
 
@@ -315,6 +317,7 @@ export function useTrainerCardSaveFlow({
                 body: JSON.stringify(buildUpdateCardPayload({
                     ...text,
                     id: editingId,
+                    type: cardType,
                     ...(imagePath !== undefined ? { imagePath } : {}),
                     ...(cardType === "sentence" && sentenceExplanationDirty ? { sentenceExplanation } : {}),
                 })),
@@ -387,6 +390,7 @@ export function useTrainerCardSaveFlow({
     return {
         saveStatus,
         saveStatusCopy: statusCopy,
+        imageUploadError: saveStatus === "error" && (errorMessage === "image_too_large" || errorMessage === "image_upload_failed") ? errorMessage : null,
         isSaveBusy,
         createCard,
         updateCard,

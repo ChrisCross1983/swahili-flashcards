@@ -38,6 +38,9 @@ describe("mobile overlay viewport stability", () => {
         const trainerCardForm = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
 
         expect(quickSearch).toContain("text-base md:text-sm");
-        expect(trainerCardForm).toContain("text-base text-primary md:text-sm");
+        expect(trainerCardForm).toContain("sentence-textarea word-input");
+        const styles = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+        expect(styles).toContain(".sentence-textarea {");
+        expect(styles).toContain("font-size: 16px;");
     });
 });

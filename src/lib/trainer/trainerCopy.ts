@@ -28,6 +28,6 @@ export function getTrainerCopy(cardType: CardType): TrainerCopy {
         cardItemLabel: isSentenceTrainer ? "Sätze" : "Karten",
         editTitle: isSentenceTrainer ? "Satz bearbeiten" : "Karte bearbeiten",
         createTitle: isSentenceTrainer ? "Neue Sätze" : "Neue Wörter",
-        saveCardLabel: isSentenceTrainer ? "Satz speichern" : "Karte speichern",
+        saveCardLabel: isSentenceTrainer ? "Satz speichern" : "Wort speichern",
     };
 }

@@ -53,35 +53,26 @@ describe("trainer card form extraction", () => {
         expect(saveFlowSource).toContain('cardType === "sentence" && sentenceExplanationDirty');
     });
 
-    it("shows sentence supplements in learning order without a nested options step", () => {
-        const titles = ["Grammatik verstehen", "Notizen", "Gruppe", "Aussprache", "Bild"];
-        const positions = titles.map((title) => formSource.indexOf(`title="${title}"`));
-        expect(positions.every((position) => position > formSource.indexOf("{isSentence ? duplicateFeedbackPanel : null}"))).toBe(true);
-        expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    it("keeps sentence grammar and vocabulary illustration in the respective feature grids", () => {
         expect(formSource).toContain('icon="grammar" featured');
-        expect(formSource).toContain('icon="notes"');
-        expect(formSource).toContain('icon="group"');
-        expect(formSource).toContain('icon="audio"');
-        expect(formSource).toContain('icon="image"');
-        expect(formSource).not.toContain('title="Mehr Optionen"');
-        expect(formSource).toContain("{!isSentence ? (");
-        expect(formSource).toContain("Optional: Beispielsätze hinzufügen");
-        expect(formSource).toContain("{isSentence || formNoteOpen ? (");
-        expect(formSource).toContain("formNoteText: formNoteDraft.mainNotes");
-        expect(formSource).toContain("<SentenceExplanationContent explanation={explanationPreview} />");
+        expect(formSource).toContain('{!isSentence ? imageFeature : null}');
+        expect(formSource).toContain('{isSentence ? imageFeature : null}');
+        expect(formSource).not.toContain('title="Beispiele"');
+        expect(formSource).toContain('title="Notizen"');
+        expect(formSource).toContain('title="Gruppe"');
+        expect(formSource).toContain('title="Aussprache"');
+        expect(formSource).toContain('formNoteText: formNoteDraft.mainNotes');
+        expect(formSource).toContain('<SentenceExplanationContent explanation={explanationPreview} />');
     });
 
-    it("keeps new-sentence success visible at the top and resets the next card", () => {
+    it("shows success feedback and resets the next card", () => {
         expect(formSource).toContain("setCreateSuccessVisible(true)");
         expect(formSource).toContain("setActiveSupplement(null)");
         expect(formSource).toContain("focusNextSentence(sheetScrollRef.current, germanInputRef.current)");
-        expect(formSource).toContain("setGerman(\"\")");
-        expect(formSource).toContain("setSwahili(\"\")");
-        expect(formSource).toContain("✓ Satz gespeichert");
-        expect(formSource).toContain("Du kannst direkt den nächsten Satz anlegen.");
-        expect(formSource.indexOf("✓ Satz gespeichert")).toBeLessThan(formSource.indexOf("{isSentence ? \"Satzpaar\""));
-        expect(formSource).toContain("setCreateSuccessVisible(false); germanInputRef.current?.focus()");
-        expect(formSource).toContain("if (isSentence && !closeOnCreateSuccess)");
+        expect(formSource).toContain('germanWordInputRef.current?.focus()');
+        expect(formSource).toContain('setGerman("")');
+        expect(formSource).toContain('setSwahili("")');
+        expect(formSource).toContain('{isSentence ? "Satz" : "Wort"} gespeichert');
     });
 
     it("keeps create ordering: POST card, assign groups, upload audio, then save notes", () => {
@@ -120,11 +111,11 @@ describe("trainer card form extraction", () => {
         expect(duplicateHookSource).toContain("Ähnlichkeitsprüfung konnte nicht abgeschlossen werden.");
         expect(formSource).toContain("onClick={saveFlow.saveDespiteWarning}");
         expect(formSource).toContain("setStatus(\"Karte aktualisiert ✅\")");
-        expect(formSource).toContain("setStatus(\"Karte gespeichert ✅\")");
+        expect(formSource).toContain("setCreateSuccessVisible(true)");
     });
 
     it("extracts notes, duplicate, media, and save-flow domains out of the sheet", () => {
-        expect(formSource).toContain("useTrainerCardFormNotes()");
+        expect(formSource).toContain("useTrainerCardFormNotes(onNoteSaved)");
         expect(formSource).toContain("useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus })");
         expect(formSource).toContain("useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated })");
         expect(formSource).toContain("useTrainerCardSaveFlow");
@@ -134,17 +125,12 @@ describe("trainer card form extraction", () => {
         expect(saveFlowSource).toContain("export type SaveFlowStatus");
     });
 
-    it("renders form feedback near the primary card fields instead of bottom-only", () => {
-        const swahiliFieldIndex = formSource.indexOf("placeholder=\"z.B. Habari za asubuhi\"");
+    it("renders form feedback near the primary card fields", () => {
+        const pairIndex = formSource.indexOf('className="sentence-pair-card"');
         const topStatusIndex = formSource.indexOf("topStatusText ? (");
-        const optionalContextIndex = formSource.indexOf("Optional: Beispielsätze hinzufügen");
-        const mediaIndex = formSource.indexOf("<div className=\"mt-6 text-sm font-medium\">Medien</div>");
-
-        expect(topStatusIndex).toBeGreaterThan(swahiliFieldIndex);
-        expect(topStatusIndex).toBeLessThan(optionalContextIndex);
-        expect(formSource.indexOf("{isSentence ? duplicateFeedbackPanel : null}")).toBeLessThan(optionalContextIndex);
-        expect(formSource.indexOf("{!isSentence ? duplicateFeedbackPanel : null}")).toBeLessThan(mediaIndex);
-        expect(formSource).toContain("aria-live=\"polite\"");
-        expect(formSource).toContain("Du kannst direkt die nächste Karte anlegen.");
+        const featureIndex = formSource.indexOf("<SentenceFormGroup sentence={isSentence}>");
+        expect(topStatusIndex).toBeGreaterThan(pairIndex);
+        expect(topStatusIndex).toBeLessThan(featureIndex);
+        expect(formSource).toContain('aria-live="polite"');
     });
 });

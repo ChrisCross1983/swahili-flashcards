@@ -60,6 +60,16 @@ describe("trainer card layout", () => {
         expect(withoutExample).not.toContain("Beispielsatz anzeigen");
     });
 
+    it("does not offer the separate legacy example flow on vocabulary cards", () => {
+        const vocab = renderToStaticMarkup(<TrainerCard
+            reveal prompt="Buch" answer="kitabu" promptExample="Altes Beispiel"
+            answerExample="Old example" showExamples={false} imagePath={null} imageBaseUrl="https://example.com"
+        />);
+        expect(vocab).not.toContain("Beispielsatz anzeigen");
+        expect(vocab).not.toContain("Altes Beispiel");
+        expect(vocab).not.toContain("Old example");
+    });
+
     it("keeps notes action on the front side", () => {
         const tips = renderToStaticMarkup(
             <TrainerCard

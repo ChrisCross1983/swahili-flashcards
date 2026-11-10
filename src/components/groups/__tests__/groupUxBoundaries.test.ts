@@ -10,8 +10,8 @@ const manager = fs.readFileSync(path.join(root, "src/components/groups/ManageGro
 
 describe("group UX boundaries", () => {
     it("keeps sentence group assignment inline without a nested manager", () => {
-        expect(form).toContain("inline={isSentence}");
-        expect(form).toContain('triggerLabel={isSentence ? "Gruppe wählen"');
+        expect(form).toContain("inline");
+        expect(form).toContain('triggerLabel="Gruppe wählen"');
         expect(picker).toContain("data-inline-group-picker");
         expect(picker).toContain("Neue Gruppe erstellen");
         expect(picker).toContain("onChange([])");

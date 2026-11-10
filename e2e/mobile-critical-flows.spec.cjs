@@ -296,9 +296,49 @@ test.describe("mobile critical flows", () => {
     await preview.getByRole("button", { name: "Bearbeiten", exact: true }).click();
 
     await expect(page.getByText("Karte bearbeiten").first()).toBeVisible();
-    await expect(page.getByPlaceholder("z.B. Guten Morgen")).toHaveValue("ich suche dich");
-    await expect(page.getByPlaceholder("z.B. Habari za asubuhi")).toHaveValue("nakutafuta");
-    await expect(page.getByText("Eigene Notizen (optional)")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Deutsch" })).toHaveValue("ich suche dich");
+    await expect(page.getByRole("textbox", { name: "Kiswahili" })).toHaveValue("nakutafuta");
+    await page.getByRole("button", { name: /^Notizen / }).click();
+    await expect(page.getByRole("textbox", { name: "Notiz" })).toBeVisible();
+  });
+
+  test("word note status changes after save and clear without reloading the library", async ({ page }) => {
+    await openTrainer(page);
+    let note = "";
+    let cardListRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/cards" && request.method() === "GET") cardListRequests++;
+    });
+    await page.route("**/api/cards/notes**", async (route) => {
+      if (route.request().method() === "GET") await route.fulfill(json({ note: { main_notes: note } }));
+      else {
+        note = route.request().postDataJSON().mainNotes;
+        await route.fulfill(json({ note: { main_notes: note } }));
+      }
+    });
+    await page.route("**/api/cards", async (route) => {
+      if (route.request().method() === "PATCH") await route.fulfill(json({ card: cards[0] }));
+      else await route.fallback();
+    });
+
+    await page.getByRole("button", { name: /Meine Karten/ }).click();
+    const card = page.getByTestId("word-library-card").first();
+    await expect(card.getByRole("img", { name: "Keine Notiz" })).toBeVisible();
+    const initialListRequests = cardListRequests;
+
+    await card.getByRole("button", { name: /Wort bearbeiten: ich suche dich/ }).click();
+    await page.getByRole("button", { name: /^Notizen / }).click();
+    await page.getByRole("textbox", { name: "Notiz" }).fill("Neue Notiz");
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
+    await expect(card.getByRole("img", { name: "Notiz vorhanden" })).toBeVisible();
+    expect(cardListRequests).toBe(initialListRequests);
+
+    await card.getByRole("button", { name: /Wort bearbeiten: ich suche dich/ }).click();
+    await page.getByRole("button", { name: /^Notizen / }).click();
+    await page.getByRole("textbox", { name: "Notiz" }).fill("");
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
+    await expect(card.getByRole("img", { name: "Keine Notiz" })).toBeVisible();
+    expect(cardListRequests).toBe(initialListRequests);
   });
 
   test("group picker inside the card form remains inside the mobile viewport", async ({ page }) => {
@@ -308,8 +348,9 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByText("Neue Wörter").first()).toBeVisible();
     await page.getByRole("button", { name: /Gruppe/ }).click();
 
-    const picker = page.locator("[data-viewport-safe-group-picker]");
+    const picker = page.locator("[data-inline-group-picker]");
     await expect(picker).toBeVisible();
+    await picker.scrollIntoViewIfNeeded();
 
     const box = await picker.boundingBox();
     const viewport = page.viewportSize();
@@ -319,7 +360,7 @@ test.describe("mobile critical flows", () => {
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
 
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /^Gruppe / }).click();
     await expect(picker).toBeHidden();
   });
 
@@ -328,6 +369,7 @@ test.describe("mobile critical flows", () => {
 
     await page.getByRole("button", { name: /Meine Karten/ }).click();
     await expect(page.getByText("Meine Karten").first()).toBeVisible();
+    await page.getByRole("button", { name: "Mehr", exact: true }).click();
     await page.getByRole("button", { name: "Dubletten prüfen" }).click();
     await expect(page.getByText("Duplikate prüfen").first()).toBeVisible();
 

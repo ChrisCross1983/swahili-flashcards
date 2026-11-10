@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
 import GroupColorDot from "@/components/groups/GroupColorDot";
-import CardText from "@/components/ui/CardText";
 import { SentenceFeatureIcon } from "@/components/trainer/SentenceFormDisclosure";
+import WordLibraryCard from "@/components/trainer/WordLibraryCard";
+import SentenceLibraryCard from "@/components/trainer/SentenceLibraryCard";
 import type { TrainerCardLibrarySheetProps } from "@/components/trainer/TrainerCardLibrarySheet";
 
 function LibraryIcon({ name, className = "h-4 w-4" }: { name: "more" | "check" | "edit" | "trash" | "chevron" | "close"; className?: string }) {
@@ -22,6 +23,8 @@ function LibraryIcon({ name, className = "h-4 w-4" }: { name: "more" | "check" |
 export default function SentenceLibrarySheet({
     open,
     title,
+    isSentenceTrainer,
+    imageBaseUrl,
     cardsLoadState,
     cardsLoadError,
     status,
@@ -49,11 +52,14 @@ export default function SentenceLibrarySheet({
     onPlayAudio,
     onEditCard,
     onDeleteCard,
+    onOpenCardGroupsEditor,
     onCreateSentence,
 }: TrainerCardLibrarySheetProps) {
     const [adminMenuOpen, setAdminMenuOpen] = useState(false);
     const [activeActionId, setActiveActionId] = useState<string | null>(null);
     const activeGroup = groups.find((group) => group.id === groupFilter[0]);
+    const noun = isSentenceTrainer ? "Sätze" : "Wörter";
+    const singular = isSentenceTrainer ? "Satz" : "Wort";
 
     useEffect(() => {
         if (!adminMenuOpen && !activeActionId) return;
@@ -89,21 +95,21 @@ export default function SentenceLibrarySheet({
     }
 
     return <FullScreenSheet open={open} title={title} subtitle="Deutsch ↔ Kiswahili" presentation="sentence" onClose={onClose}>
-        <div className="sentence-library space-y-5" data-testid="sentence-library">
+        <div className="sentence-library space-y-5" data-testid={isSentenceTrainer ? "sentence-library" : "word-library"}>
             <header className="sentence-library-intro">
                 <div className="min-w-0">
                     <p className="sentence-library-eyebrow">Deine Lernsammlung</p>
                     <p className="mt-1 text-2xl font-bold tracking-tight text-[color:var(--foreground)]">
-                        {cardsLoadState === "loaded" ? `${filteredCardsCount} ${filteredCardsCount === 1 ? "Satz" : "Sätze"}` : "Deine Sätze"}
+                        {cardsLoadState === "loaded" ? `${filteredCardsCount} ${filteredCardsCount === 1 ? singular : noun}` : title}
                     </p>
-                    <p className="mt-1 text-sm text-muted">Sätze wiederfinden, verfeinern und weiterlernen.</p>
+                    <p className="mt-1 text-sm text-muted">{isSentenceTrainer ? "Sätze wiederfinden, verfeinern und weiterlernen." : "Deine Wörter wiederfinden und weiterlernen."}{!isSentenceTrainer && groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? "Gruppe" : "Gruppen"}` : ""}</p>
                 </div>
                 {cardsLoadState === "loaded" && canLoadMore ? <span className="text-xs font-medium text-muted">{countLabel}</span> : null}
             </header>
 
             {status ? <div className="sentence-library-message" role="status">{status}</div> : null}
 
-            <div className="sentence-library-toolbar" aria-label="Satzbibliothek-Werkzeuge">
+            <div className="sentence-library-toolbar" aria-label={isSentenceTrainer ? "Satzbibliothek-Werkzeuge" : "Kartenbibliothek-Werkzeuge"}>
                 <div className="sentence-library-filter">
                     <span className="sr-only" id="sentence-library-group-filter-label">Nach Gruppen filtern</span>
                     <select
@@ -149,64 +155,53 @@ export default function SentenceLibrarySheet({
                 </div>
             </div> : null}
 
-            {cardsLoadState === "loading" ? <div className="sentence-library-grid" aria-label="Sätze werden geladen" aria-busy="true">
+            {cardsLoadState === "loading" ? <div className="sentence-library-grid" aria-label={`${noun} werden geladen`} aria-busy="true">
                 {[0, 1, 2, 3].map((index) => <div key={index} className="sentence-library-skeleton"><div /><div /><div /></div>)}
             </div> : null}
 
             {cardsLoadState === "error" ? <div className="sentence-library-empty" role="alert">
-                <p className="text-lg font-semibold">Sätze konnten nicht geladen werden</p>
+                <p className="text-lg font-semibold">{noun} konnten nicht geladen werden</p>
                 <p className="mt-1 text-sm text-muted">{cardsLoadError ?? "Bitte versuche es erneut."}</p>
                 <button type="button" className="btn btn-secondary mt-4" onClick={onRetryLoad}>Erneut laden</button>
             </div> : null}
 
             {cardsLoadState === "loaded" && filteredCardsCount === 0 ? <div className="sentence-library-empty">
                 <span className="sentence-library-empty-icon"><SentenceFeatureIcon name="notes" className="h-6 w-6" /></span>
-                <p className="mt-4 text-xl font-bold tracking-tight">{hasActiveGroupFilter ? "Keine Sätze in dieser Gruppe" : "Noch keine Sätze"}</p>
-                <p className="mt-2 max-w-sm text-sm text-muted">{hasActiveGroupFilter ? "Wähle eine andere Gruppe oder zeige wieder alle Sätze an." : "Lege deinen ersten Satz an und baue deine eigene Lernsammlung auf."}</p>
-                {hasActiveGroupFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onGroupFilterChange([])}>Alle Sätze anzeigen</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>Ersten Satz anlegen</button>}
+                <p className="mt-4 text-xl font-bold tracking-tight">{hasActiveGroupFilter ? `${noun} in dieser Gruppe nicht gefunden` : isSentenceTrainer ? "Noch keine Sätze" : "Noch keine Wörter"}</p>
+                <p className="mt-2 max-w-sm text-sm text-muted">{hasActiveGroupFilter ? `Wähle eine andere Gruppe oder zeige wieder alle ${noun} an.` : isSentenceTrainer ? "Lege deinen ersten Satz an und baue deine eigene Lernsammlung auf." : "Lege dein erstes Wort an und baue deine persönliche Lernsammlung auf."}</p>
+                {hasActiveGroupFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onGroupFilterChange([])}>{`Alle ${noun} anzeigen`}</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>{isSentenceTrainer ? "Ersten Satz anlegen" : "Erstes Wort anlegen"}</button>}
             </div> : null}
 
-            {cardsLoadState === "loaded" && visibleCards.length > 0 ? <div className="sentence-library-grid">
+            {cardsLoadState === "loaded" && visibleCards.length > 0 ? <div className={`sentence-library-grid ${!isSentenceTrainer ? "word-library-grid" : ""}`}>
                 {visibleCards.map((card) => {
                     const id = String(card.id);
                     const selected = selectedIds.has(id);
                     const actionOpen = activeActionId === id;
-                    const cardGroups = card.groups ?? [];
-                    return <article key={id} className={`sentence-library-card ${selected ? "is-selected" : ""} ${actionOpen ? "has-menu" : ""}`} data-testid="sentence-library-card" data-selected={selected}>
-                        <div className="flex items-start gap-3">
-                            {selectionMode ? <label className="sentence-library-select-hit"><input
-                                type="checkbox"
-                                className="sentence-library-checkbox"
-                                checked={selected}
-                                onChange={() => onToggleSelected(card.id)}
-                                aria-label={`Satz auswählen: ${card.german_text ?? "Satz"}`}
-                            /></label> : null}
-                            <button type="button" className="sentence-library-card-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onEditCard(card)} aria-label={selectionMode ? `Satz auswählen: ${card.german_text ?? "Satz"}` : `Satz bearbeiten: ${card.german_text ?? "Satz"}`}>
-                                <span className="sentence-library-language">DE</span>
-                                <CardText as="span" className="sentence-library-german">{card.german_text}</CardText>
-                                <span className="sentence-library-language mt-3">SW</span>
-                                <CardText as="span" className="sentence-library-swahili">{card.swahili_text}</CardText>
-                            </button>
-                            {!selectionMode ? <div className="relative" data-sentence-library-menu>
-                                <button type="button" className="sentence-library-card-more" aria-label={`Aktionen für ${card.german_text ?? "Satz"}`} aria-expanded={actionOpen} aria-controls={`sentence-library-actions-${id}`} onClick={() => { setActiveActionId(actionOpen ? null : id); setAdminMenuOpen(false); }}><LibraryIcon name="more" className="h-5 w-5" /></button>
-                            </div> : null}
-                        </div>
-                        {cardGroups.length > 0 || card.sentence_explanation || card.audio_path || card.image_path ? <div className="sentence-library-meta">
-                            {cardGroups.slice(0, 2).map((group) => <span key={String(group.id)} className="sentence-library-meta-item" title={group.name}><GroupColorDot color={group.color} /><span className="truncate">{group.name}</span></span>)}
-                            {cardGroups.length > 2 ? <span className="sentence-library-meta-item">+{cardGroups.length - 2}</span> : null}
-                            {card.sentence_explanation ? <span className="sentence-library-meta-item"><SentenceFeatureIcon name="grammar" className="h-3.5 w-3.5" />Lernerklärung vorhanden</span> : null}
-                            {card.audio_path ? <button type="button" className="sentence-library-meta-item sentence-library-audio" onClick={() => onPlayAudio(card)} aria-label="Audio abspielen"><SentenceFeatureIcon name="audio" className="h-3.5 w-3.5" />Audio</button> : null}
-                            {card.image_path ? <span className="sentence-library-meta-item"><SentenceFeatureIcon name="image" className="h-3.5 w-3.5" />Bild</span> : null}
-                        </div> : null}
-                        {!selectionMode ? <div id={`sentence-library-actions-${id}`} hidden={!actionOpen} className="sentence-library-menu sentence-library-card-actions" data-sentence-library-menu>
-                            <button type="button" onClick={() => { setActiveActionId(null); onEditCard(card); }}><LibraryIcon name="edit" />Bearbeiten</button>
-                            <button type="button" className="is-danger" onClick={() => { setActiveActionId(null); onDeleteCard(id); }}><LibraryIcon name="trash" />Löschen</button>
-                        </div> : null}
-                    </article>;
+                    if (!isSentenceTrainer) return <WordLibraryCard
+                        key={id}
+                        card={card}
+                        imageBaseUrl={imageBaseUrl}
+                        selected={selected}
+                        selectionMode={selectionMode}
+                        actionOpen={actionOpen}
+                        onToggleSelected={onToggleSelected}
+                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setAdminMenuOpen(false); }}
+                        onPlayAudio={onPlayAudio}
+                        onEditCard={(nextCard) => { setActiveActionId(null); onEditCard(nextCard); }}
+                        onOpenCardGroupsEditor={(nextCard) => { setActiveActionId(null); onOpenCardGroupsEditor(nextCard); }}
+                        onDeleteCard={(cardId) => { setActiveActionId(null); onDeleteCard(cardId); }}
+                    />;
+                    return <SentenceLibraryCard key={id} card={card} selected={selected} selectionMode={selectionMode} actionOpen={actionOpen}
+                        onToggleSelected={onToggleSelected}
+                        onPlayAudio={onPlayAudio}
+                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setAdminMenuOpen(false); }}
+                        onEditCard={(nextCard) => { setActiveActionId(null); onEditCard(nextCard); }}
+                        onOpenCardGroupsEditor={(nextCard) => { setActiveActionId(null); onOpenCardGroupsEditor(nextCard); }}
+                        onDeleteCard={(cardId) => { setActiveActionId(null); onDeleteCard(cardId); }} />;
                 })}
             </div> : null}
 
-            {cardsLoadState === "loaded" && canLoadMore ? <button type="button" className="sentence-library-load-more" onClick={onLoadMore}>Mehr Sätze laden</button> : null}
+            {cardsLoadState === "loaded" && canLoadMore ? <button type="button" className="sentence-library-load-more" onClick={onLoadMore}>{`Mehr ${noun} laden`}</button> : null}
         </div>
     </FullScreenSheet>;
 }

@@ -46,7 +46,7 @@ export default function TrainerControls({
                     </button>
                 </div>
             ) : null}
-            <div className="mt-10 grid grid-cols-2 gap-6" data-grading-in-flight={gradingInFlight ? "true" : "false"}>
+            <div className="mt-5 grid grid-cols-2 gap-3" data-grading-in-flight={gradingInFlight ? "true" : "false"}>
                 <button
                     type="button"
                     className="btn btn-danger min-h-14 touch-manipulation py-4 text-base shadow-warm active:scale-[0.98] active:opacity-90 disabled:cursor-wait disabled:opacity-70"

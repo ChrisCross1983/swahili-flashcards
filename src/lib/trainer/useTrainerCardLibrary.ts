@@ -20,6 +20,11 @@ export type TrainerLibraryCard = {
     [key: string]: unknown;
 };
 
+export function updateLibraryNoteStatus(cards: TrainerLibraryCard[], cardId: string, mainNotes: string): TrainerLibraryCard[] {
+    const hasNote = mainNotes.trim().length > 0;
+    return cards.map((card) => String(card.id) === cardId && card.type !== "sentence" ? { ...card, has_note: hasNote } : card);
+}
+
 type UseTrainerCardLibraryParams = {
     itemLabel?: string;
     initialCards?: TrainerLibraryCard[];

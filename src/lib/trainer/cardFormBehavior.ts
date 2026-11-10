@@ -26,6 +26,7 @@ export function buildCreateCardPayload(input: CardFormTextInput & {
 
 export function buildUpdateCardPayload(input: CardFormTextInput & {
     id: string;
+    type?: "vocab" | "sentence";
     imagePath?: string | null;
     sentenceExplanation?: SentenceExplanation | null;
 }) {
@@ -33,9 +34,13 @@ export function buildUpdateCardPayload(input: CardFormTextInput & {
         id: input.id,
         german: input.german.trim(),
         swahili: input.swahili.trim(),
-        germanExample: sanitizeExampleMarkup(input.germanExample) || null,
-        swahiliExample: sanitizeExampleMarkup(input.swahiliExample) || null,
     };
+
+    // The vocabulary example columns are an archive after the notes migration.
+    if (input.type !== "vocab") {
+        payload.germanExample = sanitizeExampleMarkup(input.germanExample) || null;
+        payload.swahiliExample = sanitizeExampleMarkup(input.swahiliExample) || null;
+    }
 
     if ("imagePath" in input) payload.imagePath = input.imagePath ?? null;
     if ("sentenceExplanation" in input) payload.sentenceExplanation = input.sentenceExplanation ?? null;

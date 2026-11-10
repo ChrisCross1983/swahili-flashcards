@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { shouldOpenNotesSection } from "@/lib/trainer/cardFormBehavior";
 
-export function useTrainerCardFormNotes() {
+export function useTrainerCardFormNotes(onSaved: (cardId: string, mainNotes: string) => void) {
     const [formNoteOpen, setFormNoteOpen] = useState(false);
     const [formNoteDraft, setFormNoteDraft] = useState({ mainNotes: "" });
     const [formNoteLoading, setFormNoteLoading] = useState(false);
@@ -64,6 +64,7 @@ export function useTrainerCardFormNotes() {
             const json = await res.json();
             if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
             savedFormNoteRef.current = noteText;
+            onSaved(cardId, noteText);
             setFormNoteStatus("Notizen gespeichert.");
             return true;
         } catch (error) {

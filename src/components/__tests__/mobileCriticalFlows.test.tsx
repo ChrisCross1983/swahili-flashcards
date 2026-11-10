@@ -159,22 +159,22 @@ describe("mobile critical-flow regression coverage", () => {
         const topStatusIndex = form.indexOf("topStatusText ? (");
         const sentenceDuplicatePanelIndex = form.indexOf("{isSentence ? duplicateFeedbackPanel : null}");
         const vocabDuplicatePanelIndex = form.indexOf("{!isSentence ? duplicateFeedbackPanel : null}");
-        const optionalExamplesIndex = form.indexOf("Optional: Beispielsätze hinzufügen");
+        const featureGridIndex = form.indexOf("<SentenceFormGroup sentence={isSentence}>");
 
         expect(germanIndex).toBeGreaterThan(-1);
         expect(swahiliIndex).toBeGreaterThan(germanIndex);
         expect(topStatusIndex).toBeGreaterThan(swahiliIndex);
-        expect(topStatusIndex).toBeLessThan(optionalExamplesIndex);
+        expect(topStatusIndex).toBeLessThan(featureGridIndex);
         expect(sentenceDuplicatePanelIndex).toBeLessThan(germanIndex);
         expect(vocabDuplicatePanelIndex).toBeGreaterThan(swahiliIndex);
-        expect(vocabDuplicatePanelIndex).toBeLessThan(optionalExamplesIndex);
+        expect(vocabDuplicatePanelIndex).toBeLessThan(featureGridIndex);
 
         expect(duplicateHook).toContain("Prüfe auf ähnliche Karten …");
         expect(duplicateHook).toContain("Mögliche Dublette gefunden");
         expect(duplicateHook).toContain("Ähnliche Karten gefunden");
         expect(form).toContain("Nicht zwingend eine Dublette");
-        expect(form).toContain("Karte gespeichert ✅");
-        expect(form).toContain("Du kannst direkt die nächste Karte anlegen.");
+        expect(form).toContain('{isSentence ? "Satz" : "Wort"} gespeichert');
+        expect(form).toContain('"das nächste Wort"');
         expect(form).toContain("aria-live=\"polite\"");
     });
 

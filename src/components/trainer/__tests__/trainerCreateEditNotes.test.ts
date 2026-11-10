@@ -9,9 +9,9 @@ describe("trainer create/edit notes integration", () => {
     const saveFlowSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardSaveFlow.ts"), "utf8");
 
     it("renders optional own notes in the create/edit card flow", () => {
-        expect(source).toContain("Eigene Notizen (optional)");
+        expect(source).toContain("Merksatz, Besonderheit oder Stolperstelle.");
         expect(source).toContain("formNoteDraft");
-        expect(source).toContain("min-h-[220px]");
+        expect(source).toContain("<NoteEditor");
     });
 
     it("loads existing card notes when editing an existing card", () => {

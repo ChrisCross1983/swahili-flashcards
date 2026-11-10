@@ -21,6 +21,7 @@ import type { CardType, LeitnerStats } from "@/lib/trainer/types";
 import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId } from "@/lib/trainer/utils";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
+import TrainerLearningFeature from "@/components/trainer/TrainerLearningFeature";
 import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
@@ -40,7 +41,7 @@ import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
 import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
-import { useTrainerCardLibrary } from "@/lib/trainer/useTrainerCardLibrary";
+import { updateLibraryNoteStatus, useTrainerCardLibrary } from "@/lib/trainer/useTrainerCardLibrary";
 import { getTrainerCopy } from "@/lib/trainer/trainerCopy";
 import { formatTrainerDueDate, formatTrainerDueStatus } from "@/lib/trainer/trainerDueDate";
 import { useTrainerChatContext } from "@/lib/trainer/useTrainerChatContext";
@@ -885,13 +886,14 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const json = await res.json();
             if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
             savedCardNoteRef.current = noteText;
+            setCards((prev) => updateLibraryNoteStatus(prev, cardId, noteText));
             setCardNoteSaveState("Automatisch gespeichert");
         } catch (error) {
             setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht gespeichert werden.");
         } finally {
             setCardNoteSaving(false);
         }
-    }, [cardNoteCardId, currentIndex, todayItems]);
+    }, [cardNoteCardId, currentIndex, setCards, todayItems]);
 
     const closeNotesSheet = useCallback(async () => {
         if (cardNoteDraft.mainNotes !== savedCardNoteRef.current) {
@@ -959,6 +961,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return counts;
     }, [cards]);
 
+    const [featureSuccess, setFeatureSuccess] = useState<{ id: string; message: string } | null>(null);
     const currentItem = todayItems[currentIndex] ?? null;
     const currentItemGroups = Array.isArray((currentItem as any)?.groups) ? (currentItem as any).groups : [];
     const badgeSummary = visibleBadgeSummary(currentItemGroups, 2);
@@ -1788,16 +1791,23 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
                                                     <div>
                                                         <TrainerCard
-                                                            key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}`}
+                                                            key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}-${featureSuccess?.id === resolveCardId(currentItem) ? "saved" : "original"}`}
                                                             reveal={reveal}
                                                             prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
                                                             answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
                                                             promptExample={direction === "DE_TO_SW" ? currentGermanExample : currentSwahiliExample}
                                                             answerExample={direction === "DE_TO_SW" ? currentSwahiliExample : currentGermanExample}
+                                                            showExamples={cardType === "sentence"}
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             learningTypeLabel={null}
                                                             sentenceExplanation={cardType === "sentence" ? currentItem?.sentence_explanation ?? null : null}
+                                                            autoOpenExplanation={featureSuccess?.id === resolveCardId(currentItem) && cardType === "sentence"}
+                                                            learningFeature={reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && resolveCardId(currentItem) && ((cardType === "sentence" && !currentItem?.sentence_explanation) || (cardType === "vocab" && !currentImagePath)) ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
+                                                                setFeatureSuccess({ id, message: change.image_path ? "Illustration gespeichert" : "Lernerklärung gespeichert" });
+                                                                setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
+                                                                setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
+                                                            }} /> : null}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
                                                         />
                                                     </div>
@@ -1954,6 +1964,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             return String(itemId) === String(cardId) ? { ...item, audio_path: audioPath } : item;
                                         })
                                     );
+                                }}
+                                onNoteSaved={(cardId, mainNotes) => {
+                                    setCards((prev) => updateLibraryNoteStatus(prev, cardId, mainNotes));
                                 }}
                                 onOpenCards={() => setOpenCards(true)}
                                 onReturnToLearn={() => {}}

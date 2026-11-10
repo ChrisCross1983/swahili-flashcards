@@ -33,7 +33,7 @@ describe("GlobalQuickSearch edit parity", () => {
     });
 
     it("inherits notes, duplicate/similar warnings, groups, media, and status behavior", () => {
-        expect(trainerForm).toContain("useTrainerCardFormNotes()");
+        expect(trainerForm).toContain("useTrainerCardFormNotes(onNoteSaved)");
         expect(notesHook).toContain("/api/cards/notes?cardId=");
         expect(notesHook).toContain('fetch("/api/cards/notes"');
         expect(trainerForm).toContain("useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus })");

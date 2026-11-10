@@ -17,5 +17,5 @@ export function illustrationInput(body: unknown): { german: string; swahili: str
 }
 
 export function illustrationPrompt(input: { german: string; swahili: string }): string {
-  return `Simple, friendly educational cartoon-style illustration for a language-learning flashcard. Clear central subject, minimal clean background, visually unambiguous, no text, no logos, no watermark, not photorealistic. Depict the concrete meaning of the German word "${input.german}" (Kiswahili: "${input.swahili}"). If the concept cannot be depicted clearly, do not invent unrelated objects.`;
+  return `Modern, friendly, premium editorial illustration for a language-learning flashcard. Depict one recognizable central subject with a clear silhouette and simple form. Use a quiet, minimal background and a consistent, lightly illustrative style that is not childish. No letters, words, labels, numbers, captions, logos, watermarks, interface elements, or visual clutter. Depict the concrete meaning of the German word "${input.german}" (Kiswahili: "${input.swahili}"). If the concept cannot be depicted clearly, do not invent unrelated objects.`;
 }

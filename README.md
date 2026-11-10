@@ -122,3 +122,7 @@ parity version. `safe-stt-parity-v1` sends the original product fallback
 direction (including `auto` language detection) through the shared safe audio
 STT core. Earlier samples are retained as legacy diagnostics but are excluded
 from current-parity WER and win-rate decisions.
+
+### AI illustrations
+
+The server uses `POST /v1/images/generations` with `gpt-image-2.5-flare` by default. Set `OPENAI_IMAGE_MODEL` to another model supported by the Images API for the account when needed. `OPENAI_API_KEY` is required. The endpoint returns a temporary WebP data URL; only accepting the preview and then saving the card uploads it to card storage. Provider failures are logged server-side with status, error code/type, model, and request ID, without the prompt or API key. A per-user in-memory guard allows 12 dispatched image requests per hour; local and OpenAI rate limits have distinct error codes and `Retry-After` headers.

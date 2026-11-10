@@ -16,15 +16,18 @@ describe("sentence library interaction layout", () => {
         expect(css).toContain("@media (prefers-reduced-motion: reduce) { .sentence-library-card");
     });
 
-    it("keeps card actions inside the card and management actions behind More", () => {
-        expect(component).toContain("sentence-library-card-actions");
-        expect(css).toContain(".sentence-library-card-actions { position: static");
-        expect(component).toContain("onEditCard(card)");
-        expect(component).toContain("onDeleteCard(id)");
+    it("uses shared floating card actions and keeps management actions behind More", () => {
+        const card = fs.readFileSync(path.join(root, "src/components/trainer/SentenceLibraryCard.tsx"), "utf8");
+        const menu = fs.readFileSync(path.join(root, "src/components/trainer/FloatingLibraryMenu.tsx"), "utf8");
+        expect(component).toContain("<SentenceLibraryCard");
+        expect(card).toContain("<FloatingLibraryMenu");
+        expect(card).toContain("onEditCard(card)");
+        expect(card).toContain("onDeleteCard(id)");
+        expect(menu).toContain("createPortal(");
+        expect(menu).toContain('window.addEventListener("scroll", update, true)');
         expect(component).toContain("onOpenDuplicateReview()");
         expect(component).toContain("onOpenManageGroups()");
         expect(component).toContain("onGroupFilterChange([])");
-        expect(component).toContain("onToggleSelected(card.id)");
         expect(component).toContain("onCreateSentence");
     });
 });

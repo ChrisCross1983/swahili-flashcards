@@ -50,11 +50,11 @@ describe("TrainerCardLibrarySheet", () => {
         expect(html).toContain("bitte");
         expect(html).toContain("tafadhali");
         expect(html).toContain("danke");
-        expect(html).toContain("Mehr laden");
+        expect(html).toContain("Mehr Wörter laden");
         expect(html).toContain("Dubletten prüfen");
         expect(html).toContain("Gruppen verwalten");
-        expect(html).toContain("Audio abspielen");
-        expect(html).toContain("Gruppen bearbeiten");
+        expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
+        expect(html).toContain("Aktionen für bitte");
     });
 
     it("keeps sentence group selection in the card form and group maintenance central", () => {
@@ -80,12 +80,13 @@ describe("TrainerCardLibrarySheet", () => {
         expect(html).toContain("1 Satz");
         expect(html).toContain("Guten Morgen");
         expect(html).toContain("Habari za asubuhi");
-        expect(html).toContain('data-group-color="sage"');
-        expect(html).toContain("Lernerklärung vorhanden");
-        expect(html).toContain("Audio abspielen");
-        expect(html).toContain("Bild");
+        expect(html).toContain('aria-label="Gruppe vorhanden"');
+        expect(html).toContain('aria-label="Lernerklärung vorhanden"');
+        expect(html).not.toMatch(/>Lernerklärung vorhanden</);
+        expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
+        expect(html).toContain('aria-label="Illustration vorhanden"');
         expect(html).toContain('aria-label="Aktionen für Guten Morgen"');
-        expect(html).toContain('id="sentence-library-actions-s1" hidden=""');
+        expect(html).toContain('aria-controls="sentence-library-actions-s1"');
         expect(html).not.toContain("Keine Gruppe");
     });
 
@@ -132,9 +133,9 @@ describe("TrainerCardLibrarySheet", () => {
             />,
         );
 
-        expect(html).toContain("0 von 0 passenden Karten angezeigt");
-        expect(html).toContain("Keine Karten in den gewählten Gruppen");
-        expect(html).not.toContain("Mehr laden");
+        expect(html).toContain("Wörter in dieser Gruppe nicht gefunden");
+        expect(html).toContain("Filter zurücksetzen");
+        expect(html).not.toContain("Mehr Wörter laden");
     });
 
     it("renders manual visible-selection controls in selection mode", () => {
@@ -147,9 +148,23 @@ describe("TrainerCardLibrarySheet", () => {
             />,
         );
 
-        expect(html).toContain("1 Karte(n) ausgewählt");
+        expect(html).toContain("1 ausgewählt");
         expect(html).toContain("Sichtbare auswählen");
         expect(html).toContain("Ausgewählte löschen");
-        expect(html).toContain("Karte auswählen");
+        expect(html).toContain("Wort auswählen");
+    });
+
+    it("shows a compact thumbnail and only positive word metadata", () => {
+        const html = renderToStaticMarkup(<TrainerCardLibrarySheet {...baseProps} visibleCards={[{
+            id: "v1", german_text: "Katze", swahili_text: "paka", image_path: "cat.webp", audio_path: "cat.mp3",
+            german_example: "Die Katze schläft.", has_note: true, groups: [{ id: "g1", name: "Alltag", color: "sage" }],
+        }]} filteredCardsCount={1} canLoadMore={false} />);
+        expect(html).toContain("word-library-thumb");
+        expect(html).toContain('aria-label="Gruppe vorhanden"');
+        expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
+        expect(html).not.toContain(">Beispiele</span>");
+        expect(html).toContain("Notiz");
+        expect(html).not.toContain("Kein Bild");
+        expect(html).not.toContain(">Bild</span>");
     });
 });

@@ -6,7 +6,7 @@ describe("phase 2 product UX cleanup", () => {
     const root = process.cwd();
     const trainerSource = fs.readFileSync(path.join(root, "src/app/trainer/TrainerClient.tsx"), "utf8");
     const trainerCardFormSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
-    const trainerCardLibrarySource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerCardLibrarySheet.tsx"), "utf8");
+    const trainerCardLibrarySource = fs.readFileSync(path.join(root, "src/components/trainer/SentenceLibrarySheet.tsx"), "utf8");
     const trainerSetupViewSource = fs.readFileSync(path.join(root, "src/components/trainer/TrainerSetupView.tsx"), "utf8");
     const trainerSetupHookSource = fs.readFileSync(path.join(root, "src/lib/trainer/useTrainerSetup.ts"), "utf8");
     const compactGroupPickerSource = fs.readFileSync(path.join(root, "src/components/groups/CompactGroupPicker.tsx"), "utf8");
@@ -14,9 +14,9 @@ describe("phase 2 product UX cleanup", () => {
     const importSource = fs.readFileSync(path.join(root, "src/app/import/ImportClient.tsx"), "utf8");
 
     it("uses compact group filtering and inline group editing in list rows", () => {
-        expect(trainerCardLibrarySource).toContain("<option value=\"\">Alle Karten</option>");
-        expect(trainerCardLibrarySource).toContain("Gruppen bearbeiten");
-        expect(trainerCardLibrarySource).toContain("visibleBadgeSummary(card.groups ?? [], 2)");
+        expect(trainerCardLibrarySource).toContain("<option value=\"\">Alle Gruppen</option>");
+        expect(trainerCardLibrarySource).toContain("<SentenceLibraryCard");
+        expect(trainerCardLibrarySource).toContain("onOpenCardGroupsEditor");
     });
 
     it("uses compact group selection in the learning-card and card-edit flows", () => {
@@ -27,7 +27,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerCardFormSource).toContain("<CompactGroupPicker");
         expect(compactGroupPickerSource).toContain("aria-multiselectable=\"true\"");
         expect(compactGroupPickerSource).toContain("aria-selected={isSelected}");
-        expect(trainerCardFormSource).toContain('triggerLabel={isSentence ? "Gruppe wählen" : formSelectedGroups.length > 0 ? "Gruppen bearbeiten" : "➕ Gruppe"}');
+        expect(trainerCardFormSource).toContain('triggerLabel="Gruppe wählen"');
         expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
         expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
     });
@@ -55,15 +55,14 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).not.toContain("onFlipBack");
     });
 
-    it("keeps create/edit flow progressive with optional examples collapsed behind disclosure", () => {
-        expect(trainerCardFormSource).toContain("Schritt 1 · Kartenpaar");
-        expect(trainerCardFormSource).toContain("Schritt 2 · Optionaler Kontext");
-        expect(trainerCardFormSource).toContain("Optional: Beispielsätze hinzufügen");
-        expect(trainerCardFormSource).toContain("setOptionalExamplesOpen((isOpen) => !isOpen)");
-        expect(trainerCardFormSource).toContain("aria-expanded={optionalExamplesOpen}");
-        expect(trainerCardFormSource).toContain("data-testid=\"optional-examples-section\"");
-        expect(trainerCardFormSource).toContain("Beispielsatz Deutsch (optional)");
-        expect(trainerCardFormSource).toContain("Beispielsatz Swahili (optional)");
+    it("keeps only four vocabulary feature cards after the word pair", () => {
+        expect(trainerCardFormSource).toContain("Wortpaar");
+        expect(trainerCardFormSource).toContain('title={isSentence ? "Bild" : "Illustration"}');
+        expect(trainerCardFormSource).toContain('title="Gruppe"');
+        expect(trainerCardFormSource).toContain('title="Aussprache"');
+        expect(trainerCardFormSource).toContain('title="Notizen"');
+        expect(trainerCardFormSource).not.toContain('title="Beispiele"');
+        expect(trainerCardFormSource).toContain("<NoteEditor");
     });
 
     it("keeps emphasis tools available but visually secondary", () => {
@@ -94,7 +93,7 @@ describe("phase 2 product UX cleanup", () => {
         const overlaysSource = fs.readFileSync(path.join(root, "src/components/GlobalOverlays.tsx"), "utf8");
         expect(overlaysSource).toContain("focusedTrainerMode");
         expect(overlaysSource).toContain("mobileToolsOpen");
-        expect(overlaysSource).toContain("if (focusedTrainerMode)");
+        expect(overlaysSource).toContain("data-focused-trainer-tools={focusedTrainerMode");
         expect(overlaysSource).toContain("{mobileToolsOpen ? (");
         expect(overlaysSource).toContain("bottom-[max(0.75rem,env(safe-area-inset-bottom))]");
         expect(overlaysSource).toContain("right-[max(0.75rem,env(safe-area-inset-right))]");

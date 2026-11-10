@@ -13,15 +13,15 @@ const styles = read("src/app/globals.css");
 
 describe("sentence composer design and interaction contracts", () => {
   it("keeps the sentence pair prominent and the grammar card ahead of a responsive feature grid", () => {
-    expect(form).toContain('presentation={isSentence ? "sentence" : "standard"}');
-    expect(form).toContain('subtitle={isSentence ? "Deutsch ↔ Kiswahili" : undefined}');
+    expect(form).toContain('presentation="sentence"');
+    expect(form).toContain('subtitle="Deutsch ↔ Kiswahili"');
     expect(form).toContain("sentence-pair-card");
     expect(form).toContain('icon="grammar" featured');
     expect(disclosure).toContain("sm:grid-cols-2");
     expect(disclosure).not.toContain("divide-y");
     expect(sheet).toContain("md:max-w-3xl");
     expect(form).toContain("sentence-action-bar");
-    expect(form).toContain("inline={isSentence}");
+    expect(form).toContain("<CompactGroupPicker");
   });
 
   it("provides hover, open, focus, disabled, and reduced-motion states", () => {
@@ -59,10 +59,10 @@ describe("sentence composer design and interaction contracts", () => {
     expect(form).toContain("swapSentencePair({ german, swahili })");
     expect(form).toContain("languageSaveBlocked");
     expect(form).toContain("shouldCheckSentenceLanguages(isSentence, german, swahili)");
-    expect(form).toContain("media.generationLoading || explanationLoading || languageSaveBlocked}");
+    expect(form).toContain("media.generationLoading || Boolean(media.generatedPreview) || explanationLoading || languageSaveBlocked}");
     expect(form).toContain('fetch("/api/sentence/language-check"');
     expect(form).toContain("Bitte korrigiere zuerst die Sprachzuordnung.");
-    expect(form).toContain("✓ Satz gespeichert");
+    expect(form).toContain('{isSentence ? "Satz" : "Wort"} gespeichert');
     expect(form).toContain('aria-invalid={explanationFieldError === "german"}');
     expect(form).toContain('aria-invalid={explanationFieldError === "swahili"}');
   });
@@ -76,8 +76,8 @@ describe("sentence composer design and interaction contracts", () => {
     expect(html.indexOf("overflow-auto")).toBeLessThan(html.indexOf("data-testid=\"sentence-action-footer\""));
     expect(html).toContain("h-[100dvh]");
     expect(html).toContain("md:h-[min(90dvh,860px)]");
-    expect(form).toContain("footer={isSentence ?");
-    expect(form).toContain("{!isSentence ? formActionButtons : null}");
+    expect(form).toContain("footer={");
+    expect(form).toContain('data-testid={isSentence ? "sentence-action-footer" : "word-action-footer"}');
     expect(styles).not.toContain("position: sticky;\n  bottom: 0;\n  z-index: 10;\n  margin: 24px -16px -16px;");
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { NotePreview } from "@/components/trainer/NoteEditor";
+
 type CardNoteDraft = {
     mainNotes: string;
 };
@@ -31,6 +33,7 @@ export default function LearningHelpPanel({
                 value={draft.mainNotes}
                 onChange={(event) => onChange(event.target.value)}
             />
+            {draft.mainNotes.trim() ? <NotePreview value={draft.mainNotes} /> : null}
             {saveStateText ? <span className="text-xs text-muted">{saveStateText}</span> : null}
         </div>
     );
