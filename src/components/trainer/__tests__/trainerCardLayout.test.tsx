@@ -7,6 +7,19 @@ import TrainerCard from "@/components/trainer/TrainerCard";
 import GroupBadge from "@/components/groups/GroupBadge";
 
 describe("trainer card layout", () => {
+    it("keeps an existing illustration out of the initial markup until reveal for words and sentences", () => {
+        for (const prompt of ["Hund", "Der Hund schläft."]) {
+            const render = (reveal: boolean) => renderToStaticMarkup(<TrainerCard
+                reveal={reveal} prompt={prompt} answer="mbwa" imagePath="dog.webp"
+                imageBaseUrl="https://example.com/images"
+            />);
+            const front = render(false);
+            expect(front).not.toContain("Kartenbild");
+            expect(front).not.toContain("dog.webp");
+            expect(render(true)).toContain('src="https://example.com/images/dog.webp"');
+        }
+    });
+
     it("renders compact front layout before reveal and expanded layout after reveal", () => {
         const compact = renderToStaticMarkup(
             <TrainerCard

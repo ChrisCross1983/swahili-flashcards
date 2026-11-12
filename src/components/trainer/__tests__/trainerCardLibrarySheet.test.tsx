@@ -16,6 +16,10 @@ const baseProps = {
     selectedTotalCount: 0,
     countLabel: "2 von 3 Karten angezeigt",
     groupFilter: [],
+    searchQuery: "",
+    onSearchQueryChange: vi.fn(),
+    sortOrder: "recent" as const,
+    onSortOrderChange: vi.fn(),
     hasActiveGroupFilter: false,
     visibleCards: [
         { id: "1", german_text: "bitte", swahili_text: "tafadhali", groups: [{ id: "g1", name: "Alltag", color: null }] },
@@ -36,6 +40,10 @@ const baseProps = {
     onToggleSelected: vi.fn(),
     onPlayAudio: vi.fn(),
     onEditCard: vi.fn(),
+    onEditFromDetail: vi.fn(),
+    returnToDetail: null,
+    onDetailClosed: vi.fn(),
+    onWordUnderstandingSaved: vi.fn(),
     onDeleteCard: vi.fn(),
     onOpenCardGroupsEditor: vi.fn(),
     onCreateSentence: vi.fn(),
@@ -46,6 +54,8 @@ describe("TrainerCardLibrarySheet", () => {
         const html = renderToStaticMarkup(<TrainerCardLibrarySheet {...baseProps} />);
 
         expect(html).toContain("Meine Karten");
+        expect(html).toContain("Karten durchsuchen …");
+        expect(html).toContain("Zuletzt hinzugefügt");
         expect(html).toContain("2 von 3 Karten angezeigt");
         expect(html).toContain("bitte");
         expect(html).toContain("tafadhali");
@@ -60,7 +70,7 @@ describe("TrainerCardLibrarySheet", () => {
     it("keeps sentence group selection in the card form and group maintenance central", () => {
         const html = renderToStaticMarkup(<TrainerCardLibrarySheet {...baseProps} isSentenceTrainer />);
         expect(html).toContain("Gruppen verwalten");
-        expect(html).toContain("Satz bearbeiten");
+        expect(html).toContain("Satz ansehen");
         expect(html).not.toContain("Gruppen bearbeiten");
         expect(html).toContain('data-testid="sentence-library"');
         expect(html).toContain("Deine Lernsammlung");
@@ -73,15 +83,15 @@ describe("TrainerCardLibrarySheet", () => {
             isSentenceTrainer title="Meine Sätze" filteredCardsCount={1} visibleCards={[{
                 id: "s1", german_text: "Guten Morgen", swahili_text: "Habari za asubuhi",
                 groups: [{ id: "g1", name: "Alltag", color: "sage" }],
-                sentence_explanation: { version: 1 }, audio_path: "hello.mp3", image_path: "hello.png",
+                sentence_explanation: { version: 1, naturalTranslation: "Guten Morgen", breakdown: [{ surface: "Habari", meaning: "Nachrichten", explanation: "Teil des Morgengrußes." }], learningTip: null }, audio_path: "hello.mp3", image_path: "hello.png",
             }]}
         />);
         expect(html).toContain("Meine Sätze");
         expect(html).toContain("1 Satz");
         expect(html).toContain("Guten Morgen");
         expect(html).toContain("Habari za asubuhi");
-        expect(html).toContain('aria-label="Gruppe vorhanden"');
-        expect(html).toContain('aria-label="Lernerklärung vorhanden"');
+        expect(html).toContain('aria-label="Gruppe vorhanden, anzeigen"');
+        expect(html).toContain('aria-label="Lernerklärung vorhanden, anzeigen"');
         expect(html).not.toMatch(/>Lernerklärung vorhanden</);
         expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
         expect(html).toContain('aria-label="Illustration vorhanden"');
@@ -137,6 +147,11 @@ describe("TrainerCardLibrarySheet", () => {
         expect(html).toContain("Filter zurücksetzen");
         expect(html).not.toContain("Mehr Wörter laden");
     });
+    it("shows a search empty state and a reset action", () => {
+        const html = renderToStaticMarkup(<TrainerCardLibrarySheet {...baseProps} searchQuery="unbekannt" visibleCards={[]} filteredCardsCount={0} canLoadMore={false} />);
+        expect(html).toContain("Keine passenden Karten gefunden.");
+        expect(html).toContain("Suche zurücksetzen");
+    });
 
     it("renders manual visible-selection controls in selection mode", () => {
         const html = renderToStaticMarkup(
@@ -160,7 +175,7 @@ describe("TrainerCardLibrarySheet", () => {
             german_example: "Die Katze schläft.", has_note: true, groups: [{ id: "g1", name: "Alltag", color: "sage" }],
         }]} filteredCardsCount={1} canLoadMore={false} />);
         expect(html).toContain("word-library-thumb");
-        expect(html).toContain('aria-label="Gruppe vorhanden"');
+        expect(html).toContain('aria-label="Gruppe vorhanden, anzeigen"');
         expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
         expect(html).not.toContain(">Beispiele</span>");
         expect(html).toContain("Notiz");

@@ -36,7 +36,8 @@ describe("group color presentation", () => {
         expect(html).toContain('aria-label="Farbe Salbei"');
         const form = fs.readFileSync(path.join(process.cwd(), "src/components/trainer/TrainerCardFormSheet.tsx"), "utf8");
         expect(form).toContain("<GroupColorDot color={group.color} />{group.name}");
-        expect(form).toContain(': "Keine Gruppe"');
+        expect(form).toContain('status={formSelectedGroups.length ?');
+        expect(form).toContain(': undefined} open={activeSupplement === "group"}');
     });
 
     it("offers palette selection and later editing in group management", () => {

@@ -200,7 +200,7 @@ describe("mobile critical-flow regression coverage", () => {
 
         expect(quickSearch).toContain("<TrainerCardFormSheet");
         expect(quickSearch).toContain("cardFormRef.current?.openEdit");
-        expect(quickSearch).toContain("fetchGroups(\"vocab\")");
+        expect(quickSearch).toContain("fetchGroups(nextType)");
         expect(quickSearch).toContain("groups={groups}");
         expect(quickSearch).toContain("onUpdated={(card, nextGroups) => handleSaved(card, nextGroups)}");
         expect(quickSearch).toContain("onAudioUpdated");

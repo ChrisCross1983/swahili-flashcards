@@ -2,16 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import CardText from "@/components/ui/CardText";
 import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/components/trainer/TrainerCardFormSheet";
+import CardDetailSheet from "@/components/trainer/CardDetailSheet";
 import { fetchGroups } from "@/lib/groups/api";
 import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 import type { Group } from "@/lib/groups/types";
+import type { WordEnrichment } from "@/lib/word/understanding";
 
 const IMAGE_BASE_URL =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
-const AUDIO_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 
 type CardResult = {
     id: string | number;
@@ -20,6 +21,7 @@ type CardResult = {
     german_example?: string | null;
     swahili_example?: string | null;
     has_note?: boolean;
+    word_enrichment?: WordEnrichment | null;
     image_path: string | null;
     audio_path: string | null;
     groups?: Group[];
@@ -30,20 +32,20 @@ type Props = {
     ownerKey: string;
     open: boolean;
     onClose: () => void;
+    onOpen: () => void;
 };
 
 function getImageUrl(path: string) {
     return `${IMAGE_BASE_URL}/${path}`;
 }
 
-function getAudioUrl(path: string) {
-    return `${AUDIO_BASE_URL}/${path}`;
-}
-
-export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
+export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: Props) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<CardResult[]>([]);
-    const [selected, setSelected] = useState<CardResult | null>(null);
+    const [detailCard, setDetailCard] = useState<CardResult | null>(null);
+    const [formCardType, setFormCardType] = useState<"vocab" | "sentence">("vocab");
+    const [pendingEdit, setPendingEdit] = useState<CardResult | null>(null);
+    const [pendingCreate, setPendingCreate] = useState(false);
     const [knownCards, setKnownCards] = useState<CardResult[]>([]);
     const [groups, setGroups] = useState<Group[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +53,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     const [error, setError] = useState<string | null>(null);
     const [editStatus, setEditStatus] = useState<string | null>(null);
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
+    const detailOriginRef = useRef<{ card: CardResult; note: string | null } | null>(null);
 
     const mergeKnownCard = useCallback((card: CardResult) => {
         setKnownCards((prev) => {
@@ -63,7 +66,8 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         blurActiveOverlayElement();
         setQuery("");
         setResults([]);
-        setSelected(null);
+        setDetailCard(null);
+        detailOriginRef.current = null;
         setError(null);
         setEditStatus(null);
         onClose();
@@ -78,7 +82,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
     const resetSearchAfterCreate = useCallback(() => {
         setQuery("");
         setResults([]);
-        setSelected(null);
+        setDetailCard(null);
         setError(null);
         setEditStatus(null);
     }, []);
@@ -125,7 +129,6 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         if (!open) return;
 
         const trimmed = query.trim();
-        setSelected(null);
 
         if (!trimmed) {
             setResults([]);
@@ -156,7 +159,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                     return Array.from(merged.values()).slice(0, 30);
                 });
                 setError(null);
-            } catch (err) {
+            } catch {
                 if (controller.signal.aborted) return;
                 setError("Suche fehlgeschlagen.");
             } finally {
@@ -174,10 +177,22 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
 
     const ensureGroupsLoaded = useCallback(async () => {
         if (groups.length > 0) return groups;
-        const nextGroups = await fetchGroups("vocab");
+        const nextGroups = await fetchGroups(formCardType);
         setGroups(nextGroups);
         return nextGroups;
-    }, [groups]);
+    }, [groups, formCardType]);
+
+    useEffect(() => {
+        if (!pendingEdit) return;
+        cardFormRef.current?.openEdit(pendingEdit, "cards");
+        setPendingEdit(null);
+    }, [pendingEdit, formCardType]);
+
+    useEffect(() => {
+        if (!pendingCreate || formCardType !== "vocab") return;
+        cardFormRef.current?.openCreate();
+        setPendingCreate(false);
+    }, [pendingCreate, formCardType]);
 
     useEffect(() => {
         let ignore = false;
@@ -196,34 +211,48 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
         };
     }, [ensureGroupsLoaded, mounted, open]);
 
-    const handleEdit = useCallback(async (card: CardResult) => {
+    const handleEdit = useCallback(async (card: CardResult, note: string | null) => {
         setEditStatus(null);
         hideSearchForEdit();
+        setDetailCard(null);
+        detailOriginRef.current = { card, note };
 
         try {
-            await ensureGroupsLoaded();
-            const response = await fetch(`/api/cards?id=${encodeURIComponent(String(card.id))}&type=vocab`, { cache: "no-store" });
+            const response = await fetch(`/api/cards?id=${encodeURIComponent(String(card.id))}`, { cache: "no-store" });
             const json = await response.json();
             if (!response.ok) throw new Error(json?.error ?? "Karte konnte nicht geladen werden.");
-            const loadedCard = json.card ?? card;
+            const loadedCard = json.card as CardResult | null;
+            if (!loadedCard) throw new Error("Karte nicht gefunden.");
+            const nextType = loadedCard.type === "sentence" ? "sentence" : "vocab";
+            setGroups(await fetchGroups(nextType));
+            setFormCardType(nextType);
+            detailOriginRef.current = { card: loadedCard, note };
             mergeKnownCard(loadedCard);
-            cardFormRef.current?.openEdit(loadedCard, "cards");
+            setPendingEdit(loadedCard);
         } catch (error) {
+            detailOriginRef.current = null;
             setEditStatus(error instanceof Error ? error.message : "Karte konnte nicht geladen werden.");
-            mergeKnownCard(card);
-            cardFormRef.current?.openEdit(card, "cards");
+            onOpen();
         }
-    }, [ensureGroupsLoaded, hideSearchForEdit, mergeKnownCard]);
+    }, [hideSearchForEdit, mergeKnownCard, onOpen]);
 
     const handleCreateFromSearch = useCallback(() => {
         const searchTerm = query.trim();
         if (!searchTerm) return;
+        detailOriginRef.current = null;
         hideSearchForEdit();
-        cardFormRef.current?.openCreate();
-    }, [hideSearchForEdit, query]);
+        void fetchGroups("vocab").then((vocabGroups) => {
+            setGroups(vocabGroups);
+            setFormCardType("vocab");
+            setPendingCreate(true);
+        }).catch(() => { setEditStatus("Gruppen konnten nicht geladen werden."); onOpen(); });
+    }, [hideSearchForEdit, onOpen, query]);
 
     const handleSaved = useCallback((updated: CardResult, nextGroups?: Group[]) => {
         const updatedWithGroups = nextGroups ? { ...updated, groups: nextGroups } : updated;
+        if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(updated.id)) {
+            detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, ...updatedWithGroups } };
+        }
         setResults((prev) =>
             prev.map((card) =>
                 String(card.id) === String(updatedWithGroups.id)
@@ -240,28 +269,15 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                     : card
             )
         );
-        setSelected((prev) =>
-            prev && String(prev.id) === String(updatedWithGroups.id)
-                ? {
-                    ...prev,
-                    german_text: updatedWithGroups.german_text,
-                    swahili_text: updatedWithGroups.swahili_text,
-                    german_example: updatedWithGroups.german_example,
-                    swahili_example: updatedWithGroups.swahili_example,
-                    image_path: updatedWithGroups.image_path,
-                    audio_path: updatedWithGroups.audio_path,
-                    groups: updatedWithGroups.groups ?? prev.groups,
-                }
-                : prev
-        );
         mergeKnownCard(updatedWithGroups);
     }, [mergeKnownCard]);
 
     const handleDeleted = useCallback((id: string) => {
+        if (detailOriginRef.current && String(detailOriginRef.current.card.id) === id) { detailOriginRef.current = null; onOpen(); }
         setResults((prev) => prev.filter((card) => String(card.id) !== String(id)));
-        setSelected((prev) => (prev && String(prev.id) === String(id) ? null : prev));
+        setDetailCard((prev) => (prev && String(prev.id) === String(id) ? null : prev));
         setKnownCards((prev) => prev.filter((card) => String(card.id) !== String(id)));
-    }, []);
+    }, [onOpen]);
 
     if (!mounted || !document?.body) {
         return null;
@@ -322,13 +338,15 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                             <button
                                                 key={card.id}
                                                 type="button"
-                                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition hover:bg-surface"
-                                                onClick={() => setSelected(card)}
+                                                className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left text-sm transition hover:bg-surface-elevated focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
+                                                onClick={() => { setDetailCard(card); onClose(); }}
+                                                aria-label={`Karte ansehen: ${card.german_text}`}
                                             >
                                                 {card.image_path ? (
-                                                    <img
+                                                     <Image
                                                         src={getImageUrl(card.image_path)}
                                                         alt="Vorschau"
+                                                         width={40} height={40} unoptimized
                                                         className="h-10 w-10 rounded-lg border object-cover"
                                                     />
                                                 ) : (
@@ -340,6 +358,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                                     <CardText className="font-medium text-primary">{card.german_text}</CardText>
                                                     <CardText className="text-muted">{card.swahili_text}</CardText>
                                                 </div>
+                                                <span className="ml-auto text-lg text-muted" aria-hidden="true">›</span>
                                             </button>
                                         ))}
                                     </div>
@@ -356,60 +375,25 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                                 </button>
                             ) : null}
 
-                            {selected ? (
-                                <div className="rounded-2xl border border-soft bg-surface p-4 shadow-soft" data-testid="quick-search-card-preview">
-                                    <div className="mb-3 flex items-start justify-between">
-                                        <div className="min-w-0">
-                                            <CardText className="text-sm font-semibold text-primary">{selected.german_text}</CardText>
-                                            <CardText className="text-sm text-muted">{selected.swahili_text}</CardText>
-                                        </div>
-
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                className="rounded-full border border-soft px-3 py-1 text-xs text-muted transition hover:border-accent hover:bg-surface"
-                                                onClick={() => handleEdit(selected)}
-                                            >
-                                                Bearbeiten
-                                            </button>
-                                            <button
-                                                type="button"
-                                                aria-label="Vorschau schließen"
-                                                className="rounded-full border border-soft px-2 py-1 text-xs text-muted transition hover:bg-surface"
-                                                onClick={() => setSelected(null)}
-                                            >
-                                                ✕
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {selected.image_path ? (
-                                        <img
-                                            src={getImageUrl(selected.image_path)}
-                                            alt="Karte"
-                                            className="mb-3 w-full max-h-56 rounded-xl object-contain bg-surface-elevated"
-                                        />
-                                    ) : null}
-
-                                    {selected.audio_path ? (
-                                        <audio controls src={getAudioUrl(selected.audio_path)} className="w-full" />
-                                    ) : (
-                                        <p className="text-xs text-muted">Kein Audio verfügbar.</p>
-                                    )}
-
-                                </div>
-                            ) : null}
                         </div>
                     </div>
                 </div>
             ) : null}
 
+             {detailCard ? <CardDetailSheet key={String(detailCard.id)} card={detailCard} initialNote={detailOriginRef.current?.note ?? null} onClose={() => { setDetailCard(null); detailOriginRef.current = null; onOpen(); }} onEdit={(card, note) => void handleEdit(card as CardResult, note)} onWordUnderstandingSaved={(cardId, enrichment) => {
+                const apply = (card: CardResult) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card;
+                setResults((prev) => prev.map(apply));
+                setKnownCards((prev) => prev.map(apply));
+                setDetailCard((prev) => prev ? apply(prev) : prev);
+                 if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: apply(detailOriginRef.current.card) };
+             }} /> : null}
             <TrainerCardFormSheet
+                key={formCardType}
                 ref={cardFormRef}
-                cardType="vocab"
+                cardType={formCardType}
                 closeOnCreateSuccess
                 onCreateFlowComplete={resetSearchAfterCreate}
-                editTitle="Karte bearbeiten"
+                editTitle={formCardType === "sentence" ? "Satz bearbeiten" : "Karte bearbeiten"}
                 createTitle="Neue Karte"
                 saveCardLabel="Speichern"
                 groups={groups}
@@ -422,16 +406,25 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose }: Props) {
                     const applyAudio = (card: CardResult) => String(card.id) === String(cardId) ? { ...card, audio_path: audioPath } : card;
                     setResults((prev) => prev.map(applyAudio));
                     setKnownCards((prev) => prev.map(applyAudio));
-                    setSelected((prev) => prev ? applyAudio(prev) : prev);
+                    setDetailCard((prev) => prev ? applyAudio(prev) : prev);
+                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(cardId)) detailOriginRef.current = { ...detailOriginRef.current, card: applyAudio(detailOriginRef.current.card) };
                 }}
                 onNoteSaved={(cardId, mainNotes) => {
                     const hasNote = mainNotes.trim().length > 0;
                     const applyNote = (card: CardResult) => String(card.id) === cardId ? { ...card, has_note: hasNote } : card;
                     setResults((prev) => prev.map(applyNote));
                     setKnownCards((prev) => prev.map(applyNote));
-                    setSelected((prev) => prev ? applyNote(prev) : prev);
+                    setDetailCard((prev) => prev ? applyNote(prev) : prev);
+                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { card: applyNote(detailOriginRef.current.card), note: mainNotes };
                 }}
-                onOpenCards={() => { }}
+                onWordUnderstandingSaved={(cardId, enrichment) => {
+                    const applyExplanation = (card: CardResult) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card;
+                    setResults((prev) => prev.map(applyExplanation));
+                    setKnownCards((prev) => prev.map(applyExplanation));
+                    setDetailCard((prev) => prev ? applyExplanation(prev) : prev);
+                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: applyExplanation(detailOriginRef.current.card) };
+                }}
+                onOpenCards={() => { if (detailOriginRef.current) setDetailCard({ ...detailOriginRef.current.card }); }}
                 onReturnToLearn={() => { }}
                 onStatus={setEditStatus}
             />

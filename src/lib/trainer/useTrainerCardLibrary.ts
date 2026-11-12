@@ -4,11 +4,14 @@ import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } fr
 import { clearSelection, removeDeletedFromSelection, selectAllVisible, toggleSelection } from "@/lib/cards/selection";
 import {
     CARD_LIBRARY_PAGE_SIZE,
+    filterAndSortLibraryCards,
+    type LibrarySortOrder,
     getLibraryCountLabel,
     getVisibleCards,
     nextVisibleCount,
     shouldShowLoadMore,
 } from "@/lib/trainer/cardLibraryBehavior";
+import type { WordEnrichment } from "@/lib/word/understanding";
 
 export type TrainerLibraryCard = {
     id: string | number;
@@ -17,12 +20,14 @@ export type TrainerLibraryCard = {
     image_path?: string | null;
     audio_path?: string | null;
     groups?: Array<{ id: string | number; name: string; color?: string | null }>;
+    word_enrichment?: WordEnrichment | null;
+    note_preview?: { main_notes?: string | null; memory_hint?: string | null; example_sentence?: string | null; confusion_note?: string | null } | null;
     [key: string]: unknown;
 };
 
 export function updateLibraryNoteStatus(cards: TrainerLibraryCard[], cardId: string, mainNotes: string): TrainerLibraryCard[] {
     const hasNote = mainNotes.trim().length > 0;
-    return cards.map((card) => String(card.id) === cardId && card.type !== "sentence" ? { ...card, has_note: hasNote } : card);
+    return cards.map((card) => String(card.id) === cardId ? { ...card, has_note: hasNote || (card.type === "sentence" && Boolean(card.note_preview?.memory_hint?.trim() || card.note_preview?.example_sentence?.trim() || card.note_preview?.confusion_note?.trim())), note_preview: { ...card.note_preview, main_notes: mainNotes } } : card);
 }
 
 type UseTrainerCardLibraryParams = {
@@ -45,6 +50,8 @@ export function filterCardsByGroups<T extends { groups?: Array<{ id: string | nu
 export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) {
     const [cards, setCards] = useState<TrainerLibraryCard[]>(params.initialCards ?? []);
     const [groupFilter, setGroupFilterState] = useState<string[]>([]);
+    const [searchQuery, setSearchQueryState] = useState("");
+    const [sortOrder, setSortOrder] = useState<LibrarySortOrder>("recent");
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(CARD_LIBRARY_PAGE_SIZE);
@@ -53,8 +60,8 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
     const hasActiveGroupFilter = groupFilter.length > 0;
 
     const filteredCards = useMemo(
-        () => filterCardsByGroups(cards, groupFilter),
-        [cards, groupFilter]
+        () => filterAndSortLibraryCards(cards, searchQuery, groupFilter, sortOrder),
+        [cards, groupFilter, searchQuery, sortOrder]
     );
 
     const visibleCards = useMemo(
@@ -65,9 +72,9 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
     const countLabel = useMemo(() => getLibraryCountLabel({
         visible: visibleCards.length,
         total: filteredCards.length,
-        filtered: hasActiveGroupFilter,
+        filtered: hasActiveGroupFilter || Boolean(searchQuery.trim()),
         itemLabel: params.itemLabel,
-    }), [filteredCards.length, hasActiveGroupFilter, params.itemLabel, visibleCards.length]);
+    }), [filteredCards.length, hasActiveGroupFilter, searchQuery, params.itemLabel, visibleCards.length]);
 
     const canLoadMore = useMemo(
         () => shouldShowLoadMore(filteredCards.length, visibleCount),
@@ -95,6 +102,11 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
         setGroupFilterState(nextGroupIds);
         setVisibleCount(CARD_LIBRARY_PAGE_SIZE);
         setSelectedIds(clearSelection());
+    }, []);
+
+    const setSearchQuery = useCallback((query: string) => {
+        setSearchQueryState(query);
+        setVisibleCount(CARD_LIBRARY_PAGE_SIZE);
     }, []);
 
     const toggleSelected = useCallback((cardId: string | number) => {
@@ -128,6 +140,10 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
         loadMore,
         resetVisibleWindow,
         groupFilter,
+        searchQuery,
+        setSearchQuery,
+        sortOrder,
+        setSortOrder,
         setGroupFilter,
         hasActiveGroupFilter,
         selectedIds,

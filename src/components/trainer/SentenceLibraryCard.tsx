@@ -6,21 +6,24 @@ import { SentenceFeatureIcon } from "@/components/trainer/SentenceFormDisclosure
 import FloatingLibraryMenu from "@/components/trainer/FloatingLibraryMenu";
 import { LibraryFeatureStatus } from "@/components/trainer/LibraryFeatureStatus";
 import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import { parseSentenceExplanation } from "@/lib/sentence/explanation";
 
-export default function SentenceLibraryCard({ card, selected, selectionMode, actionOpen, onToggleSelected, onToggleActions, onPlayAudio, onEditCard, onDeleteCard, onOpenCardGroupsEditor }: {
+export default function SentenceLibraryCard({ card, selected, selectionMode, actionOpen, onToggleSelected, onToggleActions, onPlayAudio, onEditCard, onViewCard, onDeleteCard, onOpenCardGroupsEditor, activePreviewKey, onPreviewChange }: {
     card: TrainerLibraryCard; selected: boolean; selectionMode: boolean; actionOpen: boolean;
     onToggleSelected: (id: string | number) => void; onToggleActions: () => void;
-    onPlayAudio: (card: TrainerLibraryCard) => void;
-    onEditCard: (card: TrainerLibraryCard) => void; onDeleteCard: (id: string) => void;
+    onPlayAudio: (card: TrainerLibraryCard) => HTMLAudioElement | null | void;
+    activePreviewKey?: string | null; onPreviewChange?: (key: string | null) => void;
+    onEditCard: (card: TrainerLibraryCard) => void; onViewCard: (card: TrainerLibraryCard) => void; onDeleteCard: (id: string) => void;
     onOpenCardGroupsEditor: (card: TrainerLibraryCard) => void;
 }) {
     const triggerRef = useRef<HTMLButtonElement>(null);
     const id = String(card.id);
     const name = card.german_text ?? "Satz";
-    return <article className={`sentence-library-card sentence-library-card--status ${selected ? "is-selected" : ""}`} data-testid="sentence-library-card" data-selected={selected}>
+    const explanation = parseSentenceExplanation(card.sentence_explanation);
+    return <article className={`sentence-library-card sentence-library-card--status ${selected ? "is-selected" : ""}`} data-testid="sentence-library-card" data-selected={selected} onClick={(event) => { if (!selectionMode && !(event.target as Element).closest("button, input, label, [data-library-status-popover]")) onViewCard(card); }}>
         <div className="sentence-library-content">
             {selectionMode ? <label className="sentence-library-select-hit"><input type="checkbox" className="sentence-library-checkbox" checked={selected} onChange={() => onToggleSelected(card.id)} aria-label={`Satz auswählen: ${name}`} /></label> : null}
-            <button type="button" className="sentence-library-card-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onEditCard(card)} aria-label={selectionMode ? `Satz auswählen: ${name}` : `Satz bearbeiten: ${name}`}>
+            <button type="button" className="sentence-library-card-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onViewCard(card)} aria-label={selectionMode ? `Satz auswählen: ${name}` : `Satz ansehen: ${name}`}>
                 <span className="min-w-0 flex-1">
                     <span className="sentence-library-language">DE</span><CardText as="span" className="sentence-library-german">{card.german_text}</CardText>
                     <span className="sentence-library-language mt-3">SW</span><CardText as="span" className="sentence-library-swahili">{card.swahili_text}</CardText>
@@ -30,12 +33,12 @@ export default function SentenceLibraryCard({ card, selected, selectionMode, act
                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>
             </button> : null}
         </div>
-        <LibraryFeatureStatus features={[
+        <LibraryFeatureStatus cardId={id} selectionMode={selectionMode} activePreviewKey={activePreviewKey} onPreviewChange={onPreviewChange} features={[
             { icon: "image", name: "Illustration", present: Boolean(card.image_path) },
-            { icon: "group", name: "Gruppe", present: Boolean(card.groups?.length) },
+            { icon: "group", name: "Gruppe", present: Boolean(card.groups?.length), preview: { kind: "groups", groups: card.groups ?? [] } },
             { icon: "audio", name: "Aussprache", present: Boolean(card.audio_path), onActivate: () => onPlayAudio(card) },
-            { icon: "notes", name: "Notiz", present: Boolean(card.has_note) },
-            { icon: "grammar", name: "Lernerklärung", present: Boolean(card.sentence_explanation) },
+            { icon: "notes", name: "Notiz", present: Boolean(card.has_note), preview: { kind: "notes", cardId: id, note: card.note_preview } },
+            { icon: "grammar", name: "Lernerklärung", present: Boolean(explanation), preview: explanation ? { kind: "sentence", explanation } : undefined },
         ]} />
         {!selectionMode ? <FloatingLibraryMenu open={actionOpen} triggerRef={triggerRef} id={`sentence-library-actions-${id}`}>
             <button type="button" onClick={() => onEditCard(card)}><SentenceFeatureIcon name="notes" className="h-4 w-4" />Bearbeiten</button>

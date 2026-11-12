@@ -25,8 +25,10 @@ import { useTrainerCardSaveFlow } from "@/lib/trainer/useTrainerCardSaveFlow";
 import IllustrationControls from "@/components/trainer/IllustrationControls";
 import NoteEditor from "@/components/trainer/NoteEditor";
 import SentenceExplanationContent from "@/components/trainer/SentenceExplanationContent";
+import WordUnderstandingFeature from "@/components/trainer/WordUnderstandingFeature";
 import SentenceFormDisclosure, { SentenceFeatureIcon, SentenceFormGroup } from "@/components/trainer/SentenceFormDisclosure";
 import { parseSentenceExplanation, type SentenceExplanation } from "@/lib/sentence/explanation";
+import { hasWordUnderstanding, type WordEnrichment } from "@/lib/word/understanding";
 import { IMAGE_MIME_TYPES, imageLimitLabel, imageTooLarge } from "@/lib/cards/imageUploadPolicy";
 import { focusNextSentence, languageBlocksSentenceSave, sentenceExplanationErrorCopy, sentencePairKey, shouldCheckSentenceLanguages, shouldShowGrammarTip, swapSentencePair, type SentenceLanguageValidation } from "@/lib/sentence/cardFormUx";
 
@@ -66,12 +68,13 @@ type Props = {
     onDeleted: (cardId: string) => Promise<void> | void;
     onAudioUpdated: (cardId: string, audioPath: string | null) => void;
     onNoteSaved: (cardId: string, mainNotes: string) => void;
+    onWordUnderstandingSaved: (cardId: string, enrichment: WordEnrichment) => void;
     onOpenCards: () => void;
     onReturnToLearn: () => void;
     onStatus: (message: string) => void;
 };
 
-type Supplement = "grammar" | "notes" | "audio" | "group" | "image";
+type Supplement = "grammar" | "word" | "notes" | "audio" | "group" | "image";
 
 const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(function TrainerCardFormSheet(
     {
@@ -89,6 +92,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         onDeleted,
         onAudioUpdated,
         onNoteSaved,
+        onWordUnderstandingSaved,
         onOpenCards,
         onReturnToLearn,
         onStatus,
@@ -113,6 +117,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     const [editingOriginalGroupIds, setEditingOriginalGroupIds] = useState<string[]>([]);
     const [activeSupplement, setActiveSupplement] = useState<Supplement | null>(null);
     const [sentenceExplanation, setSentenceExplanation] = useState<SentenceExplanation | null>(null);
+    const [wordEnrichment, setWordEnrichment] = useState<WordEnrichment | null>(null);
     const [explanationPreview, setExplanationPreview] = useState<SentenceExplanation | null>(null);
     const [explanationDirty, setExplanationDirty] = useState(false);
     const [explanationLoading, setExplanationLoading] = useState(false);
@@ -148,6 +153,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setFormNoteStatus,
         resetFormNotes,
         restoreDraftNote,
+        hydrateFormNotes,
         loadFormNotes,
         saveFormNotes,
     } = useTrainerCardFormNotes(onNoteSaved);
@@ -315,6 +321,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setLanguageValidation(null);
         setExplanationFieldError(null);
         resetExplanation();
+        setWordEnrichment(null);
         setStatus("");
         saveFlow.resetSaveFeedback();
         clearDuplicateCheck();
@@ -418,6 +425,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function handleCreateSuccess() {
         resetExplanation();
+        setWordEnrichment(null);
         setLanguageValidation(null);
         setStatus("");
         saveFlow.resetSaveFeedback();
@@ -556,6 +564,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setCreateSuccessVisible(false);
         setLanguageValidation(null);
         resetExplanation(card.sentence_explanation);
+        setWordEnrichment(hasWordUnderstanding(card.word_enrichment) ? card.word_enrichment : null);
         const nextGroupIds = extractCardGroupIds(card);
         const textState = hydrateTextStateFromCard(card);
         setEditSource(source);
@@ -574,7 +583,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setStatus("");
         saveFlow.resetSaveFeedback();
         resetFormNotes();
-        if (card.id) void loadFormNotes(String(card.id));
+        if (card.note_preview !== undefined) hydrateFormNotes(card.note_preview?.main_notes ?? "");
+        else if (card.id) void loadFormNotes(String(card.id));
 
     }
 
@@ -585,6 +595,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         setCreateSuccessVisible(false);
         setLanguageValidation(null);
         resetExplanation(item.sentence_explanation);
+        setWordEnrichment(hasWordUnderstanding(item.word_enrichment) ? item.word_enrichment : null);
         const cardId = String(item.cardId ?? item.id);
         const nextGroupIds = extractCardGroupIds(item);
         const textState = hydrateTextStateFromLearn({ german, swahili, germanExample, swahiliExample });
@@ -605,7 +616,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         clearDuplicateCheck();
         saveFlow.resetSaveFeedback();
         resetFormNotes();
-        void loadFormNotes(cardId);
+        if (item.note_preview !== undefined) hydrateFormNotes(item.note_preview?.main_notes ?? "");
+        else void loadFormNotes(cardId);
 
         media.discardIllustration();
         setOpen(true);
@@ -627,6 +639,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function cancelEdit() {
         setEditingId(null);
+        setWordEnrichment(null);
         setEditImagePath(null);
         setGerman("");
         setSwahili("");
@@ -832,7 +845,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         </div>
     ) : null;
 
-    const formActionButtons = <div className="grid grid-cols-2 gap-3 sm:gap-4" data-testid={isSentence ? "sentence-action-footer" : "word-action-footer"}>
+    const formActionButtons = <div className={isSentence ? "grid grid-cols-2 gap-3 sm:gap-4" : "word-action-footer"} data-testid={isSentence ? "sentence-action-footer" : "word-action-footer"}>
         <button
             className={`btn btn-primary min-h-12 py-3 text-sm active:scale-[0.99] sm:text-base disabled:bg-surface-elevated disabled:text-muted disabled:border ${isSentence ? "shadow-[0_7px_17px_rgba(191,84,32,0.20)]" : ""}`}
             onClick={saveFlow.saveCard}
@@ -854,10 +867,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
             sentence={isSentence}
             title={isSentence ? "Bild" : "Illustration"}
             icon="image"
-            featured={!isSentence}
+            present={Boolean(media.imageFile || editingImagePath)}
+            featured={false}
             badge={!isSentence && !editingImagePath && !media.imageFile ? "Empfohlen" : undefined}
             description={!isSentence ? "Ein klares Lernbild macht das Wort leichter merkbar." : undefined}
-            status={media.imageFile ? "Neues Bild ausgewählt" : editingImagePath ? "Bild vorhanden" : "Noch kein Bild"}
             open={activeSupplement === "image"}
             onToggle={() => toggleSupplement("image")}
             sectionRef={imageCardRef}
@@ -891,7 +904,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     );
 
     const notesFeature = (
-                    <SentenceFormDisclosure sentence={isSentence} title="Notizen" icon="notes" description={isSentence ? undefined : "Merksatz, Besonderheit oder Stolperstelle."} status={formNoteDraft.mainNotes.trim() ? "Notiz vorhanden" : "Noch keine Notiz"} open={activeSupplement === "notes"} onToggle={() => toggleSupplement("notes")}>
+                    <SentenceFormDisclosure sentence={isSentence} title="Notizen" icon="notes" present={Boolean(formNoteDraft.mainNotes.trim())} loading={formNoteLoading} className={isSentence ? "" : "word-notes-feature"} description={isSentence ? undefined : "Merksatz, Besonderheit oder Stolperstelle."} open={activeSupplement === "notes"} onToggle={() => toggleSupplement("notes")}>
                     <div className="pt-1">
                         {formNoteLoading ? <div className="text-sm text-muted">Notizen werden geladen…</div> : <>
                             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted" htmlFor="trainer-card-note">Notiz</label>
@@ -910,20 +923,21 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 open={open}
                 title={isSentence ? (editingId ? "Satz bearbeiten" : "Neuen Satz anlegen") : (editingId ? editTitle : createTitle)}
                 subtitle="Deutsch ↔ Kiswahili"
-                presentation="sentence"
+                presentation={isSentence ? "sentence" : "word-edit"}
                 onClose={handleCancelEdit}
                 scrollContainerRef={sheetScrollRef}
-                footer={<div className="sentence-action-bar">{formActionButtons}</div>}
+                footer={<div className={isSentence ? "sentence-action-bar" : "sentence-action-bar word-action-bar"}>{formActionButtons}</div>}
             >
-                <div className="rounded-2xl border p-4 shadow-soft bg-surface sm:p-6 sentence-form-surface">
+                <div className={isSentence ? "rounded-2xl border p-4 shadow-soft bg-surface sm:p-6 sentence-form-surface" : "word-edit-composer"}>
                     {!editingId && createSuccessVisible ? <div className="sentence-success-banner mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-950 shadow-[0_8px_24px_rgba(31,111,63,0.10)]" role="status" aria-live="polite">
                         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-800" aria-hidden="true">✓</span>
                         <div className="min-w-0 flex-1"><div className="font-bold">✓ {isSentence ? "Satz" : "Wort"} gespeichert</div><p className="mt-0.5 text-sm">Du kannst direkt {isSentence ? "den nächsten Satz" : "das nächste Wort"} anlegen.</p></div>
                         <button type="button" className="btn btn-secondary min-h-11 text-sm" onClick={() => { setCreateSuccessVisible(false); (isSentence ? germanInputRef.current : germanWordInputRef.current)?.focus(); }}>OK</button>
                     </div> : null}
                     {isSentence ? duplicateFeedbackPanel : null}
-                    <div className="sentence-pair-card">
+                    <div className={isSentence ? "sentence-pair-card" : "word-edit-core"}>
                     <div className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">{isSentence ? "Satzpaar" : "Wortpaar"}</div>
+                    <div className={isSentence ? "" : "word-edit-fields"}>
                     <div className="sentence-input-wrap">
                     <div className="flex items-center gap-2"><label htmlFor={`trainer-${cardType}-german`} className="block text-sm font-semibold">Deutsch</label><span className="sentence-language-chip" aria-hidden="true">DE</span></div>
                     {isSentence ? <textarea
@@ -948,7 +962,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     {explanationFieldError === "german" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den deutschen Satz ein.</p> : null}
                     </div>
 
-                    <div className="sentence-input-wrap mt-4">
+                    <div className={isSentence ? "sentence-input-wrap mt-4" : "sentence-input-wrap"}>
                     <div className="flex items-center gap-2"><label htmlFor={`trainer-${cardType}-swahili`} className="block text-sm font-semibold">Kiswahili</label><span className="sentence-language-chip" aria-hidden="true">SW</span></div>
                     {isSentence ? <textarea
                         id={`trainer-${cardType}-swahili`}
@@ -959,7 +973,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. Habari za asubuhi"
                         rows={2}
-                    /> : <input
+                    /> : <div className="word-swahili-control"><input
                         id={`trainer-${cardType}-swahili`}
                         ref={swahiliWordInputRef}
                         className="sentence-textarea word-input mt-2"
@@ -968,9 +982,25 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. paka"
                         autoComplete="off"
-                    />}
+                    /><button type="button" className={`word-pair-audio ${media.pendingAudioBlob || media.editAudioPath ? "is-present" : ""}`} aria-label={media.pendingAudioBlob || media.editAudioPath ? "Aussprache bearbeiten" : "Aussprache aufnehmen"} title={media.pendingAudioBlob || media.editAudioPath ? "Aussprache bearbeiten" : "Aussprache aufnehmen"} aria-expanded={activeSupplement === "audio"} onClick={() => toggleSupplement("audio")}><SentenceFeatureIcon name="audio" className="h-5 w-5" /></button></div>}
                     {explanationFieldError === "swahili" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den Kiswahili-Satz ein.</p> : null}
+                    {!isSentence && activeSupplement === "audio" ? <div className="word-pair-meta-panel word-audio-panel" aria-label="Aussprache bearbeiten">
+                        <div className="flex flex-wrap gap-2">
+                            {media.pendingAudioBlob ? <button type="button" className={audioActionClass} onClick={media.playPendingAudio}>Abspielen</button> : media.editAudioPath ? <button type="button" className={audioActionClass} onClick={() => media.playAudioPath(media.editAudioPath)}>Abspielen</button> : null}
+                            <button type="button" className={audioActionClass} onClick={() => editingId ? (media.isRecording ? media.stopRecordingForEdit() : void media.startRecordingForEdit(editingId)) : (media.isRecording ? media.stopRecordingForCreate() : media.startRecordingForCreate())}>{media.isRecording ? editingId ? "Stop & Speichern" : "Stop" : media.pendingAudioBlob || media.editAudioPath ? "Neu aufnehmen" : "Aufnahme starten"}</button>
+                        </div>
+                        {!editingId ? <p className="mt-2 text-xs text-muted">Wird beim Speichern der Karte hochgeladen.</p> : null}
+                    </div> : null}
                     </div>
+                    </div>
+                    {!isSentence ? <div className="word-pair-meta" aria-label="Kartenmetadaten">
+                        <div className="word-pair-meta-row word-pair-groups">
+                            <span className="word-pair-meta-label">Gruppen</span>
+                            <div className="word-pair-group-chips">{formSelectedGroups.map((group: Group) => <GroupBadge key={group.id} group={group} />)}</div>
+                            <button type="button" className="word-pair-group-action" aria-expanded={activeSupplement === "group"} onClick={() => toggleSupplement("group")}>+ Gruppe</button>
+                        </div>
+                        {activeSupplement === "group" ? <div className="word-pair-meta-panel"><CompactGroupPicker inline groups={groups} selectedIds={formGroupIds} onChange={setFormGroupIds} cardType={cardType} triggerLabel="Gruppe wählen" allowCreate onGroupCreated={(group) => onGroupsChange([...groups, group].sort((a, b) => a.name.localeCompare(b.name)))} /></div> : null}
+                    </div> : null}
                     </div>
 
                     {topStatusText ? (
@@ -1004,7 +1034,16 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
                     <SentenceFormGroup sentence={isSentence}>
                     {!isSentence ? imageFeature : null}
-                    {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Grammatik verstehen" icon="grammar" featured description="AI zerlegt Satzbau und Wortbestandteile." status={sentenceExplanation ? "Erklärung vorhanden" : "Nicht erstellt"} badge={showGrammarTip && activeSupplement !== "grammar" ? "Empfohlen" : undefined} open={activeSupplement === "grammar"} onToggle={() => { if (showGrammarTip) markGrammarTipSeen(); toggleSupplement("grammar"); }} sectionRef={grammarCardRef} triggerRef={grammarTriggerRef} coachmark={showGrammarTip ? <div className="sentence-coachmark" role="note" data-testid="sentence-grammar-coachmark">
+                    {!isSentence && editingId ? <SentenceFormDisclosure sentence={false} title="Wort verstehen" icon="grammar"
+                        present={hasWordUnderstanding(wordEnrichment)}
+                        className="word-understanding-form-feature"
+                        description="Klasse, Formen und Verwendung dieses Wortes verstehen."
+                        open={activeSupplement === "word"} onToggle={() => toggleSupplement("word")}>
+                        <WordUnderstandingFeature key={editingId} cardId={editingId} swahili={swahili} german={german}
+                            initialEnrichment={wordEnrichment} embedded enabled={activeSupplement === "word"}
+                            onChange={setWordEnrichment} onSaved={onWordUnderstandingSaved} />
+                    </SentenceFormDisclosure> : null}
+                    {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Grammatik verstehen" icon="grammar" present={Boolean(sentenceExplanation)} featured description="AI zerlegt Satzbau und Wortbestandteile." badge={showGrammarTip && activeSupplement !== "grammar" ? "Empfohlen" : undefined} open={activeSupplement === "grammar"} onToggle={() => { if (showGrammarTip) markGrammarTipSeen(); toggleSupplement("grammar"); }} sectionRef={grammarCardRef} triggerRef={grammarTriggerRef} coachmark={showGrammarTip ? <div className="sentence-coachmark" role="note" data-testid="sentence-grammar-coachmark">
                         <p className="text-sm font-bold">Grammatik leichter verstehen</p>
                         <p className="mt-1 text-xs leading-relaxed text-[color:var(--text-muted)]">Lass dir Satzbau und Wortbestandteile automatisch erklären.</p>
                         <div className="mt-3 flex flex-wrap gap-2"><button type="button" className="btn btn-primary min-h-11 text-xs" onClick={() => { markGrammarTipSeen(); setActiveSupplement("grammar"); window.requestAnimationFrame(() => { grammarCreateRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); grammarCreateRef.current?.focus({ preventScroll: true }); }); }}>Ausprobieren</button><button type="button" className="btn btn-utility min-h-11 text-xs" onClick={() => { markGrammarTipSeen(); window.requestAnimationFrame(() => grammarTriggerRef.current?.focus()); }}>Später</button></div>
@@ -1034,7 +1073,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
                     {isSentence ? notesFeature : null}
 
-                    <SentenceFormDisclosure sentence={isSentence} title="Gruppe" icon="group" description={isSentence ? undefined : "Ordne das Wort einer Gruppe zu."} status={formSelectedGroups.length ? <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">{formGroupSummary.visible.map((group) => <span key={group.id} className="inline-flex min-w-0 items-center gap-1"><GroupColorDot color={group.color} />{group.name}</span>)}{formGroupSummary.overflow > 0 ? <span>+{formGroupSummary.overflow}</span> : null}</span> : "Keine Gruppe"} open={activeSupplement === "group"} onToggle={() => toggleSupplement("group")}>
+                    {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Gruppe" icon="group" present={formSelectedGroups.length > 0} description={isSentence ? undefined : "Ordne das Wort einer Gruppe zu."} status={formSelectedGroups.length ? <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">{formGroupSummary.visible.map((group) => <span key={group.id} className="inline-flex min-w-0 items-center gap-1"><GroupColorDot color={group.color} />{group.name}</span>)}{formGroupSummary.overflow > 0 ? <span>+{formGroupSummary.overflow}</span> : null}</span> : undefined} open={activeSupplement === "group"} onToggle={() => toggleSupplement("group")}>
                     <div className="pt-1">
                         <div className="space-y-3">
                             {!isSentence ? <div className="space-y-2">
@@ -1065,9 +1104,9 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     </div>
 
-                    </SentenceFormDisclosure>
+                    </SentenceFormDisclosure> : null}
 
-                    <SentenceFormDisclosure sentence={isSentence} title="Aussprache" icon="audio" description={isSentence ? undefined : "Nimm deine Aussprache auf."} status={media.pendingAudioBlob || media.editAudioPath ? "Audio vorhanden" : "Keine Aufnahme"} open={activeSupplement === "audio"} onToggle={() => toggleSupplement("audio")}>
+                    {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Aussprache" icon="audio" present={Boolean(media.pendingAudioBlob || media.editAudioPath)} description={isSentence ? undefined : "Nimm deine Aussprache auf."} open={activeSupplement === "audio"} onToggle={() => toggleSupplement("audio")}>
                     {!editingId && (
                         <div className="pt-1">
 
@@ -1190,7 +1229,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     )}
 
-                    </SentenceFormDisclosure>
+                    </SentenceFormDisclosure> : null}
 
                     {!isSentence ? notesFeature : null}
                     {isSentence ? imageFeature : null}
@@ -1199,14 +1238,14 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
 
                     {editingId && (
-                        <button
+                        <div className={isSentence ? "mt-3" : "word-delete-row"}><button
                             type="button"
-                            className="mt-3 w-full btn btn-ghost py-3 text-accent-cta"
+                            className={isSentence ? "w-full btn btn-ghost py-3 text-accent-cta" : "word-delete-action"}
                             onClick={deleteEditingCard}
                             disabled={saveFlow.isSaveBusy}
                         >
-                            🗑️ Löschen
-                        </button>
+                            {isSentence ? "Löschen" : "Karte löschen"}
+                        </button></div>
                     )}
                 </div>
             </FullScreenSheet>

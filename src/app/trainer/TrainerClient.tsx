@@ -22,6 +22,7 @@ import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolve
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerLearningFeature from "@/components/trainer/TrainerLearningFeature";
+import WordUnderstandingFeature from "@/components/trainer/WordUnderstandingFeature";
 import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
@@ -41,7 +42,7 @@ import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
 import DuplicateReviewSheet from "@/components/cards/DuplicateReviewSheet";
 import { assignCardsToGroup, fetchGroups, removeCardFromGroup } from "@/lib/groups/api";
 import type { Group } from "@/lib/groups/types";
-import { updateLibraryNoteStatus, useTrainerCardLibrary } from "@/lib/trainer/useTrainerCardLibrary";
+import { updateLibraryNoteStatus, useTrainerCardLibrary, type TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
 import { getTrainerCopy } from "@/lib/trainer/trainerCopy";
 import { formatTrainerDueDate, formatTrainerDueStatus } from "@/lib/trainer/trainerDueDate";
 import { useTrainerChatContext } from "@/lib/trainer/useTrainerChatContext";
@@ -235,6 +236,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const { cards, setCards } = cardLibrary;
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
+    const detailOriginRef = useRef<{ card: TrainerLibraryCard; note: string | null } | null>(null);
+    const [returnToDetail, setReturnToDetail] = useState<{ card: TrainerLibraryCard; note: string | null } | null>(null);
     const [learnMode, setLearnMode] = useState<"LEITNER_TODAY" | "DRILL" | null>(null);
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [repairDrillActive, setRepairDrillActive] = useState(false);
@@ -457,7 +460,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         const key = getCardAudioKey(card);
         const wasPrepared = key ? preparedCardAudioRef.current.has(key) : false;
         const prepared = prepareCardAudio(card);
-        if (!prepared) return;
+        if (!prepared) return null;
         const trace = audioPerfTracesRef.current.get(prepared.key);
         const eventName = trigger === "reveal" ? "reveal-click" : "manual-play-click";
 
@@ -496,6 +499,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                     audioElRef.current = null;
                 }
             });
+        return prepared.audio;
     }, [prepareCardAudio, printAudioPerfTimeline, recordAudioPerfEvent, stopAnyAudio]);
 
     function triggerSetupHighlight(target: "DIRECTION" | "MATERIAL") {
@@ -736,9 +740,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             });
             if (q && q.trim().length > 0) {
                 searchParams.set("q", q);
-            }
-            if (cardLibrary.groupFilter.length > 0) {
-                searchParams.set("groupIds", cardLibrary.groupFilter.join(","));
             }
             const url = `/api/cards?${searchParams.toString()}`;
 
@@ -1803,7 +1804,17 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             learningTypeLabel={null}
                                                             sentenceExplanation={cardType === "sentence" ? currentItem?.sentence_explanation ?? null : null}
                                                             autoOpenExplanation={featureSuccess?.id === resolveCardId(currentItem) && cardType === "sentence"}
-                                                            learningFeature={reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && resolveCardId(currentItem) && ((cardType === "sentence" && !currentItem?.sentence_explanation) || (cardType === "vocab" && !currentImagePath)) ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
+                                                            learningFeature={reveal && resolveCardId(currentItem) && cardType === "vocab" ? <>
+                                                                <WordUnderstandingFeature key={`word-${resolveCardId(currentItem)}`} cardId={resolveCardId(currentItem)} swahili={currentSwahili} german={currentGerman} initialEnrichment={currentItem?.word_enrichment} onSaved={(id, enrichment) => {
+                                                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, word_enrichment: enrichment } : item));
+                                                                    setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, word_enrichment: enrichment } : card));
+                                                                }} />
+                                                                {!currentImagePath ? featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : <TrainerLearningFeature key={`${resolveCardId(currentItem)}-vocab`} cardId={resolveCardId(currentItem)} cardType="vocab" german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
+                                                                    setFeatureSuccess({ id, message: "Illustration gespeichert" });
+                                                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
+                                                                    setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
+                                                                }} /> : null}
+                                                            </> : reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && cardType === "sentence" && resolveCardId(currentItem) && !currentItem?.sentence_explanation ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
                                                                 setFeatureSuccess({ id, message: change.image_path ? "Illustration gespeichert" : "Lernerklärung gespeichert" });
                                                                 setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
                                                                 setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
@@ -1925,6 +1936,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     await loadCards(undefined, { silent: true });
                                 }}
                                 onUpdated={async (updated, nextGroups) => {
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(updated.id)) {
+                                        detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, ...updated, groups: nextGroups } };
+                                    }
                                     setCards((prev) =>
                                         prev.map((card) => (String(card.id) === String(updated.id) ? { ...card, ...updated, groups: nextGroups } : card))
                                     );
@@ -1950,11 +1964,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     );
                                 }}
                                 onDeleted={async (cardId) => {
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {
+                                        detailOriginRef.current = null;
+                                        setReturnToDetail(null);
+                                        setOpenCards(true);
+                                    }
                                     applyDeletedCards([cardId]);
                                     await loadCards(undefined, { silent: true });
                                     showToast("Karte gelöscht ✅");
                                 }}
                                 onAudioUpdated={(cardId, audioPath) => {
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(cardId)) {
+                                        detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, audio_path: audioPath } };
+                                    }
                                     setCards((prev) =>
                                         prev.map((card) => String(card.id) === String(cardId) ? { ...card, audio_path: audioPath } : card)
                                     );
@@ -1966,9 +1988,19 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     );
                                 }}
                                 onNoteSaved={(cardId, mainNotes) => {
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {
+                                        detailOriginRef.current = { card: { ...detailOriginRef.current.card, has_note: Boolean(mainNotes.trim()), note_preview: { ...detailOriginRef.current.card.note_preview, main_notes: mainNotes } }, note: mainNotes };
+                                    }
                                     setCards((prev) => updateLibraryNoteStatus(prev, cardId, mainNotes));
                                 }}
-                                onOpenCards={() => setOpenCards(true)}
+                                onWordUnderstandingSaved={(cardId, enrichment) => {
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {
+                                        detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, word_enrichment: enrichment } };
+                                    }
+                                    setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card));
+                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, word_enrichment: enrichment } : item));
+                                }}
+                                onOpenCards={() => { setReturnToDetail(detailOriginRef.current ? { ...detailOriginRef.current } : null); setOpenCards(true); }}
                                 onReturnToLearn={() => {}}
                                 onStatus={showToast}
                             />
@@ -1987,12 +2019,18 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 selectedTotalCount={cardLibrary.selectedTotalCount}
                                 countLabel={cardLibrary.countLabel}
                                 groupFilter={cardLibrary.groupFilter}
+                                searchQuery={cardLibrary.searchQuery}
+                                onSearchQueryChange={cardLibrary.setSearchQuery}
+                                sortOrder={cardLibrary.sortOrder}
+                                onSortOrderChange={cardLibrary.setSortOrder}
                                 hasActiveGroupFilter={cardLibrary.hasActiveGroupFilter}
                                 visibleCards={cardLibrary.visibleCards}
                                 filteredCardsCount={cardLibrary.filteredCards.length}
                                 canLoadMore={cardLibrary.canLoadMore}
                                 onClose={() => {
                                     setOpenCards(false);
+                                    detailOriginRef.current = null;
+                                    setReturnToDetail(null);
                                     cardLibrary.resetForClose();
                                 }}
                                 onRetryLoad={() => void loadCards(undefined, { silent: true })}
@@ -2009,8 +2047,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onToggleSelected={cardLibrary.toggleSelected}
                                 onPlayAudio={playCardAudioIfExists}
                                 onEditCard={(card) => {
+                                    detailOriginRef.current = null;
+                                    setReturnToDetail(null);
                                     cardFormRef.current?.openEdit(card, "cards");
                                     setOpenCards(false);
+                                }}
+                                onEditFromDetail={(card, note) => {
+                                    detailOriginRef.current = { card, note };
+                                    setReturnToDetail(null);
+                                    cardFormRef.current?.openEdit(card, "cards");
+                                    setOpenCards(false);
+                                }}
+                                returnToDetail={returnToDetail}
+                                onDetailClosed={() => { detailOriginRef.current = null; setReturnToDetail(null); }}
+                                onWordUnderstandingSaved={(cardId, enrichment) => {
+                                    setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card));
                                 }}
                                 onDeleteCard={(cardId) => void deleteCard(cardId)}
                                 onOpenCardGroupsEditor={openCardGroupsEditorForCard}

@@ -19,14 +19,15 @@ describe("GlobalQuickSearch edit parity", () => {
         expect(quickSearch).toContain("import TrainerCardFormSheet");
         expect(quickSearch).toContain("type TrainerCardFormSheetHandle");
         expect(quickSearch).toContain("<TrainerCardFormSheet");
-        expect(quickSearch).toContain("cardFormRef.current?.openEdit(loadedCard, \"cards\")");
+        expect(quickSearch).toContain("cardFormRef.current?.openEdit(pendingEdit, \"cards\")");
+        expect(quickSearch).toContain("<CardDetailSheet");
         expect(quickSearch).not.toContain("CardEditorSheet");
     });
 
-    it("loads full card data and vocab groups before opening the shared edit form", () => {
-        expect(quickSearch).toContain("fetchGroups(\"vocab\")");
+    it("loads full card data and groups for its actual type before opening the shared edit form", () => {
+        expect(quickSearch).toContain("fetchGroups(nextType)");
         expect(quickSearch).toContain("/api/cards?id=");
-        expect(quickSearch).toContain("&type=vocab");
+        expect(quickSearch).not.toContain("&type=vocab");
         expect(quickSearch).toContain("groups={groups}");
         expect(quickSearch).toContain("cards={knownCards}");
         expect(quickSearch).toContain("onGroupsChange={setGroups}");
@@ -50,7 +51,7 @@ describe("GlobalQuickSearch edit parity", () => {
         expect(quickSearch).toContain("const handleSaved = useCallback((updated: CardResult, nextGroups?: Group[])");
         expect(quickSearch).toContain("mergeKnownCard(updatedWithGroups)");
         expect(quickSearch).toContain("setResults((prev) =>");
-        expect(quickSearch).toContain("setSelected((prev) =>");
+        expect(quickSearch).toContain("setDetailCard((prev) =>");
         expect(quickSearch).toContain("setKnownCards((prev) => prev.filter");
         expect(quickSearch).toContain("onAudioUpdated={(cardId, audioPath) =>");
     });

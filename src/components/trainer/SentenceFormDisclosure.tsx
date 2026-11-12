@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 
 export type SentenceFeatureIconName = "grammar" | "notes" | "group" | "audio" | "image" | "swap";
 
@@ -16,27 +16,31 @@ export function SentenceFeatureIcon({ name, className = "" }: { name: SentenceFe
 }
 
 export function SentenceFormGroup({ sentence, children }: { sentence: boolean; children: ReactNode }) {
-    return <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={sentence ? "sentence-feature-grid" : "word-feature-grid"}>{children}</div>;
+    return <div className={sentence ? "mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" : "word-learning-grid"} data-testid={sentence ? "sentence-feature-grid" : "word-feature-grid"}>{children}</div>;
 }
 
-export default function SentenceFormDisclosure({ sentence, title, status, badge, description, icon, featured = false, open, onToggle, coachmark, sectionRef, triggerRef, children }: {
+export default function SentenceFormDisclosure({ sentence, title, status, badge, description, icon, present = false, loading = false, featured = false, open, onToggle, coachmark, sectionRef, triggerRef, className = "", children }: {
     sentence: boolean;
     title: string;
     status?: ReactNode;
     badge?: string;
     description?: string;
     icon?: SentenceFeatureIconName;
+    present?: boolean;
+    loading?: boolean;
     featured?: boolean;
     open: boolean;
     onToggle: () => void;
     coachmark?: ReactNode;
     sectionRef?: Ref<HTMLElement>;
     triggerRef?: Ref<HTMLButtonElement>;
+    className?: string;
     children: ReactNode;
 }) {
-    return <section ref={sectionRef} className={`sentence-feature-card ${!sentence ? "word-feature-card" : ""} ${featured ? "sentence-feature-card--featured sm:col-span-2" : open ? "sm:col-span-2" : ""} ${open ? "is-open" : ""}`}>
-        <button ref={triggerRef} type="button" className="sentence-feature-trigger" aria-expanded={open} onClick={onToggle}>
-            <span className="sentence-feature-icon"><SentenceFeatureIcon name={icon ?? "notes"} className="h-5 w-5" /></span>
+    const presenceId = useId();
+    return <section ref={sectionRef} className={`sentence-feature-card ${!sentence ? "word-feature-card" : ""} ${featured ? "sentence-feature-card--featured sm:col-span-2" : open ? "sm:col-span-2" : ""} ${open ? "is-open" : ""} ${className}`}>
+        <button ref={triggerRef} type="button" className="sentence-feature-trigger" aria-expanded={open} aria-describedby={presenceId} onClick={onToggle}>
+            <span className={`sentence-feature-icon ${loading ? "is-pending" : present ? "is-present" : ""}`}><SentenceFeatureIcon name={icon ?? "notes"} className="h-5 w-5" /></span>
             <span className="min-w-0 flex-1 text-left">
                 <span className="flex flex-wrap items-center gap-2">
                     <span className="sentence-feature-title">{title}</span>
@@ -47,6 +51,7 @@ export default function SentenceFormDisclosure({ sentence, title, status, badge,
             </span>
             <svg className="sentence-feature-chevron h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 4 6 6-6 6" /></svg>
         </button>
+        <span id={presenceId} className="sr-only">{loading ? `Status für ${title} wird geladen` : `${title} ${present ? "vorhanden" : "nicht vorhanden"}`}</span>
         {coachmark && !open ? coachmark : null}
         <div className={`sentence-feature-body ${open ? "is-open" : ""}`} aria-hidden={!open} inert={!open}>
             <div className="sentence-feature-panel">{children}</div>

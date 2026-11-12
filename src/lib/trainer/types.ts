@@ -1,4 +1,5 @@
 import type { SentenceExplanation } from "@/lib/sentence/explanation";
+import type { WordEnrichment } from "@/lib/word/understanding";
 
 export type CardType = "vocab" | "sentence";
 
@@ -27,6 +28,7 @@ export type TodayItem = {
     sw_example?: string | null;
     type?: CardType;
     sentence_explanation?: SentenceExplanation | null;
+    word_enrichment?: WordEnrichment | null;
     imagePath?: string | null;
     image_path?: string | null;
     image?: string | null;

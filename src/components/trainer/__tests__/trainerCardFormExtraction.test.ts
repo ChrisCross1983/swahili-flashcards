@@ -54,7 +54,7 @@ describe("trainer card form extraction", () => {
     });
 
     it("keeps sentence grammar and vocabulary illustration in the respective feature grids", () => {
-        expect(formSource).toContain('icon="grammar" featured');
+        expect(formSource).toContain('icon="grammar" present={Boolean(sentenceExplanation)} featured');
         expect(formSource).toContain('{!isSentence ? imageFeature : null}');
         expect(formSource).toContain('{isSentence ? imageFeature : null}');
         expect(formSource).not.toContain('title="Beispiele"');

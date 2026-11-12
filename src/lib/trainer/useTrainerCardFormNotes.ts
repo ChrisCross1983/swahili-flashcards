@@ -27,6 +27,14 @@ export function useTrainerCardFormNotes(onSaved: (cardId: string, mainNotes: str
         setFormNoteStatus(null);
     }
 
+    function hydrateFormNotes(note: string) {
+        setFormNoteDraft({ mainNotes: note });
+        savedFormNoteRef.current = note;
+        setFormNoteLoading(false);
+        setFormNoteStatus(null);
+        setFormNoteOpen(shouldOpenNotesSection(note));
+    }
+
     async function loadFormNotes(cardId: string) {
         setFormNoteLoading(true);
         setFormNoteStatus(null);
@@ -86,6 +94,7 @@ export function useTrainerCardFormNotes(onSaved: (cardId: string, mainNotes: str
         setFormNoteStatus,
         resetFormNotes,
         restoreDraftNote,
+        hydrateFormNotes,
         loadFormNotes,
         saveFormNotes,
     };

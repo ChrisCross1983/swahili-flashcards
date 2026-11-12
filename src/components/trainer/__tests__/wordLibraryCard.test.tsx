@@ -8,7 +8,7 @@ import { updateLibraryNoteStatus } from "@/lib/trainer/useTrainerCardLibrary";
 
 const handlers = {
     onToggleSelected: vi.fn(), onToggleActions: vi.fn(), onPlayAudio: vi.fn(),
-    onEditCard: vi.fn(), onOpenCardGroupsEditor: vi.fn(), onDeleteCard: vi.fn(),
+    onEditCard: vi.fn(), onViewCard: vi.fn(), onOpenCardGroupsEditor: vi.fn(), onDeleteCard: vi.fn(),
 };
 const base = { imageBaseUrl: "https://example.test/images", selected: false, selectionMode: false, actionOpen: false, ...handlers };
 const render = (card: TrainerLibraryCard) => renderToStaticMarkup(<WordLibraryCard {...base} card={card} />);
@@ -26,22 +26,31 @@ describe("WordLibraryCard", () => {
         expect(html).toMatch(/word-library-language">DE<\/span><span[^>]*word-library-german">vielleicht/);
         expect(html).toMatch(/word-library-language">SW<\/span><span[^>]*word-library-swahili">labda/);
         expect(html).not.toContain("word-library-thumb");
-        expect(html.match(/library-feature-status-icon/g)).toHaveLength(4);
+        expect(html.match(/library-feature-status-icon/g)).toHaveLength(5);
         expect(html).toContain('aria-label="Keine Illustration"');
         expect(html).toContain('aria-label="Keine Gruppe"');
         expect(html).toContain('aria-label="Keine Aussprache"');
         expect(html).toContain('aria-label="Keine Notiz"');
+        expect(html).toContain('aria-label="Keine Worterklärung"');
     });
-    it("shows a thumbnail and all four active features", () => {
+    it("shows a thumbnail and the existing active features", () => {
         const html = render({ id: "v2", german_text: "Katze", swahili_text: "paka", image_path: "cat.webp", audio_path: "cat.mp3", has_note: true, groups: [{ id: "g1", name: "Tiere" }] });
         expect(html.match(/<img/g)).toHaveLength(1);
         expect(html).toContain("word-library-thumb");
-        for (const name of ["Illustration", "Gruppe", "Aussprache", "Notiz"]) expect(html).toContain(`aria-label="${name} vorhanden${name === "Aussprache" ? ", abspielen" : ""}"`);
+        for (const name of ["Illustration", "Gruppe", "Aussprache", "Notiz"]) expect(html).toContain(`aria-label="${name} vorhanden${name === "Aussprache" ? ", abspielen" : name === "Gruppe" || name === "Notiz" ? ", anzeigen" : ""}"`);
         expect(html).not.toContain("Tiere</span>");
+    });
+    it("activates the fifth shared status only for sufficient word enrichment", () => {
+        const enrichment = { pos: "noun" as const, noun_class: "ki/vi", singular: "chumba", plural: "vyumba", mnemonic: null,
+            notes: "Auch dieses und groß ändern sich im Plural.", examples: [{ sw: "Chumba hiki ni kikubwa.", de: "Dieses Zimmer ist groß." }] };
+        const active = render({ id: "v5", swahili_text: "chumba", word_enrichment: enrichment });
+        expect(active).toContain('aria-label="Worterklärung vorhanden, anzeigen"');
+        const incomplete = render({ id: "v5", swahili_text: "chumba", word_enrichment: { ...enrichment, examples: [] } });
+        expect(incomplete).toContain('aria-label="Keine Worterklärung"');
     });
     it("shows multiple groups without treating unmigrated legacy examples as notes", () => {
         const html = render({ id: "v3", groups: [{ id: "1", name: "Erste" }, { id: "2", name: "Zweite" }], german_example: "Alt" });
-        expect(html).toContain('aria-label="Gruppe vorhanden"');
+        expect(html).toContain('aria-label="Gruppe vorhanden, anzeigen"');
         expect(html).toContain('aria-label="Keine Notiz"');
     });
     it("updates only the saved card immediately when a note is added or cleared", () => {
@@ -51,11 +60,13 @@ describe("WordLibraryCard", () => {
             { id: "sentence", type: "sentence", has_note: true },
         ];
         const saved = updateLibraryNoteStatus(cards, "v3", "**Neue Notiz**");
-        expect(render(saved[0])).toContain('aria-label="Notiz vorhanden"');
+        expect(render(saved[0])).toContain('aria-label="Notiz vorhanden, anzeigen"');
+        expect(saved[0].note_preview?.main_notes).toBe("**Neue Notiz**");
         expect(saved[1]).toBe(cards[1]);
         expect(saved[2]).toBe(cards[2]);
         const cleared = updateLibraryNoteStatus(saved, "v3", "");
         expect(render(cleared[0])).toContain('aria-label="Keine Notiz"');
+        expect(cleared[0].note_preview?.main_notes).toBe("");
         expect(cleared[1]).toBe(cards[1]);
         expect(cleared[2]).toBe(cards[2]);
     });

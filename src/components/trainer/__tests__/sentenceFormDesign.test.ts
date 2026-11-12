@@ -13,10 +13,10 @@ const styles = read("src/app/globals.css");
 
 describe("sentence composer design and interaction contracts", () => {
   it("keeps the sentence pair prominent and the grammar card ahead of a responsive feature grid", () => {
-    expect(form).toContain('presentation="sentence"');
+    expect(form).toContain('presentation={isSentence ? "sentence" : "word-edit"}');
     expect(form).toContain('subtitle="Deutsch ↔ Kiswahili"');
     expect(form).toContain("sentence-pair-card");
-    expect(form).toContain('icon="grammar" featured');
+    expect(form).toContain('icon="grammar" present={Boolean(sentenceExplanation)} featured');
     expect(disclosure).toContain("sm:grid-cols-2");
     expect(disclosure).not.toContain("divide-y");
     expect(sheet).toContain("md:max-w-3xl");

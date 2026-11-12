@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
-import { getCardNotePresence } from "@/lib/server/cardNoteStatus";
+import { getCardNotes, hasCardNote } from "@/lib/server/cardNoteStatus";
 
 export async function GET(req: Request) {
   const { user, response } = await requireUser();
@@ -49,9 +49,9 @@ export async function GET(req: Request) {
 
   const cards = data ?? [];
 
-  let noteCardIds: Set<string>;
+  let notesByCard: Awaited<ReturnType<typeof getCardNotes>>;
   try {
-    noteCardIds = await getCardNotePresence(ownerKey, cards);
+    notesByCard = await getCardNotes(ownerKey, cards);
   } catch (notesError) {
     console.error("[api/cards/all] note status enrichment failed", { error: notesError });
     return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 });
@@ -73,7 +73,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     cards: cards.map((card) => ({
       ...card,
-      has_note: noteCardIds.has(String(card.id)),
+      has_note: hasCardNote(notesByCard.get(String(card.id)) ?? {}, card.type),
+      note_preview: notesByCard.get(String(card.id)) ?? null,
       groups: groupsByCard.get(String(card.id)) ?? [],
     })),
   });

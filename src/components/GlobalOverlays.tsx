@@ -114,6 +114,7 @@ export default function GlobalOverlays({ ownerKey }: Props) {
                 ownerKey={ownerKey}
                 open={openSearch}
                 onClose={() => setOpenSearch(false)}
+                onOpen={() => setOpenSearch(true)}
             />
         </>
     );

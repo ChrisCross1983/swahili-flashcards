@@ -75,4 +75,22 @@ describe("sentence card optional sections", () => {
         expect(vocab).toContain('aria-expanded="false"');
         expect(vocab).toContain("word-feature-card");
     });
+    it("shows feature presence only through the shared icon state", () => {
+        for (const icon of ["image", "grammar", "audio", "group", "notes"] as const) {
+            const active = renderToStaticMarkup(<SentenceFormDisclosure sentence={false} title={icon} icon={icon} present description="Lernhilfe" open={false} onToggle={() => {}}>{content}</SentenceFormDisclosure>);
+            const inactive = renderToStaticMarkup(<SentenceFormDisclosure sentence={false} title={icon} icon={icon} description="Lernhilfe" open={false} onToggle={() => {}}>{content}</SentenceFormDisclosure>);
+            expect(active).toContain('sentence-feature-icon is-present');
+            expect(inactive).not.toContain('sentence-feature-icon is-present');
+            expect(active).toContain(`class="sr-only">${icon} vorhanden</span>`);
+            expect(inactive).toContain(`class="sr-only">${icon} nicht vorhanden</span>`);
+            expect(active).toContain("aria-describedby=");
+            expect(active).not.toMatch(/Bild vorhanden|Worterklärung vorhanden|Keine Gruppe|Keine Aufnahme|Noch keine Notiz/);
+        }
+    });
+    it("does not describe a still-loading note as absent", () => {
+        const html = renderToStaticMarkup(<SentenceFormDisclosure sentence={false} title="Notizen" icon="notes" loading open={false} onToggle={() => {}}>{content}</SentenceFormDisclosure>);
+        expect(html).toContain('sentence-feature-icon is-pending');
+        expect(html).toContain('Status für Notizen wird geladen');
+        expect(html).not.toContain('Notizen nicht vorhanden');
+    });
 });

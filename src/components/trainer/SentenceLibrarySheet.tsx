@@ -6,7 +6,10 @@ import GroupColorDot from "@/components/groups/GroupColorDot";
 import { SentenceFeatureIcon } from "@/components/trainer/SentenceFormDisclosure";
 import WordLibraryCard from "@/components/trainer/WordLibraryCard";
 import SentenceLibraryCard from "@/components/trainer/SentenceLibraryCard";
+import CardDetailSheet from "@/components/trainer/CardDetailSheet";
 import type { TrainerCardLibrarySheetProps } from "@/components/trainer/TrainerCardLibrarySheet";
+import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import type { LibrarySortOrder } from "@/lib/trainer/cardLibraryBehavior";
 
 function LibraryIcon({ name, className = "h-4 w-4" }: { name: "more" | "check" | "edit" | "trash" | "chevron" | "close"; className?: string }) {
     const paths = {
@@ -34,6 +37,10 @@ export default function SentenceLibrarySheet({
     selectedTotalCount,
     countLabel,
     groupFilter,
+    searchQuery,
+    onSearchQueryChange,
+    sortOrder,
+    onSortOrderChange,
     hasActiveGroupFilter,
     visibleCards,
     filteredCardsCount,
@@ -51,41 +58,61 @@ export default function SentenceLibrarySheet({
     onToggleSelected,
     onPlayAudio,
     onEditCard,
+    onEditFromDetail,
+    returnToDetail,
+    onDetailClosed,
+    onWordUnderstandingSaved,
     onDeleteCard,
     onOpenCardGroupsEditor,
     onCreateSentence,
 }: TrainerCardLibrarySheetProps) {
     const [adminMenuOpen, setAdminMenuOpen] = useState(false);
     const [activeActionId, setActiveActionId] = useState<string | null>(null);
+    const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
+    const [detailCard, setDetailCard] = useState<TrainerLibraryCard | null>(returnToDetail?.card ?? null);
+    const [detailNote, setDetailNote] = useState<string | null>(returnToDetail?.note ?? null);
     const activeGroup = groups.find((group) => group.id === groupFilter[0]);
     const noun = isSentenceTrainer ? "Sätze" : "Wörter";
     const singular = isSentenceTrainer ? "Satz" : "Wort";
 
     useEffect(() => {
-        if (!adminMenuOpen && !activeActionId) return;
+        if (!adminMenuOpen && !activeActionId && !activePreviewKey) return;
         function closeOnOutside(event: PointerEvent) {
             if (!(event.target instanceof Element) || !event.target.closest("[data-sentence-library-menu]")) {
                 setAdminMenuOpen(false);
                 setActiveActionId(null);
+            }
+            if (!(event.target instanceof Element) || !event.target.closest("[data-library-status-popover], .library-feature-status-icon.is-interactive")) {
+                setActivePreviewKey(null);
             }
         }
         function closeOnEscape(event: KeyboardEvent) {
             if (event.key === "Escape") {
                 setAdminMenuOpen(false);
                 setActiveActionId(null);
+                setActivePreviewKey(null);
             }
         }
+        function closeOnScroll() { setActivePreviewKey(null); }
         document.addEventListener("pointerdown", closeOnOutside);
         document.addEventListener("keydown", closeOnEscape);
+        window.addEventListener("scroll", closeOnScroll, true);
         return () => {
             document.removeEventListener("pointerdown", closeOnOutside);
             document.removeEventListener("keydown", closeOnEscape);
+            window.removeEventListener("scroll", closeOnScroll, true);
         };
-    }, [adminMenuOpen, activeActionId]);
+    }, [adminMenuOpen, activeActionId, activePreviewKey]);
+
+    function changePreview(key: string | null) {
+        setActivePreviewKey(key);
+        if (key) { setActiveActionId(null); setAdminMenuOpen(false); }
+    }
 
     function beginSelection() {
         setAdminMenuOpen(false);
         setActiveActionId(null);
+        setActivePreviewKey(null);
         onSelectionModeChange(true);
     }
 
@@ -94,7 +121,7 @@ export default function SentenceLibrarySheet({
         onClearSelection();
     }
 
-    return <FullScreenSheet open={open} title={title} subtitle="Deutsch ↔ Kiswahili" presentation="sentence" onClose={onClose}>
+    return <><FullScreenSheet open={open} title={title} subtitle="Deutsch ↔ Kiswahili" presentation="sentence" wide onClose={onClose}>
         <div className="sentence-library space-y-5" data-testid={isSentenceTrainer ? "sentence-library" : "word-library"}>
             <header className="sentence-library-intro">
                 <div className="min-w-0">
@@ -110,6 +137,7 @@ export default function SentenceLibrarySheet({
             {status ? <div className="sentence-library-message" role="status">{status}</div> : null}
 
             <div className="sentence-library-toolbar" aria-label={isSentenceTrainer ? "Satzbibliothek-Werkzeuge" : "Kartenbibliothek-Werkzeuge"}>
+                {!isSentenceTrainer ? <div className="sentence-library-search"><input type="search" aria-label="Karten durchsuchen" placeholder="Karten durchsuchen …" value={searchQuery} onChange={(event) => onSearchQueryChange(event.target.value)} /></div> : null}
                 <div className="sentence-library-filter">
                     <span className="sr-only" id="sentence-library-group-filter-label">Nach Gruppen filtern</span>
                     <select
@@ -124,13 +152,15 @@ export default function SentenceLibrarySheet({
                     <LibraryIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 </div>
 
-                <button type="button" className={`sentence-library-toolbar-button ${selectionMode ? "is-active" : ""}`} onClick={selectionMode ? finishSelection : beginSelection} aria-pressed={selectionMode}>
+                {!isSentenceTrainer ? <div className="sentence-library-sort"><select aria-label="Karten sortieren" className="sentence-library-select" value={sortOrder} onChange={(event) => onSortOrderChange(event.target.value as LibrarySortOrder)}><option value="recent">Zuletzt hinzugefügt</option><option value="az">A–Z</option><option value="za">Z–A</option></select><LibraryIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /></div> : null}
+
+                <button type="button" className={`sentence-library-toolbar-button ${selectionMode ? "is-active" : ""}`} onClick={selectionMode ? finishSelection : beginSelection} aria-pressed={selectionMode} aria-label={selectionMode ? "Auswahl beenden" : "Mehrfachauswahl"}>
                     <LibraryIcon name="check" />
                     <span>{selectionMode ? "Auswahl beenden" : "Mehrfachauswahl"}</span>
                 </button>
 
                 <div className="relative ml-auto" data-sentence-library-menu>
-                    <button type="button" className="sentence-library-toolbar-button" aria-expanded={adminMenuOpen} aria-controls="sentence-library-admin-menu" onClick={() => { setAdminMenuOpen((current) => !current); setActiveActionId(null); }}>
+                    <button type="button" className="sentence-library-toolbar-button" aria-label="Mehr" aria-expanded={adminMenuOpen} aria-controls="sentence-library-admin-menu" onClick={() => { setAdminMenuOpen((current) => !current); setActiveActionId(null); }}>
                         <LibraryIcon name="more" />
                         <span>Mehr</span>
                     </button>
@@ -167,9 +197,9 @@ export default function SentenceLibrarySheet({
 
             {cardsLoadState === "loaded" && filteredCardsCount === 0 ? <div className="sentence-library-empty">
                 <span className="sentence-library-empty-icon"><SentenceFeatureIcon name="notes" className="h-6 w-6" /></span>
-                <p className="mt-4 text-xl font-bold tracking-tight">{hasActiveGroupFilter ? `${noun} in dieser Gruppe nicht gefunden` : isSentenceTrainer ? "Noch keine Sätze" : "Noch keine Wörter"}</p>
+                <p className="mt-4 text-xl font-bold tracking-tight">{searchQuery.trim() && !isSentenceTrainer ? "Keine passenden Karten gefunden." : hasActiveGroupFilter ? `${noun} in dieser Gruppe nicht gefunden` : isSentenceTrainer ? "Noch keine Sätze" : "Noch keine Wörter"}</p>
                 <p className="mt-2 max-w-sm text-sm text-muted">{hasActiveGroupFilter ? `Wähle eine andere Gruppe oder zeige wieder alle ${noun} an.` : isSentenceTrainer ? "Lege deinen ersten Satz an und baue deine eigene Lernsammlung auf." : "Lege dein erstes Wort an und baue deine persönliche Lernsammlung auf."}</p>
-                {hasActiveGroupFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onGroupFilterChange([])}>{`Alle ${noun} anzeigen`}</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>{isSentenceTrainer ? "Ersten Satz anlegen" : "Erstes Wort anlegen"}</button>}
+                {searchQuery.trim() && !isSentenceTrainer ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onSearchQueryChange("")}>Suche zurücksetzen</button> : hasActiveGroupFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onGroupFilterChange([])}>{`Alle ${noun} anzeigen`}</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>{isSentenceTrainer ? "Ersten Satz anlegen" : "Erstes Wort anlegen"}</button>}
             </div> : null}
 
             {cardsLoadState === "loaded" && visibleCards.length > 0 ? <div className={`sentence-library-grid ${!isSentenceTrainer ? "word-library-grid" : ""}`}>
@@ -185,8 +215,11 @@ export default function SentenceLibrarySheet({
                         selectionMode={selectionMode}
                         actionOpen={actionOpen}
                         onToggleSelected={onToggleSelected}
-                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setAdminMenuOpen(false); }}
+                        activePreviewKey={activePreviewKey}
+                        onPreviewChange={changePreview}
+                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setActivePreviewKey(null); setAdminMenuOpen(false); }}
                         onPlayAudio={onPlayAudio}
+                        onViewCard={(nextCard) => { setActiveActionId(null); setActivePreviewKey(null); setDetailNote(nextCard.note_preview?.main_notes ?? null); setDetailCard(nextCard); }}
                         onEditCard={(nextCard) => { setActiveActionId(null); onEditCard(nextCard); }}
                         onOpenCardGroupsEditor={(nextCard) => { setActiveActionId(null); onOpenCardGroupsEditor(nextCard); }}
                         onDeleteCard={(cardId) => { setActiveActionId(null); onDeleteCard(cardId); }}
@@ -194,7 +227,10 @@ export default function SentenceLibrarySheet({
                     return <SentenceLibraryCard key={id} card={card} selected={selected} selectionMode={selectionMode} actionOpen={actionOpen}
                         onToggleSelected={onToggleSelected}
                         onPlayAudio={onPlayAudio}
-                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setAdminMenuOpen(false); }}
+                        onViewCard={(nextCard) => { setActiveActionId(null); setActivePreviewKey(null); setDetailNote(nextCard.note_preview?.main_notes ?? null); setDetailCard(nextCard); }}
+                        activePreviewKey={activePreviewKey}
+                        onPreviewChange={changePreview}
+                        onToggleActions={() => { setActiveActionId(actionOpen ? null : id); setActivePreviewKey(null); setAdminMenuOpen(false); }}
                         onEditCard={(nextCard) => { setActiveActionId(null); onEditCard(nextCard); }}
                         onOpenCardGroupsEditor={(nextCard) => { setActiveActionId(null); onOpenCardGroupsEditor(nextCard); }}
                         onDeleteCard={(cardId) => { setActiveActionId(null); onDeleteCard(cardId); }} />;
@@ -203,5 +239,5 @@ export default function SentenceLibrarySheet({
 
             {cardsLoadState === "loaded" && canLoadMore ? <button type="button" className="sentence-library-load-more" onClick={onLoadMore}>{`Mehr ${noun} laden`}</button> : null}
         </div>
-    </FullScreenSheet>;
+    </FullScreenSheet>{detailCard ? <CardDetailSheet key={String(detailCard.id)} card={detailCard} initialNote={detailNote} onClose={() => { setDetailCard(null); onDetailClosed(); }} onEdit={(card, note) => { setDetailCard(null); onEditFromDetail(card, note); }} onWordUnderstandingSaved={onWordUnderstandingSaved} /> : null}</>;
 }

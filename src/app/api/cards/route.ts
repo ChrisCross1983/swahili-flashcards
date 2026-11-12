@@ -7,7 +7,8 @@ import { isOwnedCardImagePath } from "@/lib/cards/imagePath";
 import { explanationMatchesSentences, parseSentenceExplanation } from "@/lib/sentence/explanation";
 import { sameSentencePair } from "@/lib/sentence/cardFormUx";
 import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
-import { getCardNotePresence } from "@/lib/server/cardNoteStatus";
+import { getCardNotes, hasCardNote } from "@/lib/server/cardNoteStatus";
+import { getWordUnderstandingByCard } from "@/lib/server/wordUnderstandingStatus";
 
 async function rejectSentenceLanguageMismatch(ownerKey: string, german: string, swahili: string) {
     try {
@@ -194,9 +195,9 @@ export async function GET(req: Request) {
 
     const cards = data ?? [];
 
-    let noteCardIds: Set<string>;
+    let notesByCard: Awaited<ReturnType<typeof getCardNotes>>;
     try {
-        noteCardIds = await getCardNotePresence(ownerKey, cards);
+        notesByCard = await getCardNotes(ownerKey, cards);
     } catch (notesError) {
         console.error("[api/cards] note status enrichment failed", { error: notesError });
         return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 });
@@ -218,13 +219,21 @@ export async function GET(req: Request) {
         );
     }
 
+    let wordUnderstandingByCard: Awaited<ReturnType<typeof getWordUnderstandingByCard>>;
+    try {
+        wordUnderstandingByCard = await getWordUnderstandingByCard(ownerKey, cards);
+    } catch (error) {
+        console.error("[api/cards] word understanding status failed", { error });
+        return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden (Worterklärung)." }, { status: 500 });
+    }
+
     if (id) {
-        const card = cards[0] ? { ...cards[0], has_note: noteCardIds.has(String(cards[0].id)), groups: groupsByCard.get(String(cards[0].id)) ?? [] } : null;
+        const card = cards[0] ? { ...cards[0], has_note: hasCardNote(notesByCard.get(String(cards[0].id)) ?? {}, cards[0].type), note_preview: notesByCard.get(String(cards[0].id)) ?? null, groups: groupsByCard.get(String(cards[0].id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(cards[0].id)) ?? null } : null;
         return NextResponse.json({ card });
     }
 
     return NextResponse.json({
-        cards: cards.map((card) => ({ ...card, has_note: noteCardIds.has(String(card.id)), groups: groupsByCard.get(String(card.id)) ?? [] })),
+        cards: cards.map((card) => ({ ...card, has_note: hasCardNote(notesByCard.get(String(card.id)) ?? {}, card.type), note_preview: notesByCard.get(String(card.id)) ?? null, groups: groupsByCard.get(String(card.id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(card.id)) ?? null })),
     });
 }
 

@@ -5,6 +5,7 @@ import { LibraryFeatureStatus } from "@/components/trainer/LibraryFeatureStatus"
 import FloatingLibraryMenu, { positionLibraryMenu } from "@/components/trainer/FloatingLibraryMenu";
 import { SentenceFeatureIcon } from "@/components/trainer/SentenceFormDisclosure";
 import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import { hasWordUnderstanding } from "@/lib/word/understanding";
 
 type Props = {
     card: TrainerLibraryCard;
@@ -14,8 +15,11 @@ type Props = {
     actionOpen: boolean;
     onToggleSelected: (cardId: string | number) => void;
     onToggleActions: () => void;
-    onPlayAudio: (card: TrainerLibraryCard) => void;
+    onPlayAudio: (card: TrainerLibraryCard) => HTMLAudioElement | null | void;
+    activePreviewKey?: string | null;
+    onPreviewChange?: (key: string | null) => void;
     onEditCard: (card: TrainerLibraryCard) => void;
+    onViewCard: (card: TrainerLibraryCard) => void;
     onOpenCardGroupsEditor: (card: TrainerLibraryCard) => void;
     onDeleteCard: (cardId: string) => void;
 };
@@ -33,15 +37,16 @@ export const positionWordLibraryMenu = positionLibraryMenu;
 
 export default function WordLibraryCard({
     card, imageBaseUrl, selected, selectionMode, actionOpen, onToggleSelected, onToggleActions,
-    onPlayAudio, onEditCard, onOpenCardGroupsEditor, onDeleteCard,
+    onPlayAudio, onEditCard, onViewCard, onOpenCardGroupsEditor, onDeleteCard, activePreviewKey, onPreviewChange,
 }: Props) {
     const triggerRef = useRef<HTMLButtonElement>(null);
     const id = String(card.id);
     const word = card.german_text || "Wort";
     const cardGroups = card.groups ?? [];
+    const explanation = hasWordUnderstanding(card.word_enrichment) ? card.word_enrichment : null;
 
 
-    return <article className={`sentence-library-card word-library-card ${card.image_path ? "word-library-card--with-image" : ""} ${selected ? "is-selected" : ""} ${actionOpen ? "has-menu" : ""}`} data-testid="word-library-card" data-selected={selected}>
+    return <article className={`sentence-library-card word-library-card ${card.image_path ? "word-library-card--with-image" : ""} ${selected ? "is-selected" : ""} ${actionOpen ? "has-menu" : ""}`} data-testid="word-library-card" data-selected={selected} onClick={(event) => { if (!selectionMode && !(event.target as Element).closest("button, input, label, [data-library-status-popover]")) onViewCard(card); }}>
         <div className="word-library-head">
             {selectionMode ? <label className="sentence-library-select-hit word-library-top-action">
                 <input type="checkbox" className="sentence-library-checkbox" checked={selected} onChange={() => onToggleSelected(card.id)} aria-label={`Wort auswählen: ${word}`} />
@@ -50,7 +55,7 @@ export default function WordLibraryCard({
             </button>}
         </div>
 
-        <button type="button" className="word-library-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onEditCard(card)} aria-label={selectionMode ? `Wort auswählen: ${word}` : `Wort bearbeiten: ${word}`}>
+        <button type="button" className="word-library-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onViewCard(card)} aria-label={selectionMode ? `Wort auswählen: ${word}` : `Wort ansehen: ${word}`}>
             {card.image_path ? <Image src={`${imageBaseUrl}/${card.image_path}`} alt="" width={80} height={80} unoptimized className="word-library-thumb" /> : null}
             <span className="word-library-pair">
                 <span className="word-library-language">DE</span><CardText as="span" className="word-library-german">{card.german_text}</CardText>
@@ -58,11 +63,12 @@ export default function WordLibraryCard({
             </span>
         </button>
 
-        <LibraryFeatureStatus features={[
+        <LibraryFeatureStatus cardId={id} selectionMode={selectionMode} activePreviewKey={activePreviewKey} onPreviewChange={onPreviewChange} features={[
             { icon: "image", name: "Illustration", present: Boolean(card.image_path) },
-            { icon: "group", name: "Gruppe", present: cardGroups.length > 0 },
+            { icon: "group", name: "Gruppe", present: cardGroups.length > 0, preview: { kind: "groups", groups: cardGroups } },
             { icon: "audio", name: "Aussprache", present: Boolean(card.audio_path), onActivate: () => onPlayAudio(card) },
-            { icon: "notes", name: "Notiz", present: Boolean(card.has_note) },
+            { icon: "notes", name: "Notiz", present: Boolean(card.has_note), preview: { kind: "notes", cardId: id, note: card.note_preview } },
+            { icon: "grammar", name: "Worterklärung", present: Boolean(explanation), preview: explanation ? { kind: "word", swahili: card.swahili_text ?? "", german: card.german_text ?? "", enrichment: explanation } : undefined },
         ]} />
 
         {!selectionMode ? <FloatingLibraryMenu open={actionOpen} triggerRef={triggerRef} id={`word-library-actions-${id}`}>
