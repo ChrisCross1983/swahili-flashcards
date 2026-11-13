@@ -28,5 +28,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    return NextResponse.json({ ok: true, deletedCount: result.deletedCount, warnings: result.warnings });
+    return NextResponse.json({
+        ok: true,
+        deletedCount: result.deletedCount,
+        deletedIds: result.deletedIds,
+        skippedCount: result.skippedCount,
+        warnings: result.warnings,
+    });
 }

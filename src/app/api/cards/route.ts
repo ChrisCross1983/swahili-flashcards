@@ -9,6 +9,34 @@ import { sameSentencePair } from "@/lib/sentence/cardFormUx";
 import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
 import { getCardNotes, hasCardNote } from "@/lib/server/cardNoteStatus";
 import { getWordUnderstandingByCard } from "@/lib/server/wordUnderstandingStatus";
+import { deleteOwnedCards } from "@/lib/server/deleteCards";
+import { cardImageBucket, isOwnerStoragePath, removeStoragePaths } from "@/lib/server/cardMediaStorage";
+
+async function cleanupCardImage(path: string | null | undefined, ownerKey: string, stage: string) {
+    if (!isOwnerStoragePath(path, ownerKey)) return;
+    try {
+        const { data: references, error: referenceError } = await supabaseServer
+            .from("cards")
+            .select("id")
+            .eq("owner_key", ownerKey)
+            .eq("image_path", path)
+            .limit(1);
+        if (referenceError) {
+            console.error("[api/cards] image cleanup reference check failed", { stage, code: referenceError.code ?? null });
+            return;
+        }
+        if ((references ?? []).length > 0) return;
+        const bucket = cardImageBucket();
+        if (!bucket) {
+            console.error("[api/cards] image cleanup unavailable", { stage, reason: "missing_bucket" });
+            return;
+        }
+        const error = await removeStoragePaths(supabaseServer, bucket, [path]);
+        if (error) console.error("[api/cards] image cleanup failed", { stage, code: error.code ?? null });
+    } catch {
+        console.error("[api/cards] image cleanup failed", { stage, code: "cleanup_transport_failed" });
+    }
+}
 
 async function rejectSentenceLanguageMismatch(ownerKey: string, german: string, swahili: string) {
     try {
@@ -57,14 +85,17 @@ export async function POST(req: Request) {
     const germanExample = typeof body.germanExample === "string" ? sanitizeExampleMarkup(body.germanExample) : "";
     const swahiliExample = typeof body.swahiliExample === "string" ? sanitizeExampleMarkup(body.swahiliExample) : "";
     const type = body.type === "sentence" ? "sentence" : "vocab";
+    const incomingImagePath = typeof body.imagePath === "string" ? body.imagePath : null;
 
     if (!german || !swahili) {
+        await cleanupCardImage(incomingImagePath, ownerKey, "create_validation");
         return NextResponse.json(
             { error: "german and swahili are required" },
             { status: 400 }
         );
     }
     if (type === "sentence" && (german.length > 500 || swahili.length > 500)) {
+        await cleanupCardImage(incomingImagePath, ownerKey, "create_validation");
         return NextResponse.json({ error: "Satz ist zu lang." }, { status: 400 });
     }
 
@@ -73,14 +104,24 @@ export async function POST(req: Request) {
     }
     const sentenceExplanation = body.sentenceExplanation == null ? null : parseSentenceExplanation(body.sentenceExplanation);
     if (body.sentenceExplanation != null && (type !== "sentence" || !sentenceExplanation || !explanationMatchesSentences(sentenceExplanation, german, swahili))) {
+        await cleanupCardImage(incomingImagePath, ownerKey, "create_explanation_validation");
         return NextResponse.json({ error: "Ungültige Lernerklärung." }, { status: 400 });
     }
     if (type === "sentence") {
         const duplicate = await findExistingSentencePair(ownerKey, german, swahili);
-        if (duplicate.error) return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
-        if (duplicate.match) return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+        if (duplicate.error) {
+            await cleanupCardImage(incomingImagePath, ownerKey, "create_duplicate_check");
+            return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
+        }
+        if (duplicate.match) {
+            await cleanupCardImage(incomingImagePath, ownerKey, "create_duplicate");
+            return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+        }
         const languageError = await rejectSentenceLanguageMismatch(ownerKey, german, swahili);
-        if (languageError) return languageError;
+        if (languageError) {
+            await cleanupCardImage(incomingImagePath, ownerKey, "create_language_check");
+            return languageError;
+        }
     }
 
     const { data: card, error } = await supabaseServer
@@ -99,6 +140,7 @@ export async function POST(req: Request) {
         .single();
 
     if (error) {
+        await cleanupCardImage(incomingImagePath, ownerKey, "create_insert");
         if ((error as { code?: string }).code === "23505") {
             return NextResponse.json(
                 { error: "Diese Karte existiert bereits." },
@@ -245,18 +287,10 @@ export async function DELETE(req: Request) {
     const ownerKey = user.id;
     const id = searchParams.get("id");
     if (id) {
-        const { error } = await supabaseServer
-            .from("cards")
-            .delete()
-            .eq("id", id)
-            .eq("owner_key", ownerKey);
-
-        if (error) {
-            console.error(error);
-            return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
-        }
-
-        return NextResponse.json({ ok: true, deletedIds: [id] });
+        const result = await deleteOwnedCards({ supabase: supabaseServer, userId: ownerKey, cardIds: [id] });
+        if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+        if (result.deletedIds.length === 0) return NextResponse.json({ error: "Karte nicht gefunden." }, { status: 404 });
+        return NextResponse.json(result);
     }
 
     const body = (await req.json().catch(() => ({}))) as { ids?: string[] };
@@ -267,22 +301,9 @@ export async function DELETE(req: Request) {
         return NextResponse.json({ error: "id or ids are required" }, { status: 400 });
     }
 
-    const { data, error } = await supabaseServer
-        .from("cards")
-        .delete()
-        .eq("owner_key", ownerKey)
-        .in("id", ids)
-        .select("id");
-    if (error) {
-        console.error(error);
-        return NextResponse.json({ error: "Löschen fehlgeschlagen." }, { status: 500 });
-    }
-
-    return NextResponse.json({
-        ok: true,
-        deletedCount: (data ?? []).length,
-        deletedIds: (data ?? []).map((row) => String(row.id)),
-    });
+    const result = await deleteOwnedCards({ supabase: supabaseServer, userId: ownerKey, cardIds: ids });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ ...result, deletedCount: result.deletedIds.length });
 }
 
 type UpdateCardBody = {
@@ -312,18 +333,31 @@ export async function PATCH(req: Request) {
     }
 
     let sentenceExplanation: ReturnType<typeof parseSentenceExplanation> = null;
-    let existing: { type: string; german_text: string; swahili_text: string } | null = null;
-    if ("sentenceExplanation" in body || typeof body.german === "string" || typeof body.swahili === "string" || body.type === "vocab" || body.type === "sentence") {
+    const incomingImagePath = typeof body.imagePath === "string" ? body.imagePath : null;
+    let existing: { type: string; german_text: string; swahili_text: string; image_path: string | null } | null = null;
+    if ("imagePath" in body || "sentenceExplanation" in body || typeof body.german === "string" || typeof body.swahili === "string" || body.type === "vocab" || body.type === "sentence") {
         const { data, error: lookupError } = await supabaseServer.from("cards")
-            .select("type,german_text,swahili_text")
+            .select("type,german_text,swahili_text,image_path")
             .eq("id", body.id).eq("owner_key", ownerKey).single();
-        if (lookupError || !data) return NextResponse.json({ error: "Karte nicht gefunden." }, { status: 404 });
+        if (lookupError || !data) {
+            await cleanupCardImage(incomingImagePath, ownerKey, "update_lookup");
+            return NextResponse.json({ error: "Karte nicht gefunden." }, { status: 404 });
+        }
         existing = data;
     }
+    const rollbackIncomingImage = async () => {
+        if (incomingImagePath && incomingImagePath !== existing?.image_path) {
+            await cleanupCardImage(incomingImagePath, ownerKey, "update_rollback");
+        }
+    };
     if ("sentenceExplanation" in body && existing) {
-        if (existing.type !== "sentence" || body.type === "vocab") return NextResponse.json({ error: "Nur Satzkarten können Lernerklärungen haben." }, { status: 400 });
+        if (existing.type !== "sentence" || body.type === "vocab") {
+            await rollbackIncomingImage();
+            return NextResponse.json({ error: "Nur Satzkarten können Lernerklärungen haben." }, { status: 400 });
+        }
         sentenceExplanation = body.sentenceExplanation == null ? null : parseSentenceExplanation(body.sentenceExplanation);
         if (body.sentenceExplanation != null && (!sentenceExplanation || !explanationMatchesSentences(sentenceExplanation, body.german ?? existing.german_text, body.swahili ?? existing.swahili_text))) {
+            await rollbackIncomingImage();
             return NextResponse.json({ error: "Ungültige Lernerklärung." }, { status: 400 });
         }
     }
@@ -331,18 +365,28 @@ export async function PATCH(req: Request) {
         && (typeof body.german === "string" || typeof body.swahili === "string" || body.type === "sentence")) {
         const duplicate = await findExistingSentencePair(ownerKey, body.german?.trim() ?? existing.german_text,
             body.swahili?.trim() ?? existing.swahili_text, String(body.id));
-        if (duplicate.error) return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
-        if (duplicate.match) return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+        if (duplicate.error) {
+            await rollbackIncomingImage();
+            return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
+        }
+        if (duplicate.match) {
+            await rollbackIncomingImage();
+            return NextResponse.json({ code: "duplicate_sentence", error: "Diese Satzkarte existiert bereits.", existingId: duplicate.match.id }, { status: 409 });
+        }
     }
     if (existing && (body.type ?? existing.type) === "sentence"
         && (body.type === "sentence" || typeof body.german === "string" || typeof body.swahili === "string")) {
         const nextGerman = body.german?.trim() ?? existing.german_text;
         const nextSwahili = body.swahili?.trim() ?? existing.swahili_text;
         if (!nextGerman || !nextSwahili || nextGerman.length > 500 || nextSwahili.length > 500) {
+            await rollbackIncomingImage();
             return NextResponse.json({ error: "Bitte beide Sätze prüfen (maximal 500 Zeichen)." }, { status: 400 });
         }
         const languageError = await rejectSentenceLanguageMismatch(ownerKey, nextGerman, nextSwahili);
-        if (languageError) return languageError;
+        if (languageError) {
+            await rollbackIncomingImage();
+            return languageError;
+        }
     }
 
     const updates: Record<string, unknown> = {};
@@ -368,6 +412,7 @@ export async function PATCH(req: Request) {
         .single();
 
     if (error) {
+        await rollbackIncomingImage();
         if ((error as { code?: string }).code === "23505") {
             return NextResponse.json(
                 { error: "Diese Karte existiert bereits." },
@@ -380,6 +425,10 @@ export async function PATCH(req: Request) {
             { error: "Aktualisieren fehlgeschlagen." },
             { status: 500 }
         );
+    }
+
+    if ("imagePath" in body && existing?.image_path && existing.image_path !== body.imagePath) {
+        await cleanupCardImage(existing.image_path, ownerKey, "update_replaced_image");
     }
 
     return NextResponse.json({ card: data });

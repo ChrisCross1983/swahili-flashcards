@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/api/auth";
+import { CARD_AUDIO_BUCKET, isOwnerStoragePath, removeStoragePaths } from "@/lib/server/cardMediaStorage";
 
 export const runtime = "nodejs";
 const VERSIONED_AUDIO_CACHE_SECONDS = "31536000";
@@ -68,7 +69,10 @@ export async function POST(req: Request) {
             .single();
 
         if (existingError) {
-            return NextResponse.json({ error: existingError.message }, { status: 500 });
+            return NextResponse.json({ error: "Karte konnte nicht geladen werden." }, { status: 500 });
+        }
+        if (!existingCard) {
+            return NextResponse.json({ error: "Karte nicht gefunden." }, { status: 404 });
         }
 
         const oldPath = existingCard?.audio_path ?? null;
@@ -77,7 +81,7 @@ export async function POST(req: Request) {
         const storagePath = `${ownerKey}/${cardId}-${version}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
-            .from("card-audio")
+            .from(CARD_AUDIO_BUCKET)
             .upload(storagePath, arrayBuffer, {
                 upsert: true,
                 contentType,
@@ -88,24 +92,38 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: uploadError.message }, { status: 500 });
         }
 
-        const { error: dbError } = await supabase
+        const { data: updatedCard, error: dbError } = await supabase
             .from("cards")
             .update({ audio_path: storagePath })
             .eq("id", cardId)
-            .eq("owner_key", ownerKey);
+            .eq("owner_key", ownerKey)
+            .select("id")
+            .maybeSingle();
 
-        if (dbError) {
-            return NextResponse.json({ error: dbError.message }, { status: 500 });
+        if (dbError || !updatedCard) {
+            const rollbackError = isOwnerStoragePath(storagePath, ownerKey)
+                ? await removeStoragePaths(supabase, CARD_AUDIO_BUCKET, [storagePath])
+                : null;
+            if (rollbackError) {
+                console.error("[upload-audio] rollback failed", { code: rollbackError.code ?? null });
+            }
+            return NextResponse.json(
+                { error: dbError ? "Audio konnte nicht gespeichert werden." : "Karte nicht gefunden." },
+                { status: dbError ? 500 : 404 },
+            );
         }
 
-        if (oldPath && oldPath !== storagePath) {
-            await supabase.storage.from("card-audio").remove([oldPath]);
+        if (oldPath && oldPath !== storagePath && isOwnerStoragePath(oldPath, ownerKey)) {
+            const cleanupError = await removeStoragePaths(supabase, CARD_AUDIO_BUCKET, [oldPath]);
+            if (cleanupError) {
+                console.warn("[upload-audio] replaced object cleanup failed", { code: cleanupError.code ?? null });
+            }
         }
 
         return NextResponse.json({ ok: true, audio_path: storagePath });
-    } catch (e: any) {
+    } catch (error: unknown) {
         return NextResponse.json(
-            { error: e?.message ?? "Upload failed" },
+            { error: error instanceof Error ? error.message : "Upload failed" },
             { status: 500 }
         );
     }
