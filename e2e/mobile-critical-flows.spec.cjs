@@ -195,6 +195,61 @@ async function openTrainer(page, options) {
 }
 
 test.describe("mobile critical flows", () => {
+  test("card form asks for image policy only after an image is selected", async ({ page }) => {
+    await openTrainer(page);
+    let policyGets = 0;
+    await page.route("**/api/upload-image", (route) => {
+      if (route.request().method() === "GET") policyGets++;
+      return route.fulfill(json({ error: "image_policy_unavailable" }, 503));
+    });
+    await page.getByRole("button", { name: /Neue Wörter anlegen/ }).click();
+    await expect(page.getByLabel("Deutsch")).toBeVisible();
+    expect(policyGets).toBe(0);
+
+    await page.locator("#trainer-card-image-upload").setInputFiles({ name: "test.png", mimeType: "image/png", buffer: Buffer.from("image") });
+    await expect(page.getByRole("alert")).toContainText("Du kannst die Karte ohne Bild speichern.");
+    expect(policyGets).toBe(1);
+    let createdWithoutImage = false;
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      if (route.request().method() !== "POST") return route.fulfill(json({ cards }));
+      createdWithoutImage = route.request().postDataJSON().imagePath == null;
+      return route.fulfill(json({ card: { id: "without-image", german_text: "neu", swahili_text: "mpya", type: "vocab" } }));
+    });
+    await page.getByLabel("Deutsch").fill("neu");
+    await page.getByLabel("Kiswahili").fill("mpya");
+    await page.getByRole("button", { name: "Wort speichern" }).click();
+    await expect.poll(() => createdWithoutImage).toBe(true);
+    expect(policyGets).toBe(1);
+  });
+
+  test("new vocabulary cards refresh Today counts without navigation", async ({ page }) => {
+    await openTrainer(page);
+    let added = 0;
+    let countRequests = 0;
+    await page.route(/\/api\/learn\/setup-counts(?:\?.*)?$/, (route) => {
+      countRequests++;
+      return route.fulfill(json({ todayDue: 2 + added, totalCards: 2 + added, lastMissedCount: 1 }));
+    });
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      if (route.request().method() !== "POST") return route.fulfill(json({ cards }));
+      added++;
+      return route.fulfill(json({ card: { id: `new-${added}`, german_text: `neu ${added}`, swahili_text: `mpya ${added}`, type: "vocab" } }));
+    });
+
+    await page.getByRole("button", { name: /Neue Wörter anlegen/ }).click();
+    for (const number of [1, 2]) {
+      await page.getByLabel("Deutsch").fill(`neu ${number}`);
+      await page.getByLabel("Kiswahili").fill(`mpya ${number}`);
+      await page.getByRole("button", { name: "Wort speichern" }).click();
+      await expect.poll(() => added).toBe(number);
+      await expect(page.getByLabel("Deutsch")).toHaveValue("");
+    }
+    expect(countRequests).toBeGreaterThanOrEqual(2);
+    await page.getByRole("button", { name: "Schließen", exact: true }).click();
+    await page.getByRole("button", { name: "Anpassen" }).click();
+    await expect(page.getByText("4", { exact: true }).first()).toBeVisible();
+  });
+
   for (const width of [390, 1280]) {
     test(`stored illustrations stay hidden until reveal and reset after card change at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 820 });

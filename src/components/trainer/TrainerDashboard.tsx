@@ -66,7 +66,7 @@ export default function TrainerDashboard(props: Props) {
                     className="mt-5 w-full btn btn-primary py-3 text-base"
                     onClick={onStartLearning}
                 >
-                    Heute lernen starten
+                    {todayDue > 0 ? "Heute lernen starten" : "Weiterlernen starten"}
                 </button>
                 <button
                     type="button"

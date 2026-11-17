@@ -15,17 +15,14 @@ function labelForLevel(level: number) {
 }
 
 function daysUntil(dateStr: string) {
-  const today = new Date();
-  const d = new Date(dateStr + "T00:00:00");
-  const diffMs =
-    d.getTime() -
-    new Date(today.toISOString().slice(0, 10) + "T00:00:00").getTime();
-  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const today = new Date().toISOString().slice(0, 10);
+  return Math.round((Date.parse(`${dateStr}T00:00:00.000Z`) - Date.parse(`${today}T00:00:00.000Z`)) / 86_400_000);
 }
 
 function addDaysYmd(base: Date, days: number) {
   const d = new Date(base);
-  d.setDate(d.getDate() + days);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 

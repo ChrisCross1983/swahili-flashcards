@@ -168,15 +168,6 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         checkExistingGermanDetailed,
     } = useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus });
     const media = useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated });
-    useEffect(() => {
-        if (!open) return;
-        let active = true;
-        fetch("/api/upload-image", { cache: "no-store" }).then((response) => response.ok ? response.json() : null)
-            .then((policy: { maxBytes?: number | null } | null) => {
-                if (active) setImageMaxBytes(typeof policy?.maxBytes === "number" ? policy.maxBytes : null);
-            }).catch(() => { if (active) setImageMaxBytes(null); });
-        return () => { active = false; };
-    }, [open]);
     const saveFlow = useTrainerCardSaveFlow({
         cardType,
         mode: editingId ? "update" : "create",
@@ -229,10 +220,16 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         if (maxBytes === null) {
             try {
                 const response = await fetch("/api/upload-image", { cache: "no-store" });
-                const policy = response.ok ? await response.json() as { maxBytes?: number | null } : null;
-                maxBytes = typeof policy?.maxBytes === "number" ? policy.maxBytes : null;
+                if (!response.ok) throw new Error("image_policy_unavailable");
+                const policy = await response.json() as { maxBytes?: number | null };
+                maxBytes = typeof policy.maxBytes === "number" ? policy.maxBytes : null;
                 setImageMaxBytes(maxBytes);
-            } catch { maxBytes = null; }
+            } catch {
+                media.setImageFile(null);
+                setImageUploadError("Bild-Upload ist gerade nicht verfügbar. Du kannst die Karte ohne Bild speichern.");
+                setActiveSupplement("image");
+                return;
+            }
         }
         if (imageTooLarge(file.size, maxBytes)) {
             setImageUploadError(`Das Bild ist zu groß. Maximal erlaubt sind ${imageLimitLabel(maxBytes)}. Bitte wähle ein kleineres Bild.`);

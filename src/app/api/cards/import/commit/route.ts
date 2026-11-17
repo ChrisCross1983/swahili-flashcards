@@ -97,6 +97,7 @@ export async function POST(req: Request) {
         card_id: card.id,
         owner_key: user.id,
         level: 0,
+        due_date: new Date().toISOString().slice(0, 10),
     }));
 
     if (progressPayload.length > 0) {

@@ -10,6 +10,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import {
     formatDays,
     getIntervalDays,
+    getDisplayLevel,
     getNextLevelOnWrong,
     MAX_LEVEL,
 } from "@/lib/leitner";
@@ -653,9 +654,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
 
     useEffect(() => {
         if (!openLearn) return;
+        if (directStartPreparing || learnStarted) return;
         if (learnMode) return;
         setLearnMode(setupCounts.todayDue > 0 ? "LEITNER_TODAY" : "DRILL");
-    }, [learnMode, openLearn, setupCounts.todayDue]);
+    }, [directStartPreparing, learnMode, learnStarted, openLearn, setupCounts.todayDue]);
 
     useEffect(() => {
         setNotesSheetOpen(false);
@@ -942,7 +944,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         localStorage.removeItem(LEGACY_KEY_NAME);
 
         // neu laden
-        await loadCards();
+        await Promise.all([loadCards(), refreshSetupCounts()]);
         setShowMigrate(false);
     }
 
@@ -1285,14 +1287,30 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setOpenLearn(true);
     }
 
-    function dashboardStartPreset(): QuickStartPreset {
-        if (setupCounts.todayDue > 0) return "today";
-        if (setupCounts.lastMissedCount > 0) return "last-missed";
+    function dashboardStartPreset(counts = setupCounts): QuickStartPreset {
+        if (counts.todayDue > 0) return "today";
+        if (counts.lastMissedCount > 0) return "last-missed";
         return "all";
     }
 
     async function startRecommendedLearningFromDashboard() {
-        const quickStart = dashboardStartPreset();
+        setDirectStartPreparing(true);
+        directStartCancelledRef.current = false;
+        setOpenLearn(true);
+        let currentCounts = setupCounts;
+        try {
+            currentCounts = await fetchSetupCounts(cardType);
+            setupCountsRequestIdRef.current += 1;
+            setSetupCountsLoading(false);
+            setSetupCounts(currentCounts);
+        } catch {
+            // Keep the last known counts when the refresh is unavailable.
+        }
+        if (directStartCancelledRef.current) {
+            setDirectStartPreparing(false);
+            return;
+        }
+        const quickStart = dashboardStartPreset(currentCounts);
         const nextConfig = quickStart === "today"
             ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
             : quickStart === "last-missed"
@@ -1304,9 +1322,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setTrainingMaterial(nextConfig.trainingMaterial);
         setDirectionMode("RANDOM");
         setRepairDrillActive(false);
-        setDirectStartPreparing(true);
-        directStartCancelledRef.current = false;
-        setOpenLearn(true);
         try {
             await startLearningSession({
                 learnMode: nextConfig.learnMode,
@@ -1836,7 +1851,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     {isLeitnerSelected ? (
                                                         <div className="mt-8 flex items-start justify-between gap-2 rounded-2xl border border-soft bg-surface/70 px-3 py-2 text-xs text-muted" data-focus-role="technical-context">
                                                             <span>
-                                                                Leitner · Stufe {currentLevel} · nächste Wiederholung{" "}
+                                                                Leitner · Stufe {getDisplayLevel(currentLevel)} · nächste Wiederholung{" "}
                                                                 {formatDays(footerNextDays)}
                                                             </span>
 
@@ -1868,7 +1883,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                             </div>
 
                                                                             <div className="mt-3 space-y-2">
-                                                                                <div>Aktuelle Leitner-Stufe: {currentLevel}</div>
+                                                                                <div>Aktuelle Leitner-Stufe: {getDisplayLevel(currentLevel)}</div>
                                                                                 {formattedDueDate ? (
                                                                                     <div>
                                                                                         Fällig am: {formattedDueDate}
@@ -1876,11 +1891,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                                     </div>
                                                                                 ) : null}
                                                                                 <div>
-                                                                                    Wenn gewusst: Stufe → {nextOnCorrectLevel}, nächste Wiederholung{" "}
+                                                                                    Wenn gewusst: Stufe → {getDisplayLevel(nextOnCorrectLevel)}, nächste Wiederholung{" "}
                                                                                     {formatDays(nextOnCorrectDays)}
                                                                                 </div>
                                                                                 <div>
-                                                                                    Wenn nicht gewusst: Stufe → {nextOnWrongLevel}, nächste Wiederholung{" "}
+                                                                                    Wenn nicht gewusst: Stufe → {getDisplayLevel(nextOnWrongLevel)}, nächste Wiederholung{" "}
                                                                                     {formatDays(nextOnWrongDays)}
                                                                                 </div>
                                                                             </div>
@@ -1933,7 +1948,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 cards={cards}
                                 onGroupsChange={setGroups}
                                 onCreated={async () => {
-                                    await loadCards(undefined, { silent: true });
+                                    await Promise.all([
+                                        loadCards(undefined, { silent: true }),
+                                        refreshSetupCounts(),
+                                    ]);
                                 }}
                                 onUpdated={async (updated, nextGroups) => {
                                     if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(updated.id)) {

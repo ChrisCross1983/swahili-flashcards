@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { DISPLAY_LEVELS } from "@/lib/leitner";
 
 type FilterType = "all" | "vocab" | "sentence";
 
 type StatsPayload = {
+    sessionStatsAvailable: boolean;
     totals: { all: number; vocab: number; sentence: number };
     byLevel: Record<string, number>;
     today: { reviewed: number; correct: number; wrong: number };
@@ -24,7 +26,7 @@ function formatPercent(value: number) {
 }
 
 function formatDayLabel(date: string) {
-    const weekday = new Date(`${date}T00:00:00`).toLocaleDateString("de-DE", { weekday: "short" });
+    const weekday = new Date(`${date}T00:00:00.000Z`).toLocaleDateString("de-DE", { weekday: "short", timeZone: "UTC" });
     return weekday.slice(0, 2);
 }
 
@@ -87,7 +89,7 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
         return max;
     }, [stats]);
 
-    const hasAnyCards = (stats?.totals.all ?? 0) > 0;
+    const hasAnyCards = (stats?.totals.all ?? 0) > 0 || (stats?.sessionStatsAvailable && stats.last7d.some((day) => day.sessions > 0)) === true;
 
     return (
         <main className="min-h-screen p-4 sm:p-6 flex justify-center">
@@ -151,13 +153,13 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
                                 <div className="rounded-xl border bg-base p-3"><p className="text-xs text-muted">Gesamt Karten</p><p className="text-xl font-semibold">{stats.totals.all}</p></div>
                                 <div className="rounded-xl border bg-base p-3"><p className="text-xs text-muted">Vokabeln</p><p className="text-xl font-semibold">{stats.totals.vocab}</p></div>
                                 <div className="rounded-xl border bg-base p-3"><p className="text-xs text-muted">Sätze</p><p className="text-xl font-semibold">{stats.totals.sentence}</p></div>
-                                <div className="rounded-xl border bg-base p-3"><p className="text-xs text-muted">Heute gelernt</p><p className="text-xl font-semibold">{stats.today.reviewed}</p></div>
+                                <div className="rounded-xl border bg-base p-3"><p className="text-xs text-muted">Heute gelernt</p><p className="text-xl font-semibold">{stats.sessionStatsAvailable ? stats.today.reviewed : "—"}</p></div>
                             </div>
 
-                            <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                            {stats.sessionStatsAvailable && <div className="mt-3 flex flex-wrap gap-2 text-sm">
                                 <span className="count-badge">✅ {stats.today.correct} richtig</span>
                                 <span className="count-badge">❌ {stats.today.wrong} falsch</span>
-                            </div>
+                            </div>}
                         </section>
 
                         <section className="rounded-2xl border bg-surface p-4 sm:p-5">
@@ -166,7 +168,7 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
                                 <span className="text-sm text-muted">Mastery {formatPercent(masteryPercent)}</span>
                             </div>
                             <div className="mt-4 space-y-3">
-                                {[1, 2, 3, 4, 5, 6].map((level) => {
+                                {DISPLAY_LEVELS.map((level) => {
                                     const count = stats.byLevel[String(level)] ?? 0;
                                     const percent = totalLevels > 0 ? (count / totalLevels) * 100 : 0;
                                     return (
@@ -182,7 +184,7 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
                             </div>
                         </section>
 
-                        <section className="rounded-2xl border bg-surface p-4 sm:p-5">
+                        {stats.sessionStatsAvailable ? <section className="rounded-2xl border bg-surface p-4 sm:p-5">
                             <h2 className="text-lg font-semibold">Lernqualität</h2>
                             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                                 <div className="rounded-xl border bg-base p-3"><p className="text-muted">Trefferquote (7 Tage)</p><p className="mt-1 text-lg font-semibold">{formatPercent(stats.averages.accuracy)}</p></div>
@@ -206,7 +208,7 @@ export default function StatsClient({ ownerKey }: { ownerKey: string }) {
                                     })}
                                 </div>
                             </div>
-                        </section>
+                        </section> : <p className="hint-card text-sm">Lernaktivität und Trefferquote können derzeit nur für „Alle“ angezeigt werden. Ältere Sessions speichern keine Kartenart.</p>}
                     </>
                 )}
             </div>

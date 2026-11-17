@@ -20,14 +20,15 @@ describe("sentence explanation persistence", () => {
   let updated: Record<string, unknown>[];
   let stored: Record<string, unknown>;
   let existingRows: Array<{ id: string; german_text: string; swahili_text: string }>;
+  let progressRows: Array<Record<string, unknown>>;
   beforeEach(() => {
     requireUser.mockResolvedValue({ user: { id: owner }, response: null });
     getOrCheckSentenceLanguages.mockReset().mockResolvedValue({ status: "ok" });
-    inserted = []; updated = [];
+    inserted = []; updated = []; progressRows = [];
     stored = { id: "card-1", type: "sentence", german_text: input.german, swahili_text: input.swahili, sentence_explanation: null };
     existingRows = [];
     from.mockImplementation((table: string) => {
-      if (table === "card_progress") return { insert: async () => ({ error: null }) };
+      if (table === "card_progress") return { insert: async (row: Record<string, unknown>) => { progressRows.push(row); return { error: null }; } };
       return {
         insert: (row: Record<string, unknown>) => {
           inserted.push(row);
@@ -59,6 +60,10 @@ describe("sentence explanation persistence", () => {
     const without = await POST(request("POST", input));
     expect(without.status).toBe(200);
     expect(inserted[1].sentence_explanation).toBeNull();
+    expect(progressRows).toEqual([
+      expect.objectContaining({ level: 0, due_date: new Date().toISOString().slice(0, 10) }),
+      expect.objectContaining({ level: 0, due_date: new Date().toISOString().slice(0, 10) }),
+    ]);
     expect(getOrCheckSentenceLanguages).toHaveBeenCalledWith(owner, input.german, input.swahili);
   });
 

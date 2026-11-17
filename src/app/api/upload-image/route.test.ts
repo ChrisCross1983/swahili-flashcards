@@ -48,4 +48,22 @@ describe("own image upload regression", () => {
     expect(retry.status).toBe(413);
     expect(await retry.json()).toEqual({ error: "image_too_large" });
   });
+
+  it("returns a safe 503 and logs only diagnostic metadata when bucket lookup fails", async () => {
+    requireUser.mockResolvedValue({ user: { id: "owner-1" }, response: null });
+    process.env.SUPABASE_STORAGE_BUCKET = "card-images";
+    getBucket.mockResolvedValue({ data: null, error: { code: "BucketNotFound", message: "private upstream detail" } });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "image_policy_unavailable" });
+      expect(log).toHaveBeenCalledWith("[upload-image] image policy unavailable", {
+        reason: "bucket_lookup_failed", code: "BucketNotFound", statusCode: undefined,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private upstream detail");
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

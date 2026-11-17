@@ -16,7 +16,13 @@ export async function GET() {
   if (response) return response;
   try {
     return NextResponse.json({ maxBytes: await storageLimit(), allowedTypes: IMAGE_MIME_TYPES }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
+  } catch (error) {
+    const detail = error as { code?: unknown; statusCode?: unknown };
+    console.error("[upload-image] image policy unavailable", {
+      reason: process.env.SUPABASE_STORAGE_BUCKET ? "bucket_lookup_failed" : "missing_bucket_config",
+      code: typeof detail?.code === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(detail.code) ? detail.code : undefined,
+      statusCode: typeof detail?.statusCode === "number" ? detail.statusCode : undefined,
+    });
     return NextResponse.json({ error: "image_policy_unavailable" }, { status: 503 });
   }
 }

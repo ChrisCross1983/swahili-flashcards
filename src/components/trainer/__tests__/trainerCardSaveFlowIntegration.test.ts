@@ -9,6 +9,7 @@ function readSource(relativePath: string) {
 }
 
 describe("TrainerCardFormSheet save-flow integration", () => {
+    const trainerSource = readSource("src/app/trainer/TrainerClient.tsx");
     const formSource = readSource("src/components/trainer/TrainerCardFormSheet.tsx");
     const saveFlowSource = readSource("src/lib/trainer/useTrainerCardSaveFlow.ts");
     const duplicateHookSource = readSource("src/lib/trainer/useTrainerCardDuplicateCheck.ts");
@@ -22,6 +23,27 @@ describe("TrainerCardFormSheet save-flow integration", () => {
         expect(saveFlowSource).toContain("await onCreated(created)");
         expect(saveFlowSource).toContain("onCreateSuccess(created)");
         expect(formSource).toContain("function handleCreateSuccess()");
+    });
+
+    it("refreshes Trainer counts after each successful card creation and in-place migration", () => {
+        const createdCallback = trainerSource.slice(
+            trainerSource.indexOf("onCreated={async () => {"),
+            trainerSource.indexOf("onUpdated={async", trainerSource.indexOf("onCreated={async () => {")),
+        );
+        expect(createdCallback).toContain("loadCards(undefined, { silent: true })");
+        expect(createdCallback).toContain("refreshSetupCounts()");
+        expect(trainerSource).toContain("await Promise.all([loadCards(), refreshSetupCounts()])");
+        expect(saveFlowSource).toContain("await onCreated(created)");
+    });
+
+    it("loads image policy only after file selection and keeps card saving available on policy failure", () => {
+        const selection = formSource.slice(formSource.indexOf("async function selectImageFile("), formSource.indexOf("const editingCard =", formSource.indexOf("async function selectImageFile(")));
+        expect(formSource.match(/fetch\("\/api\/upload-image"/g)).toHaveLength(1);
+        expect(selection).toContain('fetch("/api/upload-image", { cache: "no-store" })');
+        expect(selection).toContain('if (!response.ok) throw new Error("image_policy_unavailable")');
+        expect(selection).toContain("media.setImageFile(null)");
+        expect(selection).toContain("Du kannst die Karte ohne Bild speichern.");
+        expect(selection).toContain("return;");
     });
 
     it("blocks similar warnings until override and keeps override behavior explicit", () => {

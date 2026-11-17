@@ -114,6 +114,8 @@ describe("TrainerDashboard start flow", () => {
         );
 
         expect(html).toContain("Weiterlernen");
+        expect(html).toContain("Weiterlernen starten");
+        expect(html).not.toContain("Heute lernen starten");
         expect(html).toContain("Kleine Wiederholung: 3 zuletzt nicht gewusste Karten.");
     });
 });
