@@ -3,6 +3,7 @@ import "./globals.css";
 import { supabaseServer } from "@/lib/supabase/server";
 import GlobalOverlays from "@/components/GlobalOverlays";
 import WhatsNewToast from "@/components/WhatsNewToast";
+import ClientDiagnosticsProvider from "@/components/ClientDiagnosticsProvider";
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -28,6 +29,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
+        {user ? <ClientDiagnosticsProvider /> : null}
         {children}
         {user ? <GlobalOverlays ownerKey={user.id} /> : null}
         <WhatsNewToast />

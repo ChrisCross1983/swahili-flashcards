@@ -362,6 +362,98 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
   });
 
+  test("today grades known and missed cards once, then leaves no card due", async ({ page }) => {
+    await openTrainer(page);
+    const graded = [];
+    const missed = [];
+    const sessions = [];
+    const runs = [];
+    await page.route("**/api/diagnostics/runs", (route) => {
+      runs.push(route.request().postDataJSON());
+      return route.fulfill(json({ applied: true }));
+    });
+    const due = new Set(cards.map((card) => card.id));
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({
+      items: todayItems().filter((item) => due.has(item.cardId)),
+    })));
+    await page.route("**/api/learn/grade", (route) => {
+      const body = route.request().postDataJSON();
+      graded.push(body);
+      due.delete(body.cardId);
+      return route.fulfill(json({ ok: true }));
+    });
+    await page.route("**/api/learn/last-missed", (route) => {
+      const body = route.request().postDataJSON();
+      if (body.action === "add") missed.push(body.cardId);
+      return route.fulfill(json({ ok: true }));
+    });
+    await page.route("**/api/learn/sessions", (route) => {
+      sessions.push(route.request().postDataJSON());
+      return route.fulfill(json({ ok: true }));
+    });
+
+    await page.getByRole("button", { name: "Heute lernen starten" }).click();
+    for (const answer of ["Nicht gewusst", "Gewusst"]) {
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      await page.getByRole("button", { name: answer, exact: true }).click();
+    }
+
+    await expect(page.getByText("Training abgeschlossen")).toBeVisible();
+    await expect.poll(() => graded.length).toBe(2);
+    expect(graded.map((entry) => entry.correct).sort()).toEqual([false, true]);
+    expect(new Set(graded.map((entry) => entry.cardId)).size).toBe(2);
+    expect(missed).toEqual([graded.find((entry) => !entry.correct).cardId]);
+    expect(due.size).toBe(0);
+    await expect.poll(() => sessions.length).toBe(1);
+    expect(sessions).toEqual([{ mode: "LEITNER", totalCount: 2, correctCount: 1, wrongCardIds: [missed[0]] }]);
+    await expect.poll(() => runs.filter((entry) => entry.action === "end").length).toBe(1);
+    const firstRun = runs.filter((entry) => entry.run_id === runs.find((item) => item.action === "start").run_id);
+    expect(firstRun.find((entry) => entry.action === "start")).toMatchObject({ mode: "LEITNER_TODAY", run_kind: "today" });
+    expect(firstRun.find((entry) => entry.action === "loaded")).toMatchObject({ initial_card_count: 2 });
+    expect(firstRun.find((entry) => entry.action === "end")).toMatchObject({ status: "completed", last_position: 2, correct_count: 1, wrong_count: 1 });
+    const remaining = await page.evaluate(async () => (await (await fetch("/api/learn/today?type=vocab")).json()).items);
+    expect(remaining).toEqual([]);
+
+    await page.getByRole("button", { name: "Fehler kurz wiederholen" }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+    await expect(page.getByText("Fehler kurz wiederholt")).toBeVisible();
+    expect(graded).toHaveLength(2);
+    await expect.poll(() => sessions.length).toBe(2);
+    expect(sessions[1]).toEqual({ mode: "DRILL", totalCount: 1, correctCount: 1, wrongCardIds: [] });
+    await expect.poll(() => runs.filter((entry) => entry.action === "end").length).toBe(2);
+    const starts = runs.filter((entry) => entry.action === "start");
+    expect(starts).toHaveLength(2);
+    expect(starts[1].run_id).not.toBe(starts[0].run_id);
+    expect(starts[1]).toMatchObject({ mode: "DRILL", run_kind: "repair_drill" });
+    expect(runs.find((entry) => entry.run_id === starts[1].run_id && entry.action === "loaded")).toMatchObject({ initial_card_count: 1 });
+    expect(runs.find((entry) => entry.run_id === starts[1].run_id && entry.action === "end")).toMatchObject({ status: "completed", last_position: 1, correct_count: 1 });
+  });
+
+  test("early finish saves the answered Today cards once", async ({ page }) => {
+    await openTrainer(page);
+    const sessions = [];
+    const runs = [];
+    await page.route("**/api/diagnostics/runs", (route) => {
+      runs.push(route.request().postDataJSON());
+      return route.fulfill(json({ applied: true }));
+    });
+    await page.route("**/api/learn/sessions", (route) => {
+      sessions.push(route.request().postDataJSON());
+      return route.fulfill(json({ ok: true }));
+    });
+    await page.getByRole("button", { name: "Heute lernen starten" }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Nicht gewusst", exact: true }).click();
+    await page.getByRole("button", { name: "Schließen", exact: true }).click();
+    await page.getByRole("dialog", { name: "Training beenden?" }).getByRole("button", { name: "Beenden" }).click();
+    await expect.poll(() => sessions.length).toBe(1);
+    expect(sessions[0]).toMatchObject({ mode: "LEITNER", totalCount: 1, correctCount: 0 });
+    expect(sessions[0].wrongCardIds).toHaveLength(1);
+    await expect.poll(() => runs.some((entry) => entry.action === "end")).toBe(true);
+    expect(runs.find((entry) => entry.action === "end")).toMatchObject({ status: "ended_early", end_reason: "user_ended", last_position: 1, wrong_count: 1 });
+  });
+
   test("global search and AI overlays open and close without leaving the page blocked", async ({ page }) => {
     await openTrainer(page);
 

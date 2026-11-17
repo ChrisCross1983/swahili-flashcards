@@ -1,5 +1,8 @@
 import type { CardType, LeitnerStats, SessionSummary, SetupCounts, TodayItem } from "./types";
 import type { SentenceExplanation } from "@/lib/sentence/explanation";
+import { diagnosedFetch } from "@/lib/diagnostics/fetch";
+import { reportClientError } from "@/lib/diagnostics/client";
+import { isUuid } from "@/lib/diagnostics/validation";
 
 type CardGroup = NonNullable<TodayItem["groups"]>[number];
 
@@ -26,14 +29,22 @@ function withFilterParams(url: string, cardType: CardType, groupIds?: string[]):
     return url.includes("?") ? `${url}&${query}` : `${url}?${query}`;
 }
 
-async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
-    const bodyText = await res.text();
+async function parseOrThrow<T>(res: Response, fallback: string, diagnostic?: { route: string; code: "grade_failed" | "session_save_failed" | "today_load_failed" | "api_request_failed"; runId?: string | null }): Promise<T> {
+    let bodyText: string;
+    try { bodyText = await res.text(); }
+    catch (error) {
+        if (diagnostic && !(error && typeof error === "object" && "name" in error && error.name === "AbortError")) {
+            void reportClientError({ category: "network", error_code: "network_error", route: diagnostic.route, run_id: diagnostic.runId, error, urgent: true });
+        }
+        throw error;
+    }
     let json: unknown = {};
 
     if (bodyText) {
         try {
             json = JSON.parse(bodyText);
         } catch {
+            if (res.ok && diagnostic) void reportClientError({ category: "api_failure", error_code: diagnostic.code, route: diagnostic.route, run_id: diagnostic.runId, http_status: res.status, urgent: true });
             throw new Error(`${fallback} (ungültige Antwort vom Server, HTTP ${res.status})`);
         }
     }
@@ -46,11 +57,11 @@ async function parseOrThrow<T>(res: Response, fallback: string): Promise<T> {
 }
 
 export async function fetchSetupCounts(cardType: CardType, groupIds?: string[], signal?: AbortSignal): Promise<SetupCounts> {
-    const res = await fetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds), {
+    const res = await diagnosedFetch(withFilterParams("/api/learn/setup-counts", cardType, groupIds), {
         cache: "no-store",
         ...(signal ? { signal } : {}),
-    });
-    const json = await parseOrThrow<Partial<SetupCounts>>(res, "Setup counts failed");
+    }, "api_request_failed");
+    const json = await parseOrThrow<Partial<SetupCounts>>(res, "Setup counts failed", { route: "/api/learn/setup-counts", code: "api_request_failed" });
     return {
         todayDue: json.todayDue ?? 0,
         totalCards: json.totalCards ?? 0,
@@ -58,9 +69,9 @@ export async function fetchSetupCounts(cardType: CardType, groupIds?: string[], 
     };
 }
 
-export async function fetchTodayItems(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
-    const res = await fetch(withFilterParams("/api/learn/today", cardType, groupIds), { cache: "no-store" });
-    const json = await parseOrThrow<{ items?: TodayItem[] }>(res, "Aktion fehlgeschlagen.");
+export async function fetchTodayItems(cardType: CardType, groupIds?: string[], runId?: string | null): Promise<TodayItem[]> {
+    const res = await diagnosedFetch(withFilterParams("/api/learn/today", cardType, groupIds), { cache: "no-store" }, "today_load_failed", runId);
+    const json = await parseOrThrow<{ items?: TodayItem[] }>(res, "Aktion fehlgeschlagen.", { route: "/api/learn/today", code: "today_load_failed", runId });
     return Array.isArray(json.items) ? json.items : [];
 }
 
@@ -113,13 +124,13 @@ export async function postGrade(params: {
     cardId: string;
     correct: boolean;
     currentLevel: number;
-}): Promise<void> {
-    const res = await fetch("/api/learn/grade", {
+}, runId?: string | null): Promise<void> {
+    const res = await diagnosedFetch("/api/learn/grade", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(isUuid(runId) ? { "X-Diagnostics-Run-Id": runId } : {}) },
         body: JSON.stringify(params),
-    });
-    await parseOrThrow(res, "Bewertung fehlgeschlagen.");
+    }, "grade_failed", runId);
+    await parseOrThrow(res, "Bewertung fehlgeschlagen.", { route: "/api/learn/grade", code: "grade_failed", runId });
 }
 
 export async function postLastMissed(action: "add" | "remove", cardId: string): Promise<void> {
@@ -131,11 +142,11 @@ export async function postLastMissed(action: "add" | "remove", cardId: string): 
     await parseOrThrow(res, "Last-Missed Update fehlgeschlagen.");
 }
 
-export async function postLearnSession(summary: SessionSummary): Promise<void> {
-    const res = await fetch("/api/learn/sessions", {
+export async function postLearnSession(summary: SessionSummary, runId?: string | null): Promise<void> {
+    const res = await diagnosedFetch("/api/learn/sessions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(isUuid(runId) ? { "X-Diagnostics-Run-Id": runId } : {}) },
         body: JSON.stringify(summary),
-    });
-    await parseOrThrow(res, "Session konnte nicht gespeichert werden.");
+    }, "session_save_failed", runId);
+    await parseOrThrow(res, "Session konnte nicht gespeichert werden.", { route: "/api/learn/sessions", code: "session_save_failed", runId });
 }

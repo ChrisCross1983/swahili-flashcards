@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 
 type Body = {
     mode: "LEITNER" | "DRILL" | "ai";
@@ -9,7 +10,7 @@ type Body = {
     wrongCardIds: string[];
 };
 
-export async function POST(req: Request) {
+export const POST = withServerDiagnostics("/api/learn/sessions", async (req, diagnostics) => {
     let body: Body;
 
     try {
@@ -20,6 +21,8 @@ export async function POST(req: Request) {
 
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
+    diagnostics.setRunId(req.headers.get("x-diagnostics-run-id"));
 
     const ownerKey = user.id;
     const mode = body.mode;
@@ -45,8 +48,9 @@ export async function POST(req: Request) {
     });
 
     if (error) {
+        diagnostics.supabaseFailure("learn_sessions", "insert", error.code);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true });
-}
+});

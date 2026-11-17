@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/api/auth";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { classifyImportRows, normalizeImportValue, type ParsedImportRow } from "@/lib/cards/import";
 import { isGroupColorKey } from "@/lib/groups/colors";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 
 type CommitRequest = {
     rows?: Array<ParsedImportRow & { selectedAction?: "keep" | "skip" }>;
@@ -19,9 +20,10 @@ function isValidRow(value: unknown): value is ParsedImportRow {
     return typeof row.german === "string" && typeof row.swahili === "string";
 }
 
-export async function POST(req: Request) {
+export const POST = withServerDiagnostics("/api/cards/import/commit", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     let body: CommitRequest;
     try {
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
 
     if (error) {
         console.error(error);
+        diagnostics.supabaseFailure("cards", "select", error.code);
         return NextResponse.json({ error: "Import fehlgeschlagen." }, { status: 500 });
     }
 
@@ -90,6 +93,7 @@ export async function POST(req: Request) {
 
     if (insertError) {
         console.error(insertError);
+        diagnostics.supabaseFailure("cards", "insert", insertError.code);
         return NextResponse.json({ error: "Import fehlgeschlagen." }, { status: 500 });
     }
 
@@ -104,6 +108,7 @@ export async function POST(req: Request) {
         const { error: progressError } = await supabaseServer.from("card_progress").insert(progressPayload);
         if (progressError) {
             console.error(progressError);
+            diagnostics.supabaseFailure("card_progress", "insert", progressError.code);
             return NextResponse.json({ error: "Import teilweise fehlgeschlagen (Fortschritt)." }, { status: 500 });
         }
     }
@@ -119,6 +124,7 @@ export async function POST(req: Request) {
             .single();
 
         if (groupCreateError) {
+            diagnostics.supabaseFailure("groups", "insert", groupCreateError.code);
             return NextResponse.json({ error: "Importiert, aber die Gruppe konnte nicht erstellt werden." }, { status: 500 });
         }
 
@@ -135,6 +141,7 @@ export async function POST(req: Request) {
             .maybeSingle();
 
         if (groupError) {
+            diagnostics.supabaseFailure("groups", "select", groupError.code);
             return NextResponse.json({ error: "Importiert, aber die Gruppe konnte nicht geladen werden." }, { status: 500 });
         }
 
@@ -153,6 +160,7 @@ export async function POST(req: Request) {
             .upsert(joinRows, { onConflict: "owner_key,card_id,group_id", ignoreDuplicates: true });
 
         if (groupAssignError) {
+            diagnostics.supabaseFailure("card_groups", "upsert", groupAssignError.code);
             return NextResponse.json({ error: "Importiert, aber die Gruppenzuordnung ist fehlgeschlagen." }, { status: 500 });
         }
     }
@@ -166,4 +174,4 @@ export async function POST(req: Request) {
         groupAssigned: Boolean(resolvedGroupId),
         groupId: resolvedGroupId || null,
     });
-}
+});

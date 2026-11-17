@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 
 import {
   getIntervalDays,
@@ -31,7 +32,7 @@ type Body = {
   currentLevel?: number;
 };
 
-export async function POST(req: Request) {
+export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagnostics) => {
   let body: Body;
 
   try {
@@ -42,6 +43,8 @@ export async function POST(req: Request) {
 
   const { user, response } = await requireUser();
   if (response) return response;
+  diagnostics.setUser(user.id);
+  diagnostics.setRunId(req.headers.get("x-diagnostics-run-id"));
 
   const ownerKey = user.id;
   const cardId = (body.cardId ?? "").trim();
@@ -75,7 +78,7 @@ export async function POST(req: Request) {
 
   console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
 
-  const { data, error } = await supabaseServer
+  const { error } = await supabaseServer
     .from("card_progress")
     .upsert(
       {
@@ -93,7 +96,8 @@ export async function POST(req: Request) {
     .select();
 
   if (error) {
-    console.error("[learn/grade] upsert error", error);
+    diagnostics.supabaseFailure("card_progress", "upsert", error.code);
+    console.error("[learn/grade] upsert error", { code: error.code ?? null });
     return NextResponse.json(
       { error: "Update failed." },
       { status: 500 }
@@ -101,4 +105,4 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ ok: true, newLevel, dueDate });
-}
+});

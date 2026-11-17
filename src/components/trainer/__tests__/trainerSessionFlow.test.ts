@@ -27,9 +27,10 @@ describe("trainer session runtime regression guards", () => {
     });
 
     it("supports one-tap dashboard learning without leaking stale setup state", () => {
-        expect(clientSource).toContain("function dashboardStartPreset()");
-        expect(clientSource).toContain("if (setupCounts.todayDue > 0) return \"today\";");
-        expect(clientSource).toContain("if (setupCounts.lastMissedCount > 0) return \"last-missed\";");
+        expect(clientSource).toContain("function dashboardStartPreset(counts = setupCounts)");
+        expect(clientSource).toContain("if (counts.todayDue > 0) return \"today\";");
+        expect(clientSource).toContain("if (counts.lastMissedCount > 0) return \"last-missed\";");
+        expect(clientSource).toContain("currentCounts = await fetchSetupCounts(cardType)");
         expect(clientSource).toContain("function startRecommendedLearningFromDashboard()");
         expect(clientSource).toContain("resetTrainingPreset(quickStart)");
         expect(clientSource).toContain("setTrainingMaterial(nextConfig.trainingMaterial)");
@@ -58,15 +59,16 @@ describe("trainer session runtime regression guards", () => {
     it("starts today sessions via today loader", () => {
         expect(sessionSource).toContain("const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial)");
         expect(sessionSource).toContain('if (loadPlan?.kind === "today")');
-        expect(sessionSource).toContain("loadResult = await loadToday()");
+        expect(sessionSource).toContain("loadResult = await loadToday(run?.runId)");
 
         const loadTodaySource = sessionSource.slice(
-            sessionSource.indexOf("async function loadToday()"),
+            sessionSource.indexOf("async function loadToday(runId?: string | null)"),
             sessionSource.indexOf("async function loadAllForDrill("),
         );
         expect(loadTodaySource).toContain("setSessionTotal(items.length)");
         expect(loadTodaySource).toContain("onSetupCountsPatch?.({ todayDue: items.length })");
         expect(loadTodaySource).not.toContain("refreshSetupCountsInBackground()");
+        expect(sessionSource).toContain("run?.loaded(loadResult.items.length)");
     });
 
     it("ignores stale setup-count refresh responses", () => {

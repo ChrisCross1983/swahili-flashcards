@@ -11,6 +11,7 @@ import { getCardNotes, hasCardNote } from "@/lib/server/cardNoteStatus";
 import { getWordUnderstandingByCard } from "@/lib/server/wordUnderstandingStatus";
 import { deleteOwnedCards } from "@/lib/server/deleteCards";
 import { cardImageBucket, isOwnerStoragePath, removeStoragePaths } from "@/lib/server/cardMediaStorage";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 
 async function cleanupCardImage(path: string | null | undefined, ownerKey: string, stage: string) {
     if (!isOwnerStoragePath(path, ownerKey)) return;
@@ -73,9 +74,10 @@ type CreateCardBody = {
     type?: "vocab" | "sentence";
 };
 
-export async function POST(req: Request) {
+export const POST = withServerDiagnostics("/api/cards", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const body = (await req.json()) as CreateCardBody;
 
@@ -110,6 +112,7 @@ export async function POST(req: Request) {
     if (type === "sentence") {
         const duplicate = await findExistingSentencePair(ownerKey, german, swahili);
         if (duplicate.error) {
+            diagnostics.supabaseFailure("cards", "select", duplicate.error.code, 503);
             await cleanupCardImage(incomingImagePath, ownerKey, "create_duplicate_check");
             return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
         }
@@ -149,6 +152,7 @@ export async function POST(req: Request) {
         }
 
         console.error(error);
+        diagnostics.supabaseFailure("cards", "insert", error.code);
         return NextResponse.json(
             { error: "Speichern fehlgeschlagen." },
             { status: 500 }
@@ -166,6 +170,7 @@ export async function POST(req: Request) {
 
     if (progressError) {
         console.error(progressError);
+        diagnostics.supabaseFailure("card_progress", "insert", progressError.code);
         return NextResponse.json(
             { error: "Speichern fehlgeschlagen." },
             { status: 500 }
@@ -173,11 +178,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ card });
-}
+});
 
-export async function GET(req: Request) {
+export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const { searchParams } = new URL(req.url);
     const ownerKey = user.id;
@@ -230,6 +236,7 @@ export async function GET(req: Request) {
 
     if (error) {
         console.error(error);
+        diagnostics.supabaseFailure("cards", "select", error.code);
         return NextResponse.json(
             { error: "Karten konnten nicht geladen werden." },
             { status: 500 }
@@ -278,11 +285,12 @@ export async function GET(req: Request) {
     return NextResponse.json({
         cards: cards.map((card) => ({ ...card, has_note: hasCardNote(notesByCard.get(String(card.id)) ?? {}, card.type), note_preview: notesByCard.get(String(card.id)) ?? null, groups: groupsByCard.get(String(card.id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(card.id)) ?? null })),
     });
-}
+});
 
-export async function DELETE(req: Request) {
+export const DELETE = withServerDiagnostics("/api/cards", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const { searchParams } = new URL(req.url);
     const ownerKey = user.id;
@@ -305,7 +313,7 @@ export async function DELETE(req: Request) {
     const result = await deleteOwnedCards({ supabase: supabaseServer, userId: ownerKey, cardIds: ids });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ ...result, deletedCount: result.deletedIds.length });
-}
+});
 
 type UpdateCardBody = {
     id: string;
@@ -318,9 +326,10 @@ type UpdateCardBody = {
     type?: "vocab" | "sentence";
 };
 
-export async function PATCH(req: Request) {
+export const PATCH = withServerDiagnostics("/api/cards", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const body = (await req.json()) as UpdateCardBody;
     const ownerKey = user.id;
@@ -367,6 +376,7 @@ export async function PATCH(req: Request) {
         const duplicate = await findExistingSentencePair(ownerKey, body.german?.trim() ?? existing.german_text,
             body.swahili?.trim() ?? existing.swahili_text, String(body.id));
         if (duplicate.error) {
+            diagnostics.supabaseFailure("cards", "select", duplicate.error.code, 503);
             await rollbackIncomingImage();
             return NextResponse.json({ error: "Duplikatprüfung fehlgeschlagen." }, { status: 503 });
         }
@@ -422,6 +432,7 @@ export async function PATCH(req: Request) {
         }
 
         console.error(error);
+        diagnostics.supabaseFailure("cards", "update", error.code);
         return NextResponse.json(
             { error: "Aktualisieren fehlgeschlagen." },
             { status: 500 }
@@ -433,4 +444,4 @@ export async function PATCH(req: Request) {
     }
 
     return NextResponse.json({ card: data });
-}
+});

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 type DueCardRow = {
@@ -25,9 +26,10 @@ function normalizeDueCard(cards: DueCard | DueCard[]): DueCard | null {
   return Array.isArray(cards) ? (cards[0] ?? null) : cards;
 }
 
-export async function GET(req: Request) {
+export const GET = withServerDiagnostics("/api/learn/today", async (req, diagnostics) => {
   const { user, response } = await requireUser();
   if (response) return response;
+  diagnostics.setUser(user.id);
 
   const { searchParams } = new URL(req.url);
   const ownerKey = user.id;
@@ -64,6 +66,7 @@ export async function GET(req: Request) {
   const { data, error } = await query;
 
   if (error) {
+    diagnostics.supabaseFailure("card_progress", "select", error.code);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -91,4 +94,4 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json({ items });
-}
+});

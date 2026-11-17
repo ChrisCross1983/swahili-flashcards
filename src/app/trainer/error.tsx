@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import AppRouteState from "@/components/AppRouteState";
+import { reportBoundaryError } from "@/lib/diagnostics/client";
 
 type TrainerErrorProps = {
   error: Error & { digest?: string };
@@ -12,6 +13,7 @@ type TrainerErrorProps = {
 export default function TrainerError({ error, reset }: TrainerErrorProps) {
   useEffect(() => {
     console.error("Trainer route failed", error);
+    reportBoundaryError(error);
   }, [error]);
 
   return (

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import AppRouteState from "@/components/AppRouteState";
+import { reportBoundaryError } from "@/lib/diagnostics/client";
 
 type ErrorProps = {
   error: Error & { digest?: string };
@@ -12,6 +13,7 @@ type ErrorProps = {
 export default function Error({ error, reset }: ErrorProps) {
   useEffect(() => {
     console.error("App route failed", error);
+    reportBoundaryError(error);
   }, [error]);
 
   return (

@@ -1,10 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { playCorrect, playWrong } from "@/lib/audio/sounds";
 import { fetchAllCardsForDrill, fetchLastMissedItems, fetchTodayItems, postGrade, postLastMissed, postLearnSession } from "@/lib/trainer/api";
 import { findNextUnansweredIndex, removeDeletedCardsFromSession } from "@/lib/trainer/engine";
 import { canStartTraining, type TrainingMaterial } from "@/lib/trainer/setup";
 import type { CardType, Direction, TodayItem } from "@/lib/trainer/types";
 import { resolveCardId, shuffleArray } from "@/lib/trainer/utils";
+import { LearningRunDiagnostics } from "@/lib/diagnostics/learningRun";
 import {
     canAcceptGradeTap,
     chooseDirection,
@@ -58,10 +59,18 @@ export function useTrainerSession({
     const [lastMissedEmpty, setLastMissedEmpty] = useState(false);
     const [learnLoadError, setLearnLoadError] = useState<string | null>(null);
     const [gradingInFlight, setGradingInFlight] = useState(false);
-    const sessionSavedRef = useRef(false);
+    const sessionSavedRef = useRef(new WeakSet<LearningRunDiagnostics>());
     const gradingInFlightRef = useRef(false);
+    const activeSessionModeRef = useRef<LearnMode>(null);
+    const startingRef = useRef(false);
+    const runRef = useRef<LearningRunDiagnostics | null>(null);
+    if (!runRef.current) runRef.current = new LearningRunDiagnostics();
+    useEffect(() => () => runRef.current?.dispose(), []);
 
     function resetSessionTracking() {
+        if (gradingInFlightRef.current) runRef.current?.pause();
+        else runRef.current?.end("navigation");
+        runRef.current = new LearningRunDiagnostics();
         setSessionCorrect(0);
         setSessionTotal(0);
         setSessionWrongIds(new Set());
@@ -72,7 +81,7 @@ export function useTrainerSession({
         setLearnDone(false);
         setLastMissedEmpty(false);
         setEndedEarly(false);
-        sessionSavedRef.current = false;
+        activeSessionModeRef.current = null;
         gradingInFlightRef.current = false;
         setGradingInFlight(false);
         onDebugSessionReset?.();
@@ -92,13 +101,18 @@ export function useTrainerSession({
         }
     }
 
-    async function persistLearnSession(params: { mode: "LEITNER" | "DRILL"; totalCount: number; correctCount: number; wrongCardIds: string[]; }) {
-        if (sessionSavedRef.current) return;
-        sessionSavedRef.current = true;
+    async function persistLearnSession(params: { mode: "LEITNER" | "DRILL"; totalCount: number; correctCount: number; wrongCardIds: string[]; }, run: LearningRunDiagnostics | null = runRef.current): Promise<boolean> {
+        if (params.totalCount === 0) return true;
+        if (run && sessionSavedRef.current.has(run)) return true;
+        if (run) sessionSavedRef.current.add(run);
         try {
-            await postLearnSession(params);
+            await postLearnSession(params, run?.runId);
+            return true;
         } catch (error) {
+            if (run) sessionSavedRef.current.delete(run);
+            run?.markSessionSaveFailure();
             console.error("Failed to persist learn session", error);
+            return false;
         }
     }
 
@@ -114,11 +128,11 @@ export function useTrainerSession({
         });
     }
 
-    async function loadToday() {
+    async function loadToday(runId?: string | null) {
         onStatus("Lade fällige Karten...");
         setLearnLoadError(null);
         try {
-            const items = await fetchTodayItems(cardType);
+            const items = await fetchTodayItems(cardType, undefined, runId);
             setSessionTotal(items.length);
             setTodayItems(shuffleArray(items));
             setSessionCorrect(0);
@@ -190,6 +204,10 @@ export function useTrainerSession({
     }
 
     function startDrillWithItems(items: TodayItem[]) {
+        const run = runRef.current;
+        run?.start("DRILL", "repair_drill");
+        run?.loaded(items.length);
+        activeSessionModeRef.current = "DRILL";
         setLastMissedEmpty(false);
         setSessionTotal(items.length);
         setTodayItems(shuffleArray(items));
@@ -208,7 +226,7 @@ export function useTrainerSession({
         const nextDirectionMode = config?.directionMode ?? directionMode;
         const skipValidationHighlights = config?.skipValidationHighlights ?? false;
 
-        if (!nextLearnMode) return;
+        if (!nextLearnMode || startingRef.current) return;
         if (!nextDirectionMode) {
             if (!skipValidationHighlights) onValidationHighlight?.("DIRECTION");
             return;
@@ -217,49 +235,59 @@ export function useTrainerSession({
             if (!skipValidationHighlights) onValidationHighlight?.("MATERIAL");
             return;
         }
-
-        setLearnMode(nextLearnMode);
-        setTrainingMaterial(nextTrainingMaterial);
-        setDirectionMode(nextDirectionMode);
-        stopAnyAudio?.();
-        resetSessionTracking();
-        setLearnLoadError(null);
-        setTodayItems([]);
-        setDirection(chooseDirection(nextDirectionMode));
-        setReveal(false);
-        setCurrentIndex(0);
-
-        let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
         const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial);
-        if (loadPlan?.kind === "today") {
-            loadResult = await loadToday();
-            loadLeitnerStatsInBackground();
-            if (loadResult.ok && loadResult.items.length === 0) {
-                void persistLearnSession({ mode: "LEITNER", totalCount: 0, correctCount: 0, wrongCardIds: [] });
-            }
-        } else if (loadPlan?.kind === "all") {
-            loadResult = await loadAllForDrill(loadPlan.groupIds);
-        } else if (loadPlan?.kind === "last-missed") {
-            loadResult = await loadLastMissed();
-        }
+        if (!loadPlan) return;
+        startingRef.current = true;
 
-        if (!loadResult.ok) {
-            setLearnStarted(false);
-            return;
-        }
-        setLearnStarted(true);
+        try {
+            setLearnMode(nextLearnMode);
+            setTrainingMaterial(nextTrainingMaterial);
+            setDirectionMode(nextDirectionMode);
+            stopAnyAudio?.();
+            resetSessionTracking();
+            const run = runRef.current;
+            setLearnLoadError(null);
+            setTodayItems([]);
+            setDirection(chooseDirection(nextDirectionMode));
+            setReveal(false);
+            setCurrentIndex(0);
+            run?.start(nextLearnMode, loadPlan.kind === "today" ? "today" : loadPlan.kind === "last-missed" ? "last_missed" : "all_cards");
+
+            let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
+            if (loadPlan?.kind === "today") {
+                loadResult = await loadToday(run?.runId);
+                loadLeitnerStatsInBackground();
+            } else if (loadPlan?.kind === "all") {
+                loadResult = await loadAllForDrill(loadPlan.groupIds);
+            } else if (loadPlan?.kind === "last-missed") {
+                loadResult = await loadLastMissed();
+            }
+
+            if (!loadResult.ok) {
+                run?.end("load_failed");
+                setLearnStarted(false);
+                return;
+            }
+            run?.loaded(loadResult.items.length);
+            if (loadResult.items.length === 0) run?.end("completed");
+            activeSessionModeRef.current = nextLearnMode;
+            setLearnStarted(true);
+        } finally { startingRef.current = false; }
     }
     function revealCard() {
         setReveal(true);
         playCardAudioIfExists(todayItems[currentIndex], "reveal");
     }
     async function endSessionEarly() {
+        const run = runRef.current;
+        run?.pause();
         stopAnyAudio?.();
         if (isRecording) stopRecording();
         const wrongIds = Array.from(sessionWrongIds);
         if (wrongIds.length > 0) await Promise.all(wrongIds.map((id) => updateLastMissed("add", id)));
         const answeredCount = answeredCardIds.size;
-        await persistLearnSession({ mode: sessionSummaryMode(learnMode), totalCount: answeredCount, correctCount: sessionCorrect, wrongCardIds: wrongIds });
+        await persistLearnSession({ mode: sessionSummaryMode(activeSessionModeRef.current), totalCount: answeredCount, correctCount: sessionCorrect, wrongCardIds: wrongIds }, run);
+        run?.end("user_ended");
         await refreshSetupCounts();
         setSessionTotal(answeredCount);
         setReveal(false);
@@ -270,7 +298,9 @@ export function useTrainerSession({
     }
     async function gradeCurrent(correct: boolean) {
         const item = todayItems[currentIndex];
-        if (!canAcceptGradeTap({ gradingInFlight: gradingInFlightRef.current, isRecording, hasItem: Boolean(item) })) {
+        const sessionMode = activeSessionModeRef.current;
+        const run = runRef.current;
+        if (!canAcceptGradeTap({ gradingInFlight: gradingInFlightRef.current, isRecording, hasItem: Boolean(item) && Boolean(sessionMode) })) {
             if (isRecording && !gradingInFlightRef.current) stopRecording();
             return;
         }
@@ -306,7 +336,7 @@ export function useTrainerSession({
         setReveal(false);
         if (sessionComplete) {
             setTodayItems([]);
-            if (learnMode === "DRILL") setShowSummary(true);
+            if (sessionMode === "DRILL") setShowSummary(true);
             else setLearnDone(true);
         } else {
             setCurrentIndex(fallbackIndex);
@@ -318,27 +348,33 @@ export function useTrainerSession({
                 await updateLastMissed("add", cardId as string);
             }
 
-            if (learnMode === "DRILL") {
-                if (shouldRemoveLastMissed({ learnMode, trainingMaterial, correct, cardId })) {
+            if (sessionMode === "DRILL") {
+                if (shouldRemoveLastMissed({ learnMode: sessionMode, trainingMaterial, correct, cardId })) {
                     const removed = await updateLastMissed("remove", cardId);
                     if (removed) {
                         onLastMissedRemoved?.();
                         void refreshSetupCounts();
                     }
                 }
+                run?.confirmed(correct, false);
                 if (sessionComplete) {
-                    await persistLearnSession({ mode: "DRILL", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) });
+                    run?.pause();
+                    await persistLearnSession({ mode: "DRILL", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }, run);
+                    run?.end("completed");
                     await refreshSetupCounts();
                 }
                 return;
             }
 
             try {
-                await postGrade({ cardId, correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 });
-            } catch { }
+                await postGrade({ cardId, correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 }, run?.runId);
+                run?.confirmed(correct, true);
+            } catch { run?.markGradeFailure(); }
 
             if (sessionComplete) {
-                await persistLearnSession({ mode: "LEITNER", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) });
+                run?.pause();
+                await persistLearnSession({ mode: "LEITNER", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }, run);
+                run?.end("completed");
                 await loadLeitnerStats();
                 await refreshSetupCounts();
             }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { canonicalizeToSwDe } from "@/lib/cards/saveFlow";
 import { requireUser } from "@/lib/api/auth";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { findExistingMatch } from "@/lib/cards/existence";
 import { sanitizeExampleMarkup } from "@/lib/examples/formatting";
 import { getOrCheckSentenceLanguages, SentenceLanguageRateLimitError } from "@/lib/sentence/languageCheck";
@@ -47,7 +48,7 @@ function checkRateLimit(key: string) {
     return true;
 }
 
-export async function POST(req: Request) {
+export const POST = withServerDiagnostics("/api/cards/create", async (req, diagnostics) => {
     let body: CreateCardBody;
 
     try {
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
 
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const ownerKey = user.id;
     const frontText = typeof body.front_text === "string" ? body.front_text.trim() : "";
@@ -104,6 +106,7 @@ export async function POST(req: Request) {
 
     if (selectError) {
         console.error(selectError);
+        diagnostics.supabaseFailure("cards", "select", selectError.code);
         return NextResponse.json({ error: "Speichern fehlgeschlagen." }, { status: 500 });
     }
 
@@ -153,6 +156,7 @@ export async function POST(req: Request) {
 
     if (error) {
         console.error(error);
+        diagnostics.supabaseFailure("cards", "insert", error.code);
         return NextResponse.json({ error: "Speichern fehlgeschlagen." }, { status: 500 });
     }
 
@@ -165,8 +169,9 @@ export async function POST(req: Request) {
 
     if (progressError) {
         console.error(progressError);
+        diagnostics.supabaseFailure("card_progress", "insert", progressError.code);
         return NextResponse.json({ error: "Speichern fehlgeschlagen." }, { status: 500 });
     }
 
     return NextResponse.json({ status: "created", id: card.id });
-}
+});

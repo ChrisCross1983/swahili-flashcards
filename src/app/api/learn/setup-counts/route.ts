@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
+import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
 
 const MISSING_TABLE_CODES = new Set(["42P01"]);
@@ -11,6 +12,10 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
     return error.message?.toLowerCase().includes("does not exist") ?? false;
 }
 
+class CountQueryError extends Error {
+    constructor(readonly table: string, readonly code: string | undefined, message: string) { super(message); }
+}
+
 async function safeCount(table: string, applyFilters?: (q: any) => any, select = "*") {
     let q = supabaseServer.from(table).select(select, { count: "exact", head: true });
     if (applyFilters) q = applyFilters(q);
@@ -18,14 +23,15 @@ async function safeCount(table: string, applyFilters?: (q: any) => any, select =
     const { count, error } = await q;
     if (error) {
         if (isMissingTableError(error)) return 0;
-        throw new Error(error.message);
+        throw new CountQueryError(table, error.code, error.message);
     }
     return count ?? 0;
 }
 
-export async function GET(req: Request) {
+export const GET = withServerDiagnostics("/api/learn/setup-counts", async (req, diagnostics) => {
     const { user, response } = await requireUser();
     if (response) return response;
+    diagnostics.setUser(user.id);
 
     const { searchParams } = new URL(req.url);
     const ownerKey = user.id;
@@ -70,7 +76,8 @@ export async function GET(req: Request) {
 
         return NextResponse.json({ todayDue, totalCards, lastMissedCount });
     } catch (error) {
+        if (error instanceof CountQueryError) diagnostics.supabaseFailure(error.table, "select", error.code);
         const message = error instanceof Error ? error.message : "Unknown error";
         return NextResponse.json({ error: message }, { status: 500 });
     }
-}
+});
