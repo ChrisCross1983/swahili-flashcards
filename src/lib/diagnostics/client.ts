@@ -23,6 +23,7 @@ let sending = false;
 let attempts = 0;
 let listeners = 0;
 let installedCleanup: (() => void) | null = null;
+let ingestUnavailableUntil = 0;
 
 function route(): string {
     if (typeof window === "undefined") return "/other";
@@ -63,7 +64,7 @@ function schedule(ms = FLUSH_MS) {
 }
 
 export async function flushDiagnostics(keepalive = false): Promise<void> {
-    if (sending || queue.length === 0 || typeof window === "undefined") return;
+    if (Date.now() < ingestUnavailableUntil || sending || queue.length === 0 || typeof window === "undefined") return;
     sending = true;
     const batch = queue.slice(0, BATCH);
     try {
@@ -73,7 +74,11 @@ export async function flushDiagnostics(keepalive = false): Promise<void> {
             // Same-origin cookies authenticate the request; keepalive also covers navigation during an in-flight flush.
             keepalive: true,
         });
-        if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
+        if (response.status === 503) {
+            ingestUnavailableUntil = process.env.NODE_ENV === "production" ? Date.now() + 60_000 : Infinity;
+            queue.length = 0;
+            attempts = 0;
+        } else if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
             queue.splice(0, batch.length);
             attempts = 0;
         } else {
@@ -93,6 +98,7 @@ export async function reportClientError(input: {
 }): Promise<void> {
     try {
     if (typeof window === "undefined" || typeof navigator === "undefined") return;
+    if (Date.now() < ingestUnavailableUntil) return;
     const page = input.route ? normalizeRoute(input.route) : route();
     if (!page || page === "/api/diagnostics") return;
     const status = input.http_status && input.http_status >= 100 && input.http_status <= 599 ? input.http_status : null;
@@ -145,7 +151,7 @@ export function reportBoundaryError(error: Error): void {
 
 export function resetClientDiagnosticsForTests(): void {
     if (timer) clearTimeout(timer);
-    timer = null; sending = false; attempts = 0; queue.length = 0; recent.clear();
+    timer = null; sending = false; attempts = 0; ingestUnavailableUntil = 0; queue.length = 0; recent.clear();
     installedCleanup?.(); installedCleanup = null; listeners = 0;
 }
 

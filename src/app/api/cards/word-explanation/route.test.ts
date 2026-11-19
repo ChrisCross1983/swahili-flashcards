@@ -6,7 +6,7 @@ const { requireUser, from, getExistingEnrichment, generateWordUnderstanding } = 
 vi.mock("@/lib/api/auth", () => ({ requireUser }));
 vi.mock("@/lib/supabaseServer", () => ({ supabaseServer: { from } }));
 vi.mock("@/lib/aiCoach/enrichment/generateEnrichment", () => ({ getExistingEnrichment, generateWordUnderstanding }));
-import { GET, POST } from "./route";
+import { GET, POST, PUT } from "./route";
 
 const example = { sw: "Mlango umefungwa.", de: "Die Tür ist geschlossen." };
 const enrichment = {
@@ -20,6 +20,7 @@ describe("word explanation route", () => {
     const upsert = vi.fn();
     beforeEach(() => {
         vi.clearAllMocks();
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "test-only-preview-signing-secret";
         requireUser.mockResolvedValue({ user: { id: "owner" }, response: null });
         getExistingEnrichment.mockResolvedValue(null);
         generateWordUnderstanding.mockResolvedValue(enrichment);
@@ -52,13 +53,24 @@ describe("word explanation route", () => {
         const response = await POST(new Request("http://localhost/api/cards/word-explanation", { method: "POST", body: JSON.stringify({ cardId: "word-1", regenerate: true }) }));
         expect(response.status).toBe(200);
         expect(generateWordUnderstanding).toHaveBeenCalledOnce();
-        expect(upsert).toHaveBeenCalledOnce();
+        expect((await response.json()).previewToken).toEqual(expect.any(String));
+        expect(upsert).not.toHaveBeenCalled();
     });
-    it("persists a generated explanation to the original card enrichment", async () => {
+    it("persists only after accepting the signed preview", async () => {
         const response = await POST(request());
         expect(response.status).toBe(200);
         expect(generateWordUnderstanding).toHaveBeenCalledWith(expect.objectContaining({ id: "word-1", swahili_text: "mlango" }));
-        expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ owner_key: "owner", card_id: "word-1", noun_class: "m/mi", notes: enrichment.notes }), { onConflict: "owner_key,card_id" });
+        expect(upsert).not.toHaveBeenCalled();
+        const { previewToken } = await response.json();
+        const accepted = await PUT(new Request("http://localhost/api/cards/word-explanation", { method: "PUT", body: JSON.stringify({ cardId: "word-1", previewToken }) }));
+        expect(accepted.status).toBe(200);
+        expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ owner_key: "owner", card_id: "word-1", type: "vocab", noun_class: "m/mi", notes: enrichment.notes }), { onConflict: "owner_key,card_id" });
+    });
+    it("rejects a foreign or tampered preview without saving", async () => {
+        const { previewToken } = await (await POST(request())).json();
+        expect((await PUT(new Request("http://localhost/api/cards/word-explanation", { method: "PUT", body: JSON.stringify({ cardId: "another-card", previewToken }) }))).status).toBe(400);
+        expect((await PUT(new Request("http://localhost/api/cards/word-explanation", { method: "PUT", body: JSON.stringify({ cardId: "word-1", previewToken: `${previewToken}x` }) }))).status).toBe(400);
+        expect(upsert).not.toHaveBeenCalled();
     });
     it("does not persist invalid generation", async () => {
         generateWordUnderstanding.mockResolvedValue({ ...enrichment, examples: [] });
@@ -66,7 +78,7 @@ describe("word explanation route", () => {
         expect(response.status).toBe(502);
         expect(upsert).not.toHaveBeenCalled();
     });
-    it("generates and persists a phrase when no enrichment row exists", async () => {
+    it("generates a phrase preview and saves it only after acceptance", async () => {
         const phrase = { ...enrichment, pos: "phrase", noun_class: null, singular: null, plural: null,
             notes: "habari und za asubuhi bilden einen Morgengruß.", examples: [{ sw: "Habari za asubuhi?", de: "Guten Morgen?" }] };
         from.mockImplementation((table: string) => {
@@ -80,6 +92,9 @@ describe("word explanation route", () => {
         const response = await POST(request("phrase-1"));
         expect(response.status).toBe(200);
         expect(generateWordUnderstanding).toHaveBeenCalledWith(expect.objectContaining({ id: "phrase-1", swahili_text: "Habari za asubuhi", type: "vocab" }));
+        expect(upsert).not.toHaveBeenCalled();
+        const { previewToken } = await response.json();
+        expect((await PUT(new Request("http://localhost/api/cards/word-explanation", { method: "PUT", body: JSON.stringify({ cardId: "phrase-1", previewToken }) }))).status).toBe(200);
         expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ card_id: "phrase-1", pos: "phrase" }), { onConflict: "owner_key,card_id" });
         getExistingEnrichment.mockResolvedValue(phrase);
         const reopened = await GET(new Request("http://localhost/api/cards/word-explanation?cardId=phrase-1"));

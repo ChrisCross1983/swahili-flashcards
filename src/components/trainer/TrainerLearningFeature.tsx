@@ -16,6 +16,7 @@ export default function TrainerLearningFeature({ cardId, cardType, german, swahi
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(false);
+    const [imageStorageUnavailable, setImageStorageUnavailable] = useState(false);
     const [success, setSuccess] = useState<string | null>(null);
     const [explanation, setExplanation] = useState<SentenceExplanation | null>(null);
     useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -40,14 +41,14 @@ export default function TrainerLearningFeature({ cardId, cardType, german, swahi
     }
     async function acceptImage() {
         if (lock.current || !media.generatedPreview) return;
-        lock.current = true; setSaving(true); setError(false);
+        lock.current = true; setSaving(true); setError(false); setImageStorageUnavailable(false);
         try {
             const path = await uploadImageFile(illustrationPreviewFile(media.generatedPreview));
             if (!active.current) return;
             await patch({ imagePath: path });
             onSaved(cardId, { image_path: path });
             if (active.current) { media.discardIllustration(); setSuccess("Illustration gespeichert"); }
-        } catch { if (active.current) setError(true); }
+        } catch (cause) { if (active.current) { setError(true); setImageStorageUnavailable(cause instanceof Error && cause.message === "image_storage_unavailable"); } }
         finally { lock.current = false; if (active.current) setSaving(false); }
     }
     if (cardType === "sentence") return <section className="trainer-learning-feature" aria-label="Grammatik verstehen">
@@ -60,10 +61,10 @@ export default function TrainerLearningFeature({ cardId, cardType, german, swahi
     return <section className="trainer-learning-feature" aria-label="Lernbild">
         <h3>Lernbild</h3><p>Erstelle eine Illustration, damit du dir das Wort leichter merken kannst.</p>
         {media.generationLoading ? <div className="trainer-learning-loading" role="status">Illustration wird erstellt …<small>Das kann einige Sekunden dauern.</small></div> : null}
-        {media.generatedPreview ? <div><Image src={media.generatedPreview} alt="Neue Illustration zur Vorschau" width={256} height={256} unoptimized className="trainer-learning-image" />
-            <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-primary min-h-11" disabled={saving} onClick={() => void acceptImage()}>{saving ? "Wird gespeichert …" : "Übernehmen"}</button><button type="button" className="btn btn-secondary min-h-11" disabled={saving || media.generationLoading || media.generationCooldownSeconds > 0} onClick={() => void media.generateIllustration(german, swahili)}>Neu erzeugen</button><button type="button" className="btn btn-ghost min-h-11" disabled={saving} onClick={media.discardIllustration}>Verwerfen</button></div></div> : <button type="button" className="btn btn-primary min-h-11" disabled={media.generationLoading || media.generationCooldownSeconds > 0} onClick={() => void media.generateIllustration(german, swahili)}>{media.generationLoading ? "Illustration wird erstellt …" : "Illustration erzeugen"}</button>}
+        {media.generatedPreview ? <div><p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Vorschau · noch nicht gespeichert</p><Image src={media.generatedPreview} alt="Neue Illustration zur Vorschau" width={256} height={256} unoptimized className="trainer-learning-image" />
+            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" className="btn btn-primary min-h-11" disabled={saving} onClick={() => void acceptImage()}>{saving ? "Wird gespeichert …" : "Übernehmen"}</button><button type="button" className="btn btn-secondary min-h-11" disabled={saving} onClick={media.discardIllustration}>Verwerfen</button></div></div> : <button type="button" className="btn btn-primary min-h-11" disabled={media.generationLoading || media.generationCooldownSeconds > 0} onClick={() => void media.generateIllustration(german, swahili)}>{media.generationLoading ? "Illustration wird erstellt …" : "Illustration erzeugen"}</button>}
         {media.generationError ? <p role="alert">{media.generationError}</p> : null}
-        {error ? <p role="alert">Die Illustration konnte gerade nicht gespeichert werden. Bitte versuche es erneut.</p> : null}
+        {error ? <p role="alert">{imageStorageUnavailable ? "Das Bildspeichern ist derzeit nicht verfügbar. Du kannst ohne Bild weiterlernen." : "Die Illustration konnte gerade nicht gespeichert werden. Bitte versuche es erneut."}</p> : null}
         {success ? <p role="status">{success}</p> : null}
     </section>;
 }

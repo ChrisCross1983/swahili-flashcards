@@ -5,10 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { fetchSetupCounts } from "@/lib/trainer/api";
 import { LIVE_TRANSLATOR_BETA } from "@/lib/translator/live/config";
+import Link from "next/link";
 
-type Props = { ownerKey: string };
+type Props = { ownerKey: string; isAdmin?: boolean };
 
-export default function HomeClient({ ownerKey }: Props) {
+export default function HomeClient({ ownerKey, isAdmin = false }: Props) {
   void ownerKey;
   const router = useRouter();
   const pathname = usePathname();
@@ -156,6 +157,9 @@ export default function HomeClient({ ownerKey }: Props) {
             <div className="mt-2 text-sm text-muted">Fortschritt, Level und Lernqualität im Dashboard.</div>
           </button>
         </div>
+        {isAdmin ? <nav aria-label="Administration" className="mt-6 text-right">
+          <Link href="/admin/health" className="inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-medium text-muted underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]">Health Center</Link>
+        </nav> : null}
       </div>
     </main>
   );

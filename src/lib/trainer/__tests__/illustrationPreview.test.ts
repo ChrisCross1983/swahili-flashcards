@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { illustrationPreviewFile } from "../useTrainerCardMedia";
+import { describe, expect, it, vi } from "vitest";
+import { illustrationPreviewFile, uploadImageFile } from "../useTrainerCardMedia";
 
 const mediaSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardMedia.ts"), "utf8");
 const saveSource = fs.readFileSync(path.join(process.cwd(), "src/lib/trainer/useTrainerCardSaveFlow.ts"), "utf8");
@@ -18,6 +18,14 @@ describe("illustration preview flow", () => {
 
   it("rejects an unexpected preview format", () => {
     expect(() => illustrationPreviewFile("https://example.com/image.jpg")).toThrow("invalid_preview");
+  });
+
+  it("explains unavailable local storage without exposing upstream details", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "private upstream detail" }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(uploadImageFile(new File(["image"], "preview.webp", { type: "image/webp" }))).rejects.toThrow("image_storage_unavailable");
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("only uploads after accepting and saving, with retry/discard and a request lock", () => {

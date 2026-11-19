@@ -84,6 +84,17 @@ describe("client diagnostics", () => {
         expect(fetchMock.mock.calls[0][0]).toBe("/api/diagnostics/events");
     });
 
+    it("disables the local event queue after a 503 without retry spam", async () => {
+        const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
+        vi.stubGlobal("fetch", fetchMock);
+        await reportClientError({ category: "api_failure", error_code: "api_request_failed", route: "/api/learn/grade", http_status: 500 });
+        await flushDiagnostics();
+        await reportClientError({ category: "api_failure", error_code: "api_request_failed", route: "/api/learn/today", http_status: 500 });
+        await flushDiagnostics();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(queuedDiagnosticsForTests()).toHaveLength(0);
+    });
+
     it("uses same-origin keepalive when the page is left", async () => {
         const fetchMock = vi.fn<(_url: string, _init?: RequestInit) => Promise<Response>>(async () => new Response(null, { status: 200 }));
         vi.stubGlobal("fetch", fetchMock);

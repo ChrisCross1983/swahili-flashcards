@@ -1,12 +1,13 @@
 import { useId, type ReactNode, type Ref } from "react";
 
-export type SentenceFeatureIconName = "grammar" | "notes" | "group" | "audio" | "image" | "swap";
+export type SentenceFeatureIconName = "grammar" | "notes" | "group" | "audio" | "speaker" | "image" | "swap";
 
 const iconPaths: Record<SentenceFeatureIconName, ReactNode> = {
     grammar: <><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /><path d="m12 7 1.3 3.7L17 12l-3.7 1.3L12 17l-1.3-3.7L7 12l3.7-1.3L12 7Z" /></>,
     notes: <><path d="M5 4.5h11a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2V4.5Z" /><path d="M8 9h7M8 12h7M8 15h5" /><path d="M18 8h1a1 1 0 0 1 1 1v11" /></>,
     group: <><circle cx="9" cy="8" r="3" /><path d="M3.5 19v-1.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V19H3.5ZM16 5.2a3 3 0 0 1 0 5.6M17 13.2a4.5 4.5 0 0 1 3.5 4.3V19h-3" /></>,
     audio: <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4m-4 0h8" /></>,
+    speaker: <><path d="M4 9v6h4l5 4V5L8 9H4Z" /><path d="M17 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 17 4.5-4.5 3 3L15 12l5 5" /></>,
     swap: <><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4" /></>,
 };

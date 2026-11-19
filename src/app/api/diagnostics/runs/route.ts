@@ -8,6 +8,16 @@ import { readBoundedJson, sameOrigin } from "@/lib/diagnostics/validation";
 export const runtime = "nodejs";
 
 const json = (code: string, status: number) => NextResponse.json({ code }, { status });
+const loggedStages = new Set<string>();
+function unavailable(stage: string, error: { code?: string } | null | undefined) {
+    if (!loggedStages.has(stage)) {
+        loggedStages.add(stage);
+        console.error("[diagnostics/runs] ingest unavailable", {
+            stage, code: typeof error?.code === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(error.code) ? error.code : undefined,
+        });
+    }
+    return json("diagnostics_unavailable", 503);
+}
 
 export async function POST(request: Request) {
     const auth = await requireUser();
@@ -24,17 +34,17 @@ export async function POST(request: Request) {
         const since = new Date(Date.now() - 3_600_000).toISOString();
         const { count, error: countError } = await supabaseServer.from("learning_run_health")
             .select("run_id", { count: "exact", head: true }).eq("user_id", auth.user.id).gte("started_at", since);
-        if (countError || count === null) return json("diagnostics_unavailable", 503);
+        if (countError || count === null) return unavailable("count", countError);
         if (count >= 120) return json("rate_limited", 429);
         const { error } = await supabaseServer.from("learning_run_health").insert({
             run_id: action.run_id, user_id: auth.user.id, mode: action.mode, run_kind: action.run_kind,
             status: "loading", build_version: action.build_version,
         });
         if (!error) return NextResponse.json({ applied: true });
-        if (error.code !== "23505") return json(error.code === "23514" ? "invalid_run_update" : "diagnostics_unavailable", error.code === "23514" ? 400 : 503);
+        if (error.code !== "23505") return error.code === "23514" ? json("invalid_run_update", 400) : unavailable("start", error);
         const { data, error: lookupError } = await supabaseServer.from("learning_run_health")
             .select("run_id").eq("run_id", action.run_id).eq("user_id", auth.user.id).maybeSingle();
-        if (lookupError) return json("diagnostics_unavailable", 503);
+        if (lookupError) return unavailable("start_lookup", lookupError);
         return data ? NextResponse.json({ applied: false }) : json("run_id_unavailable", 409);
     }
 
@@ -72,12 +82,12 @@ export async function POST(request: Request) {
         ? query.lte("sequence_number", action.sequence_number)
         : query.lt("sequence_number", action.sequence_number);
     const { data, error } = await sequenced.eq("run_id", action.run_id).eq("user_id", auth.user.id).select("run_id");
-    if (error) return json(error.code === "23514" ? "invalid_run_update" : "diagnostics_unavailable", error.code === "23514" ? 400 : 503);
+    if (error) return error.code === "23514" ? json("invalid_run_update", 400) : unavailable("update", error);
     if (data && data.length > 0) return NextResponse.json({ applied: true });
 
     // Distinguish a stale/idempotent update from a missing or foreign run without exposing ownership.
     const { data: existing, error: lookupError } = await supabaseServer.from("learning_run_health")
         .select("run_id").eq("run_id", action.run_id).eq("user_id", auth.user.id).maybeSingle();
-    if (lookupError) return json("diagnostics_unavailable", 503);
+    if (lookupError) return unavailable("update_lookup", lookupError);
     return existing ? NextResponse.json({ applied: false }) : json("run_not_found", 404);
 }

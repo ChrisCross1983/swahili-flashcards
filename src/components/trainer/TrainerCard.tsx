@@ -19,6 +19,7 @@ type Props = {
     onOpenLearningHelp?: () => void;
     sentenceExplanation?: SentenceExplanation | null;
     learningFeature?: ReactNode;
+    compactVocabExtras?: boolean;
     autoOpenExplanation?: boolean;
 };
 
@@ -72,6 +73,7 @@ export default function TrainerCard({
     onOpenLearningHelp,
     sentenceExplanation,
     learningFeature,
+    compactVocabExtras = false,
     autoOpenExplanation = false,
 }: Props) {
     const [showPromptExample, setShowPromptExample] = useState(false);
@@ -79,9 +81,9 @@ export default function TrainerCard({
     const [showSentenceExplanation, setShowSentenceExplanation] = useState(autoOpenExplanation);
 
     return (
-        <div className="rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6" data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
-            <div className={reveal ? "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
-                <div className="rounded-2xl border border-soft bg-surface-elevated p-5">
+        <div className={`rounded-3xl border border-soft bg-surface shadow-warm sm:p-6 ${compactVocabExtras ? "p-3" : "p-5"}`} data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
+            <div className={reveal ? compactVocabExtras ? "space-y-3 sm:space-y-5" : "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
+                <div className={`rounded-2xl border border-soft bg-surface-elevated sm:p-5 ${compactVocabExtras ? "p-3" : "p-5"}`}>
                     <div className="text-xs font-semibold tracking-wide text-muted uppercase">Übersetze</div>
                     <div className="mt-3 text-3xl font-semibold leading-tight text-primary sm:text-4xl">
                         <CardText>{prompt}</CardText>
@@ -97,8 +99,8 @@ export default function TrainerCard({
                 </div>
 
                 {reveal ? (
-                    <div className="space-y-4">
-                        <div className="rounded-2xl border border-cta bg-surface p-4 shadow-soft">
+                    <div className={compactVocabExtras ? "space-y-3 sm:space-y-4" : "space-y-4"}>
+                        <div className={`rounded-2xl border border-cta bg-surface shadow-soft sm:p-4 ${compactVocabExtras ? "p-3" : "p-4"}`}>
                             <div className="text-xs font-semibold tracking-wide text-accent-cta uppercase">Antwort</div>
                             <div className="mt-2 text-2xl font-semibold leading-tight text-primary sm:text-3xl">
                                 <CardText>{answer}</CardText>
@@ -113,7 +115,7 @@ export default function TrainerCard({
                             ) : null}
                         </div>
 
-                        {imagePath ? (
+                        {!compactVocabExtras && imagePath ? (
                             <div>
                                 <img src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" className="trainer-learning-image" />
                             </div>
@@ -127,7 +129,7 @@ export default function TrainerCard({
 
                         {learningFeature}
 
-                        {onOpenLearningHelp ? (
+                        {onOpenLearningHelp && !compactVocabExtras ? (
                             <div className="flex items-center justify-between gap-3" data-testid="learning-secondary-actions">
                                 {learningTypeLabel ? <span className="badge">{learningTypeLabel}</span> : <span />}
 

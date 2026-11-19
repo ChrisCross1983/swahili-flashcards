@@ -81,6 +81,8 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
     const [error, setError] = useState(false);
     const [open, setOpen] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [preview, setPreview] = useState<{ enrichment: WordEnrichment; token: string } | null>(null);
+    const [accepting, setAccepting] = useState(false);
     useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
     useEffect(() => {
@@ -115,24 +117,56 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
             const body = await response.json().catch(() => ({}));
             const result = body.enrichment as WordEnrichment | undefined;
             if (!response.ok || !result || !hasWordUnderstanding(result)) throw new Error("generation_failed");
-            onSaved(cardId, result);
-            if (active.current) { setEnrichment(result); onChangeRef.current?.(result); setOpen(true); setSaved(!body.reused); }
+            if (active.current) {
+                if (body.reused) { setEnrichment(result); onChangeRef.current?.(result); }
+                else if (typeof body.previewToken === "string") setPreview({ enrichment: result, token: body.previewToken });
+                else throw new Error("missing_preview_token");
+            }
         } catch { if (active.current) setError(true); }
         finally { lock.current = false; if (active.current) setGenerating(false); }
     }
 
+    async function acceptPreview() {
+        if (!preview || accepting) return;
+        setAccepting(true); setError(false);
+        try {
+            const response = await fetch("/api/cards/word-explanation", {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cardId, previewToken: preview.token }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !hasWordUnderstanding(body.enrichment)) throw new Error("save_failed");
+            onSaved(cardId, body.enrichment);
+            if (active.current) {
+                setEnrichment(body.enrichment); onChangeRef.current?.(body.enrichment);
+                setPreview(null); setSaved(true); setOpen(true);
+            }
+        } catch { if (active.current) setError(true); }
+        finally { if (active.current) setAccepting(false); }
+    }
+
+    const previewContent = preview ? <div aria-label="Worterklärung Vorschau">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Vorschau · noch nicht gespeichert</p>
+        <WordUnderstandingContent enrichment={preview.enrichment} swahili={swahili} german={german} />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" className="btn btn-primary min-h-11" disabled={accepting} onClick={() => void acceptPreview()}>{accepting ? "Wird gespeichert …" : "Übernehmen"}</button>
+            <button type="button" className="btn btn-secondary min-h-11" disabled={accepting} onClick={() => { setPreview(null); setError(false); }}>Verwerfen</button>
+        </div>
+    </div> : null;
+
     if (loading) return <div className="trainer-learning-loading" role="status">Wortwissen wird geladen …</div>;
     if (embedded) return <div className={`word-understanding-form-panel ${detailPresentation ? "word-understanding-detail-panel" : ""}`} aria-label="Wort verstehen">
-        {enrichment && hasWordUnderstanding(enrichment) ? <>
+        {previewContent ?? (enrichment && hasWordUnderstanding(enrichment) ? <>
             <WordUnderstandingContent enrichment={enrichment} swahili={swahili} german={german} />
             {allowRegenerate ? <button type="button" className="btn btn-ghost word-understanding-regenerate" disabled={generating} onClick={() => void generate(true)}>{generating ? "Worterklärung wird erstellt …" : "Neu erzeugen"}</button> : null}
         </> : <>
             <p className="text-sm text-muted">{detailPresentation ? "Noch keine Worterklärung vorhanden." : "Klasse, Formen und Verwendung dieses Wortes verstehen."}</p>
             <button type="button" className={detailPresentation ? "card-detail-generate" : "btn btn-secondary mt-3 min-h-11"} disabled={generating} onClick={() => void generate()}>{detailPresentation && !generating ? <span aria-hidden="true">＋</span> : null}{generating ? "Worterklärung wird erstellt …" : error ? "Erneut versuchen" : "Worterklärung erzeugen"}</button>
-        </>}
+        </>)}
         {error ? <p role="alert" className="mt-2 text-sm">Die Worterklärung konnte gerade nicht erstellt werden.</p> : null}
         {saved ? <p role="status" className="mt-2 text-xs text-emerald-700">Worterklärung gespeichert</p> : null}
     </div>;
+    if (previewContent) return <section className="word-understanding-disclosure" aria-label="Wort verstehen">{previewContent}{error ? <p role="alert">Die Worterklärung konnte nicht gespeichert werden.</p> : null}</section>;
     if (enrichment && hasWordUnderstanding(enrichment)) return <section className="word-understanding-disclosure" aria-label="Wort verstehen">
         <button type="button" className="word-understanding-toggle" aria-expanded={open} aria-controls={`word-understanding-${cardId}`} onClick={() => setOpen((value) => !value)}>Wort verstehen <span aria-hidden="true">{open ? "⌃" : "⌄"}</span></button>
         {open ? <div id={`word-understanding-${cardId}`}><WordUnderstandingContent enrichment={enrichment} swahili={swahili} german={german} /></div> : null}

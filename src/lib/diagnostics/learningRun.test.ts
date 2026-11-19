@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LearningRunDiagnostics } from "./learningRun";
+import { LearningRunDiagnostics, resetRunIngestForTests } from "./learningRun";
 
 type Message = Record<string, string | number | boolean | null>;
 
@@ -10,7 +10,7 @@ function harness() {
     return { run, messages, send };
 }
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); resetRunIngestForTests(); });
 
 describe("learning run diagnostics", () => {
     it("creates one run ID only at a real start and loads the actual card count", async () => {
@@ -146,5 +146,15 @@ describe("learning run diagnostics", () => {
         run.start("DRILL", "all_cards"); run.loaded(1); run.confirmed(true, false); run.end();
         await expect(run.whenIdleForTests()).resolves.toBeUndefined();
         expect(send).toHaveBeenCalledTimes(3);
+    });
+    it("stops sending further run updates after a 503 without blocking learning", async () => {
+        const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
+        vi.stubGlobal("fetch", fetchMock);
+        const run = new LearningRunDiagnostics();
+        run.start("LEITNER_TODAY", "today"); run.loaded(12);
+        for (let i = 0; i < 12; i++) run.confirmed(true, true);
+        run.end();
+        await expect(run.whenIdleForTests()).resolves.toBeUndefined();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });

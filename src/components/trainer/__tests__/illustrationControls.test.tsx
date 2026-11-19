@@ -16,9 +16,9 @@ describe("IllustrationControls", () => {
     expect(html).not.toContain("<img");
   });
 
-  it("shows one stored image and the edit-specific generation label", () => {
+  it("shows one stored image without an unnecessary regenerate action", () => {
     const html = renderToStaticMarkup(<IllustrationControls {...base} currentImageUrl={currentImageUrl} />);
-    expect(html).toContain("Illustration neu erzeugen");
+    expect(html).not.toContain("Illustration neu erzeugen");
     expect(html).toContain("Aktuelles Bild");
     expect(html.match(/<img/g)).toHaveLength(1);
     expect(html).not.toContain("Bild ändern");
@@ -32,7 +32,7 @@ describe("IllustrationControls", () => {
     expect(html).toContain("illustration-reference--compact");
     expect(html.match(/<img/g)).toHaveLength(2);
     expect(html).toContain("Übernehmen");
-    expect(html).toContain("Neu erzeugen");
+    expect(html).not.toContain("Neu erzeugen");
     expect(html).toContain("Verwerfen");
   });
 
@@ -42,12 +42,12 @@ describe("IllustrationControls", () => {
     expect(html).toContain("Noch nicht gespeichert");
     expect(html.match(/<img/g)).toHaveLength(1);
     expect(html).not.toContain(currentImageUrl);
-    expect(html).toContain("Illustration neu erzeugen");
+    expect(html).not.toContain("Illustration neu erzeugen");
   });
 
-  it("uses regeneration wording after accepting an illustration on a new card", () => {
+  it("does not offer regeneration after accepting an illustration", () => {
     const html = renderToStaticMarkup(<IllustrationControls {...base} selectedImagePending selectedImageUrl={newImage} />);
-    expect(html).toContain("Illustration neu erzeugen");
+    expect(html).not.toContain("Illustration neu erzeugen");
     expect(html).not.toContain(">Illustration erzeugen<");
   });
 
@@ -55,7 +55,7 @@ describe("IllustrationControls", () => {
     const html = renderToStaticMarkup(<IllustrationControls {...base} loading currentImageUrl={currentImageUrl} />);
     expect(html).toContain("Illustration wird erstellt …");
     expect(html).toContain("Das kann einige Sekunden dauern.");
-    expect(html).toContain("disabled");
+    expect(html).not.toContain("Neu erzeugen");
     expect(html).toContain("illustration-skeleton");
   });
 

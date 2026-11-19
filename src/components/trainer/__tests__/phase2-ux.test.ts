@@ -28,7 +28,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(compactGroupPickerSource).toContain("aria-multiselectable=\"true\"");
         expect(compactGroupPickerSource).toContain("aria-selected={isSelected}");
         expect(trainerCardFormSource).toContain('triggerLabel="Gruppe wählen"');
-        expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
+        expect(trainerSource).toContain("openCurrentCardGroupsEditor();");
         expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
     });
 

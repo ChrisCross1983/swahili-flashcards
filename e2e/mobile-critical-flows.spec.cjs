@@ -195,6 +195,24 @@ async function openTrainer(page, options) {
 }
 
 test.describe("mobile critical flows", () => {
+  test("trainer waits for real counts before showing Today or Continue", async ({ page }) => {
+    await login(page);
+    await mockTrainerApis(page);
+    let releaseCounts;
+    const countsHeld = new Promise((resolve) => { releaseCounts = resolve; });
+    await page.route(/\/api\/learn\/setup-counts(?:\?.*)?$/, async (route) => {
+      await countsHeld;
+      await route.fulfill(json({ todayDue: 2, totalCards: 2, lastMissedCount: 0 }));
+    });
+    const pendingRequest = page.waitForRequest(/\/api\/learn\/setup-counts/);
+    await page.goto("/trainer");
+    await pendingRequest;
+    await expect(page.getByRole("button", { name: "Weiterlernen starten" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toHaveCount(0);
+    releaseCounts();
+    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+  });
+
   test("card form asks for image policy only after an image is selected", async ({ page }) => {
     await openTrainer(page);
     let policyGets = 0;
@@ -265,18 +283,23 @@ test.describe("mobile critical flows", () => {
       });
       await page.goto("/trainer");
       await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-      const image = page.getByTestId("trainer-card-shell").getByRole("img", { name: "Kartenbild" });
+      const image = page.getByRole("dialog", { name: "Lernbild" }).getByRole("img", { name: "Lernbild zur Karte" });
       await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
       await expect(image).toHaveCount(0);
       expect(requestedImages.size).toBe(0);
       await page.getByRole("button", { name: "Aufdecken" }).click();
+      await expect(page.getByTestId("trainer-vocab-extras")).toBeVisible();
+      expect(requestedImages.size).toBe(0);
+      await page.getByRole("button", { name: "Bild vorhanden öffnen" }).click();
       await expect(image).toBeVisible();
       await expect.poll(() => requestedImages.size).toBe(1);
+      await page.getByRole("dialog", { name: "Lernbild" }).getByRole("button", { name: "Schließen" }).click();
       await page.getByRole("button", { name: "Gewusst", exact: true }).click();
       await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
       await expect(image).toHaveCount(0);
       expect(requestedImages.size).toBe(1);
       await page.getByRole("button", { name: "Aufdecken" }).click();
+      await page.getByRole("button", { name: "Bild vorhanden öffnen" }).click();
       await expect(image).toBeVisible();
       await expect.poll(() => requestedImages.size).toBe(2);
     });
@@ -285,11 +308,102 @@ test.describe("mobile critical flows", () => {
   test("a card without an image offers illustration generation only after reveal", async ({ page }) => {
     await openTrainer(page);
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-    await expect(page.getByTestId("trainer-card-shell").getByRole("img", { name: "Kartenbild" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Lernbild" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toHaveCount(0);
     await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByRole("button", { name: "Bild öffnen" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Bild öffnen" }).click();
     await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toBeVisible();
   });
+
+  test("illustration preview is saved only on acceptance and has no regenerate action", async ({ page }) => {
+    await openTrainer(page);
+    let uploads = 0;
+    let cardPatches = 0;
+    await page.route("**/api/images/generate", (route) => route.fulfill(json({ preview: "data:image/webp;base64,AAAA" })));
+    await page.route("**/api/upload-image", (route) => { uploads++; return route.fulfill(json({ path: "test-image.webp" })); });
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      if (route.request().method() === "PATCH") { cardPatches++; return route.fulfill(json({ card: cards[0] })); }
+      return route.fulfill(json({ cards }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Bild öffnen" }).click();
+    await page.getByRole("button", { name: "Illustration erzeugen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Lernbild" });
+    await expect(dialog.getByText("Vorschau · noch nicht gespeichert")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Neu erzeugen" })).toHaveCount(0);
+    expect(uploads).toBe(0);
+    await dialog.getByRole("button", { name: "Verwerfen" }).click();
+    expect(uploads).toBe(0);
+    await dialog.getByRole("button", { name: "Illustration erzeugen" }).click();
+    await dialog.getByRole("button", { name: "Übernehmen" }).click();
+    await expect.poll(() => uploads).toBe(1);
+    await expect.poll(() => cardPatches).toBe(1);
+  });
+
+  test("card management stays in More while desktop grading follows the card", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openTrainer(page);
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.locator('summary[aria-label="Weitere Kartenaktionen"]').click();
+    await expect(page.getByRole("button", { name: "Karte bearbeiten" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Gruppen bearbeiten" })).toBeVisible();
+    const card = await page.getByTestId("trainer-card-shell").boundingBox();
+    const grade = await page.getByRole("button", { name: "Gewusst", exact: true }).boundingBox();
+    expect(grade.y).toBeGreaterThan(card.y + card.height);
+    await expect(page.getByTestId("trainer-mobile-actions")).toBeHidden();
+  });
+
+  test("learning notes open from the compact action without hiding grading", async ({ page }) => {
+    await openTrainer(page);
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Notiz öffnen" }).click();
+    await expect(page.getByRole("dialog", { name: "Eigene Notizen" })).toContainText("E2E Notiz");
+    await page.getByRole("dialog", { name: "Eigene Notizen" }).getByRole("button", { name: "Schließen" }).click();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
+  });
+
+  test("word knowledge loads only on demand and never delays grading", async ({ page }) => {
+    await openTrainer(page);
+    let wordRequests = 0;
+    await page.route("**/api/cards/word-explanation**", async (route) => {
+      wordRequests++;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.fulfill(json({ enrichment: null }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    expect(wordRequests).toBe(0);
+    await expect(page.getByText(/Wortwissen wird geladen/)).toHaveCount(0);
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
+    await expect(page.getByRole("dialog", { name: "Wort verstehen" }).getByText(/Wortwissen wird geladen/)).toBeVisible();
+    await page.getByRole("dialog", { name: "Wort verstehen" }).getByRole("button", { name: "Schließen" }).click();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
+    expect(wordRequests).toBe(1);
+  });
+
+  for (const width of [375, 390, 430]) {
+    test(`normal vocabulary card keeps recall actions in view at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await openTrainer(page);
+      await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      await expect(page.getByTestId("trainer-session-status")).toBeInViewport();
+      await expect(page.getByTestId("trainer-card-front")).toContainText(/nakutafuta|ninakupata/);
+      await expect(page.getByTestId("trainer-vocab-extras")).toBeInViewport();
+      const wrong = page.getByRole("button", { name: "Nicht gewusst", exact: true });
+      const correct = page.getByRole("button", { name: "Gewusst", exact: true });
+      await expect(wrong).toBeInViewport();
+      await expect(correct).toBeInViewport();
+      const box = await correct.boundingBox();
+      expect(box.y + box.height).toBeLessThanOrEqual(812);
+    });
+  }
 
   test("trainer grading controls stay reachable and lock while grading persists", async ({ page }) => {
     await openTrainer(page, { delayedGradeMs: 1_000 });
@@ -864,7 +978,8 @@ test.describe("mobile critical flows", () => {
       await route.fulfill(json(id ? { card } : { cards: [card] }));
     });
     await page.route("**/api/cards/word-explanation**", async (route) => {
-      if (route.request().method() === "POST") { posts++; stored = enrichment; }
+      if (route.request().method() === "POST") { posts++; return route.fulfill(json({ enrichment, previewToken: "test-preview" })); }
+      if (route.request().method() === "PUT") { stored = enrichment; return route.fulfill(json({ enrichment: stored })); }
       await route.fulfill(json({ enrichment: stored }));
     });
     await page.goto("/trainer");
@@ -875,6 +990,7 @@ test.describe("mobile critical flows", () => {
     const detail = page.getByTestId("card-detail");
     await detail.getByRole("button", { name: "Worterklärung erzeugen" }).click();
     await expect(detail.getByTestId("word-understanding-content")).toContainText("habari");
+    await detail.getByRole("button", { name: "Übernehmen" }).click();
     expect(posts).toBe(1);
     await page.getByRole("button", { name: "Schließen" }).last().click();
     await page.getByRole("button", { name: "Karte ansehen: Guten Morgen" }).click();
@@ -1094,7 +1210,8 @@ test.describe("mobile critical flows", () => {
     page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/cards" && request.method() === "GET") cardListRequests++; });
     await page.route("**/api/cards/word-explanation**", async (route) => {
       if (route.request().method() === "GET") await route.fulfill(json({ enrichment: stored }));
-      else { posts++; stored = explanation; await route.fulfill(json({ enrichment: explanation })); }
+      else if (route.request().method() === "POST") { posts++; await route.fulfill(json({ enrichment: explanation, previewToken: "test-preview" })); }
+      else { stored = explanation; await route.fulfill(json({ enrichment: explanation })); }
     });
     await page.goto("/trainer");
     await page.getByRole("button", { name: /Meine Karten/ }).click();
@@ -1108,6 +1225,8 @@ test.describe("mobile critical flows", () => {
     await page.getByRole("button", { name: "Worterklärung erzeugen" }).click();
     await expect(page.getByTestId("word-understanding-content")).toContainText("chumba");
     await expect(page.getByTestId("word-understanding-content")).not.toContainText("Kongruenz");
+    await expect(page.getByText("Vorschau · noch nicht gespeichert")).toBeVisible();
+    await page.getByRole("button", { name: "Übernehmen" }).click();
     await expect(page.getByText("Worterklärung gespeichert")).toBeVisible();
     await expect(page.getByRole("button", { name: /^Wort verstehen/ }).locator(".sentence-feature-icon")).toHaveClass(/is-present/);
     await expect(page.getByText("Worterklärung gespeichert")).toHaveCount(0, { timeout: 5000 });
@@ -1143,11 +1262,11 @@ test.describe("mobile critical flows", () => {
       } }));
     });
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-    await expect(page.getByRole("button", { name: "Wort verstehen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Verstehen öffnen" })).toHaveCount(0);
     await page.getByRole("button", { name: "Aufdecken" }).click();
-    const disclosure = page.getByRole("button", { name: "Wort verstehen" });
-    await expect(disclosure).toBeVisible();
-    await disclosure.click();
+    const action = page.getByRole("button", { name: "Verstehen öffnen" });
+    await expect(action).toBeVisible();
+    await action.click();
     await expect(page.getByText("M-MI · Klasse 3/4")).toBeVisible();
     expect((await page.getByTestId("word-understanding-content").boundingBox()).height).toBeLessThan(190);
     expect(generated).toBe(0);
@@ -1165,7 +1284,7 @@ test.describe("mobile critical flows", () => {
     await page.goto("/trainer");
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
-    await page.getByRole("button", { name: "Wort verstehen" }).click();
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
     const content = page.getByTestId("word-understanding-content");
     await expect(content).toContainText("-ingi");
     await expect(content).toContainText("N/N · Klasse 9/10");
@@ -1185,37 +1304,63 @@ test.describe("mobile critical flows", () => {
       await new Promise((resolve) => setTimeout(resolve, 350));
       await route.fulfill(json({ enrichment: { pos: "verb", noun_class: null, singular: null, plural: null,
         notes: "ni- ist das Subjekt, -na- markiert Präsens.", mnemonic: null,
-        examples: [{ sw: "Ninakutafuta.", de: "Ich suche dich." }] } }));
+        examples: [{ sw: "Ninakutafuta.", de: "Ich suche dich." }] }, previewToken: "test-preview" }));
     });
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
     const firstText = await page.getByTestId("trainer-card-front").innerText();
     const originalId = firstText.includes("ich suche dich") ? "e2e-card-1" : "e2e-card-2";
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
     const generate = page.getByRole("button", { name: "Worterklärung erzeugen" });
     await expect(generate).toBeVisible();
     await generate.click();
     await expect(page.getByRole("button", { name: /Worterklärung wird erstellt/ })).toBeDisabled();
+    await page.getByRole("dialog", { name: "Wort verstehen" }).getByRole("button", { name: "Schließen" }).click();
     await page.getByRole("button", { name: "Gewusst", exact: true }).click();
     expect(generatedFor).toBe(originalId);
     await expect(page.getByText("ni- ist das Subjekt")).toHaveCount(0);
   });
 
-  test("word generation saves once and opens the compact explanation immediately", async ({ page }) => {
+  test("word generation saves only after accepting its compact preview", async ({ page }) => {
     await openTrainer(page);
     let posts = 0;
+    let saves = 0;
     await page.route("**/api/cards/word-explanation**", async (route) => {
       if (route.request().method() === "GET") return route.fulfill(json({ enrichment: null }));
-      posts++;
+      if (route.request().method() === "POST") posts++;
+      if (route.request().method() === "PUT") saves++;
       await route.fulfill(json({ enrichment: { pos: "verb", noun_class: null, singular: null, plural: null,
-        notes: "-na- markiert das Präsens.", mnemonic: null, examples: [{ sw: "Ninaenda.", de: "Ich gehe." }] } }));
+        notes: "-na- markiert das Präsens.", mnemonic: null, examples: [{ sw: "Ninaenda.", de: "Ich gehe." }] }, previewToken: "test-preview" }));
     });
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
     await page.getByRole("button", { name: "Worterklärung erzeugen" }).click();
-    await expect(page.getByRole("button", { name: "Wort verstehen" })).toBeVisible();
-    await expect(page.getByText("Worterklärung gespeichert")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Wort verstehen" })).toBeVisible();
+    await expect(page.getByText("Vorschau · noch nicht gespeichert")).toBeVisible();
+    expect(saves).toBe(0);
     await expect(page.getByText("Ninaenda.")).toBeVisible();
+    await page.getByRole("button", { name: "Übernehmen" }).click();
+    await expect(page.getByText("Worterklärung gespeichert")).toBeVisible();
     expect(posts).toBe(1);
+    expect(saves).toBe(1);
+  });
+
+  test("discarding a word preview never calls the save endpoint", async ({ page }) => {
+    await openTrainer(page);
+    let saves = 0;
+    await page.route("**/api/cards/word-explanation**", (route) => {
+      if (route.request().method() === "GET") return route.fulfill(json({ enrichment: null }));
+      if (route.request().method() === "PUT") saves++;
+      return route.fulfill(json({ enrichment: { pos: "noun", noun_class: "m/mi", singular: "mlango", plural: "milango", notes: "Klasse m/mi.", mnemonic: null, examples: [{ sw: "Mlango uko wazi.", de: "Die Tür ist offen." }] }, previewToken: "test-preview" }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
+    await page.getByRole("button", { name: "Worterklärung erzeugen" }).click();
+    await page.getByRole("button", { name: "Verwerfen" }).click();
+    expect(saves).toBe(0);
+    await expect(page.getByRole("button", { name: "Worterklärung erzeugen" })).toBeVisible();
   });
 
   test("word status icons show groups and formatted notes without moving the card", async ({ page }) => {

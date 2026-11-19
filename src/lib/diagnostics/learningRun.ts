@@ -6,8 +6,10 @@ type Send = (message: RunMessage) => Promise<void>;
 const CHECKPOINT_GRADES = 10;
 const CHECKPOINT_MS = 45_000;
 const HEARTBEAT_MS = 60_000;
+let ingestUnavailableUntil = 0;
 
 async function sendRun(message: RunMessage): Promise<void> {
+    if (Date.now() < ingestUnavailableUntil) return;
     // Raw fetch is intentional: failures of Diagnostics must never be reported recursively.
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -16,10 +18,16 @@ async function sendRun(message: RunMessage): Promise<void> {
                 credentials: "same-origin", keepalive: true, body: JSON.stringify(message),
                 signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(5_000) : undefined,
             });
+            if (response.status === 503) {
+                ingestUnavailableUntil = process.env.NODE_ENV === "production" ? Date.now() + 60_000 : Infinity;
+                return;
+            }
             if (response.ok || response.status < 500) return;
         } catch { /* One retry covers transient network failure; app work never awaits this. */ }
     }
 }
+
+export function resetRunIngestForTests(): void { ingestUnavailableUntil = 0; }
 
 function buildVersion(): string | null {
     const value = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? process.env.NEXT_PUBLIC_APP_VERSION ?? null;

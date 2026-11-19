@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 type Props = {
+    countsState: "pending" | "ready" | "error";
     todayDue: number;
     totalCards: number;
     lastMissedCount: number;
@@ -13,6 +14,7 @@ type Props = {
     onOpenCreate: () => void;
     onOpenCards: () => void;
     onOpenImport: () => void;
+    onRetryCounts: () => void;
     importVisible: boolean;
 };
 
@@ -31,6 +33,7 @@ function Tile({ title, subtitle, badge, onClick }: { title: string; subtitle: st
 
 export default function TrainerDashboard(props: Props) {
     const {
+        countsState,
         todayDue,
         totalCards,
         lastMissedCount,
@@ -43,10 +46,11 @@ export default function TrainerDashboard(props: Props) {
         onOpenCreate,
         onOpenCards,
         onOpenImport,
+        onRetryCounts,
         importVisible,
     } = props;
     const itemLabel = isSentenceTrainer ? "Sätze" : "Karten";
-    const learningTitle = todayDue > 0 ? "Heute lernen" : "Weiterlernen";
+    const learningTitle = countsState === "ready" ? todayDue > 0 ? "Heute lernen" : "Weiterlernen" : "Training";
     const learningSubtitle = todayDue > 0
         ? `Starte mit den nächsten ${itemLabel}. ${todayDue} sind heute dran.`
         : lastMissedCount > 0
@@ -60,14 +64,17 @@ export default function TrainerDashboard(props: Props) {
             <div className="rounded-[32px] border bg-surface p-8 text-left shadow-soft transition hover:shadow-warm">
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Training</div>
                 <div className="mt-2 text-xl font-semibold">{learningTitle}</div>
-                <div className="mt-2 text-sm text-muted">{learningSubtitle}</div>
-                <button
+                <div className="mt-2 min-h-12 text-sm text-muted">
+                    {countsState === "pending" ? <div className="h-5 w-4/5 animate-pulse rounded bg-surface-elevated" aria-label="Lernzahlen werden ermittelt" />
+                        : countsState === "error" ? "Lernzahlen konnten nicht geladen werden." : learningSubtitle}
+                </div>
+                {countsState === "pending" ? <div className="mt-5 h-14 w-full rounded-xl bg-surface-elevated" aria-hidden="true" /> : <button
                     type="button"
-                    className="mt-5 w-full btn btn-primary py-3 text-base"
-                    onClick={onStartLearning}
+                    className="mt-5 min-h-14 w-full btn btn-primary py-3 text-base"
+                    onClick={countsState === "error" ? onRetryCounts : onStartLearning}
                 >
-                    {todayDue > 0 ? "Heute lernen starten" : "Weiterlernen starten"}
-                </button>
+                    {countsState === "error" ? "Erneut prüfen" : todayDue > 0 ? "Heute lernen starten" : "Weiterlernen starten"}
+                </button>}
                 <button
                     type="button"
                     className="mt-2 w-full btn btn-ghost py-2 text-sm"

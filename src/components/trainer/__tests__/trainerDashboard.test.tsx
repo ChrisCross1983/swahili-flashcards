@@ -32,6 +32,7 @@ function findButtonByText(node: ReactNode, text: string): ClickableElement | nul
 }
 
 const baseProps = {
+    countsState: "ready" as const,
     todayDue: 4,
     totalCards: 20,
     lastMissedCount: 2,
@@ -45,9 +46,23 @@ const baseProps = {
     onOpenCreate: () => { },
     onOpenCards: () => { },
     onOpenImport: () => { },
+    onRetryCounts: () => { },
 };
 
 describe("TrainerDashboard start flow", () => {
+    it("keeps the initial counts-pending state neutral and layout stable", () => {
+        const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="pending" todayDue={0} />);
+        expect(html).toContain("Lernzahlen werden ermittelt");
+        expect(html).not.toContain("Weiterlernen");
+        expect(html).not.toContain("Heute lernen starten");
+        expect(html).not.toContain("Wird geladen");
+    });
+
+    it("does not infer a fallback training mode after a failed count request", () => {
+        const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="error" todayDue={0} />);
+        expect(html).toContain("Erneut prüfen");
+        expect(html).not.toContain("Weiterlernen starten");
+    });
     it("loads the shared due count initially and refreshes it when Home becomes active", () => {
         const homeSource = fs.readFileSync(
             path.join(process.cwd(), "src/app/HomeClient.tsx"),

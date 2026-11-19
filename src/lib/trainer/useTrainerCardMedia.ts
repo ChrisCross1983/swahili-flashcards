@@ -20,7 +20,8 @@ export async function uploadImageFile(imageFile: File): Promise<string> {
     }
     const json = await res.json().catch(() => ({})) as { error?: string; path?: string };
     if (!res.ok || !json.path) {
-        throw new Error(json.error === "image_too_large" ? "image_too_large" : "image_upload_failed");
+        throw new Error(json.error === "image_too_large" ? "image_too_large"
+            : res.status === 503 ? "image_storage_unavailable" : "image_upload_failed");
     }
     return json.path;
 }

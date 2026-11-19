@@ -23,7 +23,7 @@ import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolve
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerLearningFeature from "@/components/trainer/TrainerLearningFeature";
-import WordUnderstandingFeature from "@/components/trainer/WordUnderstandingFeature";
+import TrainerVocabExtras from "@/components/trainer/TrainerVocabExtras";
 import TrainerControls from "@/components/trainer/TrainerControls";
 import ModeSwitch from "@/components/trainer/ModeSwitch";
 import AiCoachPanel from "@/components/trainer/AiCoachPanel";
@@ -256,6 +256,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
+    const [setupCountsState, setSetupCountsState] = useState<"pending" | "ready" | "error">("pending");
     const setupCountsRequestIdRef = useRef(0);
     const [groups, setGroups] = useState<Group[]>([]);
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
@@ -314,6 +315,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const leitnerInfoRef = useRef<HTMLDivElement | null>(null);
+    const managementMenuRef = useRef<HTMLDetailsElement | null>(null);
     const savedCardNoteRef = useRef("");
     const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
@@ -553,13 +555,10 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             const counts = await fetchSetupCounts(cardType);
             if (requestId !== setupCountsRequestIdRef.current) return;
             setSetupCounts(counts);
+            setSetupCountsState("ready");
         } catch {
             if (requestId !== setupCountsRequestIdRef.current) return;
-            setSetupCounts({
-                todayDue: 0,
-                totalCards: 0,
-                lastMissedCount: 0,
-            });
+            setSetupCountsState((previous) => previous === "ready" ? "ready" : "error");
         } finally {
             if (requestId === setupCountsRequestIdRef.current) {
                 setSetupCountsLoading(false);
@@ -1545,6 +1544,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             ) : null}
 
                             <TrainerDashboard
+                                countsState={setupCountsState}
                                 todayDue={setupCounts.todayDue}
                                 totalCards={setupCounts.totalCards}
                                 lastMissedCount={setupCounts.lastMissedCount}
@@ -1565,12 +1565,25 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     loadCards();
                                 }}
                                 onOpenImport={() => router.push("/import")}
+                                onRetryCounts={() => { void refreshSetupCounts(); }}
                             />
 
                             {/* Learn Modal */}
                             <FullScreenSheet
                                 open={openLearn}
                                 title="Vokabeln lernen"
+                                footer={cardType === "vocab" && learnStarted && todayItems.length > 0 ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
+                                    <TrainerControls
+                                        reveal={reveal}
+                                        hasAudio={false}
+                                        onReveal={revealCard}
+                                        onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
+                                        onWrong={() => gradeCurrent(false)}
+                                        onCorrect={() => gradeCurrent(true)}
+                                        gradingInFlight={gradingInFlight}
+                                        docked
+                                    />
+                                </div> : null}
                                 onClose={() => {
                                     if (directStartPreparing) {
                                         directStartCancelledRef.current = true;
@@ -1739,8 +1752,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 </div>
 
                                                 {/* ===== Card ===== */}
-                                                <div className="mt-3 rounded-3xl border border-soft bg-surface p-4 shadow-soft sm:p-6" data-testid="active-learning-focus" data-reveal-state={reveal ? "revealed" : "recalling"}>
-                                                    <div className={reveal ? "mb-4 grid gap-1.5 rounded-2xl border border-soft bg-surface-elevated/70 px-2 py-1.5 sm:flex sm:items-center sm:justify-between sm:gap-2" : "mb-4 grid gap-1.5 rounded-2xl border border-soft bg-surface/60 px-2 py-1.5 text-muted sm:flex sm:items-center sm:justify-between sm:gap-2"} data-testid="card-maintenance-strip" data-focus-role="maintenance" data-layout="compact-mobile" data-reveal-state={reveal ? "revealed" : "recalling"}>
+                                                <div className={`mt-3 rounded-3xl border border-soft bg-surface shadow-soft sm:p-6 ${cardType === "vocab" ? "flex flex-col p-3" : "p-4"}`} data-testid="active-learning-focus" data-reveal-state={reveal ? "revealed" : "recalling"}>
+                                                    <div className={`${reveal ? "border-soft bg-surface-elevated/70" : "border-soft bg-surface/60 text-muted"} grid gap-1.5 rounded-2xl border px-2 py-1.5 sm:flex sm:items-center sm:justify-between sm:gap-2 ${cardType === "vocab" ? "order-3 mt-3 md:order-0 md:mt-0 md:mb-4" : "mb-4"}`} data-testid="card-maintenance-strip" data-focus-role="maintenance" data-layout="compact-mobile" data-reveal-state={reveal ? "revealed" : "recalling"}>
                                                         <div className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden sm:flex-1" data-testid="card-passive-groups" aria-label="Zugeordnete Gruppen">
                                                             <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted sm:text-[11px]">Optionen</span>
                                                             <span className="hidden h-1 w-1 rounded-full bg-[color:var(--border-strong)] sm:inline-block" aria-hidden="true" />
@@ -1759,55 +1772,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             </div>
                                                         </div>
 
-                                                        <div className="grid w-full grid-cols-[auto_1fr_1fr] items-center gap-1 sm:flex sm:w-auto sm:shrink-0 sm:justify-end" data-testid="card-option-actions">
-                                                            {todayItems[currentIndex]?.audio_path ? (
-                                                                <span className="inline-flex min-h-8 items-center justify-center rounded-full border border-soft bg-surface/60 px-2 py-1 text-[11px] text-muted" data-role="passive-info" data-audio-state="present" title="Audio vorhanden">
-                                                                    <span aria-hidden="true">♪</span>
-                                                                    <span className="sr-only">Audio vorhanden</span>
-                                                                </span>
-                                                            ) : (
-                                                                <button
-                                                                    type="button"
-                                                                    className="btn btn-utility min-h-8 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs"
-                                                                    onClick={toggleLearnRecording}
-                                                                    aria-label={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}
-                                                                    title={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}
-                                                                    data-card-option-action="audio"
-                                                                >
-                                                                    <span aria-hidden="true">{isRecording ? "■" : "🎙"}</span>
-                                                                    <span className="hidden min-[390px]:inline">{isRecording ? "Stop" : "Audio"}</span>
-                                                                </button>
-                                                            )}
-
-                                                            <button
-                                                                type="button"
-                                                                className="btn btn-utility min-h-8 min-w-0 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs whitespace-nowrap"
-                                                                onClick={startEditFromLearn}
-                                                                aria-label="Karte bearbeiten"
-                                                                title="Karte bearbeiten"
-                                                                data-card-option-action="edit"
-                                                            >
-                                                                <span aria-hidden="true">✎</span>
-                                                                <span className="truncate">Bearbeiten</span>
-                                                            </button>
-
-                                                            {cardType !== "sentence" ? <button
-                                                                type="button"
-                                                                className="btn btn-utility min-h-8 min-w-0 touch-manipulation rounded-full border border-soft bg-surface px-2 py-1 text-xs whitespace-nowrap"
-                                                                onClick={openCurrentCardGroupsEditor}
-                                                                aria-label="Gruppen bearbeiten"
-                                                                title="Gruppen bearbeiten"
-                                                                data-card-option-action="groups"
-                                                            >
-                                                                <span aria-hidden="true">#</span>
-                                                                <span className="truncate">Gruppen</span>
-                                                            </button> : null}
+                                                        <div className="relative flex w-full justify-end sm:w-auto" data-testid="card-option-actions">
+                                                            <details ref={managementMenuRef} className="group relative">
+                                                                <summary className="flex min-h-10 cursor-pointer list-none items-center rounded-xl px-3 text-xs font-medium text-muted hover:bg-surface-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]" aria-label="Weitere Kartenaktionen">Mehr <span className="ml-1" aria-hidden="true">⋯</span></summary>
+                                                                <div className="absolute right-0 bottom-full z-30 mb-1 min-w-40 rounded-xl border border-soft bg-surface p-1 shadow-warm md:top-full md:bottom-auto md:mt-1" role="group" aria-label="Kartenverwaltung">
+                                                                    {cardType === "sentence" && !currentItem?.audio_path ? <button type="button" className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-surface-elevated" onClick={toggleLearnRecording} aria-label={isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"} data-card-option-action="audio">{isRecording ? "Aufnahme stoppen" : "Audio aufnehmen"}</button> : null}
+                                                                    <button type="button" className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-surface-elevated" onClick={() => { managementMenuRef.current?.removeAttribute("open"); startEditFromLearn(); }} aria-label="Karte bearbeiten" data-card-option-action="edit">Bearbeiten</button>
+                                                                    {cardType !== "sentence" ? <button type="button" className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-surface-elevated" onClick={() => { managementMenuRef.current?.removeAttribute("open"); openCurrentCardGroupsEditor(); }} aria-label="Gruppen bearbeiten" data-card-option-action="groups">Gruppen</button> : null}
+                                                                </div>
+                                                            </details>
                                                         </div>
                                                     </div>
 
-                                                    <div>
+                                                    <div className="order-1 md:order-0">
                                                         <TrainerCard
-                                                            key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}-${featureSuccess?.id === resolveCardId(currentItem) ? "saved" : "original"}`}
+                                                            key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}-${cardType === "sentence" && featureSuccess?.id === resolveCardId(currentItem) ? "saved" : "original"}`}
                                                             reveal={reveal}
                                                             prompt={direction === "DE_TO_SW" ? currentGerman : currentSwahili}
                                                             answer={direction === "DE_TO_SW" ? currentSwahili : currentGerman}
@@ -1816,20 +1795,30 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             showExamples={cardType === "sentence"}
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
+                                                            compactVocabExtras={cardType === "vocab"}
                                                             learningTypeLabel={null}
                                                             sentenceExplanation={cardType === "sentence" ? currentItem?.sentence_explanation ?? null : null}
                                                             autoOpenExplanation={featureSuccess?.id === resolveCardId(currentItem) && cardType === "sentence"}
-                                                            learningFeature={reveal && resolveCardId(currentItem) && cardType === "vocab" ? <>
-                                                                <WordUnderstandingFeature key={`word-${resolveCardId(currentItem)}`} cardId={resolveCardId(currentItem)} swahili={currentSwahili} german={currentGerman} initialEnrichment={currentItem?.word_enrichment} onSaved={(id, enrichment) => {
+                                                            learningFeature={reveal && resolveCardId(currentItem) && cardType === "vocab" ? <TrainerVocabExtras
+                                                                cardId={resolveCardId(currentItem)} swahili={currentSwahili} german={currentGerman}
+                                                                imagePath={currentImagePath} imageBaseUrl={IMAGE_BASE_URL}
+                                                                enrichment={currentItem?.word_enrichment ?? null}
+                                                                hasNote={Boolean(cards.find((card) => String(card.id) === resolveCardId(currentItem))?.has_note)}
+                                                                notesOpen={notesSheetOpen}
+                                                                hasAudio={Boolean(currentItem?.audio_path)}
+                                                                isRecording={isRecording}
+                                                                onAudio={() => currentItem?.audio_path ? playCardAudioIfExists(currentItem) : toggleLearnRecording()}
+                                                                onOpenNotes={openLearningHelp}
+                                                                onWordSaved={(id, enrichment) => {
                                                                     setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, word_enrichment: enrichment } : item));
                                                                     setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, word_enrichment: enrichment } : card));
-                                                                }} />
-                                                                {!currentImagePath ? featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : <TrainerLearningFeature key={`${resolveCardId(currentItem)}-vocab`} cardId={resolveCardId(currentItem)} cardType="vocab" german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
+                                                                }}
+                                                                onImageSaved={(id, change) => {
                                                                     setFeatureSuccess({ id, message: "Illustration gespeichert" });
                                                                     setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
                                                                     setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
-                                                                }} /> : null}
-                                                            </> : reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && cardType === "sentence" && resolveCardId(currentItem) && !currentItem?.sentence_explanation ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
+                                                                }}
+                                                            /> : reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && cardType === "sentence" && resolveCardId(currentItem) && !currentItem?.sentence_explanation ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
                                                                 setFeatureSuccess({ id, message: change.image_path ? "Illustration gespeichert" : "Lernerklärung gespeichert" });
                                                                 setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
                                                                 setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
@@ -1838,18 +1827,21 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         />
                                                     </div>
 
+                                                    <div className={cardType === "vocab" ? "order-2 hidden md:block" : ""}>
                                                     <TrainerControls
                                                         reveal={reveal}
-                                                        hasAudio={Boolean(todayItems[currentIndex]?.audio_path)}
+                                                        hasAudio={cardType !== "vocab" && Boolean(todayItems[currentIndex]?.audio_path)}
                                                         onReveal={revealCard}
                                                         onPlayAudio={() => playCardAudioIfExists(todayItems[currentIndex])}
                                                         onWrong={() => gradeCurrent(false)}
                                                         onCorrect={() => gradeCurrent(true)}
                                                         gradingInFlight={gradingInFlight}
+                                                        compact={cardType === "vocab"}
                                                     />
+                                                    </div>
 
                                                     {isLeitnerSelected ? (
-                                                        <div className="mt-8 flex items-start justify-between gap-2 rounded-2xl border border-soft bg-surface/70 px-3 py-2 text-xs text-muted" data-focus-role="technical-context">
+                                                        <div className={`flex items-center justify-between gap-2 text-xs text-muted ${cardType === "vocab" ? "order-4 mt-2 px-1 opacity-75" : "mt-8 rounded-2xl border border-soft bg-surface/70 px-3 py-2"}`} data-focus-role="technical-context">
                                                             <span>
                                                                 Leitner · Stufe {getDisplayLevel(currentLevel)} · nächste Wiederholung{" "}
                                                                 {formatDays(footerNextDays)}
