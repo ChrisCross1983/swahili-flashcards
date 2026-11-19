@@ -16,7 +16,7 @@ describe("group UX boundaries", () => {
         expect(picker).toContain("Neue Gruppe erstellen");
         expect(picker).toContain("onChange([])");
         expect(picker).toContain('inline && cardType === "sentence" ? [created.id]');
-        expect(client).toContain('{cardType !== "sentence" ? <button');
+        expect(client).toContain('cardType === "vocab" ? <button');
     });
 
     it("starts each central manager opening with fresh local editing state", () => {

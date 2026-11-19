@@ -21,11 +21,11 @@ function MobileQuickActions({ focusedTrainerMode, onOpenAi, onOpenSearch }: Mobi
 
     return (
         <div
-            className={`fixed right-[max(0.75rem,env(safe-area-inset-right))] z-[125] flex w-11 flex-col items-end gap-2 pointer-events-none md:hidden ${focusedTrainerMode
-                ? "top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]"
-                : "bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
+            className={`fixed z-[125] flex w-11 flex-col gap-2 pointer-events-none md:hidden ${focusedTrainerMode
+                ? "left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(5.75rem+env(safe-area-inset-bottom))] items-start"
+                : "right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] items-end"
                 }`}
-            data-focused-trainer-tools={focusedTrainerMode ? "top-right" : "bottom-right"}
+            data-focused-trainer-tools={focusedTrainerMode ? "bottom-left" : "bottom-right"}
         >
             {mobileToolsOpen ? (
                 <>
@@ -55,14 +55,14 @@ function MobileQuickActions({ focusedTrainerMode, onOpenAi, onOpenSearch }: Mobi
             ) : null}
             <button
                 type="button"
-                className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border text-on-accent shadow-warm transition active:scale-95 ${focusedTrainerMode
-                    ? "border-white/50 bg-accent-secondary text-white shadow-soft"
-                    : "border-white/40 bg-accent-primary"
+                className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] ${focusedTrainerMode
+                    ? "text-accent-secondary"
+                    : "border border-white/40 bg-accent-primary text-on-accent shadow-warm"
                     }`}
                 onClick={() => setMobileToolsOpen((open) => !open)}
                 aria-label={mobileToolsOpen ? "Schnellaktionen schließen" : "Schnellaktionen öffnen"}
             >
-                <span className="text-base">{mobileToolsOpen ? "✕" : "⋯"}</span>
+                <span className={focusedTrainerMode ? "flex h-9 w-9 items-center justify-center rounded-full border border-soft bg-surface text-sm shadow-soft" : "text-base"}>{mobileToolsOpen ? "✕" : "⋯"}</span>
             </button>
         </div>
     );

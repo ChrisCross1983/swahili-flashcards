@@ -245,23 +245,22 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
 
     const cards = data ?? [];
 
-    let notesByCard: Awaited<ReturnType<typeof getCardNotes>>;
-    try {
-        notesByCard = await getCardNotes(ownerKey, cards);
-    } catch (notesError) {
-        console.error("[api/cards] note status enrichment failed", { error: notesError });
+    const [notesResult, groupsResult, wordResult] = await Promise.allSettled([
+        getCardNotes(ownerKey, cards),
+        getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType),
+        getWordUnderstandingByCard(ownerKey, cards),
+    ]);
+
+    if (notesResult.status === "rejected") {
+        console.error("[api/cards] note status enrichment failed", { error: notesResult.reason });
         return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 });
     }
-
-    let groupsByCard: Map<string, Array<{ id: string; name: string; color: string | null }>>;
-    try {
-        groupsByCard = await getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType);
-    } catch (error) {
+    if (groupsResult.status === "rejected") {
         console.error("[api/cards] card group enrichment failed", {
             ownerKey,
             type: resolvedType,
             cardCount: cards.length,
-            error,
+            error: groupsResult.reason,
         });
         return NextResponse.json(
             { error: "Karten konnten nicht vollständig geladen werden (Gruppen)." },
@@ -269,13 +268,13 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
         );
     }
 
-    let wordUnderstandingByCard: Awaited<ReturnType<typeof getWordUnderstandingByCard>>;
-    try {
-        wordUnderstandingByCard = await getWordUnderstandingByCard(ownerKey, cards);
-    } catch (error) {
-        console.error("[api/cards] word understanding status failed", { error });
+    if (wordResult.status === "rejected") {
+        console.error("[api/cards] word understanding status failed", { error: wordResult.reason });
         return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden (Worterklärung)." }, { status: 500 });
     }
+    const notesByCard = notesResult.value;
+    const groupsByCard = groupsResult.value;
+    const wordUnderstandingByCard = wordResult.value;
 
     if (id) {
         const card = cards[0] ? { ...cards[0], has_note: hasCardNote(notesByCard.get(String(cards[0].id)) ?? {}, cards[0].type), note_preview: notesByCard.get(String(cards[0].id)) ?? null, groups: groupsByCard.get(String(cards[0].id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(cards[0].id)) ?? null } : null;

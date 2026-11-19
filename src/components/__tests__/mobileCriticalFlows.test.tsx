@@ -143,7 +143,8 @@ describe("mobile critical-flow regression coverage", () => {
 
         expect(overlays).toContain("focusedTrainerMode");
         expect(overlays).toContain("data-focused-trainer-tools");
-        expect(overlays).toContain("top-[max(4.5rem,calc(env(safe-area-inset-top)+4.5rem))]");
+        expect(overlays).toContain("bottom-[calc(5.75rem+env(safe-area-inset-bottom))]");
+        expect(overlays).toContain("left-[max(0.75rem,env(safe-area-inset-left))]");
         expect(overlays).toContain("bottom-[max(0.75rem,env(safe-area-inset-bottom))]");
         expect(overlays).toContain("pointer-events-none");
         expect(overlays).toContain("pointer-events-auto");

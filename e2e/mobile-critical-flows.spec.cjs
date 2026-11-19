@@ -195,6 +195,25 @@ async function openTrainer(page, options) {
 }
 
 test.describe("mobile critical flows", () => {
+  test("initial trainer entry requests counts, cards and groups once", async ({ page }) => {
+    await login(page);
+    await mockTrainerApis(page);
+    const calls = { counts: 0, cards: 0, groups: 0 };
+    const order = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/learn/setup-counts") { calls.counts++; order.push("counts"); }
+      if (path === "/api/cards") { calls.cards++; order.push("cards"); }
+      if (path === "/api/groups") { calls.groups++; order.push("groups"); }
+    });
+    await page.goto("/trainer");
+    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+    await expect.poll(() => calls.cards).toBe(1);
+    await expect.poll(() => calls.groups).toBe(1);
+    expect(calls).toEqual({ counts: 1, cards: 1, groups: 1 });
+    expect(order[0]).toBe("counts");
+  });
+
   test("trainer waits for real counts before showing Today or Continue", async ({ page }) => {
     await login(page);
     await mockTrainerApis(page);
@@ -225,7 +244,7 @@ test.describe("mobile critical flows", () => {
     expect(policyGets).toBe(0);
 
     await page.locator("#trainer-card-image-upload").setInputFiles({ name: "test.png", mimeType: "image/png", buffer: Buffer.from("image") });
-    await expect(page.getByRole("alert")).toContainText("Du kannst die Karte ohne Bild speichern.");
+    await expect(page.locator('p[role="alert"]')).toContainText("Du kannst die Karte ohne Bild speichern.");
     expect(policyGets).toBe(1);
     let createdWithoutImage = false;
     await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
@@ -343,18 +362,37 @@ test.describe("mobile critical flows", () => {
     await expect.poll(() => cardPatches).toBe(1);
   });
 
-  test("card management stays in More while desktop grading follows the card", async ({ page }) => {
+  test("card management is directly available inside the card while desktop grading follows it", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openTrainer(page);
+    await page.route("**/api/learn/today?**", (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, groups })) })));
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
-    await page.locator('summary[aria-label="Weitere Kartenaktionen"]').click();
+    await expect(page.getByText("Optionen", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Mehr", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("card-compact-actions")).toBeVisible();
     await expect(page.getByRole("button", { name: "Karte bearbeiten" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Gruppen bearbeiten" })).toBeVisible();
+    const groupShortcut = page.getByTestId("card-compact-actions").locator('[data-card-option-action="groups"]');
+    await expect(groupShortcut).toBeVisible();
+    await expect(groupShortcut).toContainText("Basis");
+    await groupShortcut.click();
+    await expect(page.getByRole("button", { name: "Abbrechen" })).toBeVisible();
+    await page.getByRole("button", { name: "Abbrechen" }).click();
     const card = await page.getByTestId("trainer-card-shell").boundingBox();
     const grade = await page.getByRole("button", { name: "Gewusst", exact: true }).boundingBox();
     expect(grade.y).toBeGreaterThan(card.y + card.height);
     await expect(page.getByTestId("trainer-mobile-actions")).toBeHidden();
+    await page.getByRole("button", { name: "Karte bearbeiten" }).click();
+    await expect(page.getByRole("textbox", { name: "Deutsch" })).toBeVisible();
+  });
+
+  test("a card without groups opens the picker directly from + Gruppe", async ({ page }) => {
+    await openTrainer(page);
+    await page.route("**/api/learn/today?**", (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, groups: [] })) })));
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Gruppe hinzufügen" }).click();
+    await expect(page.getByRole("button", { name: "Abbrechen" })).toBeVisible();
   });
 
   test("learning notes open from the compact action without hiding grading", async ({ page }) => {
@@ -365,6 +403,36 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByRole("dialog", { name: "Eigene Notizen" })).toContainText("E2E Notiz");
     await page.getByRole("dialog", { name: "Eigene Notizen" }).getByRole("button", { name: "Schließen" }).click();
     await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
+  });
+
+  test("learning notes persist only on Save, never on Cancel or close", async ({ page }) => {
+    await openTrainer(page);
+    let patches = 0;
+    await page.route("**/api/cards/notes**", async (route) => {
+      if (route.request().method() === "GET") return route.fulfill(json({ note: { main_notes: "Bestehende Notiz" } }));
+      patches++;
+      return route.fulfill(json({ ok: true }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Notiz öffnen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Eigene Notizen" });
+    await expect(dialog.getByRole("textbox", { name: "Notiz" })).toHaveValue("Bestehende Notiz");
+    await dialog.getByRole("textbox", { name: "Notiz" }).fill("Geändert");
+    await page.waitForTimeout(850);
+    expect(patches).toBe(0);
+    await dialog.getByRole("button", { name: "Abbrechen" }).click();
+    expect(patches).toBe(0);
+    await page.getByRole("button", { name: "Notiz öffnen" }).click();
+    await expect(dialog.getByRole("textbox", { name: "Notiz" })).toHaveValue("Bestehende Notiz");
+    await dialog.getByRole("textbox", { name: "Notiz" }).fill("Gespeichert");
+    await dialog.getByRole("button", { name: "Schließen" }).click();
+    expect(patches).toBe(0);
+    await page.getByRole("button", { name: "Notiz öffnen" }).click();
+    await dialog.getByRole("textbox", { name: "Notiz" }).fill("Gespeichert");
+    await dialog.getByRole("button", { name: "Speichern" }).click();
+    await expect.poll(() => patches).toBe(1);
+    await expect(dialog).toBeHidden();
   });
 
   test("word knowledge loads only on demand and never delays grading", async ({ page }) => {
@@ -380,7 +448,9 @@ test.describe("mobile critical flows", () => {
     expect(wordRequests).toBe(0);
     await expect(page.getByText(/Wortwissen wird geladen/)).toHaveCount(0);
     await page.getByRole("button", { name: "Verstehen öffnen" }).click();
-    await expect(page.getByRole("dialog", { name: "Wort verstehen" }).getByText(/Wortwissen wird geladen/)).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Wort verstehen" })).toBeVisible();
+    await expect.poll(() => wordRequests).toBe(1);
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
     await page.getByRole("dialog", { name: "Wort verstehen" }).getByRole("button", { name: "Schließen" }).click();
     await page.getByRole("button", { name: "Gewusst", exact: true }).click();
     await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
@@ -388,6 +458,47 @@ test.describe("mobile critical flows", () => {
   });
 
   for (const width of [375, 390, 430]) {
+    test(`Leitner info and global tools stay clear of the mobile grading bar at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await openTrainer(page);
+      await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      const tools = page.locator('[data-focused-trainer-tools="bottom-left"]');
+      await expect(tools).toBeVisible();
+      const gradeBar = await page.getByTestId("trainer-mobile-actions").boundingBox();
+      const toolButton = await tools.getByRole("button", { name: "Schnellaktionen öffnen" }).boundingBox();
+      const safety = await page.getByTestId("trainer-session-status").boundingBox();
+      expect(toolButton.y + toolButton.height).toBeLessThanOrEqual(gradeBar.y);
+      expect(boxesOverlap(toolButton, safety)).toBe(false);
+
+      await page.getByRole("button", { name: "Warum sehe ich diese Karte?" }).click();
+      const info = page.getByTestId("leitner-info-dialog");
+      await expect(info).toBeVisible();
+      await expect(info).toContainText(/Stufe 1/);
+      await expect(info).toContainText(/Gewusst → Stufe 2 · in 2 Tagen/);
+      await expect(info).toContainText(/Nicht gewusst → Stufe 1 · morgen/);
+      const infoBox = await info.boundingBox();
+      expect(infoBox.y + infoBox.height).toBeLessThanOrEqual(gradeBar.y);
+      const correctBox = await page.getByRole("button", { name: "Gewusst", exact: true }).boundingBox();
+      const gradeTarget = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.textContent, {
+        x: correctBox.x + correctBox.width / 2,
+        y: correctBox.y + correctBox.height / 2,
+      });
+      expect(gradeTarget).toContain("Gewusst");
+      await info.getByRole("button", { name: "Info schließen" }).click();
+      await expect(info).toBeHidden();
+
+      if (width === 390) {
+        await tools.getByRole("button", { name: "Schnellaktionen öffnen" }).click();
+        await tools.getByRole("button", { name: "Suche öffnen" }).click();
+        await expect(page.getByRole("heading", { name: "Quick Search" })).toBeVisible();
+        await page.getByRole("button", { name: "Close" }).click();
+        await tools.getByRole("button", { name: "Schnellaktionen öffnen" }).click();
+        await tools.getByRole("button", { name: "KI öffnen" }).click();
+        await expect(page.getByRole("heading", { name: /Swahili-KI/ })).toBeVisible();
+      }
+    });
+
     test(`normal vocabulary card keeps recall actions in view at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
       await openTrainer(page);
@@ -396,6 +507,15 @@ test.describe("mobile critical flows", () => {
       await expect(page.getByTestId("trainer-session-status")).toBeInViewport();
       await expect(page.getByTestId("trainer-card-front")).toContainText(/nakutafuta|ninakupata/);
       await expect(page.getByTestId("trainer-vocab-extras")).toBeInViewport();
+      const helpButtons = page.getByTestId("trainer-vocab-extras").getByRole("button");
+      await expect(helpButtons).toHaveCount(4);
+      for (const button of await helpButtons.all()) {
+        await expect(button).toBeEnabled();
+        await expect(button).toHaveCSS("cursor", "pointer");
+        const helpBox = await button.boundingBox();
+        expect(helpBox.x).toBeGreaterThanOrEqual(0);
+        expect(helpBox.x + helpBox.width).toBeLessThanOrEqual(width);
+      }
       const wrong = page.getByRole("button", { name: "Nicht gewusst", exact: true });
       const correct = page.getByRole("button", { name: "Gewusst", exact: true });
       await expect(wrong).toBeInViewport();
@@ -404,6 +524,68 @@ test.describe("mobile critical flows", () => {
       expect(box.y + box.height).toBeLessThanOrEqual(812);
     });
   }
+
+  test("all four learning actions share desktop hover feedback and keyboard focus order", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
+    const page = await context.newPage();
+    try {
+      await openTrainer(page);
+      await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      const helpButtons = page.getByTestId("trainer-vocab-extras").getByRole("button");
+      await expect(helpButtons).toHaveCount(4);
+      for (const button of await helpButtons.all()) {
+        const baseBorder = await button.evaluate((element) => getComputedStyle(element).borderColor);
+        await button.hover();
+        await expect.poll(() => button.evaluate((element) => getComputedStyle(element).borderColor)).not.toBe(baseBorder);
+      }
+      await helpButtons.nth(0).focus();
+      await page.keyboard.press("Tab");
+      await expect(helpButtons.nth(1)).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(helpButtons.nth(2)).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(helpButtons.nth(3)).toBeFocused();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("desktop Leitner info opens on hover and focus, stays readable, then closes", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
+    const page = await context.newPage();
+    try {
+      await openTrainer(page);
+      await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      const trigger = page.getByRole("button", { name: "Warum sehe ich diese Karte?" });
+      const info = page.getByTestId("leitner-info-popover");
+      await trigger.hover();
+      await expect(info).toBeVisible();
+      await expect(info).toContainText(/Gewusst → Stufe 2 · in 2 Tagen/);
+      await expect(info).toContainText(/Nicht gewusst → Stufe 1 · morgen/);
+      const card = await page.getByTestId("trainer-card-shell").boundingBox();
+      const grade = await page.getByRole("button", { name: "Gewusst", exact: true }).boundingBox();
+      const box = await info.boundingBox();
+      expect(box.x >= card.x + card.width || box.x + box.width <= card.x).toBe(true);
+      expect(boxesOverlap(box, grade)).toBe(false);
+      await info.hover();
+      await expect(info).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(info).toBeHidden();
+      await trigger.focus();
+      await expect(info).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(info).toBeHidden();
+      await page.locator("body").click({ position: { x: 1, y: 1 } });
+      await trigger.click();
+      await expect(info).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(info).toBeHidden();
+    } finally {
+      await context.close();
+    }
+  });
 
   test("trainer grading controls stay reachable and lock while grading persists", async ({ page }) => {
     await openTrainer(page, { delayedGradeMs: 1_000 });

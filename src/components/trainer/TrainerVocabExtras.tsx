@@ -10,6 +10,10 @@ import WordUnderstandingFeature from "@/components/trainer/WordUnderstandingFeat
 import type { WordEnrichment } from "@/lib/word/understanding";
 
 type Extra = "understanding" | "image";
+const actionClass = "flex min-h-12 min-w-0 cursor-pointer touch-manipulation flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-[11px] font-semibold transition-[background-color,border-color,box-shadow,filter,transform] duration-150 hover:border-[color:var(--accent-primary)] hover:shadow-[0_2px_6px_rgba(74,44,16,0.1)] active:scale-[0.98] active:brightness-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] sm:min-h-11 sm:flex-row sm:gap-1.5 sm:px-2 sm:text-sm";
+const actionTone = (present: boolean) => present
+    ? "border-[color:var(--accent-cta)] bg-accent-cta-soft text-accent-cta-strong hover:brightness-[0.96]"
+    : "border-soft bg-surface-elevated text-primary hover:bg-surface-strong";
 type Props = {
     cardId: string;
     german: string;
@@ -33,7 +37,7 @@ export default function TrainerVocabExtras({ cardId, german, swahili, imagePath,
         <button
             key={kind}
             type="button"
-            className={`flex min-h-12 min-w-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] sm:min-h-11 sm:flex-row sm:gap-1.5 sm:px-2 sm:text-sm ${present ? "border-[color:var(--accent-cta)] bg-accent-cta-soft text-accent-cta-strong" : "border-soft bg-surface-elevated text-primary hover:bg-surface-strong"}`}
+            className={`${actionClass} ${actionTone(present)}`}
             aria-label={`${label}${present ? " vorhanden" : ""} öffnen`}
             aria-haspopup="dialog"
             aria-expanded={kind === "notes" ? notesOpen : active === kind}
@@ -52,7 +56,7 @@ export default function TrainerVocabExtras({ cardId, german, swahili, imagePath,
             {action("notes", "Notiz", "notes", hasNote)}
             <button type="button" onClick={onAudio} aria-label={hasAudio ? "Audio abspielen" : isRecording ? "Audioaufnahme stoppen und speichern" : "Audio aufnehmen"}
                 data-present={hasAudio ? "true" : "false"} data-card-option-action="audio"
-                className={`flex min-h-12 min-w-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)] sm:min-h-11 sm:flex-row sm:gap-1.5 sm:px-2 sm:text-sm ${hasAudio ? "border-[color:var(--accent-cta)] bg-accent-cta-soft text-accent-cta-strong" : "border-soft bg-surface-elevated text-primary"}`}>
+                className={`${actionClass} ${actionTone(hasAudio)}`}>
                 <SentenceFeatureIcon name={hasAudio ? "speaker" : "audio"} className="h-4 w-4 shrink-0" /><span>{isRecording ? "Stop" : "Audio"}</span>
             </button>
         </div>

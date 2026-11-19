@@ -19,6 +19,7 @@ type Props = {
     onOpenLearningHelp?: () => void;
     sentenceExplanation?: SentenceExplanation | null;
     learningFeature?: ReactNode;
+    footer?: ReactNode;
     compactVocabExtras?: boolean;
     autoOpenExplanation?: boolean;
 };
@@ -73,6 +74,7 @@ export default function TrainerCard({
     onOpenLearningHelp,
     sentenceExplanation,
     learningFeature,
+    footer,
     compactVocabExtras = false,
     autoOpenExplanation = false,
 }: Props) {
@@ -144,6 +146,7 @@ export default function TrainerCard({
                         ) : null}
                     </div>
                 ) : null}
+                {footer}
             </div>
         </div>
     );

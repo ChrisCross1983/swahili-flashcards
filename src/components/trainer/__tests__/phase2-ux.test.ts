@@ -28,8 +28,8 @@ describe("phase 2 product UX cleanup", () => {
         expect(compactGroupPickerSource).toContain("aria-multiselectable=\"true\"");
         expect(compactGroupPickerSource).toContain("aria-selected={isSelected}");
         expect(trainerCardFormSource).toContain('triggerLabel="Gruppe wählen"');
-        expect(trainerSource).toContain("openCurrentCardGroupsEditor();");
-        expect(trainerSource).toContain("visibleBadgeSummary(currentItemGroups, 2)");
+        expect(trainerSource).toContain("onClick={openCurrentCardGroupsEditor}");
+        expect(trainerSource).toContain("currentItemGroups.length > 1");
     });
 
     it("keeps memberships editable with vocab scope and inline group creation", () => {
@@ -47,7 +47,9 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerSource).toContain("<CompactOverlay");
         expect(trainerSource).toContain("title=\"Eigene Notizen\"");
         expect(trainerSource).toContain("setCardNoteDraft({ mainNotes:");
-        expect(trainerSource).toContain("Automatisch gespeichert");
+        expect(trainerSource).toContain("Notiz gespeichert.");
+        expect(trainerSource).toContain("onSave={() => void handleSaveNotes()}");
+        expect(trainerSource).not.toContain("noteSaveTimerRef");
         expect(trainerSource).toContain("const closeNotesSheet = useCallback");
         expect(trainerSource).toContain("const handleNotesOverlayClose = useCallback");
         expect(trainerSource).toContain("onClose={handleNotesOverlayClose}");
@@ -97,7 +99,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(overlaysSource).toContain("{mobileToolsOpen ? (");
         expect(overlaysSource).toContain("bottom-[max(0.75rem,env(safe-area-inset-bottom))]");
         expect(overlaysSource).toContain("right-[max(0.75rem,env(safe-area-inset-right))]");
-        expect(overlaysSource).toContain("border-white/50 bg-accent-secondary text-white");
+        expect(overlaysSource).toContain("border border-soft bg-surface text-sm shadow-soft");
         expect(overlaysSource).toContain("Schnellaktionen öffnen");
     });
 

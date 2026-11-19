@@ -96,12 +96,14 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
         if (!enabled) return () => { active.current = false; };
         if (initialEnrichment) return () => { active.current = false; };
         const controller = new AbortController();
-        void fetch(`/api/cards/word-explanation?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store", signal: controller.signal })
-            .then(async (response) => response.ok ? response.json() : null)
-            .then((body) => { if (active.current) { setEnrichment(body?.enrichment ?? null); onChangeRef.current?.(body?.enrichment ?? null); } })
-            .catch(() => { /* The POST action rechecks ownership and saved enrichment. */ })
-            .finally(() => { if (active.current) setLoading(false); });
-        return () => { active.current = false; controller.abort(); };
+        const timer = window.setTimeout(() => {
+            void fetch(`/api/cards/word-explanation?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store", signal: controller.signal })
+                .then(async (response) => response.ok ? response.json() : null)
+                .then((body) => { if (active.current) { setEnrichment(body?.enrichment ?? null); onChangeRef.current?.(body?.enrichment ?? null); } })
+                .catch(() => { /* The POST action rechecks ownership and saved enrichment. */ })
+                .finally(() => { if (active.current) setLoading(false); });
+        }, 0);
+        return () => { window.clearTimeout(timer); active.current = false; controller.abort(); };
     }, [cardId, initialEnrichment, enabled]);
 
     async function generate(regenerate = false) {
