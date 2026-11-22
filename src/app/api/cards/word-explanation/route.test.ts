@@ -6,7 +6,7 @@ const { requireUser, from, getExistingEnrichment, generateWordUnderstanding } = 
 vi.mock("@/lib/api/auth", () => ({ requireUser }));
 vi.mock("@/lib/supabaseServer", () => ({ supabaseServer: { from } }));
 vi.mock("@/lib/aiCoach/enrichment/generateEnrichment", () => ({ getExistingEnrichment, generateWordUnderstanding }));
-import { GET, POST, PUT } from "./route";
+import { DELETE, GET, POST, PUT } from "./route";
 
 const example = { sw: "Mlango umefungwa.", de: "Die Tür ist geschlossen." };
 const enrichment = {
@@ -119,5 +119,54 @@ describe("word explanation route", () => {
         const response = await POST(request("missing-card"));
         expect(response.status).toBe(404);
         expect(generateWordUnderstanding).not.toHaveBeenCalled();
+    });
+    it("removes only the authenticated owner's saved word knowledge", async () => {
+        const conditions: Array<[string, string]> = [];
+        const deleteQuery = { eq: vi.fn() };
+        deleteQuery.eq.mockImplementation((column: string, value: string) => {
+            conditions.push([column, value]);
+            return conditions.length === 2 ? Promise.resolve({ error: null }) : deleteQuery;
+        });
+        from.mockImplementation((table: string) => {
+            if (table === "cards") {
+                const query = { eq: () => query, maybeSingle: async () => ({ data: { id: "word-1", german_text: "Tür", swahili_text: "mlango", type: "vocab" }, error: null }) };
+                return { select: () => query };
+            }
+            return { delete: () => deleteQuery };
+        });
+        const response = await DELETE(new Request("http://localhost/api/cards/word-explanation", { method: "DELETE", body: JSON.stringify({ cardId: "word-1", user_id: "another-user" }) }));
+        expect(response.status).toBe(200);
+        expect(conditions).toEqual([["owner_key", "owner"], ["card_id", "word-1"]]);
+        getExistingEnrichment.mockResolvedValue(null);
+        expect((await (await GET(new Request("http://localhost/api/cards/word-explanation?cardId=word-1"))).json()).enrichment).toBeNull();
+    });
+    it("rejects unauthenticated, cross-origin and foreign-card deletion", async () => {
+        const remove = vi.fn();
+        requireUser.mockResolvedValueOnce({ user: null, response: new Response(null, { status: 401 }) });
+        expect((await DELETE(new Request("http://localhost/api/cards/word-explanation", { method: "DELETE", body: JSON.stringify({ cardId: "word-1" }) }))).status).toBe(401);
+        expect((await DELETE(new Request("http://localhost/api/cards/word-explanation", { method: "DELETE", headers: { origin: "https://other.example" }, body: JSON.stringify({ cardId: "word-1" }) }))).status).toBe(403);
+        from.mockImplementation((table: string) => {
+            if (table === "cards") {
+                const query = { eq: () => query, maybeSingle: async () => ({ data: null, error: null }) };
+                return { select: () => query };
+            }
+            return { delete: remove };
+        });
+        expect((await DELETE(new Request("http://localhost/api/cards/word-explanation", { method: "DELETE", body: JSON.stringify({ cardId: "foreign-card" }) }))).status).toBe(404);
+        expect(remove).not.toHaveBeenCalled();
+    });
+    it("keeps saved word knowledge when deletion fails", async () => {
+        from.mockImplementation((table: string) => {
+            if (table === "cards") {
+                const query = { eq: () => query, maybeSingle: async () => ({ data: { id: "word-1", german_text: "Tür", swahili_text: "mlango", type: "vocab" }, error: null }) };
+                return { select: () => query };
+            }
+            const query = { eq: () => query, then: (resolve: (value: { error: { code: string } }) => void) => resolve({ error: { code: "db_down" } }) };
+            return { delete: () => query };
+        });
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            expect((await DELETE(new Request("http://localhost/api/cards/word-explanation", { method: "DELETE", body: JSON.stringify({ cardId: "word-1" }) }))).status).toBe(500);
+        } finally { log.mockRestore(); }
     });
 });

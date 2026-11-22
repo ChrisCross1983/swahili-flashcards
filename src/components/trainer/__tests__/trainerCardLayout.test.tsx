@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import TrainerCard from "@/components/trainer/TrainerCard";
+import TrainerStatus from "@/components/trainer/TrainerStatus";
 import GroupBadge from "@/components/groups/GroupBadge";
 
 describe("trainer card layout", () => {
@@ -18,6 +19,35 @@ describe("trainer card layout", () => {
             expect(front).not.toContain("dog.webp");
             expect(render(true)).toContain('src="https://example.com/images/dog.webp"');
         }
+    });
+
+    it("places a stored vocabulary image between answer and learning actions without an empty placeholder", () => {
+        const render = (reveal: boolean, imagePath: string | null) => renderToStaticMarkup(<TrainerCard
+            reveal={reveal} prompt="Ein sehr langes zusammenhängendes Vokabelwort" answer="Übersetzung"
+            imagePath={imagePath} imageBaseUrl="https://example.com/images" compactVocabExtras
+            learningFeature={reveal ? <div data-testid="learning-actions">Lernhilfen</div> : null}
+        />);
+        const front = render(false, "word.webp");
+        const back = render(true, "word.webp");
+        expect(front).not.toContain('data-testid="trainer-inline-image"');
+        expect(back).toContain('data-testid="trainer-inline-image"');
+        expect(back.indexOf("Übersetzung")).toBeLessThan(back.indexOf('data-testid="trainer-inline-image"'));
+        expect(back.indexOf('data-testid="trainer-inline-image"')).toBeLessThan(back.indexOf('data-testid="learning-actions"'));
+        expect(back).toContain("object-contain");
+        expect(back).toContain("[overflow-wrap:anywhere]");
+        expect(render(true, null)).not.toContain('data-testid="trainer-inline-image"');
+    });
+
+    it("keeps progress, direction and the vocabulary edit action in the compact session header", () => {
+        const html = renderToStaticMarkup(<TrainerStatus currentNumber={1} sessionTotal={100} answeredCount={0} safePct={0}
+            direction="DE_TO_SW" directionMode="RANDOM" onToggleDirectionMenu={() => undefined} onEditCard={() => undefined} />);
+        expect(html).toContain('data-testid="trainer-session-status"');
+        expect(html).toContain('data-card-option-action="edit"');
+        expect(html).toContain("1 <span");
+        expect(html).toContain("100");
+        expect(html).toContain("Richtung:");
+        expect(html).toContain("Zufällig");
+        expect(html).toContain("Richtung ändern");
     });
 
     it("renders compact front layout before reveal and expanded layout after reveal", () => {
@@ -143,17 +173,19 @@ describe("trainer action and group metadata layout", () => {
         expect(source).toContain('data-card-option-action="edit"');
         expect(source).toContain('aria-label="Karte bearbeiten"');
         expect(source).toContain('data-card-option-action="groups"');
+        expect(source).toContain('onEditCard={cardType === "vocab" ? startEditFromLearn : undefined}');
         expect(source).toContain('"Gruppen bearbeiten" : "Gruppe hinzufügen"');
         expect(source).toContain('"+ Gruppe"');
         expect(source).toContain('onClick={openCurrentCardGroupsEditor}');
         expect(source).toContain('onClick={startEditFromLearn}');
         const actions = source.slice(source.indexOf('data-testid="card-compact-actions"'), source.indexOf("learningTypeLabel={null}"));
-        expect(actions.match(/hover:shadow-soft/g)).toHaveLength(2);
-        expect(actions.match(/active:scale-\[0\.97\]/g)).toHaveLength(2);
-        expect(actions.match(/focus-visible:ring-2/g)).toHaveLength(2);
+        expect(actions).toContain('data-focus-role="technical-context"');
+        expect(actions).toContain("<TrainerLeitnerInfo");
+        expect(actions).toContain("hover:shadow-soft");
+        expect(actions).toContain("active:scale-[0.97]");
+        expect(actions).toContain("focus-visible:ring-2");
         expect(actions).toContain("min-h-11");
         expect(actions).toContain("h-11 w-11");
-        expect(source).toContain('data-focus-role="technical-context"');
         expect(source).toContain("Leitner · Stufe");
     });
 

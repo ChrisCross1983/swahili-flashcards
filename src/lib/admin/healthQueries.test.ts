@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), getUserById: vi.fn() }));
 vi.mock("@/lib/supabaseServer", () => ({ supabaseServer: { from: mocks.from, auth: { admin: { getUserById: mocks.getUserById } } } }));
-import { getEventsPage, getRunEventsPage, getRunsPage, getUserIdentity } from "./healthData";
+import { getEventsPage, getHealthExport, getRunEventsPage, getRunsPage, getUserIdentity } from "./healthData";
 
 const window = { from: "2026-11-10T00:00:00.000Z", to: "2026-11-17T00:00:00.000Z", label: "7d UTC", period: "7d" as const };
 const userId = "a3429d20-9335-4900-93d3-18df8e796704";
@@ -43,11 +43,22 @@ describe("admin health queries", () => {
         expect(builder.range).toHaveBeenCalledWith(25, 49);
     });
     it("uses the server admin API for a selected user's email", async () => {
-        mocks.getUserById.mockResolvedValue({ data: { user: { id: userId, email: "user@example.test" } }, error: null });
-        expect(await getUserIdentity(userId)).toEqual({ id: userId, email: "user@example.test" });
+        mocks.getUserById.mockResolvedValue({ data: { user: { id: userId, email: "user@example.test", user_metadata: { full_name: "Example User" } } }, error: null });
+        expect(await getUserIdentity(userId)).toEqual({ id: userId, email: "user@example.test", display_name: "Example User" });
         mocks.getUserById.mockResolvedValue({ data: { user: null }, error: { status: 404 } });
         expect(await getUserIdentity(userId)).toBeNull();
         mocks.getUserById.mockResolvedValue({ data: { user: null }, error: { status: 503, message: "secret" } });
         await expect(getUserIdentity(userId)).rejects.toThrow("health_query_failed");
+    });
+    it("builds an independent bounded export for the full selected context, not a UI page", async () => {
+        const events = query();
+        const runs = query();
+        mocks.from.mockReset().mockReturnValueOnce(events).mockReturnValueOnce(runs);
+        mocks.getUserById.mockResolvedValue({ data: { user: { id: userId, email: "user@example.test", user_metadata: {} } }, error: null });
+        const exported = await getHealthExport(window, userId, Date.parse("2026-11-16T12:00:00.000Z"));
+        expect(events.eq).toHaveBeenCalledWith("user_id", userId);
+        expect(runs.eq).toHaveBeenCalledWith("user_id", userId);
+        expect(exported.events).toMatchObject({ total: 51, returned: 0, limit: 500, truncated: true });
+        expect(exported.runs).toMatchObject({ total: 51, returned: 0, limit: 500, truncated: true });
     });
 });

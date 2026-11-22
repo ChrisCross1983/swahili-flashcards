@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import CompactOverlay from "@/components/CompactOverlay";
 
 type Props = {
     level: number;
@@ -16,7 +17,6 @@ type Props = {
 export default function TrainerLeitnerInfo({ level, dueDate, dueStatus, correctLevel, correctWhen, wrongLevel, wrongWhen }: Props) {
     const id = useId();
     const triggerRef = useRef<HTMLButtonElement>(null);
-    const closeRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [open, setOpen] = useState(false);
@@ -44,11 +44,9 @@ export default function TrainerLeitnerInfo({ level, dueDate, dueStatus, correctL
     }, []);
 
     useEffect(() => {
-        if (!open) return;
-        if (!desktop) closeRef.current?.focus();
+        if (!open || !desktop) return;
         function closeOnEscape(event: KeyboardEvent) {
             if (event.key === "Escape") { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
-            if (event.key === "Tab" && !desktop) { event.preventDefault(); closeRef.current?.focus(); }
         }
         function closeOutside(event: PointerEvent) {
             if (!triggerRef.current?.contains(event.target as Node) && !panelRef.current?.contains(event.target as Node)) setOpen(false);
@@ -84,14 +82,12 @@ export default function TrainerLeitnerInfo({ level, dueDate, dueStatus, correctL
         return () => { window.removeEventListener("resize", updatePosition); window.removeEventListener("scroll", updatePosition, true); };
     }, [open, desktop]);
 
-    const content = <>
-        <div className="text-sm font-semibold text-primary">Warum diese Karte?</div>
-        <div className="mt-2 space-y-1 text-xs leading-5 text-muted">
+    const details = <div className="space-y-1 text-xs leading-5 text-muted">
             <div>Stufe {level}{dueDate ? ` · ${dueDate}` : ""}{dueStatus ? ` (${dueStatus})` : ""}</div>
             <div>Gewusst → Stufe {correctLevel} · {correctWhen}</div>
             <div>Nicht gewusst → Stufe {wrongLevel} · {wrongWhen}</div>
-        </div>
-    </>;
+        </div>;
+    const content = <><div className="mb-2 text-sm font-semibold text-primary">Warum diese Karte?</div>{details}</>;
 
     return <>
         <button ref={triggerRef} type="button" aria-label="Warum sehe ich diese Karte?" aria-expanded={open}
@@ -106,15 +102,8 @@ export default function TrainerLeitnerInfo({ level, dueDate, dueStatus, correctL
             className="fixed z-[135] w-[272px] rounded-xl border border-soft bg-surface p-3 shadow-warm"
             style={{ left: position.left, top: position.top }}
             onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>{content}</div>, document.body) : null}
-        {open && !desktop ? createPortal(<div className="fixed inset-x-0 top-0 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-[135] bg-overlay" onClick={() => setOpen(false)} data-testid="leitner-info-backdrop">
-            <div ref={panelRef} id={id} role="dialog" aria-modal="true" aria-label="Warum diese Karte?"
-                data-testid="leitner-info-dialog"
-                className="absolute inset-x-3 bottom-2 mx-auto max-w-sm rounded-2xl border border-soft bg-surface p-4 shadow-warm"
-                onClick={(event) => event.stopPropagation()}>
-                <button ref={closeRef} type="button" onClick={() => { setOpen(false); triggerRef.current?.focus(); }} aria-label="Info schließen"
-                    className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]">✕</button>
-                <div className="pr-8">{content}</div>
-            </div>
-        </div>, document.body) : null}
+        {open && !desktop ? createPortal(<CompactOverlay open title="Warum diese Karte?" onClose={() => setOpen(false)} maxWidthClassName="max-w-sm">
+            <div id={id} data-testid="leitner-info-dialog" className="text-sm text-muted">{details}</div>
+        </CompactOverlay>, document.body) : null}
     </>;
 }

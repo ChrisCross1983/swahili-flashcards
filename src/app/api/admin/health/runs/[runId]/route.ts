@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin/requireAdmin";
 import { parseOptionalUserId, parsePage } from "@/lib/admin/healthParams";
-import { getRun, getRunEventsPage, getUserEmail } from "@/lib/admin/healthData";
+import { getRun, getRunEventsPage, getUserIdentity } from "@/lib/admin/healthData";
 import { isUuid } from "@/lib/diagnostics/validation";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
     try {
         const run = await getRun(runId);
         if (!run || (userId && run.user_id !== userId)) return NextResponse.json({ code: "run_not_found" }, { status: 404 });
-        const [events, email] = await Promise.all([getRunEventsPage(runId, run.user_id, page), getUserEmail(run.user_id)]);
-        return NextResponse.json({ run, user: { id: run.user_id, email }, events });
+        const [events, user] = await Promise.all([getRunEventsPage(runId, run.user_id, page), getUserIdentity(run.user_id)]);
+        return NextResponse.json({ run, user: user ?? { id: run.user_id, email: null, display_name: null }, events });
     } catch { return NextResponse.json({ code: "health_unavailable" }, { status: 503 }); }
 }

@@ -40,14 +40,14 @@ export default function TrainerSetupView(props: Props) {
 
     return (
         <div className="mt-4 rounded-2xl border p-4 bg-surface shadow-soft">
-            <div className="mt-2 hint-card border border-soft"><span className="font-medium text-primary">Empfohlen für dich:</span> {recommendation}</div>
+            <div className="mt-2 min-h-12 hint-card border border-soft"><span className="font-medium text-primary">Empfohlen für dich:</span> {setupCountsLoading ? <span className="ml-2 inline-block h-3 w-32 animate-pulse rounded bg-surface-elevated align-middle motion-reduce:animate-none" aria-label="Lernzahlen werden ermittelt" /> : recommendation}</div>
             <div className="mt-3 grid grid-cols-1 gap-3">
                 <button type="button" aria-pressed={selectedPreset === "today"} onClick={() => onSelectPreset("today")} className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "today" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
-                    <div className="font-semibold">Heute lernen</div><div className="mt-1 text-sm text-muted">Leitner-Runde mit den nächsten Karten.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.todayDue}</div>
+                    <div className="font-semibold">Heute lernen</div><div className="mt-1 text-sm text-muted">Leitner-Runde mit den nächsten Karten.</div><div className="count-badge absolute right-4 top-4 min-w-8 text-center">{setupCountsLoading ? <span className="inline-block h-3 w-4 animate-pulse rounded bg-surface-strong motion-reduce:animate-none" aria-label="Anzahl wird geladen" /> : setupCounts.todayDue}</div>
                 </button>
                 <div className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "all" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
                     <button type="button" aria-pressed={selectedPreset === "all"} onClick={() => onSelectPreset("all")} className="w-full text-left">
-                        <div className="font-semibold">Alle Karten üben</div><div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : allCardsCount}</div>
+                        <div className="font-semibold">Alle Karten üben</div><div className="mt-1 text-sm text-muted">Schneller Drill mit Standardwerten.</div><div className="count-badge absolute right-4 top-4 min-w-8 text-center">{setupCountsLoading ? <span className="inline-block h-3 w-4 animate-pulse rounded bg-surface-strong motion-reduce:animate-none" aria-label="Anzahl wird geladen" /> : allCardsCount}</div>
                     </button>
                     {selectedPreset === "all" ? <div ref={materialRef} className="mt-3 rounded-xl border border-soft bg-surface p-3">
                         <button type="button" aria-expanded={allGroupRefinementOpen} onClick={onToggleAllGroupRefinementOpen} className="flex w-full items-center justify-between text-sm"><span>Trainingsmaterial: {materialLabel(trainingMaterial, activeTrainerGroupName)}</span><span>{allGroupRefinementOpen ? "▾" : "▸"}</span></button>
@@ -60,7 +60,7 @@ export default function TrainerSetupView(props: Props) {
                     </div> : null}
                 </div>
                 <button type="button" aria-pressed={selectedPreset === "last-missed"} onClick={() => onSelectPreset("last-missed")} className={`relative rounded-2xl border p-4 text-left transition ${selectedPreset === "last-missed" ? "border-accent bg-accent-cta-soft hover:shadow-soft" : "border-soft bg-surface hover:bg-surface-elevated"}`}>
-                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Kurze Runde aus dem Fehlerpool.</div><div className="count-badge absolute right-4 top-4">{setupCountsLoading ? "…" : setupCounts.lastMissedCount}</div>
+                    <div className="font-semibold">Zuletzt nicht gewusst</div><div className="mt-1 text-sm text-muted">Kurze Runde aus dem Fehlerpool.</div><div className="count-badge absolute right-4 top-4 min-w-8 text-center">{setupCountsLoading ? <span className="inline-block h-3 w-4 animate-pulse rounded bg-surface-strong motion-reduce:animate-none" aria-label="Anzahl wird geladen" /> : setupCounts.lastMissedCount}</div>
                 </button>
             </div>
             <div ref={directionRef} className="mt-4">

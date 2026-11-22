@@ -136,6 +136,7 @@ export async function postGrade(params: {
 export async function postLastMissed(action: "add" | "remove", cardId: string): Promise<void> {
     const res = await fetch("/api/learn/last-missed", {
         method: "POST",
+        keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cardId, action }),
     });

@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import TrainerDashboard from "@/components/trainer/TrainerDashboard";
+import TrainerLoading from "@/app/trainer/loading";
 
 type ClickableElement = ReactElement<{ children?: ReactNode; onClick: () => void }>;
 
@@ -56,6 +57,22 @@ describe("TrainerDashboard start flow", () => {
         expect(html).not.toContain("Weiterlernen");
         expect(html).not.toContain("Heute lernen starten");
         expect(html).not.toContain("Wird geladen");
+        expect(html).toContain('aria-label="Lernkarten werden ermittelt"');
+        expect(html).toMatch(/<button[^>]*disabled[^>]*aria-label="Lernkarten werden ermittelt"/);
+        expect(html).toContain("min-h-14");
+        expect(html).toContain("motion-safe:animate-pulse");
+    });
+
+    it("renders the same complete training tile in the server route fallback before hydration", () => {
+        const fallback = renderToStaticMarkup(<TrainerLoading />);
+        const clientPending = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="pending" />);
+        for (const html of [fallback, clientPending]) {
+            expect(html).toContain('data-testid="trainer-dashboard-skeleton"');
+            expect(html).toContain('aria-label="Lernkarten werden ermittelt"');
+            expect(html).toContain("motion-safe:animate-pulse");
+            expect(html).not.toContain("Heute lernen starten");
+            expect(html).not.toContain("Weiterlernen starten");
+        }
     });
 
     it("does not infer a fallback training mode after a failed count request", () => {

@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import type { HealthWindow } from "./healthParams";
+import type { HealthUser } from "./healthPresentation";
 
 export type HealthEvent = {
     id: string; user_id: string; occurred_at: string; source: "client" | "server";
@@ -20,6 +21,7 @@ const EVENT_COLUMNS = "id,user_id,occurred_at,source,severity,category,error_cod
 const RUN_COLUMNS = "run_id,user_id,mode,run_kind,status,started_at,loaded_at,ended_at,initial_card_count,last_position,correct_count,wrong_count,last_successful_grade_at,last_heartbeat_at,sequence_number,end_reason,build_version";
 const SCAN_PAGE = 500;
 const MAX_SCAN = 5_000;
+export const HEALTH_EXPORT_LIMIT = 500;
 
 function check(error: { message: string } | null): void {
     if (error) throw new Error("health_query_failed");
@@ -33,13 +35,15 @@ export function isSuspectedAbandoned(run: HealthRun, now = Date.now()): boolean 
     return Number.isFinite(last) && now - last > 5 * 60_000;
 }
 
-async function scanEvents(window: HealthWindow): Promise<{ rows: HealthEvent[]; total: number; truncated: boolean }> {
+async function scanEvents(window: HealthWindow, userId?: string | null, limit = MAX_SCAN): Promise<{ rows: HealthEvent[]; total: number; truncated: boolean }> {
     const rows: HealthEvent[] = [];
     let total = 0;
-    for (let offset = 0; offset < MAX_SCAN; offset += SCAN_PAGE) {
-        const { data, error, count } = await supabaseServer.from("app_diagnostic_events")
+    for (let offset = 0; offset < limit; offset += SCAN_PAGE) {
+        let query = supabaseServer.from("app_diagnostic_events")
             .select(EVENT_COLUMNS, { count: offset === 0 ? "exact" : undefined })
-            .gte("occurred_at", window.from).lt("occurred_at", window.to)
+            .gte("occurred_at", window.from).lt("occurred_at", window.to);
+        if (userId) query = query.eq("user_id", userId);
+        const { data, error, count } = await query
             .order("occurred_at", { ascending: false }).range(offset, offset + SCAN_PAGE - 1);
         check(error);
         if (offset === 0) total = count ?? 0;
@@ -49,13 +53,15 @@ async function scanEvents(window: HealthWindow): Promise<{ rows: HealthEvent[]; 
     return { rows, total: Math.max(total, rows.length), truncated: total > rows.length };
 }
 
-async function scanRuns(window: HealthWindow): Promise<{ rows: HealthRun[]; total: number; truncated: boolean }> {
+async function scanRuns(window: HealthWindow, userId?: string | null, limit = MAX_SCAN): Promise<{ rows: HealthRun[]; total: number; truncated: boolean }> {
     const rows: HealthRun[] = [];
     let total = 0;
-    for (let offset = 0; offset < MAX_SCAN; offset += SCAN_PAGE) {
-        const { data, error, count } = await supabaseServer.from("learning_run_health")
+    for (let offset = 0; offset < limit; offset += SCAN_PAGE) {
+        let query = supabaseServer.from("learning_run_health")
             .select(RUN_COLUMNS, { count: offset === 0 ? "exact" : undefined })
-            .gte("started_at", window.from).lt("started_at", window.to)
+            .gte("started_at", window.from).lt("started_at", window.to);
+        if (userId) query = query.eq("user_id", userId);
+        const { data, error, count } = await query
             .order("started_at", { ascending: false }).range(offset, offset + SCAN_PAGE - 1);
         check(error);
         if (offset === 0) total = count ?? 0;
@@ -65,17 +71,20 @@ async function scanRuns(window: HealthWindow): Promise<{ rows: HealthRun[]; tota
     return { rows, total: Math.max(total, rows.length), truncated: total > rows.length };
 }
 
+export type HealthMetrics = ReturnType<typeof summarizeHealth>;
+
 export function summarizeHealth(events: HealthEvent[], runs: HealthRun[], now = Date.now()) {
     const affectedUsers = new Set<string>();
     const users = new Set<string>();
-    const fingerprints = new Map<string, { fingerprint: string | null; count: number; last_at: string; users: Set<string>; route: string; error_code: string }>();
+    const fingerprints = new Map<string, { fingerprint: string | null; count: number; last_at: string; users: Set<string>; route: string; error_code: string; source: HealthEvent["source"] | "mixed" }>();
     for (const event of events) {
         affectedUsers.add(event.user_id);
         users.add(event.user_id);
         const key = event.fingerprint ?? `${event.error_code}|${event.route}`;
-        const item = fingerprints.get(key) ?? { fingerprint: event.fingerprint, count: 0, last_at: event.occurred_at, users: new Set<string>(), route: event.route, error_code: event.error_code };
+        const item = fingerprints.get(key) ?? { fingerprint: event.fingerprint, count: 0, last_at: event.occurred_at, users: new Set<string>(), route: event.route, error_code: event.error_code, source: event.source };
         item.count++;
         item.users.add(event.user_id);
+        if (item.source !== event.source) item.source = "mixed";
         if (event.occurred_at > item.last_at) { item.last_at = event.occurred_at; item.route = event.route; }
         fingerprints.set(key, item);
     }
@@ -104,18 +113,42 @@ export function summarizeHealth(events: HealthEvent[], runs: HealthRun[], now = 
         avgCompletedDurationMinutes: durations.length ? Math.round(average(durations) / 60_000) : 0,
         topFingerprints: [...fingerprints.values()].sort((a, b) => b.count - a.count || b.last_at.localeCompare(a.last_at)).slice(0, 15).map((item) => ({
             fingerprint: item.fingerprint, count: item.count, last_at: item.last_at,
-            affected_users: item.users.size, route: item.route, error_code: item.error_code,
+            affected_users: item.users.size, route: item.route, error_code: item.error_code, source: item.source,
         })),
     };
 }
 
-export async function getHealthOverview(window: HealthWindow, now = Date.now()) {
-    const [events, runs] = await Promise.all([scanEvents(window), scanRuns(window)]);
+export async function getHealthOverview(window: HealthWindow, now = Date.now(), userId?: string | null) {
+    const [events, runs] = await Promise.all([scanEvents(window, userId), scanRuns(window, userId)]);
+    const users = await getUserIdentities([...new Set([...events.rows.map((event) => event.user_id), ...runs.rows.map((run) => run.user_id)])].slice(0, 100));
     return {
         window, metrics: summarizeHealth(events.rows, runs.rows, now),
         sampled: events.truncated || runs.truncated,
         scanned: { events: events.rows.length, runs: runs.rows.length },
         totals: { events: events.total, runs: runs.total },
+        users,
+        report: {
+            events: { items: events.rows.slice(0, 100), total: events.total, page: 1, pageSize: 100 },
+            runs: { items: runs.rows.slice(0, 100), total: runs.total, page: 1, pageSize: 100 },
+        },
+    };
+}
+
+export async function getHealthExport(window: HealthWindow, userId?: string | null, now = Date.now()) {
+    const [events, runs] = await Promise.all([
+        scanEvents(window, userId, HEALTH_EXPORT_LIMIT),
+        scanRuns(window, userId, HEALTH_EXPORT_LIMIT),
+    ]);
+    const ids = [...new Set([...events.rows.map((event) => event.user_id), ...runs.rows.map((run) => run.user_id), ...(userId ? [userId] : [])])];
+    const users = await getUserIdentities(ids);
+    return {
+        window,
+        selectedUser: userId ? users.find((user) => user.id === userId) ?? { id: userId, email: null, display_name: null } : null,
+        users,
+        metrics: summarizeHealth(events.rows, runs.rows, now),
+        sampled: events.truncated || runs.truncated,
+        events: { items: events.rows, total: events.total, returned: events.rows.length, limit: HEALTH_EXPORT_LIMIT, truncated: events.truncated },
+        runs: { items: runs.rows, total: runs.total, returned: runs.rows.length, limit: HEALTH_EXPORT_LIMIT, truncated: runs.truncated },
     };
 }
 
@@ -152,18 +185,29 @@ export async function getRunEventsPage(runId: string, userId: string, page: { pa
     return { items: (data ?? []) as HealthEvent[], total: count ?? 0, page: page.page, pageSize: page.pageSize };
 }
 
-export async function getUserEmail(userId: string): Promise<string | null> {
-    try {
-        const { data, error } = await supabaseServer.auth.admin.getUserById(userId);
-        return error ? null : data.user?.email ?? null;
-    } catch { return null; }
+function displayName(metadata: unknown): string | null {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+    const record = metadata as Record<string, unknown>;
+    for (const key of ["display_name", "full_name", "name"]) {
+        const value = record[key];
+        if (typeof value === "string" && value.trim()) return value.trim().slice(0, 120);
+    }
+    return null;
 }
 
-export async function getUserIdentity(userId: string): Promise<{ id: string; email: string | null } | null> {
+export async function getUserIdentity(userId: string): Promise<HealthUser | null> {
     const { data, error } = await supabaseServer.auth.admin.getUserById(userId);
     if (error) {
         if (error.status === 404) return null;
         throw new Error("health_query_failed");
     }
-    return data.user ? { id: data.user.id, email: data.user.email ?? null } : null;
+    return data.user ? { id: data.user.id, email: data.user.email ?? null, display_name: displayName(data.user.user_metadata) } : null;
+}
+
+export async function getUserIdentities(userIds: string[]): Promise<HealthUser[]> {
+    const unique = [...new Set(userIds)].slice(0, 100);
+    const identities = await Promise.all(unique.map(async (userId) => {
+        try { return await getUserIdentity(userId); } catch { return { id: userId, email: null, display_name: null }; }
+    }));
+    return identities.filter((identity): identity is HealthUser => Boolean(identity));
 }

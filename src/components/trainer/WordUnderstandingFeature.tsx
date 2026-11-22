@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { beginnerWordHint, concordChange, hasWordUnderstanding, ingiForms, isIngiForm, nounClassLabel, nounSentenceChange, wordTypeLabel, type WordEnrichment } from "@/lib/word/understanding";
 
 function HighlightedSentence({ sentence, forms }: { sentence: string; forms: string[] }) {
@@ -60,12 +61,13 @@ export function WordUnderstandingContent({ enrichment, swahili, german }: { enri
     </div>;
 }
 
-export default function WordUnderstandingFeature({ cardId, swahili, german, initialEnrichment, onSaved, onChange, embedded = false, enabled = true, allowRegenerate = true, detailPresentation = false }: {
+export default function WordUnderstandingFeature({ cardId, swahili, german, initialEnrichment, onSaved, onRemoved, onChange, embedded = false, enabled = true, allowRegenerate = true, detailPresentation = false }: {
     cardId: string;
     swahili: string;
     german: string;
     initialEnrichment?: WordEnrichment | null;
     onSaved: (cardId: string, enrichment: WordEnrichment) => void;
+    onRemoved?: (cardId: string) => void;
     onChange?: (enrichment: WordEnrichment | null) => void;
     embedded?: boolean;
     enabled?: boolean;
@@ -83,6 +85,11 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
     const [saved, setSaved] = useState(false);
     const [preview, setPreview] = useState<{ enrichment: WordEnrichment; token: string } | null>(null);
     const [accepting, setAccepting] = useState(false);
+    const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+    const [removing, setRemoving] = useState(false);
+    const [removeError, setRemoveError] = useState(false);
+    const removeLock = useRef(false);
+    const loadController = useRef<AbortController | null>(null);
     useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
     useEffect(() => {
@@ -96,6 +103,7 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
         if (!enabled) return () => { active.current = false; };
         if (initialEnrichment) return () => { active.current = false; };
         const controller = new AbortController();
+        loadController.current = controller;
         const timer = window.setTimeout(() => {
             void fetch(`/api/cards/word-explanation?cardId=${encodeURIComponent(cardId)}`, { cache: "no-store", signal: controller.signal })
                 .then(async (response) => response.ok ? response.json() : null)
@@ -103,7 +111,7 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
                 .catch(() => { /* The POST action rechecks ownership and saved enrichment. */ })
                 .finally(() => { if (active.current) setLoading(false); });
         }, 0);
-        return () => { window.clearTimeout(timer); active.current = false; controller.abort(); };
+        return () => { window.clearTimeout(timer); active.current = false; controller.abort(); if (loadController.current === controller) loadController.current = null; };
     }, [cardId, initialEnrichment, enabled]);
 
     async function generate(regenerate = false) {
@@ -147,6 +155,40 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
         finally { if (active.current) setAccepting(false); }
     }
 
+    async function removeEnrichment() {
+        if (removeLock.current || !hasWordUnderstanding(enrichment)) return;
+        removeLock.current = true;
+        setRemoving(true);
+        setRemoveError(false);
+        try {
+            const response = await fetch("/api/cards/word-explanation", {
+                method: "DELETE", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cardId }),
+            });
+            if (!response.ok) throw new Error("remove_failed");
+            loadController.current?.abort();
+            setEnrichment(null);
+            setPreview(null);
+            setOpen(false);
+            setSaved(false);
+            setRemoveConfirmOpen(false);
+            onChangeRef.current?.(null);
+            onRemoved?.(cardId);
+        } catch {
+            setRemoveError(true);
+            setRemoveConfirmOpen(false);
+        } finally {
+            removeLock.current = false;
+            setRemoving(false);
+        }
+    }
+
+    const removeControls = <>
+        <button type="button" className="btn btn-utility mt-3 min-h-11 text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={generating || accepting || removing} onClick={() => { setRemoveError(false); setRemoveConfirmOpen(true); }}>Wortwissen entfernen</button>
+        {removeError ? <p role="alert" className="mt-2 text-sm text-[color:var(--accent-danger-strong)]">Wortwissen konnte nicht entfernt werden. Bitte versuche es erneut.</p> : null}
+        <ConfirmDialog open={removeConfirmOpen} title="Gespeichertes Wortwissen wirklich entfernen?" description="Das gespeicherte Wortwissen wird von dieser Karte entfernt." confirmLabel="Entfernen" cancelLabel="Abbrechen" destructive busy={removing} onConfirm={() => void removeEnrichment()} onCancel={() => setRemoveConfirmOpen(false)} />
+    </>;
+
     const previewContent = preview ? <div aria-label="Worterklärung Vorschau">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Vorschau · noch nicht gespeichert</p>
         <WordUnderstandingContent enrichment={preview.enrichment} swahili={swahili} german={german} />
@@ -161,6 +203,7 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
         {previewContent ?? (enrichment && hasWordUnderstanding(enrichment) ? <>
             <WordUnderstandingContent enrichment={enrichment} swahili={swahili} german={german} />
             {allowRegenerate ? <button type="button" className="btn btn-ghost word-understanding-regenerate" disabled={generating} onClick={() => void generate(true)}>{generating ? "Worterklärung wird erstellt …" : "Neu erzeugen"}</button> : null}
+            {removeControls}
         </> : <>
             <p className="text-sm text-muted">{detailPresentation ? "Noch keine Worterklärung vorhanden." : "Klasse, Formen und Verwendung dieses Wortes verstehen."}</p>
             <button type="button" className={detailPresentation ? "card-detail-generate" : "btn btn-secondary mt-3 min-h-11"} disabled={generating} onClick={() => void generate()}>{detailPresentation && !generating ? <span aria-hidden="true">＋</span> : null}{generating ? "Worterklärung wird erstellt …" : error ? "Erneut versuchen" : "Worterklärung erzeugen"}</button>
@@ -172,6 +215,7 @@ export default function WordUnderstandingFeature({ cardId, swahili, german, init
     if (enrichment && hasWordUnderstanding(enrichment)) return <section className="word-understanding-disclosure" aria-label="Wort verstehen">
         <button type="button" className="word-understanding-toggle" aria-expanded={open} aria-controls={`word-understanding-${cardId}`} onClick={() => setOpen((value) => !value)}>Wort verstehen <span aria-hidden="true">{open ? "⌃" : "⌄"}</span></button>
         {open ? <div id={`word-understanding-${cardId}`}><WordUnderstandingContent enrichment={enrichment} swahili={swahili} german={german} /></div> : null}
+        {removeControls}
         {saved ? <p role="status" className="mt-2 text-xs text-emerald-700">Worterklärung gespeichert</p> : null}
     </section>;
     return <section className="trainer-learning-feature" aria-label="Wort verstehen">

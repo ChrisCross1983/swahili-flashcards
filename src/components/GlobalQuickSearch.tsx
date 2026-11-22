@@ -386,6 +386,12 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: P
                 setKnownCards((prev) => prev.map(apply));
                 setDetailCard((prev) => prev ? apply(prev) : prev);
                  if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: apply(detailOriginRef.current.card) };
+             }} onWordUnderstandingRemoved={(cardId) => {
+                const apply = (card: CardResult) => String(card.id) === cardId ? { ...card, word_enrichment: null } : card;
+                setResults((prev) => prev.map(apply));
+                setKnownCards((prev) => prev.map(apply));
+                setDetailCard((prev) => prev ? apply(prev) : prev);
+                if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: apply(detailOriginRef.current.card) };
              }} /> : null}
             <TrainerCardFormSheet
                 key={formCardType}
@@ -423,6 +429,20 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: P
                     setKnownCards((prev) => prev.map(applyExplanation));
                     setDetailCard((prev) => prev ? applyExplanation(prev) : prev);
                     if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: applyExplanation(detailOriginRef.current.card) };
+                }}
+                onWordUnderstandingRemoved={(cardId) => {
+                    const apply = (card: CardResult) => String(card.id) === cardId ? { ...card, word_enrichment: null } : card;
+                    setResults((prev) => prev.map(apply));
+                    setKnownCards((prev) => prev.map(apply));
+                    setDetailCard((prev) => prev ? apply(prev) : prev);
+                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: apply(detailOriginRef.current.card) };
+                }}
+                onImageRemoved={(cardId) => {
+                    const apply = (card: CardResult) => String(card.id) === cardId ? { ...card, image_path: null } : card;
+                    setResults((prev) => prev.map(apply));
+                    setKnownCards((prev) => prev.map(apply));
+                    setDetailCard((prev) => prev ? apply(prev) : prev);
+                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) detailOriginRef.current = { ...detailOriginRef.current, card: apply(detailOriginRef.current.card) };
                 }}
                 onOpenCards={() => { if (detailOriginRef.current) setDetailCard({ ...detailOriginRef.current.card }); }}
                 onReturnToLearn={() => { }}

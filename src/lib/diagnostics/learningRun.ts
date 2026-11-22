@@ -2,6 +2,7 @@ type Mode = "LEITNER_TODAY" | "DRILL";
 type Kind = "today" | "all_cards" | "last_missed" | "repair_drill";
 type RunMessage = Record<string, string | number | boolean | null>;
 type Send = (message: RunMessage) => Promise<void>;
+export type LearningRunResume = { id: string; sequence: number; loadedCount: number; position: number; correct: number; wrong: number; mode: Mode; kind: Kind };
 
 const CHECKPOINT_GRADES = 10;
 const CHECKPOINT_MS = 45_000;
@@ -57,6 +58,31 @@ export class LearningRunDiagnostics {
     constructor(private readonly send: Send = sendRun, private readonly now: () => number = Date.now) {}
 
     get runId(): string | null { return this.id; }
+
+    resumeState(mode: Mode, kind: Kind): LearningRunResume | null {
+        return this.id && this.active && !this.ended ? { id: this.id, sequence: this.sequence, loadedCount: this.loadedCount, position: this.position, correct: this.correct, wrong: this.wrong, mode, kind } : null;
+    }
+
+    restore(state: LearningRunResume): void {
+        if (this.id || !/^[0-9a-f-]{36}$/i.test(state.id)) return;
+        this.id = state.id;
+        this.sequence = state.sequence;
+        this.loadedCount = state.loadedCount;
+        this.position = state.position;
+        this.correct = state.correct;
+        this.wrong = state.wrong;
+        this.active = true;
+        this.paused = false;
+        this.ended = false;
+        this.disposed = false;
+        this.lastCheckpointAt = this.now();
+        // Both operations are idempotent. They repair a start/loaded request lost during reload.
+        this.enqueue({ action: "start", run_id: this.id, mode: state.mode, run_kind: state.kind, build_version: buildVersion() });
+        this.enqueue({ action: "loaded", run_id: this.id, sequence_number: 1, initial_card_count: state.loadedCount });
+        this.heartbeatTimer = setInterval(() => {
+            if (typeof document !== "undefined" && document.visibilityState === "visible") this.heartbeat();
+        }, HEARTBEAT_MS);
+    }
 
     private enqueue(message: RunMessage): void {
         this.pending = this.pending.then(() => this.send(message)).catch(() => {});

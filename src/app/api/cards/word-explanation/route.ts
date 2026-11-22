@@ -108,3 +108,25 @@ export async function PUT(req: Request) {
         return NextResponse.json({ error: "Worterklärung konnte nicht gespeichert werden." }, { status: 502 });
     }
 }
+
+export async function DELETE(req: Request) {
+    const { user, response } = await requireUser();
+    if (response) return response;
+    if (!sameOrigin(req)) return NextResponse.json({ error: "Ungültige Anfrage." }, { status: 403 });
+    let body: unknown;
+    try { body = JSON.parse(await req.text()); } catch { return NextResponse.json({ error: "Ungültige Anfrage." }, { status: 400 }); }
+    const cardId = body && typeof body === "object" && !Array.isArray(body) && typeof (body as { cardId?: unknown }).cardId === "string"
+        ? (body as { cardId: string }).cardId.trim() : "";
+    if (!cardId) return NextResponse.json({ error: "cardId ist erforderlich." }, { status: 400 });
+    try {
+        const lookup = await ownedWord(user.id, cardId);
+        if (lookup.kind !== "word") return NextResponse.json({ error: "Wort nicht gefunden." }, { status: 404 });
+        const { error } = await supabaseServer.from("ai_card_enrichment").delete()
+            .eq("owner_key", user.id).eq("card_id", cardId);
+        if (error) throw error;
+        return NextResponse.json({ removed: true }, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+        logFailure(cardId, "delete", 500);
+        return NextResponse.json({ error: "Wortwissen konnte nicht entfernt werden." }, { status: 500 });
+    }
+}

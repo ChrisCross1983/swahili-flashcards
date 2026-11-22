@@ -60,7 +60,7 @@ export default function TrainerControls({
                     data-focus-role="primary-learning-action"
                     data-tap-feedback="immediate"
                 >
-                    Nicht gewusst
+                    {gradingInFlight ? <span aria-hidden="true" className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" /> : null}Nicht gewusst
                 </button>
 
                 <button
@@ -72,7 +72,7 @@ export default function TrainerControls({
                     data-focus-role="primary-learning-action"
                     data-tap-feedback="immediate"
                 >
-                    Gewusst
+                    {gradingInFlight ? <span aria-hidden="true" className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" /> : null}Gewusst
                 </button>
             </div>
         </>

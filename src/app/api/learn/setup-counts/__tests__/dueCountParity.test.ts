@@ -136,6 +136,13 @@ describe("shared Home/Trainer due-count source", () => {
         ]);
     });
 
+    it("exposes safe per-query timings without user or card identifiers", async () => {
+        const response = await getSetupCounts(setupRequest());
+        const timing = response.headers.get("Server-Timing") ?? "";
+        expect(timing).toMatch(/groups;dur=[\d.]+, due;dur=[\d.]+, cards;dur=[\d.]+, last_missed;dur=[\d.]+/);
+        expect(timing).not.toContain("user-a");
+    });
+
     it("uses the existing UTC date boundary, not the browser's local calendar day", async () => {
         addCard("utc-tomorrow", "2026-10-08", 0);
         vi.setSystemTime(new Date("2026-10-07T21:30:00Z")); // 00:30 in Dar es Salaam

@@ -39,6 +39,7 @@ import TrainerSessionTransition from "@/components/trainer/TrainerSessionTransit
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
+import { patchResumeSnapshotCard, readResumeSnapshot } from "@/lib/trainer/resume";
 import GroupBadge from "@/components/groups/GroupBadge";
 import CompactGroupPicker from "@/components/groups/CompactGroupPicker";
 import ManageGroupsSheet from "@/components/groups/ManageGroupsSheet";
@@ -319,6 +320,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const savedCardNoteRef = useRef("");
     const initialLibraryLoadRef = useRef(false);
     const initialCountsLoadRef = useRef(false);
+    const resumeAttemptedRef = useRef(false);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
     const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
 
@@ -587,6 +589,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         learnLoadError,
         gradingInFlight,
         startLearningSession,
+        resumeActiveSession,
         revealCard,
         gradeCurrent,
         endSessionEarly: endTrainerSessionEarly,
@@ -594,6 +597,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         startDrillWithItems,
         applyDeletedCards: applyDeletedCardsToSession,
     } = useTrainerSession({
+        ownerKey,
         cardType,
         learnMode,
         setLearnMode,
@@ -627,6 +631,42 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             setExitConfirmOpen(false);
         },
     });
+
+    useEffect(() => {
+        if (resumeAttemptedRef.current) return;
+        resumeAttemptedRef.current = true;
+        let attempting = false;
+        const attempt = () => {
+            if (attempting || !readResumeSnapshot(ownerKey, cardType)) return;
+            attempting = true;
+            setOpenLearn(true);
+            setDirectStartPreparing(true);
+            void resumeActiveSession().then((restored) => {
+                setDirectStartPreparing(false);
+                if (!restored) setOpenLearn(false);
+            }).finally(() => { attempting = false; });
+        };
+        attempt();
+        // Run once for this owner and trainer type on mount.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ownerKey, cardType]);
+
+    const resumeSessionRef = useRef(resumeActiveSession);
+    useEffect(() => { resumeSessionRef.current = resumeActiveSession; }, [resumeActiveSession]);
+    useEffect(() => {
+        const retryResume = () => {
+            if (!learnStarted && readResumeSnapshot(ownerKey, cardType)) {
+                setOpenLearn(true);
+                setDirectStartPreparing(true);
+                void resumeSessionRef.current().then((restored) => {
+                    setDirectStartPreparing(false);
+                    if (!restored) setOpenLearn(false);
+                });
+            }
+        };
+        window.addEventListener("online", retryResume);
+        return () => window.removeEventListener("online", retryResume);
+    }, [ownerKey, cardType, learnStarted]);
 
     useEffect(() => {
         if (!openLearn || directStartPreparing || learnStarted) return;
@@ -1550,6 +1590,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                             <FullScreenSheet
                                 open={openLearn}
                                 title="Vokabeln lernen"
+                                backdropTone="calm"
                                 footer={cardType === "vocab" && learnStarted && todayItems.length > 0 ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
                                     <TrainerControls
                                         reveal={reveal}
@@ -1667,7 +1708,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                         return (
                                             <>
                                                 {/* ===== Session Header (quiet progress) ===== */}
-                                                <div className="mb-3" data-focus-role="session-context">
+                                                <div className="mb-2" data-focus-role="session-context">
                                                     <TrainerStatus
                                                         currentNumber={currentNumber}
                                                         sessionTotal={sessionTotal}
@@ -1676,6 +1717,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                         direction={direction}
                                                         directionMode={directionMode}
                                                         onToggleDirectionMenu={() => setOpenDirectionChange((v) => !v)}
+                                                        onEditCard={cardType === "vocab" ? startEditFromLearn : undefined}
                                                     />
 
                                                     {/* Dropdown */}
@@ -1730,7 +1772,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                 </div>
 
                                                 {/* ===== Card ===== */}
-                                                <div className={`mt-3 rounded-3xl border border-soft bg-surface shadow-soft sm:p-6 ${cardType === "vocab" ? "flex flex-col p-3" : "p-4"}`} data-testid="active-learning-focus" data-reveal-state={reveal ? "revealed" : "recalling"}>
+                                                <div className={`mt-2 min-w-0 rounded-3xl border border-soft bg-surface shadow-soft ${cardType === "vocab" ? "flex flex-col p-3 sm:p-4" : "p-4 sm:p-6"}`} data-testid="active-learning-focus" data-reveal-state={reveal ? "revealed" : "recalling"}>
                                                     <div className="order-1 md:order-0">
                                                         <TrainerCard
                                                             key={`${resolveCardId(currentItem)}-${direction}-${reveal ? "r" : "h"}-${cardType === "sentence" && featureSuccess?.id === resolveCardId(currentItem) ? "saved" : "original"}`}
@@ -1743,9 +1785,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                             imagePath={reveal ? currentImagePath : null}
                                                             imageBaseUrl={IMAGE_BASE_URL}
                                                             compactVocabExtras={cardType === "vocab"}
-                                                            footer={<div className="flex min-w-0 items-center justify-between gap-2 border-t border-soft pt-2" data-testid="card-compact-actions">
+                                                            footer={<div className="flex min-w-0 items-center gap-2 border-t border-soft pt-2" data-testid="card-compact-actions">
                                                                 {cardType === "vocab" ? <button type="button" onClick={openCurrentCardGroupsEditor} aria-label={currentItemGroups.length ? "Gruppen bearbeiten" : "Gruppe hinzufügen"} title={currentItemGroups.map((group: Group) => group.name).join(", ")}
-                                                                    data-card-option-action="groups" className="inline-flex min-h-11 min-w-0 max-w-[75%] cursor-pointer items-center gap-1 rounded-full border border-soft bg-surface-elevated/70 px-2.5 text-xs text-muted transition hover:border-[color:var(--accent-primary)] hover:bg-surface-elevated hover:text-primary hover:shadow-soft active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]">
+                                                                    data-card-option-action="groups" className="inline-flex min-h-11 min-w-0 max-w-[40%] cursor-pointer items-center gap-1 rounded-full border border-soft bg-surface-elevated/70 px-2.5 text-xs text-muted transition hover:border-[color:var(--accent-primary)] hover:bg-surface-elevated hover:text-primary hover:shadow-soft active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]">
                                                                     <SentenceFeatureIcon name="group" className="h-4 w-4 shrink-0" />
                                                                     <span className="truncate">{currentItemGroups.length ? currentItemGroups[0].name : "+ Gruppe"}</span>
                                                                     {currentItemGroups.length > 1 ? <span className="shrink-0">+{currentItemGroups.length - 1}</span> : null}
@@ -1753,17 +1795,31 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                     className="inline-flex min-h-10 items-center gap-1 rounded-full px-2 text-xs text-muted hover:bg-surface-elevated">
                                                                     <SentenceFeatureIcon name="audio" className="h-4 w-4" />{isRecording ? "Aufnahme stoppen" : "Audio aufnehmen"}
                                                                 </button> : <span />}
-                                                                <button type="button" onClick={startEditFromLearn} aria-label="Karte bearbeiten" title="Karte bearbeiten" data-card-option-action="edit"
+                                                                {cardType === "vocab" && isLeitnerSelected ? <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 text-[11px] text-muted" data-focus-role="technical-context">
+                                                                    <span className="truncate" title={`Leitner · Stufe ${getDisplayLevel(currentLevel)} · ${formatDays(footerNextDays)}`}>
+                                                                        Leitner · Stufe {getDisplayLevel(currentLevel)} · {formatDays(footerNextDays)}
+                                                                    </span>
+                                                                    <TrainerLeitnerInfo
+                                                                        key={resolveCardId(currentItem)}
+                                                                        level={getDisplayLevel(currentLevel)}
+                                                                        dueDate={formattedDueDate}
+                                                                        dueStatus={dueStatusText}
+                                                                        correctLevel={getDisplayLevel(nextOnCorrectLevel)}
+                                                                        correctWhen={formatDays(nextOnCorrectDays)}
+                                                                        wrongLevel={getDisplayLevel(nextOnWrongLevel)}
+                                                                        wrongWhen={formatDays(nextOnWrongDays)}
+                                                                    />
+                                                                </div> : null}
+                                                                {cardType !== "vocab" ? <button type="button" onClick={startEditFromLearn} aria-label="Karte bearbeiten" title="Karte bearbeiten" data-card-option-action="edit"
                                                                     className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-soft bg-surface-elevated/70 text-muted transition hover:border-[color:var(--accent-primary)] hover:bg-surface-elevated hover:text-primary hover:shadow-soft active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]">
                                                                     <SentenceFeatureIcon name="edit" className="h-4 w-4" />
-                                                                </button>
+                                                                </button> : null}
                                                             </div>}
                                                             learningTypeLabel={null}
                                                             sentenceExplanation={cardType === "sentence" ? currentItem?.sentence_explanation ?? null : null}
                                                             autoOpenExplanation={featureSuccess?.id === resolveCardId(currentItem) && cardType === "sentence"}
                                                             learningFeature={reveal && resolveCardId(currentItem) && cardType === "vocab" ? <TrainerVocabExtras
                                                                 cardId={resolveCardId(currentItem)} swahili={currentSwahili} german={currentGerman}
-                                                                imagePath={currentImagePath} imageBaseUrl={IMAGE_BASE_URL}
                                                                 enrichment={currentItem?.word_enrichment ?? null}
                                                                 hasNote={Boolean(cards.find((card) => String(card.id) === resolveCardId(currentItem))?.has_note)}
                                                                 notesOpen={notesSheetOpen}
@@ -1775,10 +1831,15 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                                     setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, word_enrichment: enrichment } : item));
                                                                     setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, word_enrichment: enrichment } : card));
                                                                 }}
-                                                                onImageSaved={(id, change) => {
-                                                                    setFeatureSuccess({ id, message: "Illustration gespeichert" });
-                                                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, ...change, ...(change.image_path ? { imagePath: change.image_path } : {}) } : item));
-                                                                    setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
+                                                                onWordRemoved={(id) => {
+                                                                    patchResumeSnapshotCard(ownerKey, cardType, id, { word_enrichment: null });
+                                                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, word_enrichment: null } : item));
+                                                                    setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, word_enrichment: null } : card));
+                                                                }}
+                                                                imagePath={currentImagePath}
+                                                                onImageSaved={(id, imagePath) => {
+                                                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === id ? { ...item, imagePath, image_path: imagePath } : item));
+                                                                    setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, image_path: imagePath } : card));
                                                                 }}
                                                             /> : reveal && featureSuccess?.id === resolveCardId(currentItem) ? <p role="status" className="text-sm text-emerald-700">{featureSuccess.message}</p> : reveal && cardType === "sentence" && resolveCardId(currentItem) && !currentItem?.sentence_explanation ? <TrainerLearningFeature key={`${resolveCardId(currentItem)}-${cardType}`} cardId={resolveCardId(currentItem)} cardType={cardType} german={currentGerman} swahili={currentSwahili} onSaved={(id, change) => {
                                                                 setFeatureSuccess({ id, message: change.image_path ? "Illustration gespeichert" : "Lernerklärung gespeichert" });
@@ -1802,8 +1863,8 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                                     />
                                                     </div>
 
-                                                    {isLeitnerSelected ? (
-                                                        <div className={`flex items-center justify-between gap-2 text-xs text-muted ${cardType === "vocab" ? "order-4 mt-2 px-1 opacity-75" : "mt-8 rounded-2xl border border-soft bg-surface/70 px-3 py-2"}`} data-focus-role="technical-context">
+                                                    {isLeitnerSelected && cardType !== "vocab" ? (
+                                                        <div className="mt-8 flex items-center justify-between gap-2 rounded-2xl border border-soft bg-surface/70 px-3 py-2 text-xs text-muted" data-focus-role="technical-context">
                                                             <span>
                                                                 Leitner · Stufe {getDisplayLevel(currentLevel)} · nächste Wiederholung{" "}
                                                                 {formatDays(footerNextDays)}
@@ -1938,6 +1999,22 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card));
                                     setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, word_enrichment: enrichment } : item));
                                 }}
+                                onWordUnderstandingRemoved={(cardId) => {
+                                    patchResumeSnapshotCard(ownerKey, cardType, cardId, { word_enrichment: null });
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {
+                                        detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, word_enrichment: null } };
+                                    }
+                                    setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: null } : card));
+                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, word_enrichment: null } : item));
+                                }}
+                                onImageRemoved={(cardId) => {
+                                    patchResumeSnapshotCard(ownerKey, cardType, cardId, { image_path: null, imagePath: null, image: null });
+                                    if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {
+                                        detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, image_path: null, imagePath: null } };
+                                    }
+                                    setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, image_path: null } : card));
+                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, image_path: null, imagePath: null, image: null } : item));
+                                }}
                                 onOpenCards={() => { setReturnToDetail(detailOriginRef.current ? { ...detailOriginRef.current } : null); setOpenCards(true); }}
                                 onReturnToLearn={() => {}}
                                 onStatus={showToast}
@@ -2000,6 +2077,11 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onDetailClosed={() => { detailOriginRef.current = null; setReturnToDetail(null); }}
                                 onWordUnderstandingSaved={(cardId, enrichment) => {
                                     setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: enrichment } : card));
+                                }}
+                                onWordUnderstandingRemoved={(cardId) => {
+                                    patchResumeSnapshotCard(ownerKey, cardType, cardId, { word_enrichment: null });
+                                    setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, word_enrichment: null } : card));
+                                    setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, word_enrichment: null } : item));
                                 }}
                                 onDeleteCard={(cardId) => void deleteCard(cardId)}
                                 onOpenCardGroupsEditor={openCardGroupsEditorForCard}

@@ -13,6 +13,21 @@ function harness() {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); resetRunIngestForTests(); });
 
 describe("learning run diagnostics", () => {
+    it("continues a reloaded run with its original ID and monotone sequence", async () => {
+        const first = harness();
+        first.run.start("LEITNER_TODAY", "today"); first.run.loaded(12);
+        for (let index = 0; index < 10; index++) first.run.confirmed(true, true);
+        const state = first.run.resumeState("LEITNER_TODAY", "today");
+        expect(state).toMatchObject({ position: 10, sequence: 2 });
+        first.run.dispose();
+        const restored = harness();
+        restored.run.restore(state!);
+        restored.run.confirmed(false, true);
+        restored.run.end();
+        await restored.run.whenIdleForTests();
+        expect(restored.messages[0]).toMatchObject({ action: "start", run_id: state!.id });
+        expect(restored.messages.at(-1)).toMatchObject({ action: "end", run_id: state!.id, sequence_number: 3, last_position: 11, correct_count: 10, wrong_count: 1 });
+    });
     it("creates one run ID only at a real start and loads the actual card count", async () => {
         const { run, messages } = harness();
         expect(run.runId).toBeNull();

@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import FullScreenSheet from "@/components/FullScreenSheet";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import Image from "next/image";
 import CardText from "@/components/ui/CardText";
 import GroupBadge from "@/components/groups/GroupBadge";
@@ -69,6 +70,8 @@ type Props = {
     onAudioUpdated: (cardId: string, audioPath: string | null) => void;
     onNoteSaved: (cardId: string, mainNotes: string) => void;
     onWordUnderstandingSaved: (cardId: string, enrichment: WordEnrichment) => void;
+    onWordUnderstandingRemoved: (cardId: string) => void;
+    onImageRemoved: (cardId: string) => void;
     onOpenCards: () => void;
     onReturnToLearn: () => void;
     onStatus: (message: string) => void;
@@ -93,6 +96,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         onAudioUpdated,
         onNoteSaved,
         onWordUnderstandingSaved,
+        onWordUnderstandingRemoved,
+        onImageRemoved,
         onOpenCards,
         onReturnToLearn,
         onStatus,
@@ -110,6 +115,10 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     const [editImagePath, setEditImagePath] = useState<string | null>(null);
     const [imageMaxBytes, setImageMaxBytes] = useState<number | null>(null);
     const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+    const [removeImageConfirmOpen, setRemoveImageConfirmOpen] = useState(false);
+    const [removeImageBusy, setRemoveImageBusy] = useState(false);
+    const [removeImageError, setRemoveImageError] = useState<string | null>(null);
+    const removeImageLock = useRef(false);
     const [editSource, setEditSource] = useState<EditSource>("create");
     const [returnToLearn, setReturnToLearn] = useState(false);
     const [createDraft, setCreateDraft] = useState<CardFormDraft | null>(null);
@@ -239,8 +248,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         media.setImageFile(file);
     }
 
-    const editingCard = cards.find((card) => String(card.id) === String(editingId)) ?? null;
-    const editingImagePath = editingId ? editImagePath ?? editingCard?.image_path ?? null : null;
+    const editingImagePath = editingId ? editImagePath : null;
     const formSelectedGroups = useMemo(
         () => groups.filter((group) => formGroupIds.includes(group.id)),
         [groups, formGroupIds]
@@ -313,6 +321,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function resetForCreate() {
         setImageUploadError(null);
+        setRemoveImageError(null);
+        setRemoveImageConfirmOpen(false);
         setActiveSupplement(null);
         setCreateSuccessVisible(false);
         setLanguageValidation(null);
@@ -418,6 +428,34 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     function showToast(message: string) {
         setStatus(message);
         window.setTimeout(() => setStatus(""), 2500);
+    }
+
+    async function removeImage() {
+        if (!editingId || !editingImagePath || removeImageLock.current) return;
+        removeImageLock.current = true;
+        setRemoveImageBusy(true);
+        setRemoveImageError(null);
+        try {
+            const response = await fetch("/api/cards", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: editingId, imagePath: null }),
+            });
+            if (!response.ok) throw new Error("remove_image_failed");
+            const body = await response.json() as { card?: { image_path?: string | null } };
+            if (body.card?.image_path !== null) throw new Error("remove_image_failed");
+            media.resetImageInputs();
+            setEditImagePath(null);
+            onImageRemoved(editingId);
+            setRemoveImageConfirmOpen(false);
+            showToast("Bild entfernt.");
+        } catch {
+            setRemoveImageError("Das Bild konnte nicht entfernt werden. Bitte versuche es erneut.");
+            setRemoveImageConfirmOpen(false);
+        } finally {
+            removeImageLock.current = false;
+            setRemoveImageBusy(false);
+        }
     }
 
     function handleCreateSuccess() {
@@ -557,6 +595,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
     function startEdit(card: any, source: EditSource = "cards") {
         setImageUploadError(null);
+        setRemoveImageError(null);
+        setRemoveImageConfirmOpen(false);
         setActiveSupplement(null);
         setCreateSuccessVisible(false);
         setLanguageValidation(null);
@@ -588,6 +628,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     function startEditFromLearn({ item, german, swahili, germanExample, swahiliExample }: EditFromLearnInput) {
         if (!item) return;
         setImageUploadError(null);
+        setRemoveImageError(null);
+        setRemoveImageConfirmOpen(false);
         setActiveSupplement(null);
         setCreateSuccessVisible(false);
         setLanguageValidation(null);
@@ -896,6 +938,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 </div>
                 {editingImagePath ? <div className="mt-4"><div className="mb-2 text-xs text-muted">Aktuelles Bild</div><Image src={`${IMAGE_BASE_URL}/${editingImagePath}`} alt="Aktuelles Bild" width={1024} height={1024} unoptimized className="max-h-56 w-full rounded-2xl border bg-surface object-contain" /></div> : null}
             </>}
+            {editingId && editingImagePath ? <button type="button" className="btn btn-utility mt-3 min-h-11 text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={removeImageBusy || saveFlow.isSaveBusy} onClick={() => { setRemoveImageError(null); setRemoveImageConfirmOpen(true); }}>Bild entfernen</button> : null}
+            {removeImageError ? <p role="alert" className="mt-2 text-sm text-[color:var(--accent-danger-strong)]">{removeImageError}</p> : null}
             {imageUploadError ? <p role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{imageUploadError}</p> : null}
         </SentenceFormDisclosure>
     );
@@ -1038,7 +1082,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         open={activeSupplement === "word"} onToggle={() => toggleSupplement("word")}>
                         <WordUnderstandingFeature key={editingId} cardId={editingId} swahili={swahili} german={german}
                             initialEnrichment={wordEnrichment} embedded enabled={activeSupplement === "word"}
-                            onChange={setWordEnrichment} onSaved={onWordUnderstandingSaved} />
+                            onChange={setWordEnrichment} onSaved={onWordUnderstandingSaved} onRemoved={onWordUnderstandingRemoved} />
                     </SentenceFormDisclosure> : null}
                     {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Grammatik verstehen" icon="grammar" present={Boolean(sentenceExplanation)} featured description="AI zerlegt Satzbau und Wortbestandteile." badge={showGrammarTip && activeSupplement !== "grammar" ? "Empfohlen" : undefined} open={activeSupplement === "grammar"} onToggle={() => { if (showGrammarTip) markGrammarTipSeen(); toggleSupplement("grammar"); }} sectionRef={grammarCardRef} triggerRef={grammarTriggerRef} coachmark={showGrammarTip ? <div className="sentence-coachmark" role="note" data-testid="sentence-grammar-coachmark">
                         <p className="text-sm font-bold">Grammatik leichter verstehen</p>
@@ -1246,6 +1290,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     )}
                 </div>
             </FullScreenSheet>
+
+            <ConfirmDialog open={removeImageConfirmOpen} title="Bild wirklich entfernen?" description="Das gespeicherte Bild wird von dieser Karte entfernt." confirmLabel="Bild entfernen" cancelLabel="Abbrechen" destructive busy={removeImageBusy} onConfirm={() => void removeImage()} onCancel={() => setRemoveImageConfirmOpen(false)} />
 
         </>
     );

@@ -6,6 +6,7 @@ import { canStartTraining, type TrainingMaterial } from "@/lib/trainer/setup";
 import type { CardType, Direction, TodayItem } from "@/lib/trainer/types";
 import { resolveCardId, shuffleArray } from "@/lib/trainer/utils";
 import { LearningRunDiagnostics } from "@/lib/diagnostics/learningRun";
+import { clearResumeSnapshot, readResumeSnapshot, reconcileTodaySnapshot, writeResumeSnapshot, type ResumeSnapshot } from "@/lib/trainer/resume";
 import {
     canAcceptGradeTap,
     chooseDirection,
@@ -18,10 +19,11 @@ import {
 type LearnMode = "LEITNER_TODAY" | "DRILL" | null;
 
 export function useTrainerSession({
-    cardType, learnMode, setLearnMode, trainingMaterial, setTrainingMaterial, directionMode, setDirectionMode,
+    ownerKey, cardType, learnMode, setLearnMode, trainingMaterial, setTrainingMaterial, directionMode, setDirectionMode,
     refreshSetupCounts, loadLeitnerStats, playCardAudioIfExists, isRecording, stopRecording, stopAnyAudio, onStatus,
     onSetupCountsPatch, onLastMissedRemoved, onValidationHighlight, onDebugSessionReset,
 }: {
+    ownerKey: string;
     cardType: CardType;
     learnMode: LearnMode;
     setLearnMode: (v: LearnMode) => void;
@@ -63,11 +65,80 @@ export function useTrainerSession({
     const gradingInFlightRef = useRef(false);
     const activeSessionModeRef = useRef<LearnMode>(null);
     const startingRef = useRef(false);
+    const pendingGradeRef = useRef<ResumeSnapshot["pendingGrade"]>(undefined);
+    const pendingLastMissedRef = useRef(new Set<Promise<boolean>>());
+    const failedLastMissedIdsRef = useRef(new Set<string>());
     const runRef = useRef<LearningRunDiagnostics | null>(null);
     if (!runRef.current) runRef.current = new LearningRunDiagnostics();
     useEffect(() => () => runRef.current?.dispose(), []);
 
+    function saveActiveSnapshot(override: Partial<Pick<ResumeSnapshot, "answeredIds" | "correctCount" | "wrongIds" | "currentIndex" | "pendingGrade" | "pendingSummary" | "pendingSummaryEndReason" | "direction">> = {}, items = todayItems) {
+        const mode = activeSessionModeRef.current;
+        if (!mode || !items.length || !directionMode) return;
+        const kind = mode === "LEITNER_TODAY" ? "today" : trainingMaterial.kind === "LAST_MISSED" ? "last_missed" : "all_cards";
+        writeResumeSnapshot(ownerKey, cardType, {
+            mode, material: trainingMaterial, directionMode, direction,
+            items, answeredIds: [...answeredCardIds], correctCount: sessionCorrect, wrongIds: [...sessionWrongIds], currentIndex,
+            pendingGrade: pendingGradeRef.current, run: runRef.current?.resumeState(mode, kind), ...override,
+        });
+    }
+
+    async function resumeActiveSession(): Promise<boolean> {
+        if (learnStarted || startingRef.current) return false;
+        const raw = readResumeSnapshot(ownerKey, cardType);
+        if (!raw) return false;
+        startingRef.current = true;
+        try {
+            let snapshot = raw;
+            if (snapshot.pendingSummary) {
+                try {
+                    const missed = await Promise.all(snapshot.wrongIds.map((id) => updateLastMissed("add", id)));
+                    if (missed.some((saved) => !saved)) return false;
+                    await postLearnSession(snapshot.pendingSummary, snapshot.run?.id);
+                    if (snapshot.run) {
+                        runRef.current?.restore(snapshot.run);
+                        runRef.current?.end(snapshot.pendingSummaryEndReason ?? "completed");
+                    }
+                    clearResumeSnapshot(ownerKey, cardType);
+                    return false;
+                } catch { onStatus("Die Lernrunde konnte noch nicht gespeichert werden. Bei Verbindung wird erneut versucht."); return false; }
+            }
+            if (raw.mode === "LEITNER_TODAY") {
+                const due = await fetchTodayItems(cardType);
+                snapshot = reconcileTodaySnapshot(raw, new Set(due.map(resolveCardId)), new Map(due.map((item) => [resolveCardId(item), item])));
+            }
+            const answered = new Set(snapshot.answeredIds);
+            const nextIndex = findNextUnansweredIndex(snapshot.items, answered, snapshot.currentIndex);
+            if (nextIndex < 0) { clearResumeSnapshot(ownerKey, cardType); return false; }
+            setLearnMode(snapshot.mode);
+            setTrainingMaterial(snapshot.material);
+            setDirectionMode(snapshot.directionMode);
+            setDirection(snapshot.direction);
+            setTodayItems(snapshot.items);
+            setSessionTotal(snapshot.items.length);
+            setCurrentIndex(nextIndex);
+            setAnsweredCardIds(answered);
+            setSessionCorrect(snapshot.correctCount);
+            setSessionWrongIds(new Set(snapshot.wrongIds));
+            setSessionWrongItems(Object.fromEntries(snapshot.items.filter((item) => snapshot.wrongIds.includes(resolveCardId(item))).map((item) => [resolveCardId(item), item])));
+            setIncorrectThisSession(snapshot.wrongIds);
+            for (const id of snapshot.wrongIds) void updateLastMissed("add", id);
+            setReveal(false);
+            setShowSummary(false);
+            setLearnDone(false);
+            activeSessionModeRef.current = snapshot.mode;
+            pendingGradeRef.current = snapshot.pendingGrade;
+            if (snapshot.run) runRef.current?.restore({ ...snapshot.run, position: answered.size,
+                correct: snapshot.correctCount, wrong: snapshot.wrongIds.length });
+            setLearnStarted(true);
+            writeResumeSnapshot(ownerKey, cardType, { ...snapshot, currentIndex: nextIndex });
+            return true;
+        } catch { onStatus("Lernrunde konnte gerade nicht wiederhergestellt werden. Bitte Verbindung prüfen."); return false; }
+        finally { startingRef.current = false; }
+    }
+
     function resetSessionTracking() {
+        clearResumeSnapshot(ownerKey, cardType);
         if (gradingInFlightRef.current) runRef.current?.pause();
         else runRef.current?.end("navigation");
         runRef.current = new LearningRunDiagnostics();
@@ -82,6 +153,9 @@ export function useTrainerSession({
         setLastMissedEmpty(false);
         setEndedEarly(false);
         activeSessionModeRef.current = null;
+        pendingGradeRef.current = undefined;
+        pendingLastMissedRef.current.clear();
+        failedLastMissedIdsRef.current.clear();
         gradingInFlightRef.current = false;
         setGradingInFlight(false);
         onDebugSessionReset?.();
@@ -134,13 +208,14 @@ export function useTrainerSession({
         try {
             const items = await fetchTodayItems(cardType, undefined, runId);
             setSessionTotal(items.length);
-            setTodayItems(shuffleArray(items));
+            const queue = shuffleArray(items);
+            setTodayItems(queue);
             setSessionCorrect(0);
             setCurrentIndex(0);
             setReveal(false);
             onSetupCountsPatch?.({ todayDue: items.length });
             onStatus(`Fällig heute: ${items.length}`);
-            return { ok: true as const, items };
+            return { ok: true as const, items: queue };
         } catch (error) {
             const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
             onStatus(message);
@@ -156,13 +231,14 @@ export function useTrainerSession({
         try {
             const items = await fetchAllCardsForDrill(cardType, groupIds);
             setSessionTotal(items.length);
-            setTodayItems(shuffleArray(items));
+            const queue = shuffleArray(items);
+            setTodayItems(queue);
             setCurrentIndex(0);
             setReveal(false);
             onSetupCountsPatch?.({ totalCards: items.length });
             refreshSetupCountsInBackground();
             onStatus(`Alle Karten: ${items.length}`);
-            return { ok: true as const, items };
+            return { ok: true as const, items: queue };
         } catch (error) {
             const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
             onStatus(message);
@@ -190,11 +266,12 @@ export function useTrainerSession({
                 return { ok: true as const, items };
             }
 
-            setTodayItems(shuffleArray(items));
+            const queue = shuffleArray(items);
+            setTodayItems(queue);
             setCurrentIndex(0);
             setReveal(false);
             onStatus(`Zuletzt nicht gewusst: ${items.length}`);
-            return { ok: true as const, items };
+            return { ok: true as const, items: queue };
         } catch (error) {
             const message = error instanceof Error ? error.message : "Aktion fehlgeschlagen.";
             onStatus(message);
@@ -210,7 +287,10 @@ export function useTrainerSession({
         activeSessionModeRef.current = "DRILL";
         setLastMissedEmpty(false);
         setSessionTotal(items.length);
-        setTodayItems(shuffleArray(items));
+        const queue = shuffleArray(items);
+        setTodayItems(queue);
+        writeResumeSnapshot(ownerKey, cardType, { mode: "DRILL", material: trainingMaterial, directionMode: directionMode ?? "RANDOM", direction,
+            items: queue, answeredIds: [], correctCount: 0, wrongIds: [], currentIndex: 0, run: run?.resumeState("DRILL", "repair_drill") });
         setCurrentIndex(0);
         setReveal(false);
     }
@@ -248,7 +328,8 @@ export function useTrainerSession({
             const run = runRef.current;
             setLearnLoadError(null);
             setTodayItems([]);
-            setDirection(chooseDirection(nextDirectionMode));
+            const chosenDirection = chooseDirection(nextDirectionMode);
+            setDirection(chosenDirection);
             setReveal(false);
             setCurrentIndex(0);
             run?.start(nextLearnMode, loadPlan.kind === "today" ? "today" : loadPlan.kind === "last-missed" ? "last_missed" : "all_cards");
@@ -272,6 +353,11 @@ export function useTrainerSession({
             if (loadResult.items.length === 0) run?.end("completed");
             activeSessionModeRef.current = nextLearnMode;
             setLearnStarted(true);
+            if (loadResult.items.length > 0) writeResumeSnapshot(ownerKey, cardType, {
+                mode: nextLearnMode, material: nextTrainingMaterial, directionMode: nextDirectionMode, direction: chosenDirection,
+                items: loadResult.items, answeredIds: [], correctCount: 0, wrongIds: [], currentIndex: 0,
+                run: run?.resumeState(nextLearnMode, loadPlan.kind === "today" ? "today" : loadPlan.kind === "last-missed" ? "last_missed" : "all_cards"),
+            });
         } finally { startingRef.current = false; }
     }
     function revealCard() {
@@ -279,16 +365,20 @@ export function useTrainerSession({
         playCardAudioIfExists(todayItems[currentIndex], "reveal");
     }
     async function endSessionEarly() {
+        if (gradingInFlightRef.current) return;
         const run = runRef.current;
         run?.pause();
         stopAnyAudio?.();
         if (isRecording) stopRecording();
         const wrongIds = Array.from(sessionWrongIds);
-        if (wrongIds.length > 0) await Promise.all(wrongIds.map((id) => updateLastMissed("add", id)));
+        const missedSaved = (await Promise.all(wrongIds.map((id) => updateLastMissed("add", id)))).every(Boolean);
         const answeredCount = answeredCardIds.size;
-        await persistLearnSession({ mode: sessionSummaryMode(activeSessionModeRef.current), totalCount: answeredCount, correctCount: sessionCorrect, wrongCardIds: wrongIds }, run);
+        const summary = { mode: sessionSummaryMode(activeSessionModeRef.current), totalCount: answeredCount, correctCount: sessionCorrect, wrongCardIds: wrongIds };
+        if (answeredCount > 0) saveActiveSnapshot({ pendingSummary: summary, pendingSummaryEndReason: "user_ended" });
+        const saved = await persistLearnSession(summary, run);
         run?.end("user_ended");
-        await refreshSetupCounts();
+        if ((saved && missedSaved) || answeredCount === 0) clearResumeSnapshot(ownerKey, cardType);
+        refreshSetupCountsInBackground();
         setSessionTotal(answeredCount);
         setReveal(false);
         setTodayItems([]);
@@ -306,11 +396,34 @@ export function useTrainerSession({
         }
         if (!item) return;
 
+        if (pendingGradeRef.current?.cardId === resolveCardId(item)) correct = pendingGradeRef.current.correct;
         stopAnyAudio?.();
         gradingInFlightRef.current = true;
         setGradingInFlight(true);
 
         const cardId = resolveCardId(item);
+        if (sessionMode === "LEITNER_TODAY") {
+            pendingGradeRef.current = { cardId, correct };
+            saveActiveSnapshot({ pendingGrade: pendingGradeRef.current });
+            try {
+                await postGrade({ cardId, correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 }, run?.runId);
+            } catch (error) {
+                // A response can be lost after the database committed. Confirm against
+                // the due queue before offering another grade for the same card.
+                let stillDue = true;
+                try { if (!(error instanceof Error && /HTTP 4\d\d/.test(error.message))) stillDue = (await fetchTodayItems(cardType)).some((dueItem) => resolveCardId(dueItem) === cardId); }
+                catch { /* Keep the pending intent for an online retry. */ }
+                if (stillDue) {
+                    run?.markGradeFailure();
+                    onStatus("Bewertung nicht bestätigt. Bitte Verbindung prüfen und erneut versuchen.");
+                    gradingInFlightRef.current = false;
+                    setGradingInFlight(false);
+                    return;
+                }
+            }
+            pendingGradeRef.current = undefined;
+        }
+
         if (correct) playCorrect();
         else playWrong();
 
@@ -332,7 +445,13 @@ export function useTrainerSession({
         const nextIndex = findNextUnansweredIndex(todayItems, nextAnswered, currentIndex + 1);
         const fallbackIndex = nextIndex === -1 ? findNextUnansweredIndex(todayItems, nextAnswered, 0) : nextIndex;
         const sessionComplete = fallbackIndex === -1;
+        const nextDirection = !sessionComplete && directionMode === "RANDOM" ? chooseDirection("RANDOM") : direction;
+        const summary = sessionComplete ? { mode: sessionSummaryMode(sessionMode), totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: [...nextWrongIds] } : undefined;
 
+        run?.confirmed(correct, sessionMode === "LEITNER_TODAY");
+        saveActiveSnapshot({ answeredIds: [...nextAnswered], correctCount: nextCorrect, wrongIds: [...nextWrongIds],
+            currentIndex: sessionComplete ? currentIndex : fallbackIndex, pendingGrade: undefined, direction: nextDirection,
+            pendingSummary: summary, pendingSummaryEndReason: sessionComplete ? "completed" : undefined });
         setReveal(false);
         if (sessionComplete) {
             setTodayItems([]);
@@ -340,12 +459,15 @@ export function useTrainerSession({
             else setLearnDone(true);
         } else {
             setCurrentIndex(fallbackIndex);
-            if (directionMode === "RANDOM") setDirection(chooseDirection("RANDOM"));
+            if (directionMode === "RANDOM") setDirection(nextDirection);
         }
 
         try {
             if (addLastMissed) {
-                await updateLastMissed("add", cardId as string);
+                const pending = updateLastMissed("add", cardId as string);
+                pendingLastMissedRef.current.add(pending);
+                void pending.then((saved) => { if (!saved) failedLastMissedIdsRef.current.add(cardId); })
+                    .finally(() => pendingLastMissedRef.current.delete(pending));
             }
 
             if (sessionMode === "DRILL") {
@@ -356,27 +478,27 @@ export function useTrainerSession({
                         void refreshSetupCounts();
                     }
                 }
-                run?.confirmed(correct, false);
                 if (sessionComplete) {
                     run?.pause();
-                    await persistLearnSession({ mode: "DRILL", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }, run);
+                    const saved = await persistLearnSession(summary!, run);
                     run?.end("completed");
-                    await refreshSetupCounts();
+                    await Promise.all([...pendingLastMissedRef.current]);
+                    const missedSaved = (await Promise.all([...failedLastMissedIdsRef.current].map((id) => updateLastMissed("add", id)))).every(Boolean);
+                    if (saved && missedSaved) clearResumeSnapshot(ownerKey, cardType);
+                    refreshSetupCountsInBackground();
                 }
                 return;
             }
 
-            try {
-                await postGrade({ cardId, correct, currentLevel: Number.isFinite(item?.level) ? item.level : 0 }, run?.runId);
-                run?.confirmed(correct, true);
-            } catch { run?.markGradeFailure(); }
-
             if (sessionComplete) {
                 run?.pause();
-                await persistLearnSession({ mode: "LEITNER", totalCount: sessionTotal, correctCount: nextCorrect, wrongCardIds: Array.from(nextWrongIds) }, run);
+                const saved = await persistLearnSession(summary!, run);
                 run?.end("completed");
-                await loadLeitnerStats();
-                await refreshSetupCounts();
+                await Promise.all([...pendingLastMissedRef.current]);
+                const missedSaved = (await Promise.all([...failedLastMissedIdsRef.current].map((id) => updateLastMissed("add", id)))).every(Boolean);
+                if (saved && missedSaved) clearResumeSnapshot(ownerKey, cardType);
+                loadLeitnerStatsInBackground();
+                refreshSetupCountsInBackground();
             }
         } finally {
             gradingInFlightRef.current = false;
@@ -385,5 +507,5 @@ export function useTrainerSession({
     }
     function applyDeletedCards(deletedIds: string[], opts?: { onDeleteCurrent?: () => void }) { const deletedSet = new Set(deletedIds.map(String)); setSessionWrongItems((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !deletedSet.has(String(id))))); setAnsweredCardIds((prev) => new Set(Array.from(prev).filter((id) => !deletedSet.has(String(id))))); setSessionWrongIds((prev) => new Set(Array.from(prev).filter((id) => !deletedSet.has(String(id))))); setTodayItems((prev) => { const adjusted = removeDeletedCardsFromSession(prev, currentIndex, reveal, deletedSet); setCurrentIndex(adjusted.index); setReveal(adjusted.reveal); if (adjusted.deletedCurrent) opts?.onDeleteCurrent?.(); if (adjusted.ended) setLearnDone(true); return adjusted.items; }); }
 
-    return { todayItems, setTodayItems, currentIndex, setCurrentIndex, reveal, setReveal, direction, setDirection, sessionCorrect, sessionWrongIds, sessionWrongItems, answeredCardIds, sessionTotal, setSessionTotal, showSummary, setShowSummary, endedEarly, setEndedEarly, learnStarted, setLearnStarted, learnDone, setLearnDone, lastMissedEmpty, learnLoadError, incorrectThisSession, gradingInFlight, startLearningSession, revealCard, gradeCurrent, endSessionEarly, resetSessionTracking, startDrillWithItems, applyDeletedCards };
+    return { todayItems, setTodayItems, currentIndex, setCurrentIndex, reveal, setReveal, direction, setDirection, sessionCorrect, sessionWrongIds, sessionWrongItems, answeredCardIds, sessionTotal, setSessionTotal, showSummary, setShowSummary, endedEarly, setEndedEarly, learnStarted, setLearnStarted, learnDone, setLearnDone, lastMissedEmpty, learnLoadError, incorrectThisSession, gradingInFlight, startLearningSession, resumeActiveSession, revealCard, gradeCurrent, endSessionEarly, resetSessionTracking, startDrillWithItems, applyDeletedCards };
 }

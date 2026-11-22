@@ -228,8 +228,18 @@ test.describe("mobile critical flows", () => {
     await pendingRequest;
     await expect(page.getByRole("button", { name: "Weiterlernen starten" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Heute lernen starten" })).toHaveCount(0);
+    const pendingCta = page.getByRole("button", { name: "Lernkarten werden ermittelt" });
+    await expect(page.getByTestId("trainer-dashboard-skeleton")).toBeVisible();
+    await expect(pendingCta).toBeVisible();
+    await expect(pendingCta).toBeDisabled();
+    const skeletonAnimation = await page.getByTestId("trainer-dashboard-skeleton").locator('div[aria-hidden="true"] > div').first().evaluate((element) => getComputedStyle(element).animationName);
+    expect(skeletonAnimation).not.toBe("none");
+    const pendingBox = await pendingCta.boundingBox();
     releaseCounts();
-    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+    const readyCta = page.getByRole("button", { name: "Heute lernen starten" });
+    await expect(readyCta).toBeVisible();
+    const readyBox = await readyCta.boundingBox();
+    expect(Math.abs(pendingBox.height - readyBox.height)).toBeLessThanOrEqual(2);
   });
 
   test("card form asks for image policy only after an image is selected", async ({ page }) => {
@@ -294,7 +304,11 @@ test.describe("mobile critical flows", () => {
       await mockTrainerApis(page);
       const illustrated = todayItems().map((item, index) => ({ ...item, imagePath: `${index + 1}.webp`, image_path: `${index + 1}.webp` }));
       await page.route(/\/api\/learn\/today(?:\?.*)?$/, async (route) => route.fulfill(json({ items: illustrated })));
-      await page.route("**/storage/v1/object/public/card-images/**", async (route) => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="orange"/></svg>' }));
+      await page.route("**/storage/v1/object/public/card-images/**", async (route) => {
+        const portrait = route.request().url().includes("2.webp");
+        const dimensions = portrait ? { width: 100, height: 300 } : { width: 300, height: 100 };
+        return route.fulfill({ contentType: "image/svg+xml", body: `<svg xmlns="http://www.w3.org/2000/svg" width="${dimensions.width}" height="${dimensions.height}"><rect width="100%" height="100%" fill="orange"/></svg>` });
+      });
       const requestedImages = new Set();
       page.on("request", (request) => {
         const url = new URL(request.url());
@@ -302,38 +316,136 @@ test.describe("mobile critical flows", () => {
       });
       await page.goto("/trainer");
       await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-      const image = page.getByRole("dialog", { name: "Lernbild" }).getByRole("img", { name: "Lernbild zur Karte" });
+      const image = page.getByTestId("trainer-inline-image").getByRole("img", { name: "Kartenbild" });
       await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
       await expect(image).toHaveCount(0);
       expect(requestedImages.size).toBe(0);
       await page.getByRole("button", { name: "Aufdecken" }).click();
       await expect(page.getByTestId("trainer-vocab-extras")).toBeVisible();
-      expect(requestedImages.size).toBe(0);
-      await page.getByRole("button", { name: "Bild vorhanden öffnen" }).click();
       await expect(image).toBeVisible();
+      if (width === 390) {
+        await expect(image).toHaveCSS("object-fit", "contain");
+        const imageBox = await image.boundingBox();
+        expect(imageBox.height).toBeGreaterThanOrEqual(176);
+        expect(imageBox.height).toBeLessThanOrEqual(220);
+      }
       await expect.poll(() => requestedImages.size).toBe(1);
-      await page.getByRole("dialog", { name: "Lernbild" }).getByRole("button", { name: "Schließen" }).click();
+      await expect(page.getByRole("button", { name: "Bild vorhanden öffnen" })).toHaveCount(0);
       await page.getByRole("button", { name: "Gewusst", exact: true }).click();
       await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
       await expect(image).toHaveCount(0);
       expect(requestedImages.size).toBe(1);
       await page.getByRole("button", { name: "Aufdecken" }).click();
-      await page.getByRole("button", { name: "Bild vorhanden öffnen" }).click();
       await expect(image).toBeVisible();
       await expect.poll(() => requestedImages.size).toBe(2);
     });
   }
 
-  test("a card without an image offers illustration generation only after reveal", async ({ page }) => {
+  test("a card without an image offers generation after reveal without a placeholder", async ({ page }) => {
     await openTrainer(page);
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-    await expect(page.getByRole("dialog", { name: "Lernbild" })).toHaveCount(0);
+    await expect(page.getByTestId("trainer-inline-image")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toHaveCount(0);
     await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByTestId("trainer-inline-image")).toHaveCount(0);
+    const helpButtons = page.getByTestId("trainer-vocab-extras").getByRole("button");
+    await expect(helpButtons).toHaveCount(4);
+    for (const width of [375, 390, 430]) {
+      await page.setViewportSize({ width, height: 812 });
+      const boxes = await Promise.all((await helpButtons.all()).map((button) => button.boundingBox()));
+      expect(Math.max(...boxes.map((box) => box.y)) - Math.min(...boxes.map((box) => box.y))).toBeLessThan(2);
+      expect(boxes[3].x + boxes[3].width).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
     await expect(page.getByRole("button", { name: "Bild öffnen" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toHaveCount(0);
     await page.getByRole("button", { name: "Bild öffnen" }).click();
     await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toBeVisible();
+    await page.getByRole("button", { name: "Schließen", exact: true }).last().click();
+    await page.getByRole("button", { name: "Karte bearbeiten" }).click();
+    await page.getByRole("button", { name: /Illustration/ }).first().click();
+    await expect(page.getByRole("button", { name: "Illustration erzeugen" })).toBeVisible();
+  });
+
+  test("a generated learning image appears in the current card only after acceptance", async ({ page }) => {
+    await openTrainer(page);
+    await page.route("**/api/images/generate", (route) => route.fulfill(json({ preview: "data:image/webp;base64,AAAA" })));
+    await page.route("**/api/upload-image", (route) => route.fulfill(json({ path: "new-learning-image.webp" })));
+    let saved = 0;
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      if (route.request().method() === "PATCH") { saved++; return route.fulfill(json({ ok: true })); }
+      return route.fulfill(json({ cards }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Bild öffnen" }).click();
+    await page.getByRole("button", { name: "Illustration erzeugen" }).click();
+    await expect(page.getByRole("button", { name: "Übernehmen" })).toBeVisible();
+    expect(saved).toBe(0);
+    await page.getByRole("button", { name: "Übernehmen" }).click();
+    await expect.poll(() => saved).toBe(1);
+    await expect(page.getByTestId("trainer-inline-image").getByRole("img")).toBeVisible();
+    await expect(page.getByTestId("trainer-vocab-extras").getByRole("button")).toHaveCount(3);
+    await expect(page.getByRole("button", { name: "Bild öffnen" })).toHaveCount(0);
+  });
+
+  test("removing a stored image updates learning immediately and stays removed after reload", async ({ page }) => {
+    await openTrainer(page);
+    const imageCards = new Set(cards.map((card) => card.id));
+    let removedId = null;
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, imagePath: imageCards.has(item.cardId) ? "stored.webp" : null, image_path: imageCards.has(item.cardId) ? "stored.webp" : null })) })));
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      const request = route.request();
+      const id = new URL(request.url()).searchParams.get("id");
+      if (request.method() === "PATCH") {
+        const body = request.postDataJSON();
+        expect(body.imagePath).toBeNull();
+        removedId = body.id;
+        imageCards.delete(body.id);
+        return route.fulfill(json({ card: { ...cards.find((card) => card.id === body.id), image_path: null } }));
+      }
+      const updated = cards.map((card) => ({ ...card, image_path: imageCards.has(card.id) ? "stored.webp" : null }));
+      return route.fulfill(json(id ? { card: updated.find((card) => card.id === id) } : { cards: updated }));
+    });
+    await page.route("**/storage/v1/object/public/card-images/**", (route) => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" />' }));
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByTestId("trainer-inline-image")).toBeVisible();
+    await page.getByRole("button", { name: "Karte bearbeiten" }).click();
+    await page.getByRole("button", { name: /Illustration/ }).first().click();
+    await page.getByRole("button", { name: "Bild entfernen" }).click();
+    const confirm = page.getByRole("dialog", { name: "Bild wirklich entfernen?" });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "Bild entfernen" }).click();
+    await expect.poll(() => removedId).not.toBeNull();
+    await page.getByRole("button", { name: "Schließen" }).last().click();
+    await expect(page.getByTestId("trainer-inline-image")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Bild öffnen" })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByTestId("trainer-inline-image")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Bild öffnen" })).toBeVisible();
+  });
+
+  test("a failed image removal keeps the image on the card", async ({ page }) => {
+    await openTrainer(page);
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, imagePath: "stored.webp", image_path: "stored.webp" })) })));
+    await page.route(/\/api\/cards(?:\?.*)?$/, (route) => {
+      if (route.request().method() === "PATCH") return route.fulfill(json({ error: "update_failed" }, 500));
+      const id = new URL(route.request().url()).searchParams.get("id");
+      const updated = cards.map((card) => ({ ...card, image_path: "stored.webp" }));
+      return route.fulfill(json(id ? { card: updated.find((card) => card.id === id) } : { cards: updated }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByTestId("trainer-inline-image")).toBeVisible();
+    await page.getByRole("button", { name: "Karte bearbeiten" }).click();
+    await page.getByRole("button", { name: /Illustration/ }).first().click();
+    await page.getByRole("button", { name: "Bild entfernen" }).click();
+    await page.getByRole("dialog", { name: "Bild wirklich entfernen?" }).getByRole("button", { name: "Bild entfernen" }).click();
+    await expect(page.locator('p[role="alert"]')).toContainText("Bild konnte nicht entfernt werden");
+    await page.getByRole("button", { name: "Schließen" }).last().click();
+    await expect(page.getByTestId("trainer-inline-image")).toBeVisible();
   });
 
   test("illustration preview is saved only on acceptance and has no regenerate action", async ({ page }) => {
@@ -348,21 +460,24 @@ test.describe("mobile critical flows", () => {
     });
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
-    await page.getByRole("button", { name: "Bild öffnen" }).click();
+    await page.getByRole("button", { name: "Karte bearbeiten" }).click();
+    await page.getByRole("button", { name: /Illustration/ }).first().click();
     await page.getByRole("button", { name: "Illustration erzeugen" }).click();
-    const dialog = page.getByRole("dialog", { name: "Lernbild" });
-    await expect(dialog.getByText("Vorschau · noch nicht gespeichert")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Neu erzeugen" })).toHaveCount(0);
+    const preview = page.getByTestId("illustration-preview");
+    await expect(preview.getByText("Noch nicht gespeichert")).toBeVisible();
+    await expect(preview.getByRole("button", { name: "Neu erzeugen" })).toHaveCount(0);
     expect(uploads).toBe(0);
-    await dialog.getByRole("button", { name: "Verwerfen" }).click();
+    await preview.getByRole("button", { name: "Verwerfen" }).click();
     expect(uploads).toBe(0);
-    await dialog.getByRole("button", { name: "Illustration erzeugen" }).click();
-    await dialog.getByRole("button", { name: "Übernehmen" }).click();
+    await page.getByRole("button", { name: "Illustration erzeugen" }).click();
+    await preview.getByRole("button", { name: "Übernehmen" }).click();
+    expect(uploads).toBe(0);
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
     await expect.poll(() => uploads).toBe(1);
     await expect.poll(() => cardPatches).toBe(1);
   });
 
-  test("card management is directly available inside the card while desktop grading follows it", async ({ page }) => {
+  test("group stays in the card, edit moves to the meta header, and desktop grading follows", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openTrainer(page);
     await page.route("**/api/learn/today?**", (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, groups })) })));
@@ -371,7 +486,7 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByText("Optionen", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Mehr", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("card-compact-actions")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Karte bearbeiten" })).toBeVisible();
+    await expect(page.getByTestId("trainer-session-status").getByRole("button", { name: "Karte bearbeiten" })).toBeVisible();
     const groupShortcut = page.getByTestId("card-compact-actions").locator('[data-card-option-action="groups"]');
     await expect(groupShortcut).toBeVisible();
     await expect(groupShortcut).toContainText("Basis");
@@ -477,15 +592,15 @@ test.describe("mobile critical flows", () => {
       await expect(info).toContainText(/Stufe 1/);
       await expect(info).toContainText(/Gewusst → Stufe 2 · in 2 Tagen/);
       await expect(info).toContainText(/Nicht gewusst → Stufe 1 · morgen/);
-      const infoBox = await info.boundingBox();
-      expect(infoBox.y + infoBox.height).toBeLessThanOrEqual(gradeBar.y);
+      const infoBox = await page.getByTestId("compact-overlay-panel").boundingBox();
+      expect(Math.abs(infoBox.y + infoBox.height / 2 - 406)).toBeLessThan(80);
       const correctBox = await page.getByRole("button", { name: "Gewusst", exact: true }).boundingBox();
       const gradeTarget = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.textContent, {
         x: correctBox.x + correctBox.width / 2,
         y: correctBox.y + correctBox.height / 2,
       });
-      expect(gradeTarget).toContain("Gewusst");
-      await info.getByRole("button", { name: "Info schließen" }).click();
+      expect(gradeTarget ?? "").not.toContain("Gewusst");
+      await page.getByRole("dialog", { name: "Warum diese Karte?" }).getByRole("button", { name: "Schließen" }).click();
       await expect(info).toBeHidden();
 
       if (width === 390) {
@@ -502,13 +617,22 @@ test.describe("mobile critical flows", () => {
     test(`normal vocabulary card keeps recall actions in view at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
       await openTrainer(page);
+      await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, imagePath: "card.webp", image_path: "card.webp" })) })));
+      await page.route("**/storage/v1/object/public/card-images/**", (route) => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="orange"/></svg>' }));
       await page.getByRole("button", { name: /Heute lernen starten/ }).click();
       await page.getByRole("button", { name: "Aufdecken" }).click();
       await expect(page.getByTestId("trainer-session-status")).toBeInViewport();
       await expect(page.getByTestId("trainer-card-front")).toContainText(/nakutafuta|ninakupata/);
       await expect(page.getByTestId("trainer-vocab-extras")).toBeInViewport();
+      await expect(page.getByTestId("trainer-inline-image")).toBeInViewport();
+      await expect(page.getByTestId("card-compact-actions")).toBeInViewport();
+      const footerBox = await page.getByTestId("card-compact-actions").boundingBox();
+      const gradeBar = await page.getByTestId("trainer-mobile-actions").boundingBox();
+      expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(gradeBar.y);
+      const directionBox = await page.getByRole("button", { name: "Richtung ändern" }).boundingBox();
+      expect(directionBox.height).toBeGreaterThanOrEqual(44);
       const helpButtons = page.getByTestId("trainer-vocab-extras").getByRole("button");
-      await expect(helpButtons).toHaveCount(4);
+      await expect(helpButtons).toHaveCount(3);
       for (const button of await helpButtons.all()) {
         await expect(button).toBeEnabled();
         await expect(button).toHaveCSS("cursor", "pointer");
@@ -524,6 +648,68 @@ test.describe("mobile critical flows", () => {
       expect(box.y + box.height).toBeLessThanOrEqual(812);
     });
   }
+
+  test("learning help stays centered and scrollable on a short mobile viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 640 });
+    await openTrainer(page);
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Wort verstehen" });
+    const box = await dialog.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(640);
+    await dialog.getByRole("button", { name: "Schließen" }).click();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeInViewport();
+  });
+
+  test("desktop learning help opens as a centered dialog above the card", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
+    const page = await context.newPage();
+    try {
+      await openTrainer(page);
+      await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+      await page.getByRole("button", { name: "Aufdecken" }).click();
+      await page.getByRole("button", { name: "Verstehen öffnen" }).click();
+      const box = await page.getByRole("dialog", { name: "Wort verstehen" }).boundingBox();
+      expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThan(40);
+      expect(Math.abs(box.y + box.height / 2 - 450)).toBeLessThan(40);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Wort verstehen" })).toHaveCount(0);
+    } finally { await context.close(); }
+  });
+
+  test("long vocabulary text wraps inside the mobile learning card", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openTrainer(page);
+    const longWord = "zusammenhängendesvokabelwort".repeat(6);
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, german: longWord, swahili: longWord })) })));
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await expect(page.getByTestId("trainer-card-front")).toContainText(longWord);
+    expect(await page.getByTestId("active-learning-focus").evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeInViewport();
+  });
+
+  test("direction change and audio playback remain available in the mobile learning layout", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__trainerAudioPlays = 0;
+      HTMLMediaElement.prototype.play = function () { window.__trainerAudioPlays += 1; return Promise.resolve(); };
+    });
+    await openTrainer(page);
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, audio_path: "voice.mp3" })) })));
+    await page.route("**/storage/v1/object/public/card-audio/**", (route) => route.fulfill({ contentType: "audio/mpeg", body: "" }));
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Richtung ändern" }).click();
+    await page.getByRole("button", { name: "Deutsch → Swahili", exact: true }).click();
+    await expect(page.getByTestId("trainer-session-status")).toContainText("Richtung: Deutsch → Swahili");
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    const before = await page.evaluate(() => window.__trainerAudioPlays);
+    await page.getByRole("button", { name: "Audio öffnen" }).click();
+    await page.getByRole("dialog", { name: "Audio" }).getByRole("button", { name: "Audio abspielen" }).click();
+    await expect.poll(() => page.evaluate(() => window.__trainerAudioPlays)).toBeGreaterThan(before);
+  });
 
   test("all four learning actions share desktop hover feedback and keyboard focus order", async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
@@ -609,18 +795,39 @@ test.describe("mobile critical flows", () => {
     expect(boxesOverlap(toolsBox, correctBox)).toBeFalsy();
 
     await correct.click();
+    await expect(wrong).toBeDisabled();
+    await expect(correct).toBeDisabled();
     const nextReveal = page.getByRole("button", { name: "Aufdecken" });
     await expect(nextReveal).toBeEnabled();
     await nextReveal.click();
-    await expect(page.getByRole("button", { name: "Nicht gewusst", exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Nicht gewusst", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeEnabled();
+  });
+
+  test("a failed Grade keeps the same card and does not advance confirmed progress", async ({ page }) => {
+    await openTrainer(page);
+    let calls = 0;
+    await page.route("**/api/learn/grade", (route) => {
+      calls++;
+      return route.fulfill(json(calls === 1 ? { error: "temporarily unavailable" } : { ok: true }, calls === 1 ? 500 : 200));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    const word = await page.getByTestId("trainer-card-front").textContent();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+    await expect.poll(() => page.getByTestId("trainer-card-front").textContent()).toBe(word);
+    await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeEnabled();
+    await expect(page.getByTestId("trainer-session-status")).toContainText(/1\s*\/\s*2/);
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+    await expect(page.getByTestId("trainer-session-status")).toContainText(/2\s*\/\s*2/);
+    expect(calls).toBe(2);
   });
 
   test("direct dashboard start shows transition instead of setup while cards load", async ({ page }) => {
     await openTrainer(page, { delayedTodayMs: 500 });
 
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
-    await expect(page.getByText("Heute lernen wird vorbereitet")).toBeVisible();
+    await expect(page.getByText("Lernkarten werden vorbereitet")).toBeVisible();
     await expect(page.getByRole("button", { name: /Session starten/ })).toBeHidden();
     await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
   });
@@ -644,7 +851,7 @@ test.describe("mobile critical flows", () => {
     await expect(repair).toBeVisible();
     await repair.click();
 
-    await expect(page.getByText(/Karte\s+1\s+von\s+1/)).toBeVisible();
+    await expect(page.getByTestId("trainer-session-status")).toContainText(/1\s*\/\s*1/);
     await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
     await page.getByRole("button", { name: "Aufdecken" }).click();
     await expect(page.getByRole("button", { name: "Gewusst", exact: true })).toBeVisible();
@@ -724,6 +931,36 @@ test.describe("mobile critical flows", () => {
     expect(starts[1]).toMatchObject({ mode: "DRILL", run_kind: "repair_drill" });
     expect(runs.find((entry) => entry.run_id === starts[1].run_id && entry.action === "loaded")).toMatchObject({ initial_card_count: 1 });
     expect(runs.find((entry) => entry.run_id === starts[1].run_id && entry.action === "end")).toMatchObject({ status: "completed", last_position: 1, correct_count: 1 });
+  });
+
+  test("reload restores the next open Today card without repeating its previous grade", async ({ page }) => {
+    await openTrainer(page);
+    const due = new Set(cards.map((card) => card.id));
+    const grades = [];
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().filter((item) => due.has(item.cardId)) })));
+    await page.route("**/api/learn/grade", (route) => {
+      const body = route.request().postDataJSON();
+      grades.push(body);
+      due.delete(body.cardId);
+      return route.fulfill(json({ ok: true }));
+    });
+    await page.getByRole("button", { name: "Heute lernen starten" }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Gewusst", exact: true }).click();
+    await expect(page.getByTestId("trainer-session-status")).toContainText(/2\s*\/\s*2/);
+    await expect.poll(() => grades.length).toBe(1);
+    await page.reload();
+    await expect(page.getByTestId("trainer-session-status")).toContainText(/2\s*\/\s*2/);
+    await expect(page.getByRole("button", { name: "Aufdecken" })).toBeVisible();
+    expect(grades).toHaveLength(1);
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Nicht gewusst", exact: true }).click();
+    await expect(page.getByText("Training abgeschlossen")).toBeVisible();
+    await expect.poll(() => grades.length).toBe(2);
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+    await expect(page.getByTestId("trainer-session-status")).toHaveCount(0);
+    expect(grades).toHaveLength(2);
   });
 
   test("early finish saves the answered Today cards once", async ({ page }) => {
@@ -1452,6 +1689,64 @@ test.describe("mobile critical flows", () => {
     await expect(page.getByText("M-MI · Klasse 3/4")).toBeVisible();
     expect((await page.getByTestId("word-understanding-content").boundingBox()).height).toBeLessThan(190);
     expect(generated).toBe(0);
+  });
+
+  test("removing saved word knowledge restores creation state and persists across reload", async ({ page }) => {
+    await openTrainer(page);
+    const enrichment = {
+      pos: "noun", noun_class: "m/mi", singular: "mlango", plural: "milango", mnemonic: null,
+      notes: "Ein Nomen der Klasse m/mi.", examples: [{ sw: "Mlango umefungwa.", de: "Die Tür ist geschlossen." }],
+    };
+    const saved = new Set(cards.map((card) => card.id));
+    let deletedId = null;
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, word_enrichment: saved.has(item.cardId) ? enrichment : null })) })));
+    await page.route("**/api/cards/word-explanation**", (route) => {
+      const request = route.request();
+      if (request.method() === "DELETE") {
+        deletedId = request.postDataJSON().cardId;
+        saved.delete(deletedId);
+        return route.fulfill(json({ removed: true }));
+      }
+      const id = new URL(request.url()).searchParams.get("cardId");
+      return route.fulfill(json({ enrichment: id && saved.has(id) ? enrichment : null }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen vorhanden öffnen" }).click();
+    await expect(page.getByTestId("word-understanding-content")).toBeVisible();
+    await page.getByRole("button", { name: "Wortwissen entfernen" }).click();
+    const confirm = page.getByRole("dialog", { name: "Gespeichertes Wortwissen wirklich entfernen?" });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "Entfernen" }).click();
+    await expect.poll(() => deletedId).not.toBeNull();
+    await expect(page.getByRole("button", { name: "Worterklärung erzeugen" })).toBeVisible();
+    await page.getByRole("button", { name: "Schließen" }).last().click();
+    await expect(page.getByRole("button", { name: "Verstehen öffnen" })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen öffnen" }).click();
+    await expect(page.getByRole("button", { name: "Worterklärung erzeugen" })).toBeVisible();
+  });
+
+  test("a failed word knowledge removal keeps saved content visible", async ({ page }) => {
+    await openTrainer(page);
+    const enrichment = {
+      pos: "noun", noun_class: "m/mi", singular: "mlango", plural: "milango", mnemonic: null,
+      notes: "Gespeicherte Wortinformation.", examples: [{ sw: "Mlango umefungwa.", de: "Die Tür ist geschlossen." }],
+    };
+    await page.route(/\/api\/learn\/today(?:\?.*)?$/, (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, word_enrichment: enrichment })) })));
+    await page.route("**/api/cards/word-explanation**", (route) => {
+      if (route.request().method() === "DELETE") return route.fulfill(json({ error: "delete_failed" }, 500));
+      return route.fulfill(json({ enrichment }));
+    });
+    await page.getByRole("button", { name: /Heute lernen starten/ }).click();
+    await page.getByRole("button", { name: "Aufdecken" }).click();
+    await page.getByRole("button", { name: "Verstehen vorhanden öffnen" }).click();
+    await expect(page.getByTestId("word-understanding-content")).toContainText("Gespeicherte Wortinformation.");
+    await page.getByRole("button", { name: "Wortwissen entfernen" }).click();
+    await page.getByRole("dialog", { name: "Gespeichertes Wortwissen wirklich entfernen?" }).getByRole("button", { name: "Entfernen" }).click();
+    await expect(page.locator('p[role="alert"]')).toContainText("Wortwissen konnte nicht entfernt werden");
+    await expect(page.getByTestId("word-understanding-content")).toContainText("Gespeicherte Wortinformation.");
   });
 
   test("nyingi shows its stem, class forms and highlighted card form without a lexicon paragraph", async ({ page }) => {

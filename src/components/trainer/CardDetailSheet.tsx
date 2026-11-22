@@ -18,12 +18,13 @@ const AUDIO_BASE_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/objec
 
 export type DetailReturn = { card: TrainerLibraryCard; note: string | null };
 
-export default function CardDetailSheet({ card, initialNote = null, onClose, onEdit, onWordUnderstandingSaved }: {
+export default function CardDetailSheet({ card, initialNote = null, onClose, onEdit, onWordUnderstandingSaved, onWordUnderstandingRemoved }: {
     card: TrainerLibraryCard | null;
     initialNote?: string | null;
     onClose: () => void;
     onEdit: (card: TrainerLibraryCard, note: string | null) => void;
     onWordUnderstandingSaved?: (cardId: string, enrichment: WordEnrichment) => void;
+    onWordUnderstandingRemoved?: (cardId: string) => void;
 }) {
     const [detail, setDetail] = useState<TrainerLibraryCard | null>(card);
     const [note, setNote] = useState<string | null>(initialNote);
@@ -81,7 +82,7 @@ export default function CardDetailSheet({ card, initialNote = null, onClose, onE
                 </div>
             {(!sentence || explanation) ? <div className="card-detail-bottom">
                 {!sentence ? <section className="card-detail-learning" aria-label="Wort verstehen"><div className="card-detail-learning-heading"><SentenceFeatureIcon name="grammar" className="h-4 w-4" /><h3>Wort verstehen</h3></div>
-                    <WordUnderstandingFeature key={String(shown.id)} cardId={String(shown.id)} swahili={shown.swahili_text ?? ""} german={shown.german_text ?? ""} initialEnrichment={shown.word_enrichment} embedded detailPresentation allowRegenerate={false} onSaved={(id, enrichment) => { setDetail((current) => current && String(current.id) === id ? { ...current, word_enrichment: enrichment } : current); onWordUnderstandingSaved?.(id, enrichment); }} />
+                    <WordUnderstandingFeature key={String(shown.id)} cardId={String(shown.id)} swahili={shown.swahili_text ?? ""} german={shown.german_text ?? ""} initialEnrichment={shown.word_enrichment} embedded detailPresentation allowRegenerate={false} onSaved={(id, enrichment) => { setDetail((current) => current && String(current.id) === id ? { ...current, word_enrichment: enrichment } : current); onWordUnderstandingSaved?.(id, enrichment); }} onRemoved={(id) => { setDetail((current) => current && String(current.id) === id ? { ...current, word_enrichment: null } : current); onWordUnderstandingRemoved?.(id); }} />
                 </section> : explanation ? <section className="card-detail-learning" aria-label="Satz verstehen"><SentenceExplanationContent explanation={explanation} compact /></section> : null}
             </div> : null}
             </article>

@@ -62,6 +62,7 @@ export default function SentenceLibrarySheet({
     returnToDetail,
     onDetailClosed,
     onWordUnderstandingSaved,
+    onWordUnderstandingRemoved,
     onDeleteCard,
     onOpenCardGroupsEditor,
     onCreateSentence,
@@ -239,5 +240,5 @@ export default function SentenceLibrarySheet({
 
             {cardsLoadState === "loaded" && canLoadMore ? <button type="button" className="sentence-library-load-more" onClick={onLoadMore}>{`Mehr ${noun} laden`}</button> : null}
         </div>
-    </FullScreenSheet>{detailCard ? <CardDetailSheet key={String(detailCard.id)} card={detailCard} initialNote={detailNote} onClose={() => { setDetailCard(null); onDetailClosed(); }} onEdit={(card, note) => { setDetailCard(null); onEditFromDetail(card, note); }} onWordUnderstandingSaved={onWordUnderstandingSaved} /> : null}</>;
+    </FullScreenSheet>{detailCard ? <CardDetailSheet key={String(detailCard.id)} card={detailCard} initialNote={detailNote} onClose={() => { setDetailCard(null); onDetailClosed(); }} onEdit={(card, note) => { setDetailCard(null); onEditFromDetail(card, note); }} onWordUnderstandingSaved={onWordUnderstandingSaved} onWordUnderstandingRemoved={onWordUnderstandingRemoved} /> : null}</>;
 }

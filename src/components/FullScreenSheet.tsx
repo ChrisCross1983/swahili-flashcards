@@ -8,6 +8,7 @@ type Props = {
     title?: string;
     subtitle?: string;
     presentation?: "standard" | "sentence" | "card-detail" | "word-edit";
+    backdropTone?: "standard" | "calm";
     wide?: boolean;
     onClose: () => void;
     children: ReactNode;
@@ -15,7 +16,7 @@ type Props = {
     scrollContainerRef?: Ref<HTMLDivElement>;
 };
 
-export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", wide = false, onClose, children, footer, scrollContainerRef }: Props) {
+export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", backdropTone = "standard", wide = false, onClose, children, footer, scrollContainerRef }: Props) {
     const sentenceLike = presentation !== "standard";
     const contentSizedDesktop = presentation === "card-detail" || presentation === "word-edit";
     const handleClose = () => {
@@ -34,7 +35,7 @@ export default function FullScreenSheet({ open, title, subtitle, presentation = 
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-overlay p-0 md:items-center md:p-4">
+        <div className={`fixed inset-0 z-[120] flex items-end justify-center p-0 md:items-center md:p-4 ${backdropTone === "calm" ? "bg-[rgba(32,24,16,0.35)]" : "bg-overlay"}`}>
             <div className={`flex w-full max-w-none flex-col overflow-hidden border-0 bg-base-alt shadow-warm md:rounded-3xl md:border md:border-soft ${presentation === "word-edit" ? "h-auto max-h-[100dvh]" : "h-[100dvh]"} ${contentSizedDesktop ? "md:h-auto md:max-h-[min(90dvh,860px)]" : "md:h-[min(90dvh,860px)]"} ${presentation === "card-detail" ? "card-detail-sheet md:max-w-[780px]" : presentation === "word-edit" ? "word-edit-sheet md:max-w-[860px]" : presentation === "sentence" ? "md:max-w-3xl" : "md:max-w-2xl"}`}>
                 <div className={`flex items-center justify-between border-b border-soft px-4 py-3 ${sentenceLike ? "bg-[color:var(--surface)] shadow-[0_4px_18px_rgba(74,44,16,0.06)] sm:px-6 sm:py-4" : "bg-surface shadow-soft"}`}>
                     <div>

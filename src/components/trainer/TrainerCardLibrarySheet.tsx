@@ -46,6 +46,7 @@ export type TrainerCardLibrarySheetProps = {
     returnToDetail: DetailReturn | null;
     onDetailClosed: () => void;
     onWordUnderstandingSaved: (cardId: string, enrichment: WordEnrichment) => void;
+    onWordUnderstandingRemoved?: (cardId: string) => void;
     onDeleteCard: (cardId: string) => void;
     onOpenCardGroupsEditor: (card: TrainerLibraryCard) => void;
     onCreateSentence: () => void;

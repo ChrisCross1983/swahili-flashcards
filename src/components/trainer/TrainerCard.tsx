@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Image from "next/image";
 import CardText from "@/components/ui/CardText";
 import FormattedExampleText from "@/components/ui/FormattedExampleText";
 import SentenceExplanationDisclosure from "@/components/trainer/SentenceExplanationDisclosure";
@@ -83,11 +84,11 @@ export default function TrainerCard({
     const [showSentenceExplanation, setShowSentenceExplanation] = useState(autoOpenExplanation);
 
     return (
-        <div className={`rounded-3xl border border-soft bg-surface shadow-warm sm:p-6 ${compactVocabExtras ? "p-3" : "p-5"}`} data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
-            <div className={reveal ? compactVocabExtras ? "space-y-3 sm:space-y-5" : "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
-                <div className={`rounded-2xl border border-soft bg-surface-elevated sm:p-5 ${compactVocabExtras ? "p-3" : "p-5"}`}>
+        <div className={compactVocabExtras ? "min-w-0" : "rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6"} data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
+            <div className={reveal ? compactVocabExtras ? "space-y-2.5 sm:space-y-4" : "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
+                <div className={`min-w-0 rounded-2xl border border-soft bg-surface-elevated ${compactVocabExtras ? "p-3 sm:p-4" : "p-5"}`}>
                     <div className="text-xs font-semibold tracking-wide text-muted uppercase">Übersetze</div>
-                    <div className="mt-3 text-3xl font-semibold leading-tight text-primary sm:text-4xl">
+                    <div className="mt-2 min-w-0 text-3xl font-semibold leading-tight text-primary sm:text-4xl">
                         <CardText>{prompt}</CardText>
                     </div>
                     {showExamples && promptExample?.trim() ? (
@@ -101,8 +102,8 @@ export default function TrainerCard({
                 </div>
 
                 {reveal ? (
-                    <div className={compactVocabExtras ? "space-y-3 sm:space-y-4" : "space-y-4"}>
-                        <div className={`rounded-2xl border border-cta bg-surface shadow-soft sm:p-4 ${compactVocabExtras ? "p-3" : "p-4"}`}>
+                    <div className={compactVocabExtras ? "space-y-2.5 sm:space-y-4" : "space-y-4"}>
+                        <div className={`min-w-0 rounded-2xl border border-cta bg-surface shadow-soft ${compactVocabExtras ? "p-3 sm:p-4" : "p-4"}`}>
                             <div className="text-xs font-semibold tracking-wide text-accent-cta uppercase">Antwort</div>
                             <div className="mt-2 text-2xl font-semibold leading-tight text-primary sm:text-3xl">
                                 <CardText>{answer}</CardText>
@@ -116,6 +117,12 @@ export default function TrainerCard({
                                 />
                             ) : null}
                         </div>
+
+                        {compactVocabExtras && imagePath ? (
+                            <div className="overflow-hidden rounded-xl border border-soft bg-surface-elevated" data-testid="trainer-inline-image">
+                                <Image src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" width={640} height={320} unoptimized className="block h-[clamp(11rem,24dvh,13.75rem)] w-full object-contain sm:h-56" />
+                            </div>
+                        ) : null}
 
                         {!compactVocabExtras && imagePath ? (
                             <div>

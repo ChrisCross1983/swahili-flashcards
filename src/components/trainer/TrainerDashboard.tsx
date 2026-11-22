@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import TrainerDashboardSkeleton from "./TrainerDashboardSkeleton";
 
 type Props = {
     countsState: "pending" | "ready" | "error";
@@ -61,20 +62,19 @@ export default function TrainerDashboard(props: Props) {
 
     return (
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="rounded-[32px] border bg-surface p-8 text-left shadow-soft transition hover:shadow-warm">
+            {countsState === "pending" ? <TrainerDashboardSkeleton onOpenLearn={onOpenLearn} /> : <div className="rounded-[32px] border bg-surface p-8 text-left shadow-soft transition hover:shadow-warm">
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-accent-cta">Training</div>
                 <div className="mt-2 text-xl font-semibold">{learningTitle}</div>
                 <div className="mt-2 min-h-12 text-sm text-muted">
-                    {countsState === "pending" ? <div className="h-5 w-4/5 animate-pulse rounded bg-surface-elevated" aria-label="Lernzahlen werden ermittelt" />
-                        : countsState === "error" ? "Lernzahlen konnten nicht geladen werden." : learningSubtitle}
+                    {countsState === "error" ? "Lernzahlen konnten nicht geladen werden." : learningSubtitle}
                 </div>
-                {countsState === "pending" ? <div className="mt-5 h-14 w-full rounded-xl bg-surface-elevated" aria-hidden="true" /> : <button
+                <button
                     type="button"
                     className="mt-5 min-h-14 w-full btn btn-primary py-3 text-base"
                     onClick={countsState === "error" ? onRetryCounts : onStartLearning}
                 >
                     {countsState === "error" ? "Erneut prüfen" : todayDue > 0 ? "Heute lernen starten" : "Weiterlernen starten"}
-                </button>}
+                </button>
                 <button
                     type="button"
                     className="mt-2 w-full btn btn-ghost py-2 text-sm"
@@ -82,7 +82,7 @@ export default function TrainerDashboard(props: Props) {
                 >
                     Anpassen
                 </button>
-            </div>
+            </div>}
             <Tile
                 title={createLabel}
                 subtitle={createHint}

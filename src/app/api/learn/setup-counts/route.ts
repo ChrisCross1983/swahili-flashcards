@@ -37,7 +37,9 @@ export const GET = withServerDiagnostics("/api/learn/setup-counts", async (req, 
     const ownerKey = user.id;
     const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
     const groupIds = parseGroupIds(searchParams);
+    const groupStart = performance.now();
     const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
+    const groupMs = performance.now() - groupStart;
     const today = new Date().toISOString().slice(0, 10);
 
     if (allowedCardIds && allowedCardIds.length === 0) {
@@ -45,8 +47,9 @@ export const GET = withServerDiagnostics("/api/learn/setup-counts", async (req, 
     }
 
     try {
+        const measure = async (query: Promise<number>) => { const start = performance.now(); const value = await query; return { value, ms: performance.now() - start }; };
         const [todayDue, totalCards, lastMissedCount] = await Promise.all([
-            safeCount(
+            measure(safeCount(
                 "card_progress",
                 (q) => {
                     let query = q.eq("owner_key", ownerKey).lte("due_date", today);
@@ -55,14 +58,14 @@ export const GET = withServerDiagnostics("/api/learn/setup-counts", async (req, 
                     return query;
                 },
                 "card_id, cards!inner(type)"
-            ),
-            safeCount("cards", (q) => {
+            )),
+            measure(safeCount("cards", (q) => {
                 let query = q.eq("owner_key", ownerKey);
                 query = applyCardTypeFilter(query, resolvedType);
                 if (allowedCardIds) query = query.in("id", allowedCardIds);
                 return query;
-            }),
-            safeCount(
+            })),
+            measure(safeCount(
                 "learn_last_missed",
                 (q) => {
                     let query = q.eq("owner_key", ownerKey);
@@ -71,10 +74,12 @@ export const GET = withServerDiagnostics("/api/learn/setup-counts", async (req, 
                     return query;
                 },
                 "card_id, cards!inner(type)"
-            ),
+            )),
         ]);
 
-        return NextResponse.json({ todayDue, totalCards, lastMissedCount });
+        const timing = ["groups", "due", "cards", "last_missed"]
+            .map((name, index) => `${name};dur=${[groupMs, todayDue.ms, totalCards.ms, lastMissedCount.ms][index].toFixed(1)}`).join(", ");
+        return NextResponse.json({ todayDue: todayDue.value, totalCards: totalCards.value, lastMissedCount: lastMissedCount.value }, { headers: { "Server-Timing": timing } });
     } catch (error) {
         if (error instanceof CountQueryError) diagnostics.supabaseFailure(error.table, "select", error.code);
         const message = error instanceof Error ? error.message : "Unknown error";

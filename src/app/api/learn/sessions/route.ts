@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
+import { isUuid } from "@/lib/diagnostics/validation";
 
 type Body = {
     mode: "LEITNER" | "DRILL" | "ai";
@@ -31,6 +32,8 @@ export const POST = withServerDiagnostics("/api/learn/sessions", async (req, dia
     const wrongCardIds = Array.isArray(body.wrongCardIds)
         ? body.wrongCardIds.filter((id) => String(id).trim().length > 0)
         : [];
+    const runId = req.headers.get("x-diagnostics-run-id");
+    const diagnosticRunId = isUuid(runId) ? runId : null;
 
     if (!mode) {
         return NextResponse.json(
@@ -39,15 +42,29 @@ export const POST = withServerDiagnostics("/api/learn/sessions", async (req, dia
         );
     }
 
-    const { error } = await supabaseServer.from("learn_sessions").insert({
+    const row = {
         owner_key: ownerKey,
         mode,
         total_count: totalCount,
         correct_count: correctCount,
         wrong_card_ids: wrongCardIds,
+    };
+    let { error } = await supabaseServer.from("learn_sessions").insert({
+        ...row,
+        diagnostic_run_id: diagnosticRunId,
     });
+    // Local development may still point at a database before the optional
+    // idempotency migration; preserve the existing session-save path there.
+    if (error && ["42703", "PGRST204"].includes(error.code ?? "")) {
+        ({ error } = await supabaseServer.from("learn_sessions").insert(row));
+    }
 
     if (error) {
+        if (error.code === "23505" && diagnosticRunId) {
+            const { data, error: lookupError } = await supabaseServer.from("learn_sessions")
+                .select("diagnostic_run_id").eq("owner_key", ownerKey).eq("diagnostic_run_id", diagnosticRunId).maybeSingle();
+            if (!lookupError && data) return NextResponse.json({ ok: true, alreadySaved: true });
+        }
         diagnostics.supabaseFailure("learn_sessions", "insert", error.code);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }

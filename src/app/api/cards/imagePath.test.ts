@@ -8,7 +8,7 @@ import { POST, PATCH } from "./route";
 type ImageSelectQuery = {
   eq: () => ImageSelectQuery;
   single: () => Promise<{ data: Record<string, unknown>; error: null }>;
-  limit: () => Promise<{ data: never[]; error: null }>;
+  limit: () => Promise<{ data: Array<{ id: string }>; error: null }>;
 };
 
 describe("card image path boundary", () => {
@@ -76,5 +76,41 @@ describe("card image path boundary", () => {
       expect(remove).toHaveBeenCalledWith([image]);
       expect(remove).not.toHaveBeenCalledWith([oldImage]);
     } finally { log.mockRestore(); }
+  });
+
+  it("clears an existing image reference and removes its unshared owned object", async () => {
+    process.env.SUPABASE_STORAGE_BUCKET = "card-images";
+    requireUser.mockResolvedValue({ user: { id: owner }, response: null });
+    remove.mockReset().mockResolvedValue({ error: null });
+    const update = vi.fn().mockReturnValue({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { id: "card-1", image_path: null }, error: null }) }) }) }) });
+    const existing = { type: "vocab", german_text: "Katze", swahili_text: "paka", image_path: oldImage };
+    from.mockReturnValue({
+      select: () => {
+        const query: ImageSelectQuery = { eq: () => query, single: async () => ({ data: existing, error: null }), limit: async () => ({ data: [], error: null }) };
+        return query;
+      },
+      update,
+    });
+    const response = await PATCH(request("PATCH", { id: "card-1", imagePath: null }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).card.image_path).toBeNull();
+    expect(update).toHaveBeenCalledWith({ image_path: null });
+    expect(remove).toHaveBeenCalledWith([oldImage]);
+  });
+
+  it("retains a storage object still referenced by another owned card", async () => {
+    process.env.SUPABASE_STORAGE_BUCKET = "card-images";
+    requireUser.mockResolvedValue({ user: { id: owner }, response: null });
+    remove.mockReset().mockResolvedValue({ error: null });
+    const existing = { type: "vocab", german_text: "Katze", swahili_text: "paka", image_path: oldImage };
+    from.mockReturnValue({
+      select: () => {
+        const query: ImageSelectQuery = { eq: () => query, single: async () => ({ data: existing, error: null }), limit: async () => ({ data: [{ id: "another-card" }], error: null }) };
+        return query;
+      },
+      update: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { id: "card-1", image_path: null }, error: null }) }) }) }) }),
+    });
+    expect((await PATCH(request("PATCH", { id: "card-1", imagePath: null }))).status).toBe(200);
+    expect(remove).not.toHaveBeenCalled();
   });
 });

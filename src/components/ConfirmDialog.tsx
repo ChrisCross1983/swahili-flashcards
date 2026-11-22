@@ -10,6 +10,8 @@ type ConfirmDialogProps = {
     cancelLabel: string;
     onConfirm: () => void;
     onCancel: () => void;
+    destructive?: boolean;
+    busy?: boolean;
 };
 
 export default function ConfirmDialog({
@@ -20,10 +22,13 @@ export default function ConfirmDialog({
     cancelLabel,
     onConfirm,
     onCancel,
+    destructive = false,
+    busy = false,
 }: ConfirmDialogProps) {
     const titleId = useId();
     const descriptionId = useId();
     const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+    const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
 
     useEffect(() => {
         if (!open) return;
@@ -33,20 +38,28 @@ export default function ConfirmDialog({
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                onCancel();
+                if (!busy) onCancel();
+            }
+            if (event.key === "Tab") {
+                const first = cancelButtonRef.current;
+                const last = confirmButtonRef.current;
+                if (!first || !last) return;
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
             }
         };
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [open, onCancel]);
+    }, [open, onCancel, busy]);
 
     if (!open) return null;
 
     return (
         <div
             className="fixed inset-0 z-[160] flex items-center justify-center bg-overlay px-4"
-            onClick={onCancel}
+            data-confirm-dialog="true"
+            onClick={() => { if (!busy) onCancel(); }}
             role="presentation"
         >
             <div
@@ -70,13 +83,16 @@ export default function ConfirmDialog({
                         type="button"
                         className="btn btn-secondary"
                         onClick={onCancel}
+                        disabled={busy}
                     >
                         {cancelLabel}
                     </button>
                     <button
+                        ref={confirmButtonRef}
                         type="button"
-                        className="btn btn-primary"
+                        className={`btn ${destructive ? "btn-danger" : "btn-primary"}`}
                         onClick={onConfirm}
+                        disabled={busy}
                     >
                         {confirmLabel}
                     </button>
