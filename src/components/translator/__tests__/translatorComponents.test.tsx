@@ -9,6 +9,18 @@ import { TRANSLATION_MODES } from "@/lib/translator/stateMachine";
 import type { TranslationEntry } from "@/lib/translator/types";
 
 describe("translator components", () => {
+  it("keeps a stopped recording recoverable after a processing failure", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/components/translator/TranslatorView.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("createBrowserPendingTranslatorAudioStore");
+    expect(source).toContain("persistPendingAudio(candidate)");
+    expect(source).toContain("Deine Aufnahme ist gespeichert");
+    expect(source).toContain("Erneut übersetzen");
+    expect(source).toContain("Diese Aufnahme wirklich löschen?");
+    expect(source).toContain("removePersistedPendingAudio");
+  });
   it("marks the selected translation direction", () => {
     const html = renderToStaticMarkup(
       <TranslationDirectionSelector

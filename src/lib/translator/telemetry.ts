@@ -37,6 +37,13 @@ export type TranslatorTechnicalEvent = TranslatorBuildMetadata &
     mediaRecorderChunkCount?: number | null;
     mediaRecorderTotalChunkBytes?: number | null;
     audioBlobSize?: number | null;
+    pendingAudioPersisted?: boolean;
+    pendingAudioSize?: number | null;
+    pendingAudioDuration?: number | null;
+    pendingAudioRetryAvailable?: boolean;
+    pendingAudioRetryAttempt?: number | null;
+    pendingAudioProcessingOutcome?: "success" | "failed" | "discarded" | null;
+    pendingAudioRecoveredAfterReload?: boolean;
     audioSignalObserved?: boolean | null;
     realtimeTransportReady?: boolean;
     realtimeInputTrackGeneration?: number | null;

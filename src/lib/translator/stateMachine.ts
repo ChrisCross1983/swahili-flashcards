@@ -56,6 +56,7 @@ export type TranslatorEvent =
       authRequired?: boolean;
     }
   | { type: "STOP_AND_TRANSLATE" }
+  | { type: "RETRY_PENDING_AUDIO" }
   | {
       type: "PROCESSING_SUCCEEDED";
       entry: TranslationEntry;
@@ -139,6 +140,15 @@ export function translatorReducer(
     case "STOP_AND_TRANSLATE":
       if (state.status !== "recording") return state;
       return { ...state, status: "processing" };
+
+    case "RETRY_PENDING_AUDIO":
+      if (state.status !== "idle" && state.status !== "error") return state;
+      return {
+        ...state,
+        status: "processing",
+        errorMessage: null,
+        failureCategory: null,
+      };
 
     case "PROCESSING_SUCCEEDED":
       if (state.status !== "processing") return state;

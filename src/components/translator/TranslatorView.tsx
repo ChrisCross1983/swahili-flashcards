@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import TranslationCard from "@/components/translator/TranslationCard";
 import TranslationDirectionSelector from "@/components/translator/TranslationDirectionSelector";
 import TranslatorBuildMarker from "@/components/translator/TranslatorBuildMarker";
@@ -135,6 +136,11 @@ import {
   type PersistedTranslatorIncident,
 } from "@/lib/translator/incidentPersistence";
 import {
+  createBrowserPendingTranslatorAudioStore,
+  isPendingTranslatorAudioStale,
+  type PendingTranslatorAudio,
+} from "@/lib/translator/pendingAudioStore";
+import {
   transcriptScriptAnomalyDetected,
   type SttCandidateComparison,
   type SttRoutingDecision,
@@ -197,6 +203,13 @@ export default function TranslatorView({
     useState<PersistedTranslatorIncident | null>(null);
   const incidentStoreRef =
     useRef<ReturnType<typeof createBrowserTranslatorIncidentStore>>(null);
+  const pendingAudioStoreRef =
+    useRef<ReturnType<typeof createBrowserPendingTranslatorAudioStore>>(null);
+  const [pendingAudio, setPendingAudio] = useState<PendingTranslatorAudio[]>([]);
+  const [pendingAudioRecovered, setPendingAudioRecovered] = useState(false);
+  const [discardPendingAudioId, setDiscardPendingAudioId] = useState<string | null>(null);
+  const pendingAudioPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const pendingAudioPersistedByTurnRef = useRef(new Map<string, boolean>());
   const preTurnPersistenceChainRef = useRef<Promise<void>>(Promise.resolve());
   const [qaNextFailure, setQaNextFailure] = useState<
     "realtime" | "semantic" | "translation" | "tts" | "network" | null
@@ -231,6 +244,7 @@ export default function TranslatorView({
   }>());
   const [failedSpeechReviewTurnIds, setFailedSpeechReviewTurnIds] = useState<string[]>([]);
   const translationInFlightRef = useRef(false);
+  const pendingProcessingTurnIdsRef = useRef(new Set<string>());
   const recordingStartInFlightRef = useRef(false);
   const recordingStartGenerationRef = useRef(0);
   const recordingStartTrackerRef = useRef(new RecordingStartDiagnosticsTracker());
@@ -344,6 +358,13 @@ export default function TranslatorView({
     setDiagnosticsSettings(settings);
     installationIdRef.current = getOrCreateInstallationId(localStorage);
     incidentStoreRef.current = createBrowserTranslatorIncidentStore();
+    pendingAudioStoreRef.current = createBrowserPendingTranslatorAudioStore();
+    void pendingAudioStoreRef.current?.list().then((recordings) => {
+      if (!active) return;
+      recordings.forEach((recording) => pendingAudioPersistedByTurnRef.current.set(recording.turnId, true));
+      setPendingAudio(recordings);
+      setPendingAudioRecovered(recordings.length > 0);
+    }).catch(() => undefined);
     void incidentStoreRef.current?.latest(sessionIdRef.current)
       .then((incident) => {
         if (active) setLastIncident(incident);
@@ -384,6 +405,8 @@ export default function TranslatorView({
       active = false;
       window.removeEventListener("online", flushOnline);
       subscription.unsubscribe();
+      pendingAudioPlaybackRef.current?.pause();
+      pendingAudioPlaybackRef.current = null;
     };
   }, [flushPendingFeedback, initialFeedbackOwnerId]);
 
@@ -485,6 +508,43 @@ export default function TranslatorView({
     setQualityRevision((current) => current + 1);
   }, []);
 
+  const updatePendingAudio = useCallback((recording: PendingTranslatorAudio) => {
+    setPendingAudio((current) => [recording, ...current.filter((item) => item.turnId !== recording.turnId)]);
+  }, []);
+
+  const persistPendingAudio = useCallback(async (recording: Omit<PendingTranslatorAudio, "updatedAt">) => {
+    const store = pendingAudioStoreRef.current;
+    if (!store) return null;
+    const saved = await store.save(recording);
+    updatePendingAudio(saved);
+    return saved;
+  }, [updatePendingAudio]);
+
+  const updatePersistedPendingAudio = useCallback(async (
+    turnId: string,
+    patch: Parameters<NonNullable<ReturnType<typeof createBrowserPendingTranslatorAudioStore>>["update"]>[1],
+  ) => {
+    const updated = await pendingAudioStoreRef.current?.update(turnId, patch);
+    if (updated) updatePendingAudio(updated);
+    return updated ?? null;
+  }, [updatePendingAudio]);
+
+  const removePersistedPendingAudio = useCallback(async (turnId: string) => {
+    await pendingAudioStoreRef.current?.remove(turnId);
+    pendingAudioPersistedByTurnRef.current.delete(turnId);
+    setPendingAudio((current) => current.filter((item) => item.turnId !== turnId));
+  }, []);
+
+  const playPendingAudio = useCallback((recording: PendingTranslatorAudio) => {
+    pendingAudioPlaybackRef.current?.pause();
+    const audio = new Audio(URL.createObjectURL(recording.blob));
+    pendingAudioPlaybackRef.current = audio;
+    const release = () => URL.revokeObjectURL(audio.src);
+    audio.addEventListener("ended", release, { once: true });
+    audio.addEventListener("error", release, { once: true });
+    void audio.play().catch(() => undefined);
+  }, []);
+
   const finalizeTurnConsent = useCallback((turnId: string) => {
     const current = consentByTurnRef.current.get(turnId);
     if (!current) return null;
@@ -544,6 +604,15 @@ export default function TranslatorView({
     errorStage?: string | null;
     recoveryAction?: TranslatorRecoveryAction;
     recoverySucceeded?: boolean | null;
+    pendingAudio?: {
+      persisted: boolean;
+      size: number | null;
+      duration: number | null;
+      retryAvailable: boolean;
+      retryAttempt: number | null;
+      outcome: "success" | "failed" | "discarded" | null;
+      recoveredAfterReload: boolean;
+    };
   }) => {
     const installationId = installationIdRef.current;
     if (!installationId || !diagnosticsSettingsRef.current.diagnosticsSharingEnabled) return;
@@ -578,6 +647,13 @@ export default function TranslatorView({
       mediaRecorderChunkCount: finite(d?.mediaRecorderChunkCount),
       mediaRecorderTotalChunkBytes: finite(d?.mediaRecorderTotalChunkBytes),
       audioBlobSize: finite(d?.audioBlobSize),
+      pendingAudioPersisted: input.pendingAudio?.persisted === true,
+      pendingAudioSize: finite(input.pendingAudio?.size),
+      pendingAudioDuration: finite(input.pendingAudio?.duration),
+      pendingAudioRetryAvailable: input.pendingAudio?.retryAvailable === true,
+      pendingAudioRetryAttempt: finite(input.pendingAudio?.retryAttempt),
+      pendingAudioProcessingOutcome: input.pendingAudio?.outcome ?? null,
+      pendingAudioRecoveredAfterReload: input.pendingAudio?.recoveredAfterReload === true,
       audioSignalObserved:
         typeof d?.audioSignalObserved === "boolean" ? d.audioSignalObserved : null,
       realtimeTransportReady: d?.realtimeTransportReady === true,
@@ -1503,8 +1579,13 @@ export default function TranslatorView({
     dispatch({ type: "PLAYBACK_FINISHED" });
   }
 
-  async function handleStopRecording() {
-    if (state.status !== "recording" || translationInFlightRef.current) return;
+  async function handleStopRecording(retryRecording?: PendingTranslatorAudio) {
+    if (
+      ((!retryRecording && state.status !== "recording") ||
+        (retryRecording && state.status !== "idle" && state.status !== "error")) ||
+      translationInFlightRef.current ||
+      (retryRecording && pendingProcessingTurnIdsRef.current.has(retryRecording.turnId))
+    ) return;
     const recorderStatusBeforeStop = recorderStatus;
     const realtimeManagerStateBeforeStop =
       realtimeManagerRef.current?.getState() ?? null;
@@ -1512,7 +1593,7 @@ export default function TranslatorView({
       activeTurnPerformanceRef.current ??
       new TranslatorTurnPerformance({ recordingStarted: performance.now() });
     turnPerformance.markRecordingStopped();
-    const activeTurnId = activeTurnIdRef.current ??
+    const activeTurnId = retryRecording?.turnId ?? activeTurnIdRef.current ??
       globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
     const monitorResult = audioQualityMonitorRef.current?.stop() ?? {
       metadata: { sampleRate: null, channelCount: null },
@@ -1529,13 +1610,61 @@ export default function TranslatorView({
       },
       metrics: monitorResult.metrics,
     });
+    const direction = retryRecording?.direction ?? getTranslationRequestDirection(state.mode);
     translationInFlightRef.current = true;
-    const direction = getTranslationRequestDirection(state.mode);
-    const audioBlobResult = stopRecording().then(
-      (audioBlob) => ({ ok: true as const, audioBlob }),
-      (error: unknown) => ({ ok: false as const, error }),
-    );
-    dispatch({ type: "STOP_AND_TRANSLATE" });
+    const audioBlobResult = retryRecording
+      ? Promise.resolve({ ok: true as const, audioBlob: retryRecording.blob })
+      : stopRecording().then(
+          (audioBlob) => ({ ok: true as const, audioBlob }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+    let pendingRecording = retryRecording ?? null;
+    if (!pendingRecording) {
+      const completedRecording = await audioBlobResult;
+      if (completedRecording.ok) {
+        const now = new Date().toISOString();
+        const candidate = {
+          turnId: activeTurnId,
+          correlationId: `translation-${activeTurnId}`,
+          blob: completedRecording.audioBlob,
+          mimeType: completedRecording.audioBlob.type || null,
+          createdAt: activeTurnCreatedAtRef.current ?? now,
+          durationMs: turnPerformance.getDiagnostics().recordingDurationMs ?? null,
+          size: completedRecording.audioBlob.size,
+          mode: state.mode,
+          direction,
+          status: "pending" as const,
+          retryAttempt: 0,
+          lastErrorCode: null,
+        };
+        try {
+          const saved = await persistPendingAudio(candidate);
+          pendingRecording = saved ?? {
+            ...candidate,
+            updatedAt: now,
+          };
+          pendingAudioPersistedByTurnRef.current.set(activeTurnId, saved !== null);
+          if (!pendingAudioStoreRef.current) updatePendingAudio(pendingRecording);
+        } catch {
+          // Keep the blob in memory as a last resort; a storage failure must not discard it.
+          pendingRecording = { ...candidate, updatedAt: now };
+          pendingAudioPersistedByTurnRef.current.set(activeTurnId, false);
+          updatePendingAudio(pendingRecording);
+        }
+      }
+    }
+    if (pendingRecording) {
+      pendingProcessingTurnIdsRef.current.add(pendingRecording.turnId);
+      try {
+        pendingRecording = await updatePersistedPendingAudio(pendingRecording.turnId, {
+          status: "processing",
+        }) ?? { ...pendingRecording, status: "processing" };
+      } catch {
+        pendingRecording = { ...pendingRecording, status: "processing" };
+      }
+      updatePendingAudio(pendingRecording);
+    }
+    dispatch({ type: retryRecording ? "RETRY_PENDING_AUDIO" : "STOP_AND_TRANSLATE" });
     setProcessingPhase("recognition");
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
@@ -1655,9 +1784,8 @@ export default function TranslatorView({
       }
       setProcessingPhase("translation");
       turnPerformance.markTranslationRequestStarted();
-      const translationCorrelationId = activeTurnIdRef.current
-        ? `translation-${activeTurnIdRef.current}`
-        : undefined;
+      const translationCorrelationId = pendingRecording?.correlationId ??
+        (activeTurnIdRef.current ? `translation-${activeTurnIdRef.current}` : undefined);
       if (translationCorrelationId) {
         turnPerformance.setCaptureDiagnostics({
           translationRequestCorrelationId: translationCorrelationId,
@@ -1895,7 +2023,7 @@ export default function TranslatorView({
         });
       }
       const entry = createTranslationEntry(result, {
-        id: activeTurnIdRef.current ?? undefined,
+        id: activeTurnId,
         sourceWasDetected: direction.sourceLanguage === "auto",
         diagnostics: {
           ttsSpeed: speechSpeed,
@@ -2079,6 +2207,9 @@ export default function TranslatorView({
         type: "PROCESSING_SUCCEEDED",
         entry,
       });
+      if (pendingRecording) {
+        void removePersistedPendingAudio(pendingRecording.turnId).catch(() => undefined);
+      }
       if (qaRealtimeScenarioId) {
         setQaLastResult("Test erfolgreich: Realtime-Ausfall → sicherer Audio-Fallback");
       } else if (qaSemanticScenarioId && semanticRescueSucceeded) {
@@ -2213,9 +2344,12 @@ export default function TranslatorView({
             capturePathOutcome: "invalid_audio_capture",
           });
         }
-        const message = recordedAudio.ok
+        const rawMessage = recordedAudio.ok
           ? failure.message || getTranslatorClientErrorMessage(error)
           : getAudioRecorderErrorMessage(recordedAudio.error);
+        const message = pendingRecording && failure.category !== "AUTH"
+          ? "Übersetzung konnte nicht abgeschlossen werden. Deine Aufnahme ist gespeichert."
+          : rawMessage;
         const failureStage = invalidCapture ? "recording_stop" :
           recordedAudio.ok ? errorStage : "recording_stop";
         const diagnostics = turnPerformance.getDiagnostics();
@@ -2248,7 +2382,9 @@ export default function TranslatorView({
         }
         const recoveryAction = failure.category === "AUTH"
           ? "reauthenticate" as const
-          : "reset_to_idle" as const;
+          : pendingRecording
+            ? "retry_pending_audio" as const
+            : "reset_to_idle" as const;
         const qaScenarioId = failure.apiErrorCode?.startsWith("qa_")
           ? failure.apiErrorCode
           : qaSemanticScenarioId;
@@ -2337,6 +2473,22 @@ export default function TranslatorView({
           },
         ]);
         if (recordedAudio.ok) {
+          if (pendingRecording) {
+            try {
+              await updatePersistedPendingAudio(pendingRecording.turnId, {
+                status: "failed",
+                retryAttempt: pendingRecording.retryAttempt + 1,
+                lastErrorCode: failure.apiErrorCode ?? "processing_failed",
+              });
+            } catch {
+              updatePendingAudio({
+                ...pendingRecording,
+                status: "failed",
+                retryAttempt: pendingRecording.retryAttempt + 1,
+                lastErrorCode: failure.apiErrorCode ?? "processing_failed",
+              });
+            }
+          }
           const capture = audioCaptureByTurnRef.current.get(turnId);
           if (capture) {
             capture.metadata.mimeType = recordedAudio.audioBlob.type || null;
@@ -2366,6 +2518,15 @@ export default function TranslatorView({
           errorStage: failureStage,
           recoveryAction,
           recoverySucceeded: failure.category !== "AUTH",
+          pendingAudio: pendingRecording ? {
+            persisted: pendingAudioPersistedByTurnRef.current.get(pendingRecording.turnId) === true,
+            size: pendingRecording.size,
+            duration: pendingRecording.durationMs,
+            retryAvailable: failure.retryable,
+            retryAttempt: pendingRecording.retryAttempt + 1,
+            outcome: "failed",
+            recoveredAfterReload: pendingAudioRecovered,
+          } : undefined,
         });
         resetRecoverableResources();
         dispatch({
@@ -2385,6 +2546,7 @@ export default function TranslatorView({
       activeTurnCreatedAtRef.current = null;
       activeTurnIdRef.current = null;
       activeTurnStateBeforeRecordingRef.current = null;
+      pendingProcessingTurnIdsRef.current.delete(activeTurnId);
     }
   }
 
@@ -2826,9 +2988,39 @@ export default function TranslatorView({
                     </p>
                   ) : null}
                   <p className="mt-1 text-sm font-medium">
-                    Du kannst direkt eine neue Aufnahme starten.
+                    {pendingAudio.length > 0
+                      ? "Deine Aufnahme bleibt verfügbar."
+                      : "Du kannst direkt eine neue Aufnahme starten."}
                   </p>
                 </div>
+              ) : null}
+              {pendingAudio.length > 0 ? (
+                <section className="mt-3 rounded-xl border border-accent-warning/40 bg-surface-elevated p-3" aria-label="Gespeicherte Aufnahmen">
+                  <p className="text-sm font-semibold text-primary">
+                    {pendingAudioRecovered ? "Nicht abgeschlossene Aufnahme gefunden" : "Deine Aufnahme ist gespeichert"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {pendingAudio.length > 1
+                      ? `${pendingAudio.length} Aufnahmen warten auf die Verarbeitung.`
+                      : "Du kannst sie anhören, erneut übersetzen oder bewusst verwerfen."}
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {pendingAudio.map((recording) => (
+                      <div key={recording.turnId} className="rounded-lg border border-soft bg-surface p-2">
+                        <p className="text-xs text-muted">
+                          {new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(recording.createdAt))}
+                          {recording.durationMs ? ` · ${Math.ceil(recording.durationMs / 1000)} s` : ""}
+                          {isPendingTranslatorAudioStale(recording) ? " · ältere Aufnahme" : ""}
+                        </p>
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          <button type="button" className="btn btn-secondary min-h-10 px-2 text-xs" onClick={() => playPendingAudio(recording)}>Anhören</button>
+                          <button type="button" className="btn btn-primary min-h-10 px-2 text-xs" disabled={translationInFlightRef.current} onClick={() => void handleStopRecording(recording)}>Erneut übersetzen</button>
+                          <button type="button" className="btn btn-ghost min-h-10 px-2 text-xs text-accent-danger-strong" onClick={() => setDiscardPendingAudioId(recording.turnId)}>Verwerfen</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ) : null}
               <button
                 type="button"
@@ -2997,6 +3189,20 @@ export default function TranslatorView({
             </div>
           ) : null}
         </section>
+        <ConfirmDialog
+          open={discardPendingAudioId !== null}
+          title="Diese Aufnahme wirklich löschen?"
+          description="Die Aufnahme kann danach nicht wiederhergestellt werden."
+          confirmLabel="Aufnahme löschen"
+          cancelLabel="Abbrechen"
+          destructive
+          onCancel={() => setDiscardPendingAudioId(null)}
+          onConfirm={() => {
+            const turnId = discardPendingAudioId;
+            setDiscardPendingAudioId(null);
+            if (turnId) void removePersistedPendingAudio(turnId).catch(() => undefined);
+          }}
+        />
 
         {speechFeedback ? (
           <div

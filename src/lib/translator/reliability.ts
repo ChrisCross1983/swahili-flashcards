@@ -23,6 +23,7 @@ export type TranslatorRecoveryAction =
   | "audio_upload_fallback"
   | "audio_transcription_rescue"
   | "retry_translation_once"
+  | "retry_pending_audio"
   | "keep_translation_without_tts"
   | "reauthenticate";
 

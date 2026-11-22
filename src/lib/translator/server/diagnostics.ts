@@ -8,7 +8,7 @@ const EVENT_ORIGINS = new Set(["organic_runtime", "qa_simulation"]);
 const EVENT_KINDS = new Set(["failure", "degradation", "expected_fallback", "info"]);
 const RECOVERY_ACTIONS = new Set([
   "none", "reset_to_idle", "audio_upload_fallback", "audio_transcription_rescue", "retry_translation_once",
-  "keep_translation_without_tts", "reauthenticate",
+  "retry_pending_audio", "keep_translation_without_tts", "reauthenticate",
 ]);
 const AUTH_FAILURE_TYPES = new Set([
   "missing_session", "invalid_session", "auth_network_error",
@@ -187,6 +187,15 @@ export function parseTechnicalDiagnosticEvent(value: unknown): TranslatorTechnic
     mediaRecorderTotalChunkBytes:
       nullableCount(item.mediaRecorderTotalChunkBytes),
     audioBlobSize: nullableCount(item.audioBlobSize),
+    pendingAudioPersisted: item.pendingAudioPersisted === true,
+    pendingAudioSize: nullableCount(item.pendingAudioSize),
+    pendingAudioDuration: nullableMetric(item.pendingAudioDuration ?? null) as number | null,
+    pendingAudioRetryAvailable: item.pendingAudioRetryAvailable === true,
+    pendingAudioRetryAttempt: nullableCount(item.pendingAudioRetryAttempt, 10) ?? null,
+    pendingAudioProcessingOutcome: ["success", "failed", "discarded"].includes(String(item.pendingAudioProcessingOutcome))
+      ? item.pendingAudioProcessingOutcome as "success" | "failed" | "discarded"
+      : null,
+    pendingAudioRecoveredAfterReload: item.pendingAudioRecoveredAfterReload === true,
     audioSignalObserved:
       typeof item.audioSignalObserved === "boolean" ? item.audioSignalObserved : null,
     realtimeTransportReady: item.realtimeTransportReady === true,

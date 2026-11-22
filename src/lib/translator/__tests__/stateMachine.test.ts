@@ -46,6 +46,20 @@ describe("translator state machine", () => {
     expect(processing.status).toBe("processing");
   });
 
+  it("allows a saved recording to re-enter processing without starting a new recording", () => {
+    const failed = translatorReducer(
+      translatorReducer(
+        translatorReducer(initialTranslatorState, { type: "START_RECORDING" }),
+        { type: "STOP_AND_TRANSLATE" },
+      ),
+      { type: "PROCESSING_FAILED", message: "Netzwerkfehler", category: "NETWORK" },
+    );
+    expect(translatorReducer(failed, { type: "RETRY_PENDING_AUDIO" })).toMatchObject({
+      status: "processing",
+      errorMessage: null,
+    });
+  });
+
   it("returns a recoverable microphone failure to idle without entering processing", () => {
     const failed = translatorReducer(initialTranslatorState, {
       type: "RECORDING_FAILED",

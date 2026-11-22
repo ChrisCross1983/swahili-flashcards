@@ -84,6 +84,13 @@ describe("translator telemetry queue", () => {
       rescueTranscript: "private rescue transcript",
       correctedTranscript: "private correction",
       audio: "base64-data",
+      pendingAudioPersisted: true,
+      pendingAudioSize: 3080000,
+      pendingAudioDuration: 114700,
+      pendingAudioRetryAvailable: true,
+      pendingAudioRetryAttempt: 1,
+      pendingAudioProcessingOutcome: "failed",
+      pendingAudioRecoveredAfterReload: true,
     });
     expect(parsed).not.toBeNull();
     expect(parsed).not.toHaveProperty("authorization");
@@ -100,5 +107,14 @@ describe("translator telemetry queue", () => {
       }),
     ]);
     expect(parsed?.diagnosticEvents[0]).not.toHaveProperty("stacktrace");
+    expect(parsed).toMatchObject({
+      pendingAudioPersisted: true,
+      pendingAudioSize: 3080000,
+      pendingAudioDuration: 114700,
+      pendingAudioRetryAvailable: true,
+      pendingAudioRetryAttempt: 1,
+      pendingAudioProcessingOutcome: "failed",
+      pendingAudioRecoveredAfterReload: true,
+    });
   });
 });
