@@ -9,6 +9,7 @@
     "lint": "eslint",
     "check": "npx tsc --noEmit && npm run build && node scripts/security-smoke.mjs",
     "test:e2e": "node scripts/run-playwright.mjs",
+    "test:e2e:health": "playwright test --config playwright.admin-health.config.cjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
