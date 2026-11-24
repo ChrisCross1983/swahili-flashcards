@@ -8,7 +8,8 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  animation: breathe 7s ease-in-out infinite;
+  transform-origin: 54% 58%;
+  animation: lionPresence 14s cubic-bezier(0.42, 0, 0.2, 1) infinite;
 }
 
 .progress {
@@ -20,8 +21,12 @@
   animation: drift 3.8s ease-in-out infinite alternate;
 }
 
-@keyframes breathe {
-  50% { transform: translateY(-1px) scale(1.005); }
+@keyframes lionPresence {
+  0%, 46%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+  18% { transform: translateY(-1px) rotate(-0.15deg) scale(1.006); }
+  56% { transform: translateY(-2px) rotate(-0.45deg) scale(1.012); }
+  61% { transform: translateY(-3px) rotate(-0.6deg) scale(1.014); }
+  67% { transform: translateY(-1px) rotate(-0.18deg) scale(1.007); }
 }
 
 @keyframes drift {

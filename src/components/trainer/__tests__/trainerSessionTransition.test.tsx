@@ -18,5 +18,7 @@ describe("TrainerSessionTransition", () => {
         expect(html).not.toContain("animation-delay:");
         expect(css).toContain("@media (prefers-reduced-motion: reduce)");
         expect(css).toContain("animation: none");
+        expect(css).toContain("lionPresence");
+        expect(css).toContain("14s");
     });
 });
