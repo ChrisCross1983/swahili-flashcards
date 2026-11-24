@@ -20,7 +20,10 @@ const event = {
   id: "33333333-3333-4333-8333-333333333333", user_id: userId, occurred_at: "2026-11-22T07:10:00.000Z",
   source: "server", severity: "error", category: "network", error_code: "translation_network_error",
   route: "/api/learn/grade", http_status: 503, fingerprint: "grade-network", run_id: runId,
-  browser_family: "Safari", os_family: "iOS", device_class: "mobile", build_version: "e2e",
+  browser_family: "Safari", browser_version: "18.1", os_family: "iOS", device_class: "mobile", build_version: "e2e",
+  event_type: "window_error", error_name: "TypeError", message_category: "runtime_type", rejection_type: "not_promise",
+  stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:1:2", same_origin: true, source_hint: "global",
+  navigation_state: "active", online: true, visibility_state: "visible",
 };
 const metrics = {
   errors: 1, warnings: 0, affectedUsers: 1, startedRuns: 1, completedRuns: 1, openRuns: 0,
@@ -58,20 +61,20 @@ test("admin health exports and run details are visibly usable", async ({ page, c
   await page.goto("/admin/health");
 
   await expect(page.getByText("Diagnose-Report", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Report kopieren" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Markdown herunterladen" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "JSON herunterladen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kurzreport kopieren" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Report herunterladen (.md)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Technische Daten (.json)" })).toBeVisible();
   await expect(page.getByLabel("Diagnose-User")).toContainText("Test User · test.user@example.test");
 
-  await page.getByRole("button", { name: "Report kopieren" }).click();
+  await page.getByRole("button", { name: "Kurzreport kopieren" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Report kopiert" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Swahili Flashcards – Health Report");
 
   const markdownDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Markdown herunterladen" }).click();
+  await page.getByRole("button", { name: "Report herunterladen (.md)" }).click();
   await expect((await markdownDownload).suggestedFilename()).toMatch(/^swahili-health-.*\.md$/);
   const jsonDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "JSON herunterladen" }).click();
+  await page.getByRole("button", { name: "Technische Daten (.json)" }).click();
   await expect((await jsonDownload).suggestedFilename()).toMatch(/^swahili-health-.*\.json$/);
 
   await page.getByRole("button", { name: "Öffnen" }).click();
@@ -84,6 +87,6 @@ test("admin health exports and run details are visibly usable", async ({ page, c
   await expect(dialog).toHaveCount(0);
 
   await page.getByLabel("Diagnosezeitraum").selectOption("today");
-  await page.getByRole("button", { name: "Report kopieren" }).click();
+  await page.getByRole("button", { name: "Kurzreport kopieren" }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("Heute (UTC)");
 });

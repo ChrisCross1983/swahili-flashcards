@@ -15,8 +15,10 @@ const run = (changes: Partial<HealthRun> = {}): HealthRun => ({
 const event = (changes: Partial<HealthEvent> = {}): HealthEvent => ({
     id: "dd0fa83f-e3c5-4cc1-8843-e0f12b355f28", user_id: userA, occurred_at: "2026-11-16T11:55:00.000Z",
     source: "server", severity: "error", category: "api_failure", error_code: "grade_failed", route: "/api/learn/grade",
-    http_status: 500, fingerprint: "a".repeat(64), run_id: null, browser_family: null, os_family: null,
-    device_class: null, build_version: null, ...changes,
+    http_status: 500, fingerprint: "a".repeat(64), run_id: null, browser_family: null, browser_version: null, os_family: null,
+    device_class: null, build_version: null, event_type: null, error_name: null, message_category: null,
+    rejection_type: null, stack_origin: null, top_frame: null, same_origin: null, source_hint: null,
+    navigation_state: null, online: null, visibility_state: null, ...changes,
 });
 
 describe("health aggregates", () => {

@@ -6,8 +6,12 @@ export type HealthEvent = {
     id: string; user_id: string; occurred_at: string; source: "client" | "server";
     severity: "error" | "warning"; category: string; error_code: string; route: string;
     http_status: number | null; fingerprint: string | null; run_id: string | null;
-    browser_family: string | null; os_family: string | null; device_class: string | null;
+    browser_family: string | null; browser_version: string | null; os_family: string | null; device_class: string | null;
     build_version: string | null;
+    event_type: string | null; error_name: string | null; message_category: string | null;
+    rejection_type: string | null; stack_origin: string | null; top_frame: string | null;
+    same_origin: boolean | null; source_hint: string | null; navigation_state: string | null;
+    online: boolean | null; visibility_state: string | null;
 };
 export type HealthRun = {
     run_id: string; user_id: string; mode: string; run_kind: string | null; status: string;
@@ -17,7 +21,7 @@ export type HealthRun = {
     sequence_number: number; end_reason: string | null; build_version: string | null;
 };
 
-const EVENT_COLUMNS = "id,user_id,occurred_at,source,severity,category,error_code,route,http_status,fingerprint,run_id,browser_family,os_family,device_class,build_version";
+const EVENT_COLUMNS = "id,user_id,occurred_at,source,severity,category,error_code,route,http_status,fingerprint,run_id,browser_family,browser_version,os_family,device_class,build_version,event_type,error_name,message_category,rejection_type,stack_origin,top_frame,same_origin,source_hint,navigation_state,online,visibility_state";
 const RUN_COLUMNS = "run_id,user_id,mode,run_kind,status,started_at,loaded_at,ended_at,initial_card_count,last_position,correct_count,wrong_count,last_successful_grade_at,last_heartbeat_at,sequence_number,end_reason,build_version";
 const SCAN_PAGE = 500;
 const MAX_SCAN = 5_000;
@@ -76,16 +80,19 @@ export type HealthMetrics = ReturnType<typeof summarizeHealth>;
 export function summarizeHealth(events: HealthEvent[], runs: HealthRun[], now = Date.now()) {
     const affectedUsers = new Set<string>();
     const users = new Set<string>();
-    const fingerprints = new Map<string, { fingerprint: string | null; count: number; last_at: string; users: Set<string>; route: string; error_code: string; source: HealthEvent["source"] | "mixed" }>();
+    const fingerprints = new Map<string, { fingerprint: string | null; count: number; last_at: string; users: Set<string>; route: string; error_code: string; source: HealthEvent["source"] | "mixed"; severity: HealthEvent["severity"]; error_name: string | null; message_category: string | null; stack_origin: string | null }>();
     for (const event of events) {
         affectedUsers.add(event.user_id);
         users.add(event.user_id);
         const key = event.fingerprint ?? `${event.error_code}|${event.route}`;
-        const item = fingerprints.get(key) ?? { fingerprint: event.fingerprint, count: 0, last_at: event.occurred_at, users: new Set<string>(), route: event.route, error_code: event.error_code, source: event.source };
+        const item = fingerprints.get(key) ?? { fingerprint: event.fingerprint, count: 0, last_at: event.occurred_at, users: new Set<string>(), route: event.route, error_code: event.error_code, source: event.source, severity: event.severity, error_name: event.error_name, message_category: event.message_category, stack_origin: event.stack_origin };
         item.count++;
         item.users.add(event.user_id);
         if (item.source !== event.source) item.source = "mixed";
-        if (event.occurred_at > item.last_at) { item.last_at = event.occurred_at; item.route = event.route; }
+        if (event.occurred_at > item.last_at) {
+            item.last_at = event.occurred_at; item.route = event.route; item.severity = event.severity;
+            item.error_name = event.error_name; item.message_category = event.message_category; item.stack_origin = event.stack_origin;
+        }
         fingerprints.set(key, item);
     }
     for (const run of runs) users.add(run.user_id);
@@ -114,6 +121,7 @@ export function summarizeHealth(events: HealthEvent[], runs: HealthRun[], now = 
         topFingerprints: [...fingerprints.values()].sort((a, b) => b.count - a.count || b.last_at.localeCompare(a.last_at)).slice(0, 15).map((item) => ({
             fingerprint: item.fingerprint, count: item.count, last_at: item.last_at,
             affected_users: item.users.size, route: item.route, error_code: item.error_code, source: item.source,
+            severity: item.severity, error_name: item.error_name, message_category: item.message_category, stack_origin: item.stack_origin,
         })),
     };
 }

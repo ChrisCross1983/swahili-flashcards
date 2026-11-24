@@ -7,13 +7,13 @@ import {
 import { diagnosedFetch } from "./fetch";
 import { postGrade, postLearnSession } from "@/lib/trainer/api";
 
-const page = new EventTarget() as EventTarget & { location: { pathname: string } };
-page.location = { pathname: "/trainer" };
+const page = new EventTarget() as EventTarget & { location: { pathname: string; origin: string } };
+page.location = { pathname: "/trainer", origin: "https://app.test" };
 const runId = "ad0fa83f-e3c5-4cc1-8843-e0f12b355f28";
 
 beforeEach(() => {
     vi.stubGlobal("window", page);
-    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15" });
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15", onLine: true });
     resetClientDiagnosticsForTests();
 });
 afterEach(() => {
@@ -26,6 +26,12 @@ function emitted(type: string, error: Error) {
     const event = new Event(type) as Event & { error?: Error; reason?: Error };
     if (type === "error") event.error = error;
     else event.reason = error;
+    page.dispatchEvent(event);
+}
+
+function emittedWindowError(error: unknown, message: string, filename = "") {
+    const event = new Event("error") as Event & { error?: unknown; message?: string; filename?: string };
+    event.error = error; event.message = message; event.filename = filename;
     page.dispatchEvent(event);
 }
 
@@ -56,6 +62,36 @@ describe("client diagnostics", () => {
         close();
         expect(readFileSync("src/app/error.tsx", "utf8")).toContain("reportBoundaryError(error)");
         expect(readFileSync("src/app/trainer/error.tsx", "utf8")).toContain("reportBoundaryError(error)");
+    });
+
+    it("does not conflate distinct Safari runtime errors when no stack frame is available", async () => {
+        await reportClientError({ category: "client_exception", error_code: "unexpected_error", error: new TypeError("first private detail") });
+        await reportClientError({ category: "client_exception", error_code: "unexpected_error", error: new TypeError("second private detail") });
+        expect(queuedDiagnosticsForTests()).toHaveLength(2);
+        expect(queuedDiagnosticsForTests()[0].fingerprint).toBe(queuedDiagnosticsForTests()[1].fingerprint);
+        expect(JSON.stringify(queuedDiagnosticsForTests())).not.toMatch(/first private|second private/);
+    });
+
+    it("records confirmed browser noise as warnings but keeps real runtime exceptions as errors", async () => {
+        const sent: Array<Record<string, unknown>> = [];
+        vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+            sent.push(...JSON.parse(String(init?.body)).events);
+            return new Response(null, { status: 200 });
+        }));
+        const close = installGlobalDiagnostics();
+
+        emittedWindowError(null, "ResizeObserver loop completed with undelivered notifications.");
+        await vi.waitFor(() => expect(queuedDiagnosticsForTests()).toHaveLength(1));
+        expect(queuedDiagnosticsForTests()[0]).toMatchObject({ severity: "warning", error_code: "resize_observer", event_type: "window_error", message_category: "resize_observer" });
+        await flushDiagnostics();
+
+        const runtime = new TypeError("private card text");
+        runtime.stack = "render@https://app.test/_next/static/chunks/app.js:7:11";
+        emittedWindowError(runtime, runtime.message, "https://app.test/_next/static/chunks/app.js");
+        await vi.waitFor(() => expect(sent).toHaveLength(2));
+        expect(sent[1]).toMatchObject({ severity: "error", error_code: "unexpected_error", error_name: "TypeError", message_category: "runtime_type", stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:7:11" });
+        expect(JSON.stringify(sent)).not.toContain("private card text");
+        close();
     });
 
     it("drops diagnostics endpoint errors, removes querystrings and private paths", async () => {

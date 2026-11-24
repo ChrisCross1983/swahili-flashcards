@@ -9,6 +9,10 @@ const event = () => ({
     event_id: id, occurred_at: new Date(now).toISOString(), source: "client",
     severity: "error", category: "api_failure", error_code: "grade_failed",
     route: "https://example.com/api/learn/grade?token=secret#fragment",
+    browser_family: "Safari", browser_version: "18.1", os_family: "iOS", device_class: "mobile",
+    event_type: "window_error", error_name: "TypeError", message_category: "runtime_type",
+    rejection_type: "not_promise", stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:1:2",
+    same_origin: true, source_hint: "global", navigation_state: "active", online: true, visibility_state: "visible",
 });
 
 describe("diagnostic event input", () => {
@@ -26,6 +30,8 @@ describe("diagnostic event input", () => {
             { browser_family: "x".repeat(41) }, { http_status: 999 },
             { run_id: "wrong" }, { occurred_at: new Date(now - 8 * 86_400_000).toISOString() },
             { occurred_at: new Date(now + 6 * 60_000).toISOString() },
+            { event_type: "click" }, { error_name: "PrivateError" }, { message_category: "private message" },
+            { top_frame: "/_next/app.js?token=secret" }, { navigation_state: "private" }, { online: "yes" },
         ]) expect(parseEvents({ events: [{ ...event(), ...change }] }, user, now)).toBeNull();
     });
     it("limits batches and repeated IDs within a batch", () => {

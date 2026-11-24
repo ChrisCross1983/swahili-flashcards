@@ -1,13 +1,22 @@
 import { detectTranslatorPlatform } from "@/lib/translator/diagnosticMetadata";
 import { isUuid, normalizeRoute } from "@/lib/diagnostics/validation";
+import {
+    buildClientErrorContext, isBenignBrowserContext,
+    type ClientErrorContext, type DiagnosticVisibility, type NavigationState,
+} from "@/lib/diagnostics/clientErrorContext";
 
-type Code = "unexpected_error" | "unhandled_rejection" | "render_error" | "api_request_failed" | "network_error" | "timeout_error" | "grade_failed" | "session_save_failed" | "today_load_failed";
+type Code = "unexpected_error" | "unhandled_rejection" | "render_error" | "api_request_failed" | "network_error" | "timeout_error" | "grade_failed" | "session_save_failed" | "today_load_failed" | "browser_abort" | "resize_observer" | "external_script_error";
 type Category = "client_exception" | "network" | "api_failure" | "learning" | "ui";
 type Event = {
     event_id: string; occurred_at: string; source: "client"; severity: "error" | "warning";
     category: Category; error_code: Code; route: string; http_status: number | null;
     fingerprint: string | null; run_id: string | null; browser_family: string; os_family: string;
-    device_class: "desktop" | "mobile" | "tablet" | "unknown"; build_version: string | null;
+    device_class: "desktop" | "mobile" | "tablet" | "unknown"; browser_version: string | null; build_version: string | null;
+    event_type: ClientErrorContext["event_type"]; error_name: ClientErrorContext["error_name"];
+    message_category: ClientErrorContext["message_category"]; rejection_type: ClientErrorContext["rejection_type"];
+    stack_origin: ClientErrorContext["stack_origin"]; top_frame: string | null; same_origin: boolean | null;
+    source_hint: ClientErrorContext["source_hint"]; navigation_state: NavigationState;
+    online: boolean | null; visibility_state: DiagnosticVisibility;
 };
 
 const ENDPOINT = "/api/diagnostics/events";
@@ -18,27 +27,18 @@ const FLUSH_MS = 1_500;
 const MAX_RETRIES = 2;
 const queue: Event[] = [];
 const recent = new Map<string, number>();
+let reportedErrorObjects = new WeakSet<object>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let sending = false;
 let attempts = 0;
 let listeners = 0;
 let installedCleanup: (() => void) | null = null;
 let ingestUnavailableUntil = 0;
+let navigationState: NavigationState = "active";
 
 function route(): string {
     if (typeof window === "undefined") return "/other";
     return normalizeRoute(window.location.pathname) ?? "/api/diagnostics";
-}
-
-function errorType(value: unknown): string {
-    if (!(value instanceof Error)) return "Unknown";
-    return ["Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "URIError"].includes(value.name) ? value.name : "Other";
-}
-
-function firstFrame(value: unknown): string {
-    if (!(value instanceof Error) || typeof value.stack !== "string") return "unknown";
-    const match = value.stack.match(/(?:\/_next\/static\/[^\s?#():]+|webpack-internal:\/\/\/[^\s?#():]+):\d+(?::\d+)?/);
-    return match?.[0] ?? "unknown";
 }
 
 async function fingerprint(value: string): Promise<string | null> {
@@ -55,7 +55,32 @@ function metadata() {
         : /Mobi|iPhone|Android/i.test(ua) ? "mobile" as const : "desktop" as const;
     const rawBuild = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? process.env.NEXT_PUBLIC_APP_VERSION ?? null;
     const build_version = rawBuild && /^[A-Za-z0-9._-]{1,80}$/.test(rawBuild) ? rawBuild : null;
-    return { browser_family: platform.browserFamily, os_family: platform.osFamily, device_class, build_version };
+    const browser_version = platform.browserVersion && /^[0-9.]{1,20}$/.test(platform.browserVersion) ? platform.browserVersion : null;
+    return { browser_family: platform.browserFamily, browser_version, os_family: platform.osFamily, device_class, build_version };
+}
+
+function visibilityState(): DiagnosticVisibility {
+    if (typeof document === "undefined") return "unknown";
+    return document.visibilityState === "visible" || document.visibilityState === "hidden" || document.visibilityState === "prerender"
+        ? document.visibilityState : "unknown";
+}
+
+function runtimeState() {
+    return {
+        navigation_state: navigationState,
+        online: typeof navigator.onLine === "boolean" ? navigator.onLine : null,
+        visibility_state: visibilityState(),
+    };
+}
+
+function defaultContext(input: { category: Category; error?: unknown; error_code: Code }): ClientErrorContext {
+    const eventType = input.error_code === "render_error" ? "react_boundary"
+        : input.category === "network" ? "network_request"
+            : input.category === "api_failure" ? "api_response" : "manual";
+    const sourceHint = input.error_code === "render_error" ? "react_boundary"
+        : input.category === "network" || input.category === "api_failure" ? "api_client"
+            : input.category === "learning" ? "trainer" : input.category === "ui" ? "ui" : "unknown";
+    return buildClientErrorContext({ error: input.error, eventType, sourceHint });
 }
 
 function schedule(ms = FLUSH_MS) {
@@ -95,6 +120,7 @@ export async function flushDiagnostics(keepalive = false): Promise<void> {
 export async function reportClientError(input: {
     category: Category; error_code: Code; severity?: "error" | "warning";
     error?: unknown; route?: string; http_status?: number | null; run_id?: string | null; urgent?: boolean;
+    context?: ClientErrorContext;
 }): Promise<void> {
     try {
     if (typeof window === "undefined" || typeof navigator === "undefined") return;
@@ -102,13 +128,22 @@ export async function reportClientError(input: {
     const page = input.route ? normalizeRoute(input.route) : route();
     if (!page || page === "/api/diagnostics") return;
     const status = input.http_status && input.http_status >= 100 && input.http_status <= 599 ? input.http_status : null;
+    const context = input.context ?? defaultContext(input);
     const crash = input.category === "client_exception" || input.error_code === "render_error";
-    const key = `${crash ? "runtime" : input.error_code}|${errorType(input.error)}|${firstFrame(input.error)}|${page}|${status ?? ""}|${isUuid(input.run_id) ? input.run_id : ""}`;
+    const errorObject = input.error && typeof input.error === "object" ? input.error : null;
+    if (crash && errorObject) {
+        if (reportedErrorObjects.has(errorObject)) return;
+        reportedErrorObjects.add(errorObject);
+    }
+    const key = `${crash ? "runtime" : input.error_code}|${context.error_name}|${context.message_category}|${context.top_frame ?? context.stack_origin}|${page}|${status ?? ""}|${isUuid(input.run_id) ? input.run_id : ""}`;
     const hash = await fingerprint(key);
     const dedupKey = hash ?? key;
     const now = Date.now();
-    if (recent.get(dedupKey) && now - recent.get(dedupKey)! < DEDUP_MS) return;
-    recent.set(dedupKey, now);
+    // A Safari error without a usable frame is too broad to hash-deduplicate:
+    // two unrelated TypeErrors on one route otherwise collapse into one event.
+    const useHashDedup = !crash || context.top_frame !== null || errorObject === null;
+    if (useHashDedup && recent.get(dedupKey) && now - recent.get(dedupKey)! < DEDUP_MS) return;
+    if (useHashDedup) recent.set(dedupKey, now);
     if (recent.size > 100) {
         for (const [entry, at] of recent) if (now - at > DEDUP_MS) recent.delete(entry);
         while (recent.size > 100) recent.delete(recent.keys().next().value!);
@@ -117,6 +152,7 @@ export async function reportClientError(input: {
         event_id: crypto.randomUUID(), occurred_at: new Date(now).toISOString(), source: "client",
         severity: input.severity ?? "error", category: input.category, error_code: input.error_code,
         route: page, http_status: status, fingerprint: hash, run_id: isUuid(input.run_id) ? input.run_id : null, ...metadata(),
+        ...context, ...runtimeState(),
     });
     if (queue.length > MAX_QUEUE) queue.splice(0, queue.length - MAX_QUEUE);
     if (input.urgent) void flushDiagnostics(); else schedule();
@@ -127,16 +163,36 @@ export function installGlobalDiagnostics(): () => void {
     if (typeof window === "undefined") return () => {};
     listeners++;
     if (!installedCleanup) {
-        const onError = (event: ErrorEvent) => { void reportClientError({ category: "client_exception", error_code: "unexpected_error", error: event.error, urgent: true }); };
-        const onRejection = (event: PromiseRejectionEvent) => { void reportClientError({ category: "client_exception", error_code: "unhandled_rejection", error: event.reason, urgent: true }); };
-        const onPageHide = () => { void flushDiagnostics(true); };
+        const onError = (event: ErrorEvent) => {
+            const context = buildClientErrorContext({ error: event.error, message: event.message, filename: event.filename, eventType: "window_error", sourceHint: "global" });
+            const benign = isBenignBrowserContext(context, navigationState, typeof navigator.onLine === "boolean" ? navigator.onLine : null);
+            const error_code: Code = context.message_category === "aborted" ? "browser_abort"
+                : context.message_category === "resize_observer" ? "resize_observer"
+                    : context.message_category === "opaque_script_error" || context.stack_origin === "browser_extension" || context.stack_origin === "external" ? "external_script_error"
+                        : "unexpected_error";
+            void reportClientError({ category: "client_exception", error_code, severity: benign ? "warning" : "error", error: event.error, context, urgent: !benign });
+        };
+        const onRejection = (event: PromiseRejectionEvent) => {
+            const context = buildClientErrorContext({ error: event.reason, eventType: "unhandled_rejection", sourceHint: "global" });
+            const benign = isBenignBrowserContext(context, navigationState, typeof navigator.onLine === "boolean" ? navigator.onLine : null);
+            const error_code: Code = context.message_category === "aborted" ? "browser_abort" : "unhandled_rejection";
+            void reportClientError({ category: "client_exception", error_code, severity: benign ? "warning" : "error", error: event.reason, context, urgent: !benign });
+        };
+        const onBeforeUnload = () => { navigationState = "unloading"; };
+        const onPageHide = () => { navigationState = "page_hidden"; void flushDiagnostics(true); };
+        const onPageShow = (event: PageTransitionEvent) => { navigationState = event.persisted ? "restored" : "active"; };
         window.addEventListener("error", onError);
         window.addEventListener("unhandledrejection", onRejection);
+        window.addEventListener("beforeunload", onBeforeUnload);
         window.addEventListener("pagehide", onPageHide);
+        window.addEventListener("pageshow", onPageShow);
         installedCleanup = () => {
             window.removeEventListener("error", onError);
             window.removeEventListener("unhandledrejection", onRejection);
+            window.removeEventListener("beforeunload", onBeforeUnload);
             window.removeEventListener("pagehide", onPageHide);
+            window.removeEventListener("pageshow", onPageShow);
+            navigationState = "active";
         };
     }
     return () => {
@@ -146,13 +202,14 @@ export function installGlobalDiagnostics(): () => void {
 }
 
 export function reportBoundaryError(error: Error): void {
-    void reportClientError({ category: "client_exception", error_code: "render_error", error, urgent: true });
+    const context = buildClientErrorContext({ error, eventType: "react_boundary", sourceHint: "react_boundary" });
+    void reportClientError({ category: "client_exception", error_code: "render_error", error, context, urgent: true });
 }
 
 export function resetClientDiagnosticsForTests(): void {
     if (timer) clearTimeout(timer);
     timer = null; sending = false; attempts = 0; ingestUnavailableUntil = 0; queue.length = 0; recent.clear();
-    installedCleanup?.(); installedCleanup = null; listeners = 0;
+    installedCleanup?.(); installedCleanup = null; listeners = 0; navigationState = "active"; reportedErrorObjects = new WeakSet<object>();
 }
 
 export function queuedDiagnosticsForTests(): readonly Event[] { return queue; }

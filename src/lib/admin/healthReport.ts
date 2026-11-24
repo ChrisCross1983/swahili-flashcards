@@ -53,7 +53,16 @@ export function deriveHealthAnomalies(data: HealthReportInput, now = Date.parse(
 }
 
 function exportEvent(event: HealthEvent, users: Map<string, HealthUser>) {
-    return { id: shortHealthId(event.id), at: event.occurred_at, source: event.source, severity: event.severity, category: event.category, error_code: event.error_code, route: routeCell(event.route), http_status: event.http_status, fingerprint: shortHealthId(event.fingerprint), user: userCell(users, event.user_id), run_id: shortHealthId(event.run_id), browser: event.browser_family, os: event.os_family, device: event.device_class, build_version: event.build_version };
+    return {
+        id: shortHealthId(event.id), at: event.occurred_at, source: event.source, severity: event.severity,
+        category: event.category, error_code: event.error_code, route: routeCell(event.route), http_status: event.http_status,
+        fingerprint: shortHealthId(event.fingerprint), user: userCell(users, event.user_id), run_id: shortHealthId(event.run_id),
+        browser: event.browser_family, browser_version: event.browser_version, os: event.os_family, device: event.device_class,
+        event_type: event.event_type, error_name: event.error_name, message_category: event.message_category,
+        rejection_type: event.rejection_type, stack_origin: event.stack_origin, top_frame: event.top_frame,
+        same_origin: event.same_origin, source_hint: event.source_hint, navigation_state: event.navigation_state,
+        online: event.online, visibility_state: event.visibility_state, build_version: event.build_version,
+    };
 }
 
 function exportRun(run: HealthRun, users: Map<string, HealthUser>) {
@@ -62,6 +71,7 @@ function exportRun(run: HealthRun, users: Map<string, HealthUser>) {
 
 export function buildHealthReportJson(data: HealthReportInput) {
     const users = userMap(data.users);
+    const includedUsers = new Set([...data.events.items.map((event) => event.user_id), ...data.runs.items.map((run) => run.user_id)]).size;
     const summary = {
         errors: data.metrics.errors, warnings: data.metrics.warnings, affectedUsers: data.metrics.affectedUsers,
         startedRuns: data.metrics.startedRuns, completedRuns: data.metrics.completedRuns, openRuns: data.metrics.openRuns,
@@ -73,14 +83,26 @@ export function buildHealthReportJson(data: HealthReportInput) {
         runsOver150: data.metrics.runsOver150,
     };
     return {
-        meta: { ...data.meta, period: data.window.label, selected_user: data.selectedUser ? getAdminUserLabel(data.selectedUser) : "Alle User", timezone: "UTC" },
+        meta: {
+            ...data.meta, period: data.window.label,
+            selected_user: data.selectedUser ? getAdminUserLabel(data.selectedUser) : "Alle User",
+            user_filter: data.selectedUser ? getAdminUserLabel(data.selectedUser) : "Alle User im gewählten Zeitraum",
+            included_user_count: includedUsers, included_event_count: data.events.returned,
+            included_learning_run_count: data.runs.returned, timezone: "UTC",
+        },
         summary,
         anomalies: deriveHealthAnomalies(data),
         errorGroups: data.metrics.topFingerprints.map((group) => ({ ...group, fingerprint: shortHealthId(group.fingerprint), route: routeCell(group.route) })),
         events: { total: data.events.total, returned: data.events.returned, limit: data.events.limit, truncated: data.events.truncated, items: data.events.items.map((event) => exportEvent(event, users)) },
         runs: { total: data.runs.total, returned: data.runs.returned, limit: data.runs.limit, truncated: data.runs.truncated, items: data.runs.items.map((run) => exportRun(run, users)) },
         performance: { available: false, note: "Für diesen Zeitraum wurden noch keine Request-Dauern persistiert." },
-        technical_context: { event_messages: "Keine freien Fehlermeldungen oder Request-Payloads werden persistiert.", identifiers: "IDs sind im Export gekürzt." },
+        instrumentation_scope: {
+            app_diagnostics: "App-weite globale Clientfehler und instrumentierte API-Fehler.",
+            vocabulary_learning_runs: "Detailliert instrumentiert.",
+            translator: "Teilweise: globale App-Diagnosen; Translator-Telemetrie ist nicht vollständig in diesem Report konsolidiert.",
+            sentence_trainer: "Teilweise: globale App-Diagnosen; keine eigenen Learning-Run-Daten in diesem Report.",
+        },
+        technical_context: { event_messages: "Keine freien Fehlermeldungen, vollständigen Stacks oder Request-Payloads werden persistiert.", identifiers: "IDs sind im Export gekürzt." },
     };
 }
 
@@ -88,22 +110,26 @@ export function buildHealthReport(data: HealthReportInput): string {
     const m = data.metrics;
     const users = userMap(data.users);
     const anomalies = deriveHealthAnomalies(data);
+    const includedUsers = new Set([...data.events.items.map((event) => event.user_id), ...data.runs.items.map((run) => run.user_id)]).size;
+    const userFilter = data.selectedUser ? getAdminUserLabel(data.selectedUser) : "Alle User im gewählten Zeitraum";
     const limitNote = (name: string, collection: ReportCollection<unknown>) => collection.truncated ? `${name}: Export enthält die neuesten ${collection.returned} von ${collection.total} Einträgen (Limit ${collection.limit}).` : `${name}: Export enthält ${collection.returned} von ${collection.total} Einträgen.`;
     const lines = [
         "# Swahili Flashcards – Health Report", "", "## Report", `- Zeitraum: ${cell(data.window.label)}`, `- Generiert: ${time(data.meta.generated_at)}`,
-        `- Environment: ${cell(data.meta.environment)}`, `- App-Version / Commit: ${cell(data.meta.build_version)}`, `- Ausgewählter User: ${cell(data.selectedUser ? getAdminUserLabel(data.selectedUser) : "Alle User")}`,
-        "- Zeitzone der Anzeige: UTC", `- ${limitNote("Diagnoseereignisse", data.events)}`, `- ${limitNote("Learning Runs", data.runs)}`, "",
+        `- Environment: ${cell(data.meta.environment)}`, `- App-Version / Commit: ${cell(data.meta.build_version)}`, `- User-Filter: ${cell(userFilter)}`,
+        `- Enthaltene User: ${includedUsers}`, `- Enthaltene Diagnoseereignisse: ${data.events.returned}`, `- Enthaltene Vokabel-Lernläufe: ${data.runs.returned}`,
+        "- Zeitzone der Anzeige: UTC", `- ${limitNote("Diagnoseereignisse", data.events)}`, `- ${limitNote("Vokabel-Lernläufe", data.runs)}`, "",
         "## Executive Summary", `- Fehler: ${m.errors}`, `- Warnungen / Anomalien: ${m.warnings}`, `- Betroffene User: ${m.affectedUsers}`,
         `- Gestartete Runs: ${m.startedRuns}`, `- Completed: ${m.completedRuns}`, `- Active: ${m.openRuns}`, `- Vermutete Abbrüche: ${m.suspectedAbandoned}`,
         `- Grade-Fehler: ${m.gradeErrors}`, `- Session-Save-Fehler: ${m.sessionSaveErrors}`, `- Client-Fehler: ${m.clientErrors}`, `- Server-5xx: ${m.apiServer5xx}`, "",
         "## Auffälligkeiten", ...(anomalies.length ? anomalies.map((item) => `- ${item}`) : ["- Keine automatisch ableitbaren Auffälligkeiten im exportierten Datensatz."]), "",
         "## Häufigste Fehlergruppen", "| Anzahl | Code | Route | Quelle | Letzter Zeitpunkt | betroffene User |", "| ---: | --- | --- | --- | --- | ---: |",
         ...m.topFingerprints.map((group) => `| ${group.count} | ${cell(group.error_code)} | ${routeCell(group.route)} | ${cell(group.source)} | ${time(group.last_at)} | ${group.affected_users} |`), "",
-        "## Diagnoseereignisse", "| Zeit | Quelle | Art | Code | Route | HTTP | Fingerprint | User | Run |", "| --- | --- | --- | --- | --- | ---: | --- | --- | --- |",
-        ...data.events.items.map((event) => `| ${time(event.occurred_at)} | ${cell(event.source)} | ${cell(event.category)} | ${cell(event.error_code)} | ${routeCell(event.route)} | ${cell(event.http_status)} | ${shortHealthId(event.fingerprint)} | ${userCell(users, event.user_id)} | ${shortHealthId(event.run_id)} |`), "",
-        "## Learning Runs", "| Start | User | Modus | Status | Karten | Position | Richtig / Falsch | Letzter Heartbeat | Dauer |", "| --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
+        "## App-Fehler / Diagnoseereignisse", "| Zeit | Schwere | Code | Fehlerklasse / Kategorie | Ursprung | Route | Fingerprint | User |", "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ...data.events.items.map((event) => `| ${time(event.occurred_at)} | ${cell(event.severity)} | ${cell(event.error_code)} | ${cell(event.error_name)} / ${cell(event.message_category)} | ${cell(event.stack_origin)} | ${routeCell(event.route)} | ${shortHealthId(event.fingerprint)} | ${userCell(users, event.user_id)} |`), "",
+        "## Vokabel-Lernläufe", "| Start | User | Modus | Status | Karten | Position | Richtig / Falsch | Letzter Heartbeat | Dauer |", "| --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
         ...data.runs.items.map((run) => `| ${time(run.started_at)} | ${userCell(users, run.user_id)} | ${cell(run.mode)} | ${cell(run.status)} | ${run.initial_card_count} | ${run.last_position} | ${run.correct_count} / ${run.wrong_count} | ${time(run.last_heartbeat_at)} | ${run.ended_at ? `${Math.max(0, Math.round((Date.parse(run.ended_at) - Date.parse(run.started_at)) / 60_000))} Min.` : "—"} |`),
-        "", "## Performance", "Für diesen Zeitraum wurden noch keine Request-Dauern persistiert.", "", "## Technische Rohdaten / Debug-Kontext", "- Es werden keine Tokens, Cookies, Auth-Header, Passwörter, API-Keys oder Request-Bodies exportiert.", "- Fehlernachrichten werden nicht frei persistiert; verfügbar sind nur Kategorie, stabiler Fehlercode, Route, HTTP-Status und Fingerprint.", "- IDs sind im Report gekürzt.",
+        "", "## Instrumentierungsumfang", "- App-Fehler / Diagnoseereignisse: globale Clientfehler und instrumentierte API-Fehler auf authentifizierten App-Routen.", "- Vokabel-Lernläufe: detailliert instrumentiert.", "- Übersetzer: teilweise instrumentiert; globale App-Diagnosen sind enthalten, Translator-Telemetrie ist nicht vollständig in diesem Report konsolidiert.", "- Satztrainer: teilweise instrumentiert; globale App-Diagnosen sind enthalten, eigene Learning-Run-Daten derzeit nicht.",
+        "", "## Performance", "Für diesen Zeitraum wurden noch keine Request-Dauern persistiert.", "", "## Technische Rohdaten / Debug-Kontext", "- Es werden keine Tokens, Cookies, Auth-Header, Passwörter, API-Keys oder Request-Bodies exportiert.", "- Fehlernachrichten und vollständige Stacks werden nicht frei persistiert; verfügbar sind nur feste Kategorien und ein sanitisiertes Same-Origin-Top-Frame.", "- IDs sind im Report gekürzt.",
     ];
     if (data.sampled) lines.splice(10, 0, "- Hinweis: Kennzahlen können wegen einer serverseitigen Scan-Grenze unvollständig sein.");
     return lines.join("\n") + "\n";
