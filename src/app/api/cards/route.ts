@@ -12,6 +12,7 @@ import { getWordUnderstandingByCard } from "@/lib/server/wordUnderstandingStatus
 import { deleteOwnedCards } from "@/lib/server/deleteCards";
 import { cardImageBucket, isOwnerStoragePath, removeStoragePaths } from "@/lib/server/cardMediaStorage";
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
+import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 async function cleanupCardImage(path: string | null | undefined, ownerKey: string, stage: string) {
     if (!isOwnerStoragePath(path, ownerKey)) return;
@@ -181,8 +182,9 @@ export const POST = withServerDiagnostics("/api/cards", async (req, diagnostics)
 });
 
 export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) => {
-    const { user, response } = await requireUser();
-    if (response) return response;
+    const audit = new ServerPerformanceAudit("/api/cards");
+    const { user, response } = await requireUserWithPerformance(audit, requireUser);
+    if (response) return audit.response(response);
     diagnostics.setUser(user.id);
 
     const { searchParams } = new URL(req.url);
@@ -194,7 +196,7 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
     let allowedCardIds: string[] | null;
 
     try {
-        allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
+        allowedCardIds = await audit.measure("group_filter", () => getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType));
     } catch (error) {
         console.error("[api/cards] group filter resolution failed", {
             ownerKey,
@@ -202,15 +204,15 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
             groupCount: groupIds.length,
             error,
         });
-        return NextResponse.json(
+        return audit.response(NextResponse.json(
             { error: "Karten konnten nicht geladen werden (Gruppenfilter)." },
             { status: 500 }
-        );
+        ));
     }
 
     if (allowedCardIds && allowedCardIds.length === 0) {
-        if (id) return NextResponse.json({ card: null });
-        return NextResponse.json({ cards: [] });
+        if (id) return audit.response(NextResponse.json({ card: null }), { groupFilterIds: 0 });
+        return audit.response(NextResponse.json({ cards: [] }), { groupFilterIds: 0 });
     }
 
     let query = supabaseServer
@@ -228,32 +230,32 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
         query = query.or(`german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`);
     }
 
-    const { data, error } = id
+    const { data, error } = await audit.measure("cards_query", async () => id
         ? await query
         : await query.order("created_at", {
             ascending: false,
-        });
+        }));
 
     if (error) {
         console.error(error);
         diagnostics.supabaseFailure("cards", "select", error.code);
-        return NextResponse.json(
+        return audit.response(NextResponse.json(
             { error: "Karten konnten nicht geladen werden." },
             { status: 500 }
-        );
+        ));
     }
 
     const cards = data ?? [];
 
     const [notesResult, groupsResult, wordResult] = await Promise.allSettled([
-        getCardNotes(ownerKey, cards),
-        getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType),
-        getWordUnderstandingByCard(ownerKey, cards),
+        audit.measure("notes_enrichment", () => getCardNotes(ownerKey, cards)),
+        audit.measure("groups_enrichment", () => getCardGroups(ownerKey, cards.map((card) => String(card.id)), resolvedType)),
+        audit.measure("word_enrichment", () => getWordUnderstandingByCard(ownerKey, cards)),
     ]);
 
     if (notesResult.status === "rejected") {
         console.error("[api/cards] note status enrichment failed", { error: notesResult.reason });
-        return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 });
+        return audit.response(NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden." }, { status: 500 }));
     }
     if (groupsResult.status === "rejected") {
         console.error("[api/cards] card group enrichment failed", {
@@ -262,27 +264,44 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
             cardCount: cards.length,
             error: groupsResult.reason,
         });
-        return NextResponse.json(
+        return audit.response(NextResponse.json(
             { error: "Karten konnten nicht vollständig geladen werden (Gruppen)." },
             { status: 500 }
-        );
+        ));
     }
 
     if (wordResult.status === "rejected") {
         console.error("[api/cards] word understanding status failed", { error: wordResult.reason });
-        return NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden (Worterklärung)." }, { status: 500 });
+        return audit.response(NextResponse.json({ error: "Karten konnten nicht vollständig geladen werden (Worterklärung)." }, { status: 500 }));
     }
     const notesByCard = notesResult.value;
     const groupsByCard = groupsResult.value;
     const wordUnderstandingByCard = wordResult.value;
 
     if (id) {
+        const transformStartedAt = performance.now();
         const card = cards[0] ? { ...cards[0], has_note: hasCardNote(notesByCard.get(String(cards[0].id)) ?? {}, cards[0].type), note_preview: notesByCard.get(String(cards[0].id)) ?? null, groups: groupsByCard.get(String(cards[0].id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(cards[0].id)) ?? null } : null;
-        return NextResponse.json({ card });
+        audit.mark("transform", transformStartedAt);
+        return audit.response(NextResponse.json({ card }), {
+            cardCount: cards.length,
+            groupFilterIds: allowedCardIds?.length ?? 0,
+            noteQueryBatches: Math.ceil(cards.length / 200),
+            groupQueryBatches: Math.ceil(cards.length / 200),
+            wordQueryBatches: Math.ceil(cards.filter((card) => card.type !== "sentence").length / 150),
+        });
     }
 
-    return NextResponse.json({
+    const transformStartedAt = performance.now();
+    const result = NextResponse.json({
         cards: cards.map((card) => ({ ...card, has_note: hasCardNote(notesByCard.get(String(card.id)) ?? {}, card.type), note_preview: notesByCard.get(String(card.id)) ?? null, groups: groupsByCard.get(String(card.id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(card.id)) ?? null })),
+    });
+    audit.mark("transform", transformStartedAt);
+    return audit.response(result, {
+        cardCount: cards.length,
+        groupFilterIds: allowedCardIds?.length ?? 0,
+        noteQueryBatches: Math.ceil(cards.length / 200),
+        groupQueryBatches: Math.ceil(cards.length / 200),
+        wordQueryBatches: Math.ceil(cards.filter((card) => card.type !== "sentence").length / 150),
     });
 });
 

@@ -26,14 +26,9 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("if (quickStart === \"last-missed\") setTrainingMaterial({ kind: \"LAST_MISSED\" })");
     });
 
-    it("supports one-tap dashboard learning without leaking stale setup state", () => {
-        expect(clientSource).toContain("function dashboardStartPreset(counts = setupCounts)");
-        expect(clientSource).toContain("if (counts.todayDue > 0) return \"today\";");
-        expect(clientSource).toContain("if (counts.lastMissedCount > 0) return \"last-missed\";");
-        expect(clientSource).toContain("currentCounts = await fetchSetupCounts(cardType)");
+    it("uses an authoritative one-tap dashboard start without a stale counts refresh", () => {
         expect(clientSource).toContain("function startRecommendedLearningFromDashboard()");
-        expect(clientSource).toContain("resetTrainingPreset(quickStart)");
-        expect(clientSource).toContain("setTrainingMaterial(nextConfig.trainingMaterial)");
+        expect(clientSource).not.toContain("currentCounts = await fetchSetupCounts(cardType)");
         expect(clientSource).toContain("setDirectionMode(\"RANDOM\")");
         expect(clientSource).toContain("setDirectStartPreparing(true)");
         expect(clientSource).toContain("setDirectStartPreparing(false)");
@@ -41,6 +36,9 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain("if (directStartCancelledRef.current)");
         expect(clientSource).toContain("startLearningSession({");
         expect(clientSource).toContain("directionMode: \"RANDOM\"");
+        expect(clientSource).toContain("dashboardQuickStart: true");
+        expect(sessionSource).toContain("fetchQuickStartSession");
+        expect(sessionSource).toContain("if (dashboardQuickStart)");
         expect(clientSource).toContain("onStartLearning={startRecommendedLearningFromDashboard}");
         expect(clientSource).toContain("onOpenLearn={openSetupFromDashboard}");
     });
@@ -57,8 +55,8 @@ describe("trainer session runtime regression guards", () => {
     });
 
     it("starts today sessions via today loader", () => {
-        expect(sessionSource).toContain("const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial)");
-        expect(sessionSource).toContain('if (loadPlan?.kind === "today")');
+        expect(sessionSource).toContain("const requestedLoadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial)");
+        expect(sessionSource).toContain('} else if (effectiveLoadPlan.kind === "today")');
         expect(sessionSource).toContain("loadResult = await loadToday(run?.runId)");
 
         const loadTodaySource = sessionSource.slice(
@@ -85,12 +83,12 @@ describe("trainer session runtime regression guards", () => {
     });
 
     it("starts all/group drill via all-cards loader", () => {
-        expect(sessionSource).toContain('} else if (loadPlan?.kind === "all")');
-        expect(sessionSource).toContain("loadResult = await loadAllForDrill(loadPlan.groupIds)");
+        expect(sessionSource).toContain('} else if (effectiveLoadPlan.kind === "all")');
+        expect(sessionSource).toContain("loadResult = await loadAllForDrill(effectiveLoadPlan.groupIds)");
     });
 
     it("starts last-missed drill via last-missed loader", () => {
-        expect(sessionSource).toContain('} else if (loadPlan?.kind === "last-missed")');
+        expect(sessionSource).toContain('} else if (effectiveLoadPlan.kind === "last-missed")');
         expect(sessionSource).toContain("loadResult = await loadLastMissed()");
     });
 

@@ -75,6 +75,18 @@ export async function fetchTodayItems(cardType: CardType, groupIds?: string[], r
     return Array.isArray(json.items) ? json.items : [];
 }
 
+export type QuickStartSession = {
+    kind: "today" | "last-missed" | "all";
+    items: TodayItem[];
+};
+
+export async function fetchQuickStartSession(cardType: CardType, runId?: string | null): Promise<QuickStartSession> {
+    const res = await diagnosedFetch(withFilterParams("/api/learn/quick-start", cardType), { cache: "no-store" }, "today_load_failed", runId);
+    const json = await parseOrThrow<Partial<QuickStartSession>>(res, "Lernrunde konnte nicht gestartet werden.", { route: "/api/learn/quick-start", code: "today_load_failed", runId });
+    const kind = json.kind === "today" || json.kind === "last-missed" || json.kind === "all" ? json.kind : "all";
+    return { kind, items: Array.isArray(json.items) ? json.items : [] };
+}
+
 export async function fetchAllCardsForDrill(cardType: CardType, groupIds?: string[]): Promise<TodayItem[]> {
     const res = await fetch(withFilterParams("/api/cards/all", cardType, groupIds), { cache: "no-store" });
     const json = await parseOrThrow<{ items?: CardListItem[]; cards?: CardListItem[] }>(res, "Aktion fehlgeschlagen.");

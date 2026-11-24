@@ -4,10 +4,12 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { resolveCardTypeFilter } from "@/lib/server/cardFilters";
 import { isGroupColorKey } from "@/lib/groups/colors";
 import { cleanGroupName, isGroupNameConflict, normalizeGroupName } from "@/lib/groups/names";
+import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 export async function GET(req: Request) {
-    const { user, response } = await requireUser();
-    if (response) return response;
+    const audit = new ServerPerformanceAudit("/api/groups");
+    const { user, response } = await requireUserWithPerformance(audit, requireUser);
+    if (response) return audit.response(response);
 
     const { searchParams } = new URL(req.url);
     const resolvedType = resolveCardTypeFilter(searchParams.get("type")) ?? "vocab";
@@ -25,10 +27,10 @@ export async function GET(req: Request) {
         query = query.or("type_scope.is.null,type_scope.eq.vocab");
     }
 
-    const { data, error } = await query;
+    const { data, error } = await audit.measure("groups_query", async () => await query);
 
-    if (error) return NextResponse.json({ error: "groups_unavailable" }, { status: 500 });
-    return NextResponse.json({ groups: data ?? [] });
+    if (error) return audit.response(NextResponse.json({ error: "groups_unavailable" }, { status: 500 }));
+    return audit.response(NextResponse.json({ groups: data ?? [] }), { groupCount: data?.length ?? 0 });
 }
 
 export async function POST(req: Request) {

@@ -64,6 +64,7 @@ type Props = {
     groups: Group[];
     cards: any[];
     onGroupsChange: (groups: Group[]) => void;
+    onRequestGroups?: () => void;
     onCreated: (card: any) => Promise<void> | void;
     onUpdated: (card: any, groups: Group[]) => Promise<void> | void;
     onDeleted: (cardId: string) => Promise<void> | void;
@@ -90,6 +91,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         groups,
         cards,
         onGroupsChange,
+        onRequestGroups,
         onCreated,
         onUpdated,
         onDeleted,
@@ -316,6 +318,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }, [isSentence, duplicateHint, duplicateCheckKind]);
     const toggleSupplement = (section: Supplement) => setActiveSupplement((current) => {
         if (media.isRecording && current === "audio") return current;
+        if (section === "group" && current !== "group") onRequestGroups?.();
         return current === section ? null : section;
     });
 

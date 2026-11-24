@@ -1,14 +1,19 @@
 import { redirect } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/requestUser";
 import HomeClient from "./HomeClient";
 import { checkAdminMembership } from "@/lib/admin/requireAdmin";
+import { ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 export default async function HomePage() {
-  const supabase = await supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  const audit = new ServerPerformanceAudit("/");
+  const { data: { user } } = await audit.measure("auth_user", getRequestUser);
 
-  if (!user) redirect("/login");
+  if (!user) {
+    audit.log();
+    redirect("/login");
+  }
 
-  const membership = await checkAdminMembership(user.id).catch(() => ({ enabled: false, error: true }));
+  const membership = await audit.measure("admin_membership", () => checkAdminMembership(user.id).catch(() => ({ enabled: false, error: true })));
+  audit.log();
   return <HomeClient ownerKey={user.id} isAdmin={membership.enabled} />;
 }

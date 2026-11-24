@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { playCorrect, playWrong } from "@/lib/audio/sounds";
-import { fetchAllCardsForDrill, fetchLastMissedItems, fetchTodayItems, postGrade, postLastMissed, postLearnSession } from "@/lib/trainer/api";
+import { fetchAllCardsForDrill, fetchLastMissedItems, fetchQuickStartSession, fetchTodayItems, postGrade, postLastMissed, postLearnSession } from "@/lib/trainer/api";
 import { findNextUnansweredIndex, removeDeletedCardsFromSession } from "@/lib/trainer/engine";
 import { canStartTraining, type TrainingMaterial } from "@/lib/trainer/setup";
 import type { CardType, Direction, TodayItem } from "@/lib/trainer/types";
@@ -300,11 +300,13 @@ export function useTrainerSession({
         trainingMaterial?: TrainingMaterial;
         directionMode?: "DE_TO_SW" | "SW_TO_DE" | "RANDOM";
         skipValidationHighlights?: boolean;
+        dashboardQuickStart?: boolean;
     }) {
         const nextLearnMode = config?.learnMode ?? learnMode;
         const nextTrainingMaterial = config?.trainingMaterial ?? trainingMaterial;
         const nextDirectionMode = config?.directionMode ?? directionMode;
         const skipValidationHighlights = config?.skipValidationHighlights ?? false;
+        const dashboardQuickStart = config?.dashboardQuickStart ?? false;
 
         if (!nextLearnMode || startingRef.current) return;
         if (!nextDirectionMode) {
@@ -315,8 +317,8 @@ export function useTrainerSession({
             if (!skipValidationHighlights) onValidationHighlight?.("MATERIAL");
             return;
         }
-        const loadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial);
-        if (!loadPlan) return;
+        const requestedLoadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial);
+        if (!requestedLoadPlan) return;
         startingRef.current = true;
 
         try {
@@ -332,15 +334,50 @@ export function useTrainerSession({
             setDirection(chosenDirection);
             setReveal(false);
             setCurrentIndex(0);
-            run?.start(nextLearnMode, loadPlan.kind === "today" ? "today" : loadPlan.kind === "last-missed" ? "last_missed" : "all_cards");
-
             let loadResult: { ok: boolean; items: TodayItem[] } = { ok: false, items: [] };
-            if (loadPlan?.kind === "today") {
+            let effectiveLearnMode = nextLearnMode;
+            let effectiveTrainingMaterial = nextTrainingMaterial;
+            let effectiveLoadPlan = requestedLoadPlan;
+
+            if (dashboardQuickStart) {
+                onStatus("Lade Lernrunde...");
+                try {
+                    const quickStart = await fetchQuickStartSession(cardType, run?.runId);
+                    effectiveLearnMode = quickStart.kind === "today" ? "LEITNER_TODAY" : "DRILL";
+                    effectiveTrainingMaterial = quickStart.kind === "last-missed" ? { kind: "LAST_MISSED" } : { kind: "ALL" };
+                    effectiveLoadPlan = getSessionLoadPlan(effectiveLearnMode, effectiveTrainingMaterial)!;
+                    run?.start(effectiveLearnMode, effectiveLoadPlan.kind === "today" ? "today" : effectiveLoadPlan.kind === "last-missed" ? "last_missed" : "all_cards");
+                    setLearnMode(effectiveLearnMode);
+                    setTrainingMaterial(effectiveTrainingMaterial);
+                    const queue = shuffleArray(quickStart.items);
+                    setSessionTotal(queue.length);
+                    setTodayItems(queue);
+                    setCurrentIndex(0);
+                    setReveal(false);
+                    if (quickStart.kind === "today") {
+                        onSetupCountsPatch?.({ todayDue: queue.length });
+                        loadLeitnerStatsInBackground();
+                    } else if (quickStart.kind === "last-missed") {
+                        onSetupCountsPatch?.({ lastMissedCount: queue.length });
+                        if (queue.length === 0) setLastMissedEmpty(true);
+                    } else {
+                        onSetupCountsPatch?.({ totalCards: queue.length });
+                    }
+                    loadResult = { ok: true, items: queue };
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : "Lernrunde konnte nicht gestartet werden.";
+                    onStatus(message);
+                    setLearnLoadError(message);
+                }
+            } else if (effectiveLoadPlan.kind === "today") {
+                run?.start(nextLearnMode, "today");
                 loadResult = await loadToday(run?.runId);
                 loadLeitnerStatsInBackground();
-            } else if (loadPlan?.kind === "all") {
-                loadResult = await loadAllForDrill(loadPlan.groupIds);
-            } else if (loadPlan?.kind === "last-missed") {
+            } else if (effectiveLoadPlan.kind === "all") {
+                run?.start(nextLearnMode, "all_cards");
+                loadResult = await loadAllForDrill(effectiveLoadPlan.groupIds);
+            } else if (effectiveLoadPlan.kind === "last-missed") {
+                run?.start(nextLearnMode, "last_missed");
                 loadResult = await loadLastMissed();
             }
 
@@ -351,12 +388,12 @@ export function useTrainerSession({
             }
             run?.loaded(loadResult.items.length);
             if (loadResult.items.length === 0) run?.end("completed");
-            activeSessionModeRef.current = nextLearnMode;
+            activeSessionModeRef.current = effectiveLearnMode;
             setLearnStarted(true);
             if (loadResult.items.length > 0) writeResumeSnapshot(ownerKey, cardType, {
-                mode: nextLearnMode, material: nextTrainingMaterial, directionMode: nextDirectionMode, direction: chosenDirection,
+                mode: effectiveLearnMode, material: effectiveTrainingMaterial, directionMode: nextDirectionMode, direction: chosenDirection,
                 items: loadResult.items, answeredIds: [], correctCount: 0, wrongIds: [], currentIndex: 0,
-                run: run?.resumeState(nextLearnMode, loadPlan.kind === "today" ? "today" : loadPlan.kind === "last-missed" ? "last_missed" : "all_cards"),
+                run: run?.resumeState(effectiveLearnMode, effectiveLoadPlan.kind === "today" ? "today" : effectiveLoadPlan.kind === "last-missed" ? "last_missed" : "all_cards"),
             });
         } finally { startingRef.current = false; }
     }

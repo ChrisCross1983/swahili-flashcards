@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { supabaseServer } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/requestUser";
 import GlobalOverlays from "@/components/GlobalOverlays";
 import WhatsNewToast from "@/components/WhatsNewToast";
 import ClientDiagnosticsProvider from "@/components/ClientDiagnosticsProvider";
+import { ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -21,10 +22,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const supabase = await supabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const audit = new ServerPerformanceAudit("root_layout");
+  const { data: { user } } = await audit.measure("auth_user", getRequestUser);
+  audit.log();
 
   return (
     <html lang="en">

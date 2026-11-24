@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAllCardsForDrill, fetchSetupCounts } from "@/lib/trainer/api";
+import { fetchAllCardsForDrill, fetchQuickStartSession, fetchSetupCounts } from "@/lib/trainer/api";
 
 describe("trainer api", () => {
     afterEach(() => {
@@ -69,6 +69,23 @@ describe("trainer api", () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/learn/setup-counts?type=vocab",
+            { cache: "no-store" },
+        );
+    });
+
+    it("starts the dashboard session through one authoritative request", async () => {
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+            kind: "last-missed",
+            items: [{ cardId: "1", german: "Haus", swahili: "nyumba" }],
+        }), { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(fetchQuickStartSession("vocab")).resolves.toEqual({
+            kind: "last-missed",
+            items: [{ cardId: "1", german: "Haus", swahili: "nyumba" }],
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/learn/quick-start?type=vocab",
             { cache: "no-store" },
         );
     });

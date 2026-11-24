@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { test, expect } = require("@playwright/test");
 
 const testEmail = process.env.SECURITY_TEST_EMAIL || process.env.PLAYWRIGHT_TEST_EMAIL;
@@ -93,6 +94,14 @@ async function mockTrainerApis(page, options = {}) {
 
     if (path === "/api/groups") {
       await route.fulfill(json({ groups }));
+      return;
+    }
+
+    if (path === "/api/learn/quick-start") {
+      if (delayedTodayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayedTodayMs));
+      }
+      await route.fulfill(json({ kind: "today", items: todayItems() }));
       return;
     }
 
@@ -195,7 +204,7 @@ async function openTrainer(page, options) {
 }
 
 test.describe("mobile critical flows", () => {
-  test("initial trainer entry requests counts, cards and groups once", async ({ page }) => {
+  test("initial trainer entry loads cards and groups only when the library opens", async ({ page }) => {
     await login(page);
     await mockTrainerApis(page);
     const calls = { counts: 0, cards: 0, groups: 0 };
@@ -208,11 +217,68 @@ test.describe("mobile critical flows", () => {
     });
     await page.goto("/trainer");
     await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+    await page.waitForTimeout(100);
+    expect(calls).toEqual({ counts: 1, cards: 0, groups: 0 });
+    expect(order[0]).toBe("counts");
+
+    await page.getByTestId("trainer-dashboard-library-card").click();
     await expect.poll(() => calls.cards).toBe(1);
     await expect.poll(() => calls.groups).toBe(1);
-    expect(calls).toEqual({ counts: 1, cards: 1, groups: 1 });
-    expect(order[0]).toBe("counts");
   });
+
+  test("training setup lazy-loads groups without loading the card library", async ({ page }) => {
+    await login(page);
+    await mockTrainerApis(page);
+    const calls = { cards: 0, groups: 0 };
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/cards") calls.cards++;
+      if (path === "/api/groups") calls.groups++;
+    });
+    await page.goto("/trainer");
+    await expect(page.getByRole("button", { name: "Training anpassen" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Training anpassen" }).click();
+    await expect.poll(() => calls.groups).toBe(1);
+    expect(calls.cards).toBe(0);
+  });
+
+  for (const viewport of [
+    { width: 1440, height: 900, label: "desktop" },
+    { width: 375, height: 812, label: "375px" },
+    { width: 390, height: 844, label: "390px" },
+    { width: 430, height: 932, label: "430px" },
+  ]) {
+    test(`trainer dashboard keeps a stable ${viewport.label} card grid`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await openTrainer(page);
+      await expect(page.getByRole("button", { name: "Heute lernen starten" })).toBeVisible();
+
+      const cards = [
+        page.getByTestId("trainer-dashboard-training-card"),
+        page.getByTestId("trainer-dashboard-create-card"),
+        page.getByTestId("trainer-dashboard-library-card"),
+        page.getByTestId("trainer-dashboard-import-card"),
+      ];
+      for (const card of cards) await expect(card).toBeVisible();
+      const boxes = await Promise.all(cards.map((card) => card.boundingBox()));
+      expect(boxes.every(Boolean)).toBe(true);
+
+      const [training, create, library, importCard] = boxes;
+      if (viewport.width >= 640) {
+        expect(Math.abs(training.width - create.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(training.height - create.height)).toBeLessThanOrEqual(1);
+        expect(Math.abs(library.width - importCard.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(library.height - importCard.height)).toBeLessThanOrEqual(1);
+        expect(create.x).toBeGreaterThan(training.x);
+      } else {
+        expect(create.y).toBeGreaterThanOrEqual(training.y + training.height);
+        expect(library.y).toBeGreaterThanOrEqual(create.y + create.height);
+        expect(importCard.y).toBeGreaterThanOrEqual(library.y + library.height);
+        expect(await page.locator("html").evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      }
+    });
+  }
 
   test("trainer waits for real counts before showing Today or Continue", async ({ page }) => {
     await login(page);
@@ -480,7 +546,7 @@ test.describe("mobile critical flows", () => {
   test("group stays in the card, edit moves to the meta header, and desktop grading follows", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openTrainer(page);
-    await page.route("**/api/learn/today?**", (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, groups })) })));
+    await page.route("**/api/learn/quick-start?**", (route) => route.fulfill(json({ kind: "today", items: todayItems().map((item) => ({ ...item, groups })) })));
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
     await expect(page.getByText("Optionen", { exact: true })).toHaveCount(0);
@@ -503,7 +569,7 @@ test.describe("mobile critical flows", () => {
 
   test("a card without groups opens the picker directly from + Gruppe", async ({ page }) => {
     await openTrainer(page);
-    await page.route("**/api/learn/today?**", (route) => route.fulfill(json({ items: todayItems().map((item) => ({ ...item, groups: [] })) })));
+    await page.route("**/api/learn/quick-start?**", (route) => route.fulfill(json({ kind: "today", items: todayItems().map((item) => ({ ...item, groups: [] })) })));
     await page.getByRole("button", { name: /Heute lernen starten/ }).click();
     await page.getByRole("button", { name: "Aufdecken" }).click();
     await page.getByRole("button", { name: "Gruppe hinzufügen" }).click();

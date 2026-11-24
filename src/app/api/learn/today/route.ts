@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
+import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 type DueCardRow = {
   card_id: string;
@@ -27,18 +28,19 @@ function normalizeDueCard(cards: DueCard | DueCard[]): DueCard | null {
 }
 
 export const GET = withServerDiagnostics("/api/learn/today", async (req, diagnostics) => {
-  const { user, response } = await requireUser();
-  if (response) return response;
+  const audit = new ServerPerformanceAudit("/api/learn/today");
+  const { user, response } = await requireUserWithPerformance(audit, requireUser);
+  if (response) return audit.response(response);
   diagnostics.setUser(user.id);
 
   const { searchParams } = new URL(req.url);
   const ownerKey = user.id;
   const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
   const groupIds = parseGroupIds(searchParams);
-  const allowedCardIds = await getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType);
+  const allowedCardIds = await audit.measure("group_filter", () => getAllowedCardIdsByGroups(ownerKey, groupIds, resolvedType));
 
   if (allowedCardIds && allowedCardIds.length === 0) {
-    return NextResponse.json({ items: [] });
+    return audit.response(NextResponse.json({ items: [] }), { groupFilterIds: 0 });
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -63,16 +65,17 @@ export const GET = withServerDiagnostics("/api/learn/today", async (req, diagnos
     query = query.in("card_id", allowedCardIds);
   }
 
-  const { data, error } = await query;
+  const { data, error } = await audit.measure("due_cards_query", async () => await query);
 
   if (error) {
     diagnostics.supabaseFailure("card_progress", "select", error.code);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return audit.response(NextResponse.json({ error: error.message }, { status: 500 }));
   }
 
   const rows = (data ?? []) as DueCardRow[];
-  const groupsByCard = await getCardGroups(ownerKey, rows.map((row) => String(row.card_id)), resolvedType);
+  const groupsByCard = await audit.measure("groups_enrichment", () => getCardGroups(ownerKey, rows.map((row) => String(row.card_id)), resolvedType));
 
+  const transformStartedAt = performance.now();
   const items = rows.flatMap((row) => {
     const card = normalizeDueCard(row.cards);
     if (!card) return [];
@@ -93,5 +96,10 @@ export const GET = withServerDiagnostics("/api/learn/today", async (req, diagnos
     }];
   });
 
-  return NextResponse.json({ items });
+  audit.mark("transform", transformStartedAt);
+  return audit.response(NextResponse.json({ items }), {
+    dueCardCount: rows.length,
+    groupFilterIds: allowedCardIds?.length ?? 0,
+    groupQueryBatches: Math.ceil(rows.length / 200),
+  });
 });

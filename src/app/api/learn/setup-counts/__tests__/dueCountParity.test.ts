@@ -9,6 +9,8 @@ type QueryRow = CardRow | ProgressRow | (ProgressRow & { cards: CardRow });
 const fixture = vi.hoisted(() => ({
     cards: [] as CardRow[],
     progress: [] as ProgressRow[],
+    rpc: vi.fn(),
+    from: vi.fn((table: string) => new FakeQuery(table)),
 }));
 
 class FakeQuery {
@@ -87,7 +89,10 @@ class FakeQuery {
 }
 
 vi.mock("@/lib/supabaseServer", () => ({
-    supabaseServer: { from: (table: string) => new FakeQuery(table) },
+    supabaseServer: {
+        from: (table: string) => fixture.from(table),
+        rpc: (...args: unknown[]) => fixture.rpc(...args),
+    },
 }));
 
 vi.mock("@/lib/api/auth", () => ({
@@ -110,6 +115,9 @@ describe("shared Home/Trainer due-count source", () => {
     beforeEach(() => {
         fixture.cards.length = 0;
         fixture.progress.length = 0;
+        fixture.rpc.mockReset();
+        fixture.from.mockClear();
+        fixture.rpc.mockResolvedValue({ data: null, error: { code: "PGRST202", message: "function not found" } });
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-10-08T12:00:00Z"));
     });
@@ -141,6 +149,86 @@ describe("shared Home/Trainer due-count source", () => {
         const timing = response.headers.get("Server-Timing") ?? "";
         expect(timing).toMatch(/groups;dur=[\d.]+, due;dur=[\d.]+, cards;dur=[\d.]+, last_missed;dur=[\d.]+/);
         expect(timing).not.toContain("user-a");
+    });
+
+    it("uses the single exact-count RPC once its migration is available", async () => {
+        fixture.rpc.mockResolvedValue({
+            data: [{ today_due: "5", total_cards: "11", last_missed_count: "2" }],
+            error: null,
+        });
+
+        const response = await getSetupCounts(setupRequest());
+        await expect(response.json()).resolves.toEqual({ todayDue: 5, totalCards: 11, lastMissedCount: 2 });
+        expect(fixture.rpc).toHaveBeenCalledWith("trainer_setup_counts", {
+            p_owner_key: "user-a",
+            p_card_type: "vocab",
+            p_today: "2026-10-08",
+        });
+        expect(fixture.from).not.toHaveBeenCalled();
+        expect(response.headers.get("Server-Timing")).toMatch(/counts_rpc;dur=[\d.]+, total;dur=[\d.]+/);
+        expect(response.headers.get("Server-Timing")).not.toMatch(/(?:due|cards|last_missed|groups);dur=/);
+    });
+
+    it("runs legacy counts only when the RPC reports an error", async () => {
+        addCard("due", "2026-10-08", 1);
+        fixture.rpc.mockResolvedValue({ data: null, error: { code: "XX000", message: "RPC temporarily unavailable" } });
+
+        const response = await getSetupCounts(setupRequest());
+        await expect(response.json()).resolves.toEqual({ todayDue: 1, totalCards: 1, lastMissedCount: 0 });
+        expect(fixture.from.mock.calls.map(([table]) => table).sort()).toEqual([
+            "card_progress", "cards", "learn_last_missed",
+        ]);
+        expect(response.headers.get("Server-Timing")).toMatch(/counts_rpc_fallback;dur=[\d.]+/);
+    });
+
+    it("logs only a sanitized RPC fallback category during a performance audit", async () => {
+        vi.stubEnv("PERFORMANCE_AUDIT", "1");
+        const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+        try {
+            fixture.rpc.mockResolvedValue({
+                data: null,
+                error: { code: "PGRST202", message: "raw database message must not be logged" },
+            });
+
+            await getSetupCounts(setupRequest());
+
+            expect(info).toHaveBeenCalledWith("[performance-audit]", {
+                scope: "/api/learn/setup-counts",
+                rpc_fallback_reason: "rpc_not_found_or_signature_mismatch",
+            });
+            expect(JSON.stringify(info.mock.calls)).not.toContain("raw database message");
+        } finally {
+            info.mockRestore();
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it("keeps the group-filtered request on the legacy path", async () => {
+        fixture.rpc.mockResolvedValue({
+            data: [{ today_due: "5", total_cards: "11", last_missed_count: "2" }],
+            error: null,
+        });
+
+        const response = await getSetupCounts(new Request("http://localhost/api/learn/setup-counts?type=vocab&groupId=group-a"));
+        await expect(response.json()).resolves.toEqual({ todayDue: 0, totalCards: 0, lastMissedCount: 0 });
+        expect(fixture.rpc).not.toHaveBeenCalled();
+        expect(fixture.from).toHaveBeenCalledWith("card_groups");
+    });
+
+    it("maps successful RPC values to the legacy count response semantics", async () => {
+        addCard("due", "2026-10-08", 1);
+        addCard("future", "2026-10-09", 1);
+        const legacy = await (await getSetupCounts(setupRequest())).json();
+
+        fixture.from.mockClear();
+        fixture.rpc.mockResolvedValue({
+            data: [{ today_due: String(legacy.todayDue), total_cards: String(legacy.totalCards), last_missed_count: String(legacy.lastMissedCount) }],
+            error: null,
+        });
+        const rpc = await (await getSetupCounts(setupRequest())).json();
+
+        expect(rpc).toEqual(legacy);
+        expect(fixture.from).not.toHaveBeenCalled();
     });
 
     it("uses the existing UTC date boundary, not the browser's local calendar day", async () => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
+import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 import {
   getIntervalDays,
@@ -33,16 +34,17 @@ type Body = {
 };
 
 export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagnostics) => {
+  const audit = new ServerPerformanceAudit("/api/learn/grade");
   let body: Body;
 
   try {
-    body = (await req.json()) as Body;
+    body = await audit.measure("body", async () => await req.json() as Body);
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return audit.response(NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }));
   }
 
-  const { user, response } = await requireUser();
-  if (response) return response;
+  const { user, response } = await requireUserWithPerformance(audit, requireUser);
+  if (response) return audit.response(response);
   diagnostics.setUser(user.id);
   diagnostics.setRunId(req.headers.get("x-diagnostics-run-id"));
 
@@ -50,10 +52,10 @@ export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagno
   const cardId = (body.cardId ?? "").trim();
 
   if (!cardId) {
-    return NextResponse.json(
+    return audit.response(NextResponse.json(
       { error: "cardId is required" },
       { status: 400 }
-    );
+    ));
   }
 
   const lvlRaw = Number.isFinite(body.currentLevel)
@@ -78,7 +80,7 @@ export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagno
 
   console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
 
-  const { error } = await supabaseServer
+  const { error } = await audit.measure("progress_upsert", async () => await supabaseServer
     .from("card_progress")
     .upsert(
       {
@@ -93,16 +95,16 @@ export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagno
         onConflict: "owner_key,card_id",
       }
     )
-    .select();
+    .select());
 
   if (error) {
     diagnostics.supabaseFailure("card_progress", "upsert", error.code);
     console.error("[learn/grade] upsert error", { code: error.code ?? null });
-    return NextResponse.json(
+    return audit.response(NextResponse.json(
       { error: "Update failed." },
       { status: 500 }
-    );
+    ));
   }
 
-  return NextResponse.json({ ok: true, newLevel, dueDate });
+  return audit.response(NextResponse.json({ ok: true, newLevel, dueDate }));
 });

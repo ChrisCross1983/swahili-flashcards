@@ -18,7 +18,7 @@ import {
     fetchLeitnerStats,
     fetchSetupCounts,
 } from "@/lib/trainer/api";
-import type { CardType, LeitnerStats } from "@/lib/trainer/types";
+import type { CardType, LeitnerStats, SetupCounts } from "@/lib/trainer/types";
 import { readGerman, readGermanExample, readSwahili, readSwahiliExample, resolveCardId } from "@/lib/trainer/utils";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
 import TrainerCard from "@/components/trainer/TrainerCard";
@@ -55,7 +55,10 @@ const LEGACY_KEY_NAME = "ramona_owner_key";
 
 type Props = {
     ownerKey: string;
+    userEmail: string | null;
     cardType?: CardType;
+    initialSetupCounts?: SetupCounts | null;
+    initialSetupCountsState?: "ready" | "error";
 };
 
 const IMAGE_BASE_URL =
@@ -218,7 +221,7 @@ function getAudioSnapshot(audio: HTMLAudioElement, source: "prepared" | "created
     };
 }
 
-export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
+export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab", initialSetupCounts, initialSetupCountsState }: Props) {
     // Route-level orchestrator: setup, session, card form, and library domains own their detailed state behind focused boundaries.
     const {
         isSentenceTrainer,
@@ -232,7 +235,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         createTitle,
         saveCardLabel,
     } = getTrainerCopy(cardType);
-    const [userEmail, setUserEmail] = useState<string | null>(null);
     const [status, setStatus] = useState("");
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
@@ -252,15 +254,16 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const [showMigrate, setShowMigrate] = useState(false);
     const [migrateStatus, setMigrateStatus] = useState<string | null>(null);
     const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
-    const [setupCounts, setSetupCounts] = useState({
+    const [setupCounts, setSetupCounts] = useState<SetupCounts>(initialSetupCounts ?? {
         todayDue: 0,
         totalCards: 0,
         lastMissedCount: 0,
     });
     const [setupCountsLoading, setSetupCountsLoading] = useState(false);
-    const [setupCountsState, setSetupCountsState] = useState<"pending" | "ready" | "error">("pending");
+    const [setupCountsState, setSetupCountsState] = useState<"pending" | "ready" | "error">(initialSetupCountsState ?? "pending");
     const setupCountsRequestIdRef = useRef(0);
     const [groups, setGroups] = useState<Group[]>([]);
+    const [groupsLoadState, setGroupsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
     const [cardGroupsEditorOpen, setCardGroupsEditorOpen] = useState(false);
     const [cardGroupsDraft, setCardGroupsDraft] = useState<string[]>([]);
@@ -318,9 +321,9 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
-    const initialLibraryLoadRef = useRef(false);
-    const initialCountsLoadRef = useRef(false);
+    const initialCountsLoadRef = useRef(initialSetupCountsState !== undefined);
     const resumeAttemptedRef = useRef(false);
+    const groupsRequestRef = useRef<Promise<Group[]> | null>(null);
     const [entryQuickStartPreset, setEntryQuickStartPreset] = useState<QuickStartPreset | null>(null);
     const [allPresetFilteredCount, setAllPresetFilteredCount] = useState<number | null>(null);
 
@@ -529,14 +532,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         initFeedbackSounds();
     }, []);
 
-    useEffect(() => {
-        (async () => {
-            const supabase = supabaseBrowser();
-            const { data } = await supabase.auth.getUser();
-            setUserEmail(data.user?.email ?? null);
-        })();
-    }, []);
-
     const activeTrainerGroupName = useMemo(
         () => trainingMaterial.kind === "GROUP"
             ? groups.find((group) => group.id === trainingMaterial.groupId)?.name ?? null
@@ -562,6 +557,29 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
             }
         }
     }, [cardType]);
+
+    const ensureGroups = useCallback(async (): Promise<Group[]> => {
+        if (groupsLoadState === "loaded") return groups;
+        if (groupsRequestRef.current) return groupsRequestRef.current;
+
+        setGroupsLoadState("loading");
+        const request = fetchGroups(cardType)
+            .then((nextGroups) => {
+                setGroups(nextGroups);
+                setGroupsLoadState("loaded");
+                return nextGroups;
+            })
+            .catch(() => {
+                setGroups([]);
+                setGroupsLoadState("error");
+                return [];
+            })
+            .finally(() => {
+                groupsRequestRef.current = null;
+            });
+        groupsRequestRef.current = request;
+        return request;
+    }, [cardType, groups, groupsLoadState]);
 
     const {
         todayItems,
@@ -687,14 +705,6 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         initialCountsLoadRef.current = true;
         void refreshSetupCounts();
     }, [refreshSetupCounts]);
-
-    useEffect(() => {
-        if (initialLibraryLoadRef.current) return;
-        initialLibraryLoadRef.current = true;
-        loadCards(undefined, { silent: true });
-        fetchGroups(cardType).then(setGroups).catch(() => setGroups([]));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
 
     useEffect(() => {
         if (!openLearn) return;
@@ -1320,49 +1330,25 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setRepairDrillActive(false);
         setDirectStartPreparing(false);
         setOpenLearn(true);
-    }
-
-    function dashboardStartPreset(counts = setupCounts): QuickStartPreset {
-        if (counts.todayDue > 0) return "today";
-        if (counts.lastMissedCount > 0) return "last-missed";
-        return "all";
+        void ensureGroups();
     }
 
     async function startRecommendedLearningFromDashboard() {
         setDirectStartPreparing(true);
         directStartCancelledRef.current = false;
         setOpenLearn(true);
-        let currentCounts = setupCounts;
-        try {
-            currentCounts = await fetchSetupCounts(cardType);
-            setupCountsRequestIdRef.current += 1;
-            setSetupCountsLoading(false);
-            setSetupCounts(currentCounts);
-        } catch {
-            // Keep the last known counts when the refresh is unavailable.
-        }
-        if (directStartCancelledRef.current) {
-            setDirectStartPreparing(false);
-            return;
-        }
-        const quickStart = dashboardStartPreset(currentCounts);
-        const nextConfig = quickStart === "today"
-            ? { learnMode: "LEITNER_TODAY" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial }
-            : quickStart === "last-missed"
-                ? { learnMode: "DRILL" as const, trainingMaterial: { kind: "LAST_MISSED" } as TrainingMaterial }
-                : { learnMode: "DRILL" as const, trainingMaterial: { kind: "ALL" } as TrainingMaterial };
-
-        setEntryQuickStartPreset(quickStart);
-        resetTrainingPreset(quickStart);
-        setTrainingMaterial(nextConfig.trainingMaterial);
+        setEntryQuickStartPreset(null);
+        resetTrainingPreset("today");
+        setTrainingMaterial({ kind: "ALL" });
         setDirectionMode("RANDOM");
         setRepairDrillActive(false);
         try {
             await startLearningSession({
-                learnMode: nextConfig.learnMode,
-                trainingMaterial: nextConfig.trainingMaterial,
+                learnMode: "LEITNER_TODAY",
+                trainingMaterial: { kind: "ALL" },
                 directionMode: "RANDOM",
                 skipValidationHighlights: true,
+                dashboardQuickStart: true,
             });
         } finally {
             setDirectStartPreparing(false);
@@ -1450,6 +1436,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setCardGroupsDraft(current);
         setCardGroupsStatus(null);
         setCardGroupsEditorOpen(true);
+        void ensureGroups();
     }
 
     function openCardGroupsEditorForCard(card: any) {
@@ -1460,6 +1447,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         setCardGroupsDraft(current);
         setCardGroupsStatus(null);
         setCardGroupsEditorOpen(true);
+        void ensureGroups();
     }
 
     async function saveCardGroups() {
@@ -1513,26 +1501,30 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
         return existing.size === next.size && Array.from(existing).every((id) => next.has(id));
     })();
 
+    function openCardLibrary() {
+        setStatus("");
+        cardLibrary.resetVisibleWindow();
+        setOpenCards(true);
+        void Promise.all([loadCards(), ensureGroups()]);
+    }
+
+    function openManageGroups() {
+        void ensureGroups().then(() => setManageGroupsOpen(true));
+    }
+
     return (
-        <main className="min-h-screen bg-base p-6 flex justify-center">
-            <div className="w-full max-w-xl">
-                <h1 className="text-2xl font-semibold tracking-tight">{trainerTitle}</h1>
+        <main className="min-h-screen bg-base px-4 py-5 sm:px-6 sm:py-8">
+            <div className="mx-auto w-full max-w-5xl">
+                <header className="flex flex-wrap items-start justify-between gap-4 border-b border-soft pb-5">
+                    <div><h1 className="text-2xl font-semibold tracking-tight text-primary">{trainerTitle}</h1><p className="mt-1 text-sm text-muted">Lernen, organisieren und Fortschritt behalten.</p></div>
+                    <nav className="flex flex-wrap items-center justify-end gap-1.5" aria-label="Trainer-Navigation">
+                        <button type="button" className="btn btn-ghost min-h-10 px-3 text-sm" onClick={() => router.push("/")}>Home</button>
+                        <span className="max-w-52 truncate rounded-full border border-soft bg-surface px-3 py-2 text-xs text-muted" title={userEmail ?? undefined}>{userEmail ?? "Profil wird geladen…"}</span>
+                        <button type="button" className="btn btn-ghost min-h-10 px-3 text-sm" onClick={logout}>Logout</button>
+                    </nav>
+                </header>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                    <button className="btn btn-ghost text-sm" onClick={() => router.push("/")}>
-                        ← Home
-                    </button>
-
-                    <div className="text-xs text-muted">
-                        Eingeloggt als: <span className="font-mono">{userEmail ?? "..."}</span>
-                    </div>
-
-                    <button className="btn btn-ghost text-sm" onClick={logout}>
-                        Logout
-                    </button>
-                </div>
-
-                <ModeSwitch mode={mode} onChange={handleModeChange} />
+                <div className="mt-5"><ModeSwitch mode={mode} onChange={handleModeChange} /></div>
 
                 {mode === "ai" ? <AiCoachPanel cardType={cardType} />
                     : (
@@ -1576,12 +1568,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onOpenCreate={() => {
                                     cardFormRef.current?.openCreate();
                                 }}
-                                onOpenCards={() => {
-                                    setStatus("");
-                                    cardLibrary.resetVisibleWindow();
-                                    setOpenCards(true);
-                                    loadCards();
-                                }}
+                                onOpenCards={openCardLibrary}
                                 onOpenImport={() => router.push("/import")}
                                 onRetryCounts={() => { void refreshSetupCounts(); }}
                             />
@@ -1667,7 +1654,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                             setTrainingMaterial(nextMaterial);
                                             if (nextMaterial.kind === "ALL") setAllPresetFilteredCount(null);
                                         }}
-                                        onOpenManageGroups={() => setManageGroupsOpen(true)}
+                                        onOpenManageGroups={openManageGroups}
                                         onDirectionModeChange={setDirectionMode}
                                         onStart={() => {
                                             setRepairDrillActive(false);
@@ -1928,6 +1915,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 groups={groups}
                                 cards={cards}
                                 onGroupsChange={setGroups}
+                                onRequestGroups={() => { void ensureGroups(); }}
                                 onCreated={async () => {
                                     await Promise.all([
                                         loadCards(undefined, { silent: true }),
@@ -2015,7 +2003,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                     setCards((prev) => prev.map((card) => String(card.id) === cardId ? { ...card, image_path: null } : card));
                                     setTodayItems((prev) => prev.map((item) => resolveCardId(item) === cardId ? { ...item, image_path: null, imagePath: null, image: null } : item));
                                 }}
-                                onOpenCards={() => { setReturnToDetail(detailOriginRef.current ? { ...detailOriginRef.current } : null); setOpenCards(true); }}
+                                onOpenCards={() => { setReturnToDetail(detailOriginRef.current ? { ...detailOriginRef.current } : null); openCardLibrary(); }}
                                 onReturnToLearn={() => {}}
                                 onStatus={showToast}
                             />
@@ -2057,7 +2045,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 }}
                                 onGroupFilterChange={cardLibrary.setGroupFilter}
                                 onOpenDuplicateReview={cardLibrary.openDuplicateReview}
-                                onOpenManageGroups={() => setManageGroupsOpen(true)}
+                                onOpenManageGroups={openManageGroups}
                                 onLoadMore={cardLibrary.loadMore}
                                 onToggleSelected={cardLibrary.toggleSelected}
                                 onPlayAudio={playCardAudioIfExists}
@@ -2106,7 +2094,7 @@ export default function TrainerClient({ ownerKey, cardType = "vocab" }: Props) {
                                 onOpenGroup={(groupId) => {
                                     cardLibrary.setGroupFilter([groupId]);
                                     setManageGroupsOpen(false);
-                                    setOpenCards(true);
+                                    openCardLibrary();
                                 }}
                             />
                             <DuplicateReviewSheet

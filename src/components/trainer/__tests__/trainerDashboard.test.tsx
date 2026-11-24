@@ -54,6 +54,7 @@ describe("TrainerDashboard start flow", () => {
     it("keeps the initial counts-pending state neutral and layout stable", () => {
         const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="pending" todayDue={0} />);
         expect(html).toContain("Lernzahlen werden ermittelt");
+        expect(html).toContain("Training wird vorbereitet");
         expect(html).not.toContain("Weiterlernen");
         expect(html).not.toContain("Heute lernen starten");
         expect(html).not.toContain("Wird geladen");
@@ -61,6 +62,7 @@ describe("TrainerDashboard start flow", () => {
         expect(html).toMatch(/<button[^>]*disabled[^>]*aria-label="Lernkarten werden ermittelt"/);
         expect(html).toContain("min-h-14");
         expect(html).toContain("motion-safe:animate-pulse");
+        expect(html).toContain("min-h-[250px]");
     });
 
     it("renders the same complete training tile in the server route fallback before hydration", () => {
@@ -73,6 +75,10 @@ describe("TrainerDashboard start flow", () => {
             expect(html).not.toContain("Heute lernen starten");
             expect(html).not.toContain("Weiterlernen starten");
         }
+        expect(fallback).toContain('aria-label="Trainer wird vorbereitet"');
+        expect(fallback).toContain('aria-label="Neue Wörter wird vorbereitet"');
+        expect(fallback).toContain('aria-label="Meine Karten wird vorbereitet"');
+        expect(fallback).toContain('aria-label="Bulk Import wird vorbereitet"');
     });
 
     it("does not infer a fallback training mode after a failed count request", () => {
@@ -115,7 +121,10 @@ describe("TrainerDashboard start flow", () => {
         expect(html).toContain("Heute lernen");
         expect(html).toContain("Starte mit den nächsten Karten. 4 sind heute dran.");
         expect(html).toContain("Heute lernen starten");
-        expect(html).toContain("Anpassen");
+        expect(html).toContain("Training anpassen");
+        expect(html).toContain("Bulk Import");
+        expect(html).not.toContain("📥");
+        expect(html).toContain("sm:grid-cols-2");
     });
 
     it("fires separate callbacks for direct start and setup customization", () => {
@@ -130,7 +139,7 @@ describe("TrainerDashboard start flow", () => {
         );
 
         const startButton = findButtonByText(element, "Heute lernen starten");
-        const setupButton = findButtonByText(element, "Anpassen");
+        const setupButton = findButtonByText(element, "Training anpassen");
         expect(startButton).not.toBeNull();
         expect(setupButton).not.toBeNull();
         startButton?.props.onClick();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { getIntervalDays } from "@/lib/leitner";
 import { requireUser } from "@/lib/api/auth";
+import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
 type ProgressStatsRow = {
   level?: number | null;
@@ -27,8 +28,9 @@ function addDaysYmd(base: Date, days: number) {
 }
 
 export async function GET(req: Request) {
-  const { user, response } = await requireUser();
-  if (response) return response;
+  const audit = new ServerPerformanceAudit("/api/learn/stats");
+  const { user, response } = await requireUserWithPerformance(audit, requireUser);
+  if (response) return audit.response(response);
 
   const { searchParams } = new URL(req.url);
   const ownerKey = user.id;
@@ -53,12 +55,13 @@ export async function GET(req: Request) {
     query = query.or("type.is.null,type.eq.vocab", { foreignTable: "cards" });
   }
 
-  const { data, error } = await query;
+  const { data, error } = await audit.measure("progress_query", async () => await query);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return audit.response(NextResponse.json({ error: error.message }, { status: 500 }));
   }
 
+  const transformStartedAt = performance.now();
   const rows = data ?? [];
   const total = rows.length;
 
@@ -103,7 +106,7 @@ export async function GET(req: Request) {
       count,
     }));
 
-  return NextResponse.json({
+  const result = NextResponse.json({
     total,
     byLevel,
     dueTodayCount,
@@ -112,4 +115,6 @@ export async function GET(req: Request) {
     nextDueDate: futureDue,
     nextDueInDays: futureDue ? daysUntil(futureDue) : null,
   });
+  audit.mark("transform", transformStartedAt);
+  return audit.response(result, { progressRowCount: rows.length });
 }
