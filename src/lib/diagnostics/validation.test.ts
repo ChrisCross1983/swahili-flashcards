@@ -13,6 +13,7 @@ const event = () => ({
     event_type: "window_error", error_name: "TypeError", message_category: "runtime_type",
     rejection_type: "not_promise", stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:1:2",
     same_origin: true, source_hint: "global", navigation_state: "active", online: true, visibility_state: "visible",
+    source_kind: "next_chunk", source_line: 1, source_column: 2, error_symbol: "renderCard",
 });
 
 describe("diagnostic event input", () => {
@@ -32,6 +33,7 @@ describe("diagnostic event input", () => {
             { occurred_at: new Date(now + 6 * 60_000).toISOString() },
             { event_type: "click" }, { error_name: "PrivateError" }, { message_category: "private message" },
             { top_frame: "/_next/app.js?token=secret" }, { navigation_state: "private" }, { online: "yes" },
+            { source_kind: "private" }, { source_line: 0 }, { source_column: 10_000_001 }, { error_symbol: "private value" },
         ]) expect(parseEvents({ events: [{ ...event(), ...change }] }, user, now)).toBeNull();
     });
     it("limits batches and repeated IDs within a batch", () => {

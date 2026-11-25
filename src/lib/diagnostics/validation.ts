@@ -19,10 +19,11 @@ const SYSTEMS = new Set(["iOS", "Android", "Windows", "macOS", "Linux", "Other"]
 const DEVICES = new Set(["desktop", "mobile", "tablet", "unknown"]);
 const EVENT_TYPES = new Set(["window_error", "unhandled_rejection", "react_boundary", "network_request", "api_response", "manual"]);
 const ERROR_NAMES = new Set(["Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "URIError", "AbortError", "TimeoutError", "DOMException", "Other", "Unknown"]);
-const MESSAGE_CATEGORIES = new Set(["aborted", "resize_observer", "opaque_script_error", "network", "chunk_load", "storage", "permission", "runtime_type", "runtime_reference", "runtime_syntax", "runtime_other", "unknown"]);
+const MESSAGE_CATEGORIES = new Set(["aborted", "resize_observer", "opaque_script_error", "network", "chunk_load", "storage", "permission", "runtime_type", "type_undefined_member", "type_null_member", "type_not_function", "type_illegal_invocation", "runtime_reference", "reference_missing_identifier", "reference_tdz", "runtime_syntax", "runtime_other", "unknown"]);
 const REJECTION_TYPES = new Set(["error", "dom_exception", "string", "object", "primitive", "null", "not_promise"]);
 const STACK_ORIGINS = new Set(["same_origin", "external", "browser_extension", "browser_native", "unknown"]);
 const SOURCE_HINTS = new Set(["global", "react_boundary", "api_client", "trainer", "ui", "unknown"]);
+const SOURCE_KINDS = new Set(["next_chunk", "inline_document", "same_origin_other", "external", "browser_extension", "browser_native", "unknown"]);
 const NAVIGATION_STATES = new Set(["active", "unloading", "page_hidden", "restored"]);
 const VISIBILITY_STATES = new Set(["visible", "hidden", "prerender", "unknown"]);
 const EVENT_KEYS = new Set([
@@ -30,6 +31,7 @@ const EVENT_KEYS = new Set([
     "http_status", "fingerprint", "run_id", "browser_family", "browser_version", "os_family", "device_class", "build_version",
     "event_type", "error_name", "message_category", "rejection_type", "stack_origin", "top_frame", "same_origin",
     "source_hint", "navigation_state", "online", "visibility_state",
+    "source_kind", "source_line", "source_column", "error_symbol",
 ]);
 
 export const MAX_EVENT_BATCH = 10;
@@ -64,6 +66,16 @@ function optionalTopFrame(value: unknown): string | null | undefined {
     if (value == null || value === "") return null;
     return typeof value === "string" && value.length <= 180 && /^\/_next\/static\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+(?::\d{1,8}:\d{1,8})?$/.test(value)
         ? value : undefined;
+}
+
+function optionalPosition(value: unknown): number | null | undefined {
+    if (value == null) return null;
+    return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 10_000_000 ? value : undefined;
+}
+
+function optionalErrorSymbol(value: unknown): string | null | undefined {
+    if (value == null || value === "") return null;
+    return typeof value === "string" && /^[A-Za-z_$][\w$]{0,79}$/.test(value) ? value : undefined;
 }
 
 export function optionalBuild(value: unknown): string | null | undefined {
@@ -112,6 +124,10 @@ export type DiagnosticEventRow = {
     navigation_state: string | null;
     online: boolean | null;
     visibility_state: string | null;
+    source_kind: string | null;
+    source_line: number | null;
+    source_column: number | null;
+    error_symbol: string | null;
 };
 
 export function parseEvents(value: unknown, userId: string, now = Date.now()): DiagnosticEventRow[] | null {
@@ -143,10 +159,15 @@ export function parseEvents(value: unknown, userId: string, now = Date.now()): D
         const navigationState = optionalString(event.navigation_state, NAVIGATION_STATES);
         const online = optionalBoolean(event.online);
         const visibilityState = optionalString(event.visibility_state, VISIBILITY_STATES);
+        const sourceKind = optionalString(event.source_kind, SOURCE_KINDS);
+        const sourceLine = optionalPosition(event.source_line);
+        const sourceColumn = optionalPosition(event.source_column);
+        const errorSymbol = optionalErrorSymbol(event.error_symbol);
         if (!route || browser === undefined || browserVersion === undefined || os === undefined || device === undefined || build === undefined ||
             eventType === undefined || errorName === undefined || messageCategory === undefined || rejectionType === undefined ||
             stackOrigin === undefined || topFrame === undefined || sameOrigin === undefined || sourceHint === undefined ||
-            navigationState === undefined || online === undefined || visibilityState === undefined) return null;
+            navigationState === undefined || online === undefined || visibilityState === undefined || sourceKind === undefined ||
+            sourceLine === undefined || sourceColumn === undefined || errorSymbol === undefined) return null;
         const status = event.http_status == null ? null : event.http_status;
         if (status !== null && (typeof status !== "number" || !Number.isInteger(status) || status < 100 || status > 599)) return null;
         const fingerprint = event.fingerprint == null || event.fingerprint === "" ? null : event.fingerprint;
@@ -162,6 +183,7 @@ export function parseEvents(value: unknown, userId: string, now = Date.now()): D
             message_category: messageCategory, rejection_type: rejectionType, stack_origin: stackOrigin,
             top_frame: topFrame, same_origin: sameOrigin, source_hint: sourceHint,
             navigation_state: navigationState, online, visibility_state: visibilityState,
+            source_kind: sourceKind, source_line: sourceLine, source_column: sourceColumn, error_symbol: errorSymbol,
         });
         seen.add(event.event_id);
     }

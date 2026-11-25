@@ -18,7 +18,8 @@ const event = (changes: Partial<HealthEvent> = {}): HealthEvent => ({
     http_status: 500, fingerprint: "a".repeat(64), run_id: null, browser_family: null, browser_version: null, os_family: null,
     device_class: null, build_version: null, event_type: null, error_name: null, message_category: null,
     rejection_type: null, stack_origin: null, top_frame: null, same_origin: null, source_hint: null,
-    navigation_state: null, online: null, visibility_state: null, ...changes,
+    navigation_state: null, online: null, visibility_state: null, source_kind: null, source_line: null,
+    source_column: null, error_symbol: null, ...changes,
 });
 
 describe("health aggregates", () => {

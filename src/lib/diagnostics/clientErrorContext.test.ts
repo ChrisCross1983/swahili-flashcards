@@ -11,6 +11,7 @@ describe("privacy-safe client error context", () => {
         expect(context).toMatchObject({
             error_name: "TypeError", message_category: "runtime_type", stack_origin: "same_origin",
             top_frame: "/_next/static/chunks/app-abc.js:12:34", same_origin: true,
+            source_kind: "next_chunk", source_line: 12, source_column: 34,
         });
         expect(JSON.stringify(context)).not.toMatch(/private card|token=secret|app\.example/);
     });
@@ -29,7 +30,18 @@ describe("privacy-safe client error context", () => {
         const error = new ReferenceError("missingVariable is not defined");
         error.stack = "handler@https://app.example/_next/static/chunks/page.js:5:9";
         const context = buildClientErrorContext({ error, eventType: "window_error", pageOrigin: "https://app.example" });
-        expect(context).toMatchObject({ error_name: "ReferenceError", message_category: "runtime_reference", stack_origin: "same_origin" });
+        expect(context).toMatchObject({ error_name: "ReferenceError", message_category: "reference_missing_identifier", error_symbol: "missingVariable", stack_origin: "same_origin" });
         expect(isBenignBrowserContext(context, "active", true)).toBe(false);
+    });
+
+    it("captures only a bounded identifier and document position for inline Safari errors", () => {
+        const error = new ReferenceError("Can't find variable: missingWidget");
+        error.stack = "global code@https://app.example/trainer:4:27";
+        const context = buildClientErrorContext({ error, eventType: "window_error", pageOrigin: "https://app.example", pagePath: "/trainer" });
+        expect(context).toMatchObject({
+            message_category: "reference_missing_identifier", error_symbol: "missingWidget",
+            source_kind: "inline_document", source_line: 4, source_column: 27, top_frame: null,
+        });
+        expect(JSON.stringify(context)).not.toContain("Can't find variable");
     });
 });

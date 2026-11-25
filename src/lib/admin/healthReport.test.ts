@@ -8,12 +8,12 @@ const metrics = {
     errors: 2, warnings: 1, affectedUsers: 1, userIds: [user.id], startedRuns: 1, completedRuns: 0, openRuns: 1, suspectedAbandoned: 1,
     gradeErrors: 1, sessionSaveErrors: 0, apiServer5xx: 1, clientErrors: 1, avgInitialCards: 120, largestSession: 173,
     avgPosition: 83, avgCompletedDurationMinutes: 5, runsOver100: 1, runsOver150: 1,
-    topFingerprints: [{ fingerprint: "abc123456789", count: 2, last_at: "2026-11-20T12:00:00.000Z", affected_users: 1, route: "/api/learn/grade?token=private", error_code: "grade_failed", source: "server" as const, severity: "error" as const, error_name: null, message_category: null, stack_origin: null }],
+    topFingerprints: [{ fingerprint: "abc123456789", count: 2, last_at: "2026-11-20T12:00:00.000Z", affected_users: 1, route: "/api/learn/grade?token=private", error_code: "grade_failed", source: "server" as const, severity: "error" as const, error_name: null, message_category: null, stack_origin: null, source_kind: null, error_symbol: null }],
 };
 const input = {
     meta: { generated_at: "2026-11-20T12:30:00.000Z", environment: "production", build_version: "commit123", timezone: "UTC" as const },
     window, selectedUser: user, users: [user], metrics, sampled: false,
-    events: { items: [{ id: "dd0fa83f-e3c5-4cc1-8843-e0f12b355f28", user_id: user.id, occurred_at: "2026-11-20T12:00:00.000Z", source: "server" as const, severity: "error" as const, category: "api_failure", error_code: "grade_failed", route: "/api/learn/grade?token=private", http_status: 500, fingerprint: "abc123456789", run_id: "bd0fa83f-e3c5-4cc1-8843-e0f12b355f28", browser_family: null, browser_version: null, os_family: null, device_class: null, build_version: null, event_type: null, error_name: null, message_category: null, rejection_type: null, stack_origin: null, top_frame: null, same_origin: null, source_hint: null, navigation_state: null, online: null, visibility_state: null }], total: 501, returned: 500, limit: 500, truncated: true },
+    events: { items: [{ id: "dd0fa83f-e3c5-4cc1-8843-e0f12b355f28", user_id: user.id, occurred_at: "2026-11-20T12:00:00.000Z", source: "server" as const, severity: "error" as const, category: "api_failure", error_code: "grade_failed", route: "/api/learn/grade?token=private", http_status: 500, fingerprint: "abc123456789", run_id: "bd0fa83f-e3c5-4cc1-8843-e0f12b355f28", browser_family: null, browser_version: null, os_family: null, device_class: null, build_version: null, event_type: null, error_name: null, message_category: null, rejection_type: null, stack_origin: null, top_frame: null, same_origin: null, source_hint: null, navigation_state: null, online: null, visibility_state: null, source_kind: null, source_line: null, source_column: null, error_symbol: null }], total: 501, returned: 500, limit: 500, truncated: true },
     runs: { items: [{ run_id: "bd0fa83f-e3c5-4cc1-8843-e0f12b355f28", user_id: user.id, mode: "LEITNER_TODAY", run_kind: "today", status: "active", started_at: "2026-11-20T11:00:00.000Z", loaded_at: null, ended_at: null, initial_card_count: 173, last_position: 83, correct_count: 60, wrong_count: 23, last_successful_grade_at: null, last_heartbeat_at: "2026-11-20T11:54:00.000Z", sequence_number: 83, end_reason: null, build_version: null }], total: 1, returned: 1, limit: 500, truncated: false },
 };
 
@@ -61,6 +61,21 @@ describe("health report export", () => {
         expect(markdown).toContain("Enthaltene User: 2");
         expect(markdown).toContain("Enthaltene Diagnoseereignisse: 2");
         expect(buildHealthReportJson(allUsers).meta).toMatchObject({ user_filter: "Alle User im gewählten Zeitraum", included_user_count: 2 });
+    });
+    it("includes sanitized source details in technical event exports", () => {
+        const diagnostic = {
+            ...input.events.items[0], source: "client" as const, error_name: "ReferenceError",
+            message_category: "reference_missing_identifier", error_symbol: "missingWidget",
+            stack_origin: "same_origin", source_hint: "global", source_kind: "inline_document",
+            source_line: 4, source_column: 27,
+        };
+        const detailed = { ...input, events: { ...input.events, items: [diagnostic] } };
+        expect(buildHealthReport(detailed)).toContain("global · inline_document · Zeile 4:27");
+        expect(buildHealthReport(detailed)).toContain("ReferenceError / reference_missing_identifier / missingWidget");
+        expect(buildHealthReportJson(detailed).events.items[0]).toMatchObject({
+            source_hint: "global", source_kind: "inline_document", source_line: 4,
+            source_column: 27, error_symbol: "missingWidget",
+        });
     });
     it("uses name, email, then identifier fallback for user labels", () => {
         expect(getAdminUserLabel(user)).toBe("Christian Borza · borza@example.test");

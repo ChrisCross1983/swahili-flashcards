@@ -16,6 +16,8 @@ type Event = {
     message_category: ClientErrorContext["message_category"]; rejection_type: ClientErrorContext["rejection_type"];
     stack_origin: ClientErrorContext["stack_origin"]; top_frame: string | null; same_origin: boolean | null;
     source_hint: ClientErrorContext["source_hint"]; navigation_state: NavigationState;
+    source_kind: ClientErrorContext["source_kind"]; source_line: number | null; source_column: number | null;
+    error_symbol: string | null;
     online: boolean | null; visibility_state: DiagnosticVisibility;
 };
 
@@ -135,15 +137,13 @@ export async function reportClientError(input: {
         if (reportedErrorObjects.has(errorObject)) return;
         reportedErrorObjects.add(errorObject);
     }
-    const key = `${crash ? "runtime" : input.error_code}|${context.error_name}|${context.message_category}|${context.top_frame ?? context.stack_origin}|${page}|${status ?? ""}|${isUuid(input.run_id) ? input.run_id : ""}`;
+    const location = context.top_frame ?? `${context.source_kind}:${context.source_line ?? ""}:${context.source_column ?? ""}`;
+    const key = `${crash ? "runtime" : input.error_code}|${context.error_name}|${context.message_category}|${context.error_symbol ?? ""}|${location}|${page}|${status ?? ""}|${isUuid(input.run_id) ? input.run_id : ""}`;
     const hash = await fingerprint(key);
     const dedupKey = hash ?? key;
     const now = Date.now();
-    // A Safari error without a usable frame is too broad to hash-deduplicate:
-    // two unrelated TypeErrors on one route otherwise collapse into one event.
-    const useHashDedup = !crash || context.top_frame !== null || errorObject === null;
-    if (useHashDedup && recent.get(dedupKey) && now - recent.get(dedupKey)! < DEDUP_MS) return;
-    if (useHashDedup) recent.set(dedupKey, now);
+    if (recent.get(dedupKey) && now - recent.get(dedupKey)! < DEDUP_MS) return;
+    recent.set(dedupKey, now);
     if (recent.size > 100) {
         for (const [entry, at] of recent) if (now - at > DEDUP_MS) recent.delete(entry);
         while (recent.size > 100) recent.delete(recent.keys().next().value!);
@@ -164,7 +164,7 @@ export function installGlobalDiagnostics(): () => void {
     listeners++;
     if (!installedCleanup) {
         const onError = (event: ErrorEvent) => {
-            const context = buildClientErrorContext({ error: event.error, message: event.message, filename: event.filename, eventType: "window_error", sourceHint: "global" });
+            const context = buildClientErrorContext({ error: event.error, message: event.message, filename: event.filename, line: event.lineno, column: event.colno, eventType: "window_error", sourceHint: "global" });
             const benign = isBenignBrowserContext(context, navigationState, typeof navigator.onLine === "boolean" ? navigator.onLine : null);
             const error_code: Code = context.message_category === "aborted" ? "browser_abort"
                 : context.message_category === "resize_observer" ? "resize_observer"

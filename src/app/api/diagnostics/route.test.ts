@@ -66,7 +66,7 @@ function table(name: string) {
                     Object.assign(row, mutation);
                 }
             }
-            return Promise.resolve(resolve({ data: matching.map((row) => ({ run_id: row.run_id })), error: null }));
+            return Promise.resolve(resolve({ data: matching.map((row) => ({ ...row })), error: null }));
         },
     };
     return builder;
@@ -94,6 +94,14 @@ describe("POST /api/diagnostics/events", () => {
         expect(events.size).toBe(1);
         expect(events.get(eventId)).toMatchObject({ user_id: user, route: "/api/learn/grade", error_code: "grade_failed" });
         expect(JSON.stringify(events.get(eventId))).not.toContain("secret");
+    });
+    it("deduplicates separate event IDs with the same recent fingerprint", async () => {
+        const fingerprint = "b".repeat(64);
+        const first = { ...event(), fingerprint };
+        const second = { ...event(), event_id: "ece974b9-2bb9-43cf-99d3-103a43c1723a", fingerprint };
+        await expect((await postEvents(request("/api/diagnostics/events", { events: [first] }))).json()).resolves.toEqual({ accepted: 1 });
+        await expect((await postEvents(request("/api/diagnostics/events", { events: [second] }))).json()).resolves.toEqual({ accepted: 0 });
+        expect(events.size).toBe(1);
     });
     it("rate limits a broken client", async () => {
         for (let i = 0; i < 30; i++) expect((await postEvents(request("/api/diagnostics/events", { events: [event()] }))).status).toBe(200);

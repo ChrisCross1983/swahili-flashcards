@@ -24,13 +24,14 @@ const event = {
   event_type: "window_error", error_name: "TypeError", message_category: "runtime_type", rejection_type: "not_promise",
   stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:1:2", same_origin: true, source_hint: "global",
   navigation_state: "active", online: true, visibility_state: "visible",
+  source_kind: "next_chunk", source_line: 1, source_column: 2, error_symbol: "renderCard",
 };
 const metrics = {
   errors: 1, warnings: 0, affectedUsers: 1, startedRuns: 1, completedRuns: 1, openRuns: 0,
   suspectedAbandoned: 0, gradeErrors: 1, sessionSaveErrors: 0, apiServer5xx: 1, clientErrors: 0,
   avgInitialCards: 12, largestSession: 12, avgPosition: 12, avgCompletedDurationMinutes: 12,
   runsOver100: 0, runsOver150: 0,
-  topFingerprints: [{ fingerprint: "grade-network", count: 1, last_at: event.occurred_at, affected_users: 1, route: event.route, error_code: event.error_code, source: "server" }],
+  topFingerprints: [{ fingerprint: "grade-network", count: 1, last_at: event.occurred_at, affected_users: 1, route: event.route, error_code: event.error_code, source: "server", severity: "error", error_name: "TypeError", message_category: "runtime_type", stack_origin: "same_origin", source_kind: "next_chunk", error_symbol: "renderCard" }],
 };
 const pageOf = (items) => ({ items, total: items.length, page: 1, pageSize: 25 });
 

@@ -62,6 +62,8 @@ function exportEvent(event: HealthEvent, users: Map<string, HealthUser>) {
         rejection_type: event.rejection_type, stack_origin: event.stack_origin, top_frame: event.top_frame,
         same_origin: event.same_origin, source_hint: event.source_hint, navigation_state: event.navigation_state,
         online: event.online, visibility_state: event.visibility_state, build_version: event.build_version,
+        source_kind: event.source_kind, source_line: event.source_line, source_column: event.source_column,
+        error_symbol: event.error_symbol,
     };
 }
 
@@ -124,8 +126,8 @@ export function buildHealthReport(data: HealthReportInput): string {
         "## Auffälligkeiten", ...(anomalies.length ? anomalies.map((item) => `- ${item}`) : ["- Keine automatisch ableitbaren Auffälligkeiten im exportierten Datensatz."]), "",
         "## Häufigste Fehlergruppen", "| Anzahl | Code | Route | Quelle | Letzter Zeitpunkt | betroffene User |", "| ---: | --- | --- | --- | --- | ---: |",
         ...m.topFingerprints.map((group) => `| ${group.count} | ${cell(group.error_code)} | ${routeCell(group.route)} | ${cell(group.source)} | ${time(group.last_at)} | ${group.affected_users} |`), "",
-        "## App-Fehler / Diagnoseereignisse", "| Zeit | Schwere | Code | Fehlerklasse / Kategorie | Ursprung | Route | Fingerprint | User |", "| --- | --- | --- | --- | --- | --- | --- | --- |",
-        ...data.events.items.map((event) => `| ${time(event.occurred_at)} | ${cell(event.severity)} | ${cell(event.error_code)} | ${cell(event.error_name)} / ${cell(event.message_category)} | ${cell(event.stack_origin)} | ${routeCell(event.route)} | ${shortHealthId(event.fingerprint)} | ${userCell(users, event.user_id)} |`), "",
+        "## App-Fehler / Diagnoseereignisse", "| Zeit | Schwere | Code | Fehlerklasse / Kategorie | Technischer Ursprung | Route | Fingerprint | User |", "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ...data.events.items.map((event) => `| ${time(event.occurred_at)} | ${cell(event.severity)} | ${cell(event.error_code)} | ${cell(event.error_name)} / ${cell(event.message_category)}${event.error_symbol ? ` / ${cell(event.error_symbol)}` : ""} | ${cell(event.source_hint)} · ${cell(event.source_kind)} · ${cell(event.top_frame ?? (event.source_line ? `Zeile ${event.source_line}:${event.source_column ?? "—"}` : null))} | ${routeCell(event.route)} | ${shortHealthId(event.fingerprint)} | ${userCell(users, event.user_id)} |`), "",
         "## Vokabel-Lernläufe", "| Start | User | Modus | Status | Karten | Position | Richtig / Falsch | Letzter Heartbeat | Dauer |", "| --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
         ...data.runs.items.map((run) => `| ${time(run.started_at)} | ${userCell(users, run.user_id)} | ${cell(run.mode)} | ${cell(run.status)} | ${run.initial_card_count} | ${run.last_position} | ${run.correct_count} / ${run.wrong_count} | ${time(run.last_heartbeat_at)} | ${run.ended_at ? `${Math.max(0, Math.round((Date.parse(run.ended_at) - Date.parse(run.started_at)) / 60_000))} Min.` : "—"} |`),
         "", "## Instrumentierungsumfang", "- App-Fehler / Diagnoseereignisse: globale Clientfehler und instrumentierte API-Fehler auf authentifizierten App-Routen.", "- Vokabel-Lernläufe: detailliert instrumentiert.", "- Übersetzer: teilweise instrumentiert; globale App-Diagnosen sind enthalten, Translator-Telemetrie ist nicht vollständig in diesem Report konsolidiert.", "- Satztrainer: teilweise instrumentiert; globale App-Diagnosen sind enthalten, eigene Learning-Run-Daten derzeit nicht.",

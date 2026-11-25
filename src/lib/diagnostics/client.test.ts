@@ -64,11 +64,10 @@ describe("client diagnostics", () => {
         expect(readFileSync("src/app/trainer/error.tsx", "utf8")).toContain("reportBoundaryError(error)");
     });
 
-    it("does not conflate distinct Safari runtime errors when no stack frame is available", async () => {
+    it("deduplicates repeated Safari runtime events with the same diagnostic signature", async () => {
         await reportClientError({ category: "client_exception", error_code: "unexpected_error", error: new TypeError("first private detail") });
         await reportClientError({ category: "client_exception", error_code: "unexpected_error", error: new TypeError("second private detail") });
-        expect(queuedDiagnosticsForTests()).toHaveLength(2);
-        expect(queuedDiagnosticsForTests()[0].fingerprint).toBe(queuedDiagnosticsForTests()[1].fingerprint);
+        expect(queuedDiagnosticsForTests()).toHaveLength(1);
         expect(JSON.stringify(queuedDiagnosticsForTests())).not.toMatch(/first private|second private/);
     });
 
@@ -90,6 +89,11 @@ describe("client diagnostics", () => {
         emittedWindowError(runtime, runtime.message, "https://app.test/_next/static/chunks/app.js");
         await vi.waitFor(() => expect(sent).toHaveLength(2));
         expect(sent[1]).toMatchObject({ severity: "error", error_code: "unexpected_error", error_name: "TypeError", message_category: "runtime_type", stack_origin: "same_origin", top_frame: "/_next/static/chunks/app.js:7:11" });
+        const reference = new ReferenceError("missingValue is not defined");
+        reference.stack = "render@https://app.test/_next/static/chunks/app.js:8:12";
+        emittedWindowError(reference, reference.message, "https://app.test/_next/static/chunks/app.js");
+        await vi.waitFor(() => expect(sent).toHaveLength(3));
+        expect(sent[2]).toMatchObject({ severity: "error", error_code: "unexpected_error", error_name: "ReferenceError", message_category: "reference_missing_identifier", error_symbol: "missingValue" });
         expect(JSON.stringify(sent)).not.toContain("private card text");
         close();
     });

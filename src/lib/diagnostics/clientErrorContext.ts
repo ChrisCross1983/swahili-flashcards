@@ -28,13 +28,20 @@ export type MessageCategory =
     | "storage"
     | "permission"
     | "runtime_type"
+    | "type_undefined_member"
+    | "type_null_member"
+    | "type_not_function"
+    | "type_illegal_invocation"
     | "runtime_reference"
+    | "reference_missing_identifier"
+    | "reference_tdz"
     | "runtime_syntax"
     | "runtime_other"
     | "unknown";
 
 export type RejectionType = "error" | "dom_exception" | "string" | "object" | "primitive" | "null" | "not_promise";
 export type StackOrigin = "same_origin" | "external" | "browser_extension" | "browser_native" | "unknown";
+export type SourceKind = "next_chunk" | "inline_document" | "same_origin_other" | "external" | "browser_extension" | "browser_native" | "unknown";
 export type NavigationState = "active" | "unloading" | "page_hidden" | "restored";
 export type DiagnosticVisibility = "visible" | "hidden" | "prerender" | "unknown";
 export type DiagnosticSourceHint = "global" | "react_boundary" | "api_client" | "trainer" | "ui" | "unknown";
@@ -48,6 +55,10 @@ export type ClientErrorContext = {
     top_frame: string | null;
     same_origin: boolean | null;
     source_hint: DiagnosticSourceHint;
+    source_kind: SourceKind;
+    source_line: number | null;
+    source_column: number | null;
+    error_symbol: string | null;
 };
 
 const ERROR_NAMES = new Set<DiagnosticErrorName>([
@@ -80,6 +91,12 @@ export function classifyMessage(error: unknown, message?: string | null): Messag
     if (/networkerror|network request failed|failed to fetch|load failed|internet connection|offline/.test(text)) return "network";
     if (/quotaexceeded|localstorage|sessionstorage|indexeddb|database.*version/.test(text)) return "storage";
     if (/notallowederror|securityerror|permission denied|operation is not allowed/.test(text)) return "permission";
+    if (name === "TypeError" && /undefined is not an object|cannot read (?:properties|property) of undefined/.test(text)) return "type_undefined_member";
+    if (name === "TypeError" && /null is not an object|cannot read (?:properties|property) of null/.test(text)) return "type_null_member";
+    if (name === "TypeError" && /is not a function|is not callable/.test(text)) return "type_not_function";
+    if (name === "TypeError" && /illegal invocation|incompatible receiver/.test(text)) return "type_illegal_invocation";
+    if (name === "ReferenceError" && /can't find variable|cannot find variable| is not defined/.test(text)) return "reference_missing_identifier";
+    if (name === "ReferenceError" && /uninitialized variable|before initialization|temporal dead zone/.test(text)) return "reference_tdz";
     if (name === "TypeError") return "runtime_type";
     if (name === "ReferenceError") return "runtime_reference";
     if (name === "SyntaxError") return "runtime_syntax";
@@ -96,7 +113,31 @@ export function rejectionType(value: unknown): RejectionType {
     return "primitive";
 }
 
-type Frame = { stack_origin: StackOrigin; top_frame: string | null; same_origin: boolean | null };
+type Frame = {
+    stack_origin: StackOrigin;
+    top_frame: string | null;
+    same_origin: boolean | null;
+    source_kind: SourceKind;
+    source_line: number | null;
+    source_column: number | null;
+};
+
+function safePosition(value: unknown): number | null {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 10_000_000 ? value : null;
+}
+
+function safeErrorSymbol(error: unknown, message?: string | null): string | null {
+    const text = typeof message === "string" ? message.slice(0, 500)
+        : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message.slice(0, 500)
+            : "";
+    const reference = text.match(/(?:can't|cannot) find variable:\s*([A-Za-z_$][\w$]{0,79})/i)
+        ?? text.match(/\b([A-Za-z_$][\w$]{0,79}) is not defined\b/i);
+    if (reference) return reference[1];
+    const evaluation = text.match(/evaluating\s+['"]([^'"]{1,160})['"]/i)?.[1];
+    if (!evaluation) return null;
+    const identifiers = evaluation.match(/[A-Za-z_$][\w$]*/g);
+    return identifiers?.at(-1)?.slice(0, 80) ?? null;
+}
 
 function cleanLocation(raw: string): { base: string; line: string | null; column: string | null } {
     const value = raw.replace(/[),]+$/, "");
@@ -110,17 +151,25 @@ function safeSameOriginFrame(path: string, line: string | null, column: string |
     return `${clean}${line && column ? `:${line}:${column}` : ""}`.slice(0, 180);
 }
 
-export function extractStackFrame(error: unknown, filename?: string | null, pageOrigin?: string | null): Frame {
+export function extractStackFrame(
+    error: unknown,
+    filename?: string | null,
+    pageOrigin?: string | null,
+    pagePath?: string | null,
+    eventLine?: number | null,
+    eventColumn?: number | null,
+): Frame {
     const stack = error && typeof error === "object" && "stack" in error && typeof error.stack === "string" ? error.stack : "";
     const candidates = [...stack.split("\n"), filename ?? ""].filter(Boolean);
     const origin = pageOrigin ?? (typeof window !== "undefined" ? window.location.origin : null);
+    const pathname = pagePath ?? (typeof window !== "undefined" ? window.location.pathname : null);
 
     for (const lineText of candidates) {
         if (/\[native code\]|\bnative\b/i.test(lineText) && !/https?:\/\//.test(lineText)) {
-            return { stack_origin: "browser_native", top_frame: null, same_origin: null };
+            return { stack_origin: "browser_native", top_frame: null, same_origin: null, source_kind: "browser_native", source_line: null, source_column: null };
         }
         const extension = lineText.match(/(?:safari-web-extension|(?:chrome|moz)-extension):\/\/[^\s)]+/i);
-        if (extension) return { stack_origin: "browser_extension", top_frame: null, same_origin: false };
+        if (extension) return { stack_origin: "browser_extension", top_frame: null, same_origin: false, source_kind: "browser_extension", source_line: null, source_column: null };
         const absolute = lineText.match(/https?:\/\/[^\s)]+/i)?.[0];
         const relative = lineText.match(/\/_next\/static\/[^\s)]+/)?.[0];
         const found = absolute ?? relative;
@@ -129,17 +178,24 @@ export function extractStackFrame(error: unknown, filename?: string | null, page
         try {
             const url = new URL(location.base, origin ?? "https://app.invalid");
             const same = Boolean(origin) && url.origin === origin;
-            if (!same) return { stack_origin: "external", top_frame: null, same_origin: false };
+            const sourceLine = safePosition(location.line ? Number(location.line) : eventLine);
+            const sourceColumn = safePosition(location.column ? Number(location.column) : eventColumn);
+            if (!same) return { stack_origin: "external", top_frame: null, same_origin: false, source_kind: "external", source_line: sourceLine, source_column: sourceColumn };
+            const sourceKind: SourceKind = url.pathname.startsWith("/_next/static/") ? "next_chunk"
+                : pathname !== null && url.pathname === pathname ? "inline_document" : "same_origin_other";
             return {
                 stack_origin: "same_origin",
                 top_frame: safeSameOriginFrame(url.pathname, location.line, location.column),
                 same_origin: true,
+                source_kind: sourceKind,
+                source_line: sourceLine,
+                source_column: sourceColumn,
             };
         } catch {
             continue;
         }
     }
-    return { stack_origin: "unknown", top_frame: null, same_origin: null };
+    return { stack_origin: "unknown", top_frame: null, same_origin: null, source_kind: "unknown", source_line: safePosition(eventLine), source_column: safePosition(eventColumn) };
 }
 
 export function buildClientErrorContext(input: {
@@ -149,8 +205,11 @@ export function buildClientErrorContext(input: {
     eventType: ClientEventType;
     sourceHint?: DiagnosticSourceHint;
     pageOrigin?: string | null;
+    pagePath?: string | null;
+    line?: number | null;
+    column?: number | null;
 }): ClientErrorContext {
-    const frame = extractStackFrame(input.error, input.filename, input.pageOrigin);
+    const frame = extractStackFrame(input.error, input.filename, input.pageOrigin, input.pagePath, input.line, input.column);
     return {
         event_type: input.eventType,
         error_name: objectName(input.error),
@@ -158,6 +217,7 @@ export function buildClientErrorContext(input: {
         rejection_type: input.eventType === "unhandled_rejection" ? rejectionType(input.error) : "not_promise",
         ...frame,
         source_hint: input.sourceHint ?? "unknown",
+        error_symbol: safeErrorSymbol(input.error, input.message),
     };
 }
 
