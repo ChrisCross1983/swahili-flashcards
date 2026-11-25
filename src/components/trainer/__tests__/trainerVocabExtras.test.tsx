@@ -94,4 +94,21 @@ describe("compact vocabulary learning flow", () => {
         expect(client).toContain('data-testid="card-compact-actions"');
         expect(client).not.toContain('aria-label="Weitere Kartenaktionen"');
     });
+
+    it("keeps removal controls behind explicit confirmations and retains inactive creation actions", () => {
+        const source = readFileSync("src/components/trainer/TrainerVocabExtras.tsx", "utf8");
+        const card = readFileSync("src/components/trainer/TrainerCard.tsx", "utf8");
+        const client = readFileSync("src/app/trainer/TrainerClient.tsx", "utf8");
+        expect(source).toContain("Audio entfernen");
+        expect(source).toContain("audioRemoveConfirmOpen");
+        expect(source).toContain("audioRemoving");
+        expect(card).toContain("Bild entfernen");
+        expect(card).toContain("imageRemoveConfirmOpen");
+        expect(card).toContain("imageRemoving");
+        expect(card).toContain("Kartenbild vergrößern");
+        expect(client).toContain("notePresenceByCard[resolveCardId(currentItem)]");
+        expect(client).toContain("setNotePresenceByCard((previous) => ({ ...previous, [cardId]: Boolean(noteText.trim()) }))");
+        expect(client).toContain("audioRemoveLockRef.current");
+        expect(client).toContain("imageRemoveLockRef.current");
+    });
 });

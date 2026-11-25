@@ -13,6 +13,8 @@ type Props = {
     onCancel: () => void;
     saving: boolean;
     saveDisabled?: boolean;
+    canRemove?: boolean;
+    onRequestRemove?: () => void;
 };
 
 export default function LearningHelpPanel({
@@ -24,6 +26,8 @@ export default function LearningHelpPanel({
     onCancel,
     saving,
     saveDisabled = false,
+    canRemove = false,
+    onRequestRemove,
 }: Props) {
     if (loading) {
         return <div className="text-sm text-muted">Notizen werden geladen…</div>;
@@ -45,6 +49,7 @@ export default function LearningHelpPanel({
                 <button type="button" className="btn btn-primary min-h-11" disabled={saving || saveDisabled} onClick={onSave}>Speichern</button>
                 <button type="button" className="btn btn-secondary min-h-11" disabled={saving} onClick={onCancel}>Abbrechen</button>
             </div>
+            {canRemove && onRequestRemove ? <button type="button" className="btn btn-utility min-h-11 w-full text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={saving || saveDisabled} onClick={onRequestRemove}>Notiz entfernen</button> : null}
         </div>
     );
 }

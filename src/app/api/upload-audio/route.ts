@@ -20,6 +20,27 @@ function pickExt(contentType: string) {
     return "m4a";
 }
 
+async function cleanupOwnedAudio(path: string | null | undefined, ownerKey: string, stage: string) {
+    if (!isOwnerStoragePath(path, ownerKey)) return;
+    try {
+        const { data: references, error: referenceError } = await supabase
+            .from("cards")
+            .select("id")
+            .eq("owner_key", ownerKey)
+            .eq("audio_path", path)
+            .limit(1);
+        if (referenceError) {
+            console.warn("[upload-audio] cleanup reference check failed", { stage, code: referenceError.code ?? null });
+            return;
+        }
+        if ((references ?? []).length > 0) return;
+        const cleanupError = await removeStoragePaths(supabase, CARD_AUDIO_BUCKET, [path]);
+        if (cleanupError) console.warn("[upload-audio] cleanup failed", { stage, code: cleanupError.code ?? null });
+    } catch {
+        console.warn("[upload-audio] cleanup failed", { stage, code: "cleanup_transport_failed" });
+    }
+}
+
 export async function POST(req: Request) {
     try {
         const { user, response } = await requireUser();
@@ -113,12 +134,7 @@ export async function POST(req: Request) {
             );
         }
 
-        if (oldPath && oldPath !== storagePath && isOwnerStoragePath(oldPath, ownerKey)) {
-            const cleanupError = await removeStoragePaths(supabase, CARD_AUDIO_BUCKET, [oldPath]);
-            if (cleanupError) {
-                console.warn("[upload-audio] replaced object cleanup failed", { code: cleanupError.code ?? null });
-            }
-        }
+        if (oldPath && oldPath !== storagePath) await cleanupOwnedAudio(oldPath, ownerKey, "replace");
 
         return NextResponse.json({ ok: true, audio_path: storagePath });
     } catch (error: unknown) {
@@ -126,5 +142,40 @@ export async function POST(req: Request) {
             { error: error instanceof Error ? error.message : "Upload failed" },
             { status: 500 }
         );
+    }
+}
+
+export async function DELETE(req: Request) {
+    try {
+        const { user, response } = await requireUser();
+        if (response) return response;
+
+        const body = await req.json().catch(() => null) as { cardId?: unknown } | null;
+        const cardId = typeof body?.cardId === "string" ? body.cardId.trim() : "";
+        if (!cardId) return NextResponse.json({ error: "Invalid cardId" }, { status: 400 });
+
+        const ownerKey = user.id;
+        const { data: existingCard, error: existingError } = await supabase
+            .from("cards")
+            .select("audio_path")
+            .eq("id", cardId)
+            .eq("owner_key", ownerKey)
+            .single();
+        if (existingError || !existingCard) return NextResponse.json({ error: "Karte nicht gefunden." }, { status: existingError ? 500 : 404 });
+
+        const oldPath = existingCard.audio_path ?? null;
+        const { data: updatedCard, error: updateError } = await supabase
+            .from("cards")
+            .update({ audio_path: null })
+            .eq("id", cardId)
+            .eq("owner_key", ownerKey)
+            .select("id,audio_path")
+            .maybeSingle();
+        if (updateError || !updatedCard) return NextResponse.json({ error: updateError ? "Audio konnte nicht entfernt werden." : "Karte nicht gefunden." }, { status: updateError ? 500 : 404 });
+
+        if (oldPath) await cleanupOwnedAudio(oldPath, ownerKey, "remove");
+        return NextResponse.json({ ok: true, audio_path: null });
+    } catch {
+        return NextResponse.json({ error: "Audio konnte nicht entfernt werden." }, { status: 500 });
     }
 }

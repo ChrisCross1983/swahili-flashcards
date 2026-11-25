@@ -29,4 +29,11 @@ describe("learning notes panel", () => {
         expect(html).not.toContain("Beispielsatz");
         expect(html).not.toContain("Verwechslungswort");
     });
+
+    it("offers explicit removal only for a persisted note", () => {
+        const existing = renderToStaticMarkup(<LearningHelpPanel loading={false} draft={{ mainNotes: "Gespeichert" }} saveStateText={null} onChange={vi.fn()} onSave={vi.fn()} onCancel={vi.fn()} saving={false} canRemove onRequestRemove={vi.fn()} />);
+        const empty = renderToStaticMarkup(<LearningHelpPanel loading={false} draft={{ mainNotes: "" }} saveStateText={null} onChange={vi.fn()} onSave={vi.fn()} onCancel={vi.fn()} saving={false} />);
+        expect(existing).toContain("Notiz entfernen");
+        expect(empty).not.toContain("Notiz entfernen");
+    });
 });

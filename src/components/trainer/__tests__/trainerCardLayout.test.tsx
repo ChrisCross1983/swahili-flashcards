@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import TrainerCard from "@/components/trainer/TrainerCard";
 import TrainerStatus from "@/components/trainer/TrainerStatus";
+import FullScreenSheet from "@/components/FullScreenSheet";
 import GroupBadge from "@/components/groups/GroupBadge";
 
 describe("trainer card layout", () => {
@@ -50,6 +51,17 @@ describe("trainer card layout", () => {
         expect(html).toContain("Richtung:");
         expect(html).toContain("Zufällig");
         expect(html).toContain("Richtung ändern");
+    });
+
+    it("uses the compact mobile trainer header without shrinking the close target", () => {
+        const sheet = renderToStaticMarkup(<FullScreenSheet open title="Vokabeln lernen" compactHeader onClose={() => undefined}><div /></FullScreenSheet>);
+        const status = renderToStaticMarkup(<TrainerStatus currentNumber={1} sessionTotal={20} answeredCount={4} safePct={75} direction="DE_TO_SW" directionMode="RANDOM" onToggleDirectionMenu={() => undefined} onEditCard={() => undefined} />);
+        expect(sheet).toContain("py-2");
+        expect(sheet).toContain("h-11 w-11 p-0");
+        expect(status).toContain("px-3 py-1.5");
+        expect(status).toContain("Deutsch → Swahili · Zufällig");
+        expect(status).toContain("Richtung ändern");
+        expect(status).toContain("h-11 w-11");
     });
 
     it("renders compact front layout before reveal and expanded layout after reveal", () => {

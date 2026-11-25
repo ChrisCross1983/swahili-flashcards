@@ -14,9 +14,10 @@ type Props = {
     children: ReactNode;
     footer?: ReactNode;
     scrollContainerRef?: Ref<HTMLDivElement>;
+    compactHeader?: boolean;
 };
 
-export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", backdropTone = "standard", wide = false, onClose, children, footer, scrollContainerRef }: Props) {
+export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", backdropTone = "standard", wide = false, onClose, children, footer, scrollContainerRef, compactHeader = false }: Props) {
     const sentenceLike = presentation !== "standard";
     const contentSizedDesktop = presentation === "card-detail" || presentation === "word-edit";
     const handleClose = () => {
@@ -37,15 +38,15 @@ export default function FullScreenSheet({ open, title, subtitle, presentation = 
     return (
         <div className={`fixed inset-0 z-[120] flex items-end justify-center p-0 md:items-center md:p-4 ${backdropTone === "calm" ? "bg-[rgba(32,24,16,0.35)]" : "bg-overlay"}`}>
             <div className={`flex w-full max-w-none flex-col overflow-hidden border-0 bg-base-alt shadow-warm md:rounded-3xl md:border md:border-soft ${presentation === "word-edit" ? "h-auto max-h-[100dvh]" : "h-[100dvh]"} ${contentSizedDesktop ? "md:h-auto md:max-h-[min(90dvh,860px)]" : "md:h-[min(90dvh,860px)]"} ${presentation === "card-detail" ? "card-detail-sheet md:max-w-[780px]" : presentation === "word-edit" ? "word-edit-sheet md:max-w-[860px]" : presentation === "sentence" ? "md:max-w-3xl" : "md:max-w-2xl"}`}>
-                <div className={`flex items-center justify-between border-b border-soft px-4 py-3 ${sentenceLike ? "bg-[color:var(--surface)] shadow-[0_4px_18px_rgba(74,44,16,0.06)] sm:px-6 sm:py-4" : "bg-surface shadow-soft"}`}>
+                <div className={`flex items-center justify-between border-b border-soft px-4 ${compactHeader ? "py-2" : "py-3"} ${sentenceLike ? "bg-[color:var(--surface)] shadow-[0_4px_18px_rgba(74,44,16,0.06)] sm:px-6 sm:py-4" : "bg-surface shadow-soft"}`}>
                     <div>
-                        <div className={sentenceLike ? "text-lg font-bold tracking-tight text-[color:var(--foreground)] sm:text-xl" : "text-base font-semibold tracking-wide"}>{title ?? ""}</div>
+                        <div className={sentenceLike ? "text-lg font-bold tracking-tight text-[color:var(--foreground)] sm:text-xl" : compactHeader ? "text-sm font-semibold tracking-wide text-primary sm:text-base" : "text-base font-semibold tracking-wide"}>{title ?? ""}</div>
                         {subtitle ? <div className="mt-0.5 text-xs font-medium tracking-wide text-[color:var(--text-muted)]">{subtitle}</div> : null}
                     </div>
                     <button
                         type="button"
                         onClick={handleClose}
-                        className={`btn btn-utility rounded-full border border-soft bg-surface-elevated text-sm ${sentenceLike ? "h-11 w-11 p-0" : "px-3 py-1"}`}
+                        className={`btn btn-utility rounded-full border border-soft bg-surface-elevated text-sm ${sentenceLike || compactHeader ? "h-11 w-11 p-0" : "px-3 py-1"}`}
                         aria-label="Schließen"
                     >
                         {sentenceLike ? <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4" aria-hidden="true"><path d="M4 4l12 12M16 4 4 16" /></svg> : "✕"}

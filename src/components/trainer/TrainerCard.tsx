@@ -6,6 +6,7 @@ import Image from "next/image";
 import CardText from "@/components/ui/CardText";
 import FormattedExampleText from "@/components/ui/FormattedExampleText";
 import CompactOverlay from "@/components/CompactOverlay";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import SentenceExplanationDisclosure from "@/components/trainer/SentenceExplanationDisclosure";
 import type { SentenceExplanation } from "@/lib/sentence/explanation";
 
@@ -25,6 +26,7 @@ type Props = {
     footer?: ReactNode;
     compactVocabExtras?: boolean;
     autoOpenExplanation?: boolean;
+    onRemoveImage?: () => Promise<boolean>;
 };
 
 type ExampleDisclosureProps = {
@@ -80,12 +82,31 @@ export default function TrainerCard({
     footer,
     compactVocabExtras = false,
     autoOpenExplanation = false,
+    onRemoveImage,
 }: Props) {
     const [showPromptExample, setShowPromptExample] = useState(false);
     const [showAnswerExample, setShowAnswerExample] = useState(false);
     const [showSentenceExplanation, setShowSentenceExplanation] = useState(autoOpenExplanation);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [imageRemoveConfirmOpen, setImageRemoveConfirmOpen] = useState(false);
+    const [imageRemoving, setImageRemoving] = useState(false);
+    const [imageRemoveError, setImageRemoveError] = useState<string | null>(null);
     const imageUrl = imagePath ? `${imageBaseUrl}/${imagePath}` : null;
+
+    async function removeImage() {
+        if (!onRemoveImage || imageRemoving) return;
+        setImageRemoving(true);
+        setImageRemoveError(null);
+        const removed = await onRemoveImage();
+        setImageRemoving(false);
+        if (removed) {
+            setImageRemoveConfirmOpen(false);
+            setImagePreviewOpen(false);
+        } else {
+            setImageRemoveError("Bild konnte nicht entfernt werden. Bitte versuche es erneut.");
+            setImageRemoveConfirmOpen(false);
+        }
+    }
 
     return (
         <>
@@ -170,10 +191,15 @@ export default function TrainerCard({
         </div>
         {imagePreviewOpen && imageUrl && typeof document !== "undefined" ? createPortal(
             <CompactOverlay open title="Kartenbild" onClose={() => setImagePreviewOpen(false)} maxWidthClassName="max-w-3xl">
-                <Image src={imageUrl} alt="Kartenbild vergrößert" width={1280} height={960} unoptimized className="mx-auto block max-h-[calc(100dvh-9rem)] w-auto max-w-full object-contain" />
+                <div className="space-y-3">
+                    <Image src={imageUrl} alt="Kartenbild vergrößert" width={1280} height={960} unoptimized className="mx-auto block max-h-[calc(100dvh-13rem)] w-auto max-w-full object-contain" />
+                    {onRemoveImage ? <button type="button" className="btn btn-utility min-h-11 w-full text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={imageRemoving} onClick={() => setImageRemoveConfirmOpen(true)}>Bild entfernen</button> : null}
+                    {imageRemoveError ? <p role="alert" className="text-sm text-[color:var(--accent-danger-strong)]">{imageRemoveError}</p> : null}
+                </div>
             </CompactOverlay>,
             document.body,
         ) : null}
+        <ConfirmDialog open={imageRemoveConfirmOpen} title="Bild entfernen?" description="Das gespeicherte Bild dieser Karte wird entfernt." confirmLabel="Bild entfernen" cancelLabel="Abbrechen" destructive busy={imageRemoving} onConfirm={() => void removeImage()} onCancel={() => setImageRemoveConfirmOpen(false)} />
         </>
     );
 }

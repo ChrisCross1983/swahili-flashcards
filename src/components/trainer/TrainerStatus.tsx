@@ -22,8 +22,9 @@ export default function TrainerStatus({
     onToggleDirectionMenu,
     onEditCard,
 }: Props) {
+    const directionLabel = direction === "DE_TO_SW" ? "Deutsch → Swahili" : "Swahili → Deutsch";
     return (
-        <div className="min-w-0 rounded-2xl border border-soft bg-surface px-3 py-2.5 text-sm shadow-soft" data-testid="trainer-session-status" data-tone="secondary">
+        <div className="min-w-0 rounded-2xl border border-soft bg-surface px-3 py-1.5 text-sm shadow-soft" data-testid="trainer-session-status" data-tone="secondary">
             <div className="flex min-w-0 items-center gap-2">
                 <div className="shrink-0 font-semibold tabular-nums text-primary">
                     {currentNumber} <span className="font-normal text-muted">/</span> {sessionTotal}
@@ -39,15 +40,13 @@ export default function TrainerStatus({
                 </button> : null}
             </div>
 
-            <div className="mt-2 flex min-w-0 items-center justify-between gap-2 border-t border-soft pt-2">
+            <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
                 <div className="min-w-0 text-xs text-muted">
-                    Richtung:{" "}
+                    <span className="sr-only">Richtung: </span>
                     <span className="font-medium text-primary">
                         {directionMode === "RANDOM"
-                            ? "Zufällig"
-                            : direction === "DE_TO_SW"
-                                ? "Deutsch → Swahili"
-                                : "Swahili → Deutsch"}
+                            ? `${directionLabel} · Zufällig`
+                            : directionLabel}
                     </span>
                 </div>
 

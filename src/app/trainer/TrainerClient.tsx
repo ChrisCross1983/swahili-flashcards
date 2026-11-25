@@ -277,6 +277,8 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const [cardNoteLoadFailed, setCardNoteLoadFailed] = useState(false);
     const [cardNoteSaving, setCardNoteSaving] = useState(false);
     const [cardNoteSaveState, setCardNoteSaveState] = useState<string | null>(null);
+    const [notePresenceByCard, setNotePresenceByCard] = useState<Record<string, boolean>>({});
+    const [noteRemoveConfirmOpen, setNoteRemoveConfirmOpen] = useState(false);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -309,6 +311,8 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
 
     const [isRecording, setIsRecording] = useState(false);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioRemoveLockRef = useRef(false);
+    const imageRemoveLockRef = useRef(false);
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
     const preparedCardAudioRef = useRef<Map<string, PreparedCardAudio>>(new Map());
@@ -921,6 +925,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                 mainNotes: json.note?.main_notes ?? "",
             });
             savedCardNoteRef.current = json.note?.main_notes ?? "";
+            setNotePresenceByCard((previous) => ({ ...previous, [cardId]: Boolean(json.note?.main_notes?.trim()) }));
         } catch (error) {
             setCardNoteLoadFailed(true);
             setCardNoteSaveState(error instanceof Error ? error.message : "Notizen konnten nicht geladen werden.");
@@ -947,6 +952,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             if (!res.ok) throw new Error(json?.error ?? "Notizen konnten nicht gespeichert werden.");
             savedCardNoteRef.current = noteText;
             setCards((prev) => updateLibraryNoteStatus(prev, cardId, noteText));
+            setNotePresenceByCard((previous) => ({ ...previous, [cardId]: Boolean(noteText.trim()) }));
             setCardNoteSaveState("Notiz gespeichert.");
             return true;
         } catch (error) {
@@ -961,6 +967,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         setNotesSheetOpen(false);
         setCardNoteCardId(null);
         setCardNoteSaveState(null);
+        setNoteRemoveConfirmOpen(false);
     }, []);
 
     const handleNotesOverlayClose = useCallback(() => {
@@ -973,6 +980,16 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             || await saveCardNotes(cardNoteDraft.mainNotes, cardNoteCardId ?? undefined);
         if (saved) closeNotesSheet();
     }, [cardNoteCardId, cardNoteDraft.mainNotes, cardNoteLoading, cardNoteSaving, cardNoteLoadFailed, closeNotesSheet, saveCardNotes]);
+
+    const handleRemoveNotes = useCallback(async () => {
+        if (cardNoteLoading || cardNoteSaving || cardNoteLoadFailed) return;
+        const removed = await saveCardNotes("", cardNoteCardId ?? undefined);
+        if (!removed) return;
+        setCardNoteDraft({ mainNotes: "" });
+        setNoteRemoveConfirmOpen(false);
+        closeNotesSheet();
+        showToast("Notiz entfernt.");
+    }, [cardNoteCardId, cardNoteLoadFailed, cardNoteLoading, cardNoteSaving, closeNotesSheet, saveCardNotes]);
 
     async function logout() {
         const supabase = supabaseBrowser();
@@ -1047,6 +1064,56 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const nextAudioItem = todayItems[currentIndex + 1] ?? null;
     const currentAudioKey = getCardAudioKey(currentItem);
     const nextAudioKey = getCardAudioKey(nextAudioItem);
+
+    const removeCurrentAudio = useCallback(async (): Promise<boolean> => {
+        const cardId = resolveCardId(todayItems[currentIndex]);
+        if (!cardId || audioRemoveLockRef.current) return false;
+        audioRemoveLockRef.current = true;
+        try {
+            const response = await fetch("/api/upload-audio", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cardId }),
+            });
+            const body = await response.json().catch(() => null) as { audio_path?: string | null } | null;
+            if (!response.ok || body?.audio_path !== null) return false;
+            stopAnyAudio();
+            const key = getCardAudioKey(todayItems[currentIndex]);
+            if (key) preparedCardAudioRef.current.delete(key);
+            setTodayItems((previous) => previous.map((item) => resolveCardId(item) === cardId ? { ...item, audio_path: null } : item));
+            setCards((previous) => previous.map((card) => String(card.id) === cardId ? { ...card, audio_path: null } : card));
+            showToast("Audio entfernt.");
+            return true;
+        } catch {
+            return false;
+        } finally {
+            audioRemoveLockRef.current = false;
+        }
+    }, [currentIndex, setCards, setTodayItems, stopAnyAudio, todayItems]);
+
+    const removeCurrentImage = useCallback(async (): Promise<boolean> => {
+        const cardId = resolveCardId(todayItems[currentIndex]);
+        if (!cardId || imageRemoveLockRef.current) return false;
+        imageRemoveLockRef.current = true;
+        try {
+            const response = await fetch("/api/cards", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: cardId, imagePath: null }),
+            });
+            const body = await response.json().catch(() => null) as { card?: { image_path?: string | null } } | null;
+            if (!response.ok || body?.card?.image_path !== null) return false;
+            patchResumeSnapshotCard(ownerKey, cardType, cardId, { image_path: null, imagePath: null, image: null });
+            setTodayItems((previous) => previous.map((item) => resolveCardId(item) === cardId ? { ...item, image_path: null, imagePath: null, image: null } : item));
+            setCards((previous) => previous.map((card) => String(card.id) === cardId ? { ...card, image_path: null } : card));
+            showToast("Bild entfernt.");
+            return true;
+        } catch {
+            return false;
+        } finally {
+            imageRemoveLockRef.current = false;
+        }
+    }, [cardType, currentIndex, ownerKey, setCards, setTodayItems, todayItems]);
 
     useEffect(() => {
         if (!DEBUG_AUDIO_PERF) return;
@@ -1578,6 +1645,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 open={openLearn}
                                 title="Vokabeln lernen"
                                 backdropTone="calm"
+                                compactHeader
                                 footer={cardType === "vocab" && learnStarted && todayItems.length > 0 ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
                                     <TrainerControls
                                         reveal={reveal}
@@ -1808,10 +1876,11 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                                             learningFeature={reveal && resolveCardId(currentItem) && cardType === "vocab" ? <TrainerVocabExtras
                                                                 cardId={resolveCardId(currentItem)} swahili={currentSwahili} german={currentGerman}
                                                                 enrichment={currentItem?.word_enrichment ?? null}
-                                                                hasNote={Boolean(cards.find((card) => String(card.id) === resolveCardId(currentItem))?.has_note)}
+                                                                hasNote={notePresenceByCard[resolveCardId(currentItem)] ?? Boolean(cards.find((card) => String(card.id) === resolveCardId(currentItem))?.has_note)}
                                                                 notesOpen={notesSheetOpen}
                                                                 hasAudio={Boolean(currentItem?.audio_path)}
                                                                 isRecording={isRecording}
+                                                                onRemoveAudio={removeCurrentAudio}
                                                                 onAudio={() => currentItem?.audio_path ? playCardAudioIfExists(currentItem) : toggleLearnRecording()}
                                                                 onOpenNotes={openLearningHelp}
                                                                 onWordSaved={(id, enrichment) => {
@@ -1834,6 +1903,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                                                 setCards((prev) => prev.map((card) => String(card.id) === id ? { ...card, ...change } : card));
                                                             }} /> : null}
                                                             onOpenLearningHelp={reveal ? openLearningHelp : undefined}
+                                                            onRemoveImage={cardType === "vocab" && currentImagePath ? removeCurrentImage : undefined}
                                                         />
                                                     </div>
 
@@ -1899,12 +1969,26 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                     saveDisabled={cardNoteLoadFailed}
                                     onSave={() => void handleSaveNotes()}
                                     onCancel={closeNotesSheet}
+                                    canRemove={Boolean(savedCardNoteRef.current.trim())}
+                                    onRequestRemove={() => setNoteRemoveConfirmOpen(true)}
                                     onChange={(value) => {
                                         setCardNoteSaveState("Ungespeicherte Änderung…");
                                         setCardNoteDraft({ mainNotes: value });
                                     }}
                                 />
                             </CompactOverlay>
+
+                            <ConfirmDialog
+                                open={noteRemoveConfirmOpen}
+                                title="Notiz entfernen?"
+                                description="Die gespeicherte Notiz dieser Karte wird entfernt."
+                                confirmLabel="Notiz entfernen"
+                                cancelLabel="Abbrechen"
+                                destructive
+                                busy={cardNoteSaving}
+                                onConfirm={() => void handleRemoveNotes()}
+                                onCancel={() => setNoteRemoveConfirmOpen(false)}
+                            />
 
                             <TrainerCardFormSheet
                                 ref={cardFormRef}
@@ -1979,6 +2063,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                         detailOriginRef.current = { card: { ...detailOriginRef.current.card, has_note: Boolean(mainNotes.trim()), note_preview: { ...detailOriginRef.current.card.note_preview, main_notes: mainNotes } }, note: mainNotes };
                                     }
                                     setCards((prev) => updateLibraryNoteStatus(prev, cardId, mainNotes));
+                                    setNotePresenceByCard((previous) => ({ ...previous, [cardId]: Boolean(mainNotes.trim()) }));
                                 }}
                                 onWordUnderstandingSaved={(cardId, enrichment) => {
                                     if (detailOriginRef.current && String(detailOriginRef.current.card.id) === cardId) {

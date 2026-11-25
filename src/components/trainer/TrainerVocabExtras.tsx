@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import CompactOverlay from "@/components/CompactOverlay";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { SentenceFeatureIcon, type SentenceFeatureIconName } from "@/components/trainer/SentenceFormDisclosure";
 import WordUnderstandingFeature from "@/components/trainer/WordUnderstandingFeature";
 import TrainerLearningFeature from "@/components/trainer/TrainerLearningFeature";
@@ -23,6 +24,7 @@ type Props = {
     hasAudio: boolean;
     isRecording: boolean;
     onAudio: () => void;
+    onRemoveAudio?: () => Promise<boolean>;
     onOpenNotes: () => void;
     onWordSaved: (cardId: string, enrichment: WordEnrichment) => void;
     onWordRemoved?: (cardId: string) => void;
@@ -30,8 +32,26 @@ type Props = {
     onImageSaved: (cardId: string, imagePath: string) => void;
 };
 
-export default function TrainerVocabExtras({ cardId, german, swahili, enrichment, hasNote, notesOpen, hasAudio, isRecording, onAudio, onOpenNotes, onWordSaved, onWordRemoved, imagePath, onImageSaved }: Props) {
+export default function TrainerVocabExtras({ cardId, german, swahili, enrichment, hasNote, notesOpen, hasAudio, isRecording, onAudio, onRemoveAudio, onOpenNotes, onWordSaved, onWordRemoved, imagePath, onImageSaved }: Props) {
     const [active, setActive] = useState<Extra | null>(null);
+    const [audioRemoveConfirmOpen, setAudioRemoveConfirmOpen] = useState(false);
+    const [audioRemoving, setAudioRemoving] = useState(false);
+    const [audioRemoveError, setAudioRemoveError] = useState<string | null>(null);
+
+    async function removeAudio() {
+        if (!onRemoveAudio || audioRemoving) return;
+        setAudioRemoving(true);
+        setAudioRemoveError(null);
+        const removed = await onRemoveAudio();
+        setAudioRemoving(false);
+        if (removed) {
+            setAudioRemoveConfirmOpen(false);
+            setActive(null);
+        } else {
+            setAudioRemoveError("Audio konnte nicht entfernt werden. Bitte versuche es erneut.");
+            setAudioRemoveConfirmOpen(false);
+        }
+    }
     const action = (kind: Extra | "notes", label: string, icon: SentenceFeatureIconName, present: boolean) => (
         <button
             key={kind}
@@ -76,7 +96,10 @@ export default function TrainerVocabExtras({ cardId, german, swahili, enrichment
                 <button type="button" className="btn btn-primary min-h-11 w-full" onClick={onAudio}>
                     {hasAudio ? "Audio abspielen" : isRecording ? "Aufnahme stoppen und speichern" : "Audio aufnehmen"}
                 </button>
+                {hasAudio && onRemoveAudio ? <button type="button" className="btn btn-utility min-h-11 w-full text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={audioRemoving} onClick={() => setAudioRemoveConfirmOpen(true)}>Audio entfernen</button> : null}
+                {audioRemoveError ? <p role="alert" className="text-sm text-[color:var(--accent-danger-strong)]">{audioRemoveError}</p> : null}
             </div>
         </CompactOverlay>, document.body)}
+        <ConfirmDialog open={audioRemoveConfirmOpen} title="Audio entfernen?" description="Die gespeicherte Aussprache dieser Karte wird entfernt." confirmLabel="Audio entfernen" cancelLabel="Abbrechen" destructive busy={audioRemoving} onConfirm={() => void removeAudio()} onCancel={() => setAudioRemoveConfirmOpen(false)} />
     </>;
 }
