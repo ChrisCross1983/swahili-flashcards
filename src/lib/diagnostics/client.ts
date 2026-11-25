@@ -1,11 +1,11 @@
 import { detectTranslatorPlatform } from "@/lib/translator/diagnosticMetadata";
 import { isUuid, normalizeRoute } from "@/lib/diagnostics/validation";
 import {
-    buildClientErrorContext, isBenignBrowserContext,
+    buildClientErrorContext, isBenignBrowserContext, isKnownInjectedBrowserContext,
     type ClientErrorContext, type DiagnosticVisibility, type NavigationState,
 } from "@/lib/diagnostics/clientErrorContext";
 
-type Code = "unexpected_error" | "unhandled_rejection" | "render_error" | "api_request_failed" | "network_error" | "timeout_error" | "grade_failed" | "session_save_failed" | "today_load_failed" | "browser_abort" | "resize_observer" | "external_script_error";
+type Code = "unexpected_error" | "unhandled_rejection" | "render_error" | "api_request_failed" | "network_error" | "timeout_error" | "grade_failed" | "session_save_failed" | "today_load_failed" | "browser_abort" | "resize_observer" | "external_script_error" | "injected_script_error";
 type Category = "client_exception" | "network" | "api_failure" | "learning" | "ui";
 type Event = {
     event_id: string; occurred_at: string; source: "client"; severity: "error" | "warning";
@@ -168,8 +168,9 @@ export function installGlobalDiagnostics(): () => void {
             const benign = isBenignBrowserContext(context, navigationState, typeof navigator.onLine === "boolean" ? navigator.onLine : null);
             const error_code: Code = context.message_category === "aborted" ? "browser_abort"
                 : context.message_category === "resize_observer" ? "resize_observer"
-                    : context.message_category === "opaque_script_error" || context.stack_origin === "browser_extension" || context.stack_origin === "external" ? "external_script_error"
-                        : "unexpected_error";
+                    : isKnownInjectedBrowserContext(context) ? "injected_script_error"
+                        : context.message_category === "opaque_script_error" || context.stack_origin === "browser_extension" || context.stack_origin === "external" ? "external_script_error"
+                            : "unexpected_error";
             void reportClientError({ category: "client_exception", error_code, severity: benign ? "warning" : "error", error: event.error, context, urgent: !benign });
         };
         const onRejection = (event: PromiseRejectionEvent) => {

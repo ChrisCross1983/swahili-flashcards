@@ -19,6 +19,8 @@ const event = () => ({
 describe("diagnostic event input", () => {
     it("uses the authenticated user and removes URL values", () => {
         expect(parseEvents({ events: [event()] }, user, now)).toMatchObject([{ user_id: user, route: "/api/learn/grade" }]);
+        expect(parseEvents({ events: [{ ...event(), severity: "warning", error_code: "injected_script_error" }] }, user, now))
+            .toMatchObject([{ severity: "warning", error_code: "injected_script_error" }]);
         expect(normalizeRoute("/cards/secret-translation?key=secret")).toBe("/other");
         expect(normalizeRoute("/admin/health?userId=secret")).toBe("/admin/health");
         expect(normalizeRoute("/api/diagnostics/events")).toBeNull();

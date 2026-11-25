@@ -222,9 +222,29 @@ export function buildClientErrorContext(input: {
 }
 
 export function isBenignBrowserContext(context: ClientErrorContext, navigationState: NavigationState, online: boolean | null): boolean {
+    if (isKnownInjectedBrowserContext(context)) return true;
     if (context.message_category === "aborted" || context.message_category === "resize_observer" || context.message_category === "opaque_script_error") return true;
     if (context.stack_origin === "browser_extension" || context.stack_origin === "external") return true;
     if (context.message_category === "network" && (navigationState !== "active" || online === false)) return true;
     if (context.event_type === "unhandled_rejection" && ["string", "primitive", "null"].includes(context.rejection_type)) return true;
     return false;
+}
+
+/**
+ * Signatures verified against the shipped production source and build output.
+ * A browser-injected script is reported with the document URL, so same-origin
+ * `inline_document` alone is not evidence that the application owns the code.
+ * Keep these matches deliberately narrow so unknown inline failures remain errors.
+ */
+export function isKnownInjectedBrowserContext(context: ClientErrorContext): boolean {
+    if (context.event_type !== "window_error" || context.source_kind !== "inline_document" || context.source_line !== 1) return false;
+
+    if (context.error_name === "ReferenceError"
+        && context.message_category === "reference_missing_identifier"
+        && context.error_symbol === "__firefox__"
+        && context.source_column === 12) return true;
+
+    if (context.error_name !== "TypeError" || context.message_category !== "type_undefined_member" || context.source_column !== 19) return false;
+    if (context.error_symbol === "reader") return true;
+    return /^refresh_youtube_quality_[A-F0-9]{32}$/.test(context.error_symbol ?? "");
 }

@@ -29,9 +29,9 @@ function emitted(type: string, error: Error) {
     page.dispatchEvent(event);
 }
 
-function emittedWindowError(error: unknown, message: string, filename = "") {
-    const event = new Event("error") as Event & { error?: unknown; message?: string; filename?: string };
-    event.error = error; event.message = message; event.filename = filename;
+function emittedWindowError(error: unknown, message: string, filename = "", line = 0, column = 0) {
+    const event = new Event("error") as Event & { error?: unknown; message?: string; filename?: string; lineno?: number; colno?: number };
+    event.error = error; event.message = message; event.filename = filename; event.lineno = line; event.colno = column;
     page.dispatchEvent(event);
 }
 
@@ -95,6 +95,30 @@ describe("client diagnostics", () => {
         await vi.waitFor(() => expect(sent).toHaveLength(3));
         expect(sent[2]).toMatchObject({ severity: "error", error_code: "unexpected_error", error_name: "ReferenceError", message_category: "reference_missing_identifier", error_symbol: "missingValue" });
         expect(JSON.stringify(sent)).not.toContain("private card text");
+        close();
+    });
+
+    it("keeps verified injected scripts visible as warnings and unknown inline errors as errors", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+        const close = installGlobalDiagnostics();
+
+        const injected = new ReferenceError("Can't find variable: __firefox__");
+        emittedWindowError(injected, injected.message, "https://app.test/trainer", 1, 12);
+        await vi.waitFor(() => expect(queuedDiagnosticsForTests()).toHaveLength(1));
+        expect(queuedDiagnosticsForTests()[0]).toMatchObject({
+            severity: "warning", error_code: "injected_script_error", source_kind: "inline_document",
+            error_name: "ReferenceError", error_symbol: "__firefox__",
+        });
+
+        const unknown = new TypeError("undefined is not an object (evaluating 'undefined')");
+        emittedWindowError(unknown, unknown.message, "https://app.test/trainer", 1, 16);
+        await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1));
+        const sent = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).events;
+        expect(sent).toHaveLength(2);
+        expect(sent[1]).toMatchObject({
+            severity: "error", error_code: "unexpected_error", source_kind: "inline_document",
+            error_name: "TypeError", error_symbol: "undefined",
+        });
         close();
     });
 

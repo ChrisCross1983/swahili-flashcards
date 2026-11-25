@@ -12,7 +12,7 @@ const CATEGORIES = new Set(["client_exception", "network", "api_failure", "learn
 const ERROR_CODES = new Set([
     "unexpected_error", "render_error", "unhandled_rejection", "api_request_failed", "network_error",
     "grade_failed", "session_save_failed", "today_load_failed", "timeout_error", "large_session", "long_session",
-    "session_abandoned", "browser_abort", "resize_observer", "external_script_error",
+    "session_abandoned", "browser_abort", "resize_observer", "external_script_error", "injected_script_error",
 ]);
 const BROWSERS = new Set(["Chrome", "Safari", "Firefox", "Edge", "Other"]);
 const SYSTEMS = new Set(["iOS", "Android", "Windows", "macOS", "Linux", "Other"]);
