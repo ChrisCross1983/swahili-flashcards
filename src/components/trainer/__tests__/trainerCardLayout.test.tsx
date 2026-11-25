@@ -21,7 +21,7 @@ describe("trainer card layout", () => {
         }
     });
 
-    it("places a stored vocabulary image between answer and learning actions without an empty placeholder", () => {
+    it("places vocabulary learning actions before the compact stored image without an empty placeholder", () => {
         const render = (reveal: boolean, imagePath: string | null) => renderToStaticMarkup(<TrainerCard
             reveal={reveal} prompt="Ein sehr langes zusammenhängendes Vokabelwort" answer="Übersetzung"
             imagePath={imagePath} imageBaseUrl="https://example.com/images" compactVocabExtras
@@ -32,8 +32,10 @@ describe("trainer card layout", () => {
         expect(front).not.toContain('data-testid="trainer-inline-image"');
         expect(back).toContain('data-testid="trainer-inline-image"');
         expect(back.indexOf("Übersetzung")).toBeLessThan(back.indexOf('data-testid="trainer-inline-image"'));
-        expect(back.indexOf('data-testid="trainer-inline-image"')).toBeLessThan(back.indexOf('data-testid="learning-actions"'));
+        expect(back.indexOf('data-testid="learning-actions"')).toBeLessThan(back.indexOf('data-testid="trainer-inline-image"'));
         expect(back).toContain("object-contain");
+        expect(back).toContain("h-[clamp(9.375rem,20dvh,11.25rem)]");
+        expect(back).toContain('aria-label="Kartenbild vergrößern"');
         expect(back).toContain("[overflow-wrap:anywhere]");
         expect(render(true, null)).not.toContain('data-testid="trainer-inline-image"');
     });

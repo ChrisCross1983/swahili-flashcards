@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import CardText from "@/components/ui/CardText";
 import FormattedExampleText from "@/components/ui/FormattedExampleText";
+import CompactOverlay from "@/components/CompactOverlay";
 import SentenceExplanationDisclosure from "@/components/trainer/SentenceExplanationDisclosure";
 import type { SentenceExplanation } from "@/lib/sentence/explanation";
 
@@ -82,8 +84,11 @@ export default function TrainerCard({
     const [showPromptExample, setShowPromptExample] = useState(false);
     const [showAnswerExample, setShowAnswerExample] = useState(false);
     const [showSentenceExplanation, setShowSentenceExplanation] = useState(autoOpenExplanation);
+    const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const imageUrl = imagePath ? `${imageBaseUrl}/${imagePath}` : null;
 
     return (
+        <>
         <div className={compactVocabExtras ? "min-w-0" : "rounded-3xl border border-soft bg-surface p-5 shadow-warm sm:p-6"} data-testid="trainer-card-shell" data-mode="front" data-focus-role="recall-card">
             <div className={reveal ? compactVocabExtras ? "space-y-2.5 sm:space-y-4" : "space-y-5" : "space-y-4"} data-testid="trainer-card-front" data-layout={reveal ? "expanded" : "compact"}>
                 <div className={`min-w-0 rounded-2xl border border-soft bg-surface-elevated ${compactVocabExtras ? "p-3 sm:p-4" : "p-5"}`}>
@@ -118,15 +123,9 @@ export default function TrainerCard({
                             ) : null}
                         </div>
 
-                        {compactVocabExtras && imagePath ? (
-                            <div className="overflow-hidden rounded-xl border border-soft bg-surface-elevated" data-testid="trainer-inline-image">
-                                <Image src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" width={640} height={320} unoptimized className="block h-[clamp(11rem,24dvh,13.75rem)] w-full object-contain sm:h-56" />
-                            </div>
-                        ) : null}
-
-                        {!compactVocabExtras && imagePath ? (
+                        {!compactVocabExtras && imageUrl ? (
                             <div>
-                                <img src={`${imageBaseUrl}/${imagePath}`} alt="Kartenbild" className="trainer-learning-image" />
+                                <img src={imageUrl} alt="Kartenbild" className="trainer-learning-image" />
                             </div>
                         ) : null}
 
@@ -137,6 +136,19 @@ export default function TrainerCard({
                         /> : null}
 
                         {learningFeature}
+
+                        {compactVocabExtras && imageUrl ? (
+                            <div className="overflow-hidden rounded-xl border border-soft bg-surface-elevated" data-testid="trainer-inline-image">
+                                <button
+                                    type="button"
+                                    className="block w-full cursor-zoom-in touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
+                                    onClick={() => setImagePreviewOpen(true)}
+                                    aria-label="Kartenbild vergrößern"
+                                >
+                                    <Image src={imageUrl} alt="Kartenbild" width={640} height={320} unoptimized className="block h-[clamp(9.375rem,20dvh,11.25rem)] w-full object-contain sm:h-56" />
+                                </button>
+                            </div>
+                        ) : null}
 
                         {onOpenLearningHelp && !compactVocabExtras ? (
                             <div className="flex items-center justify-between gap-3" data-testid="learning-secondary-actions">
@@ -156,5 +168,12 @@ export default function TrainerCard({
                 {footer}
             </div>
         </div>
+        {imagePreviewOpen && imageUrl && typeof document !== "undefined" ? createPortal(
+            <CompactOverlay open title="Kartenbild" onClose={() => setImagePreviewOpen(false)} maxWidthClassName="max-w-3xl">
+                <Image src={imageUrl} alt="Kartenbild vergrößert" width={1280} height={960} unoptimized className="mx-auto block max-h-[calc(100dvh-9rem)] w-auto max-w-full object-contain" />
+            </CompactOverlay>,
+            document.body,
+        ) : null}
+        </>
     );
 }

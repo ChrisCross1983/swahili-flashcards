@@ -16,7 +16,7 @@ const withoutImage = <TrainerVocabExtras cardId="test-card" german="Buch" swahil
     imagePath={null} onImageSaved={vi.fn()} />;
 
 describe("compact vocabulary learning flow", () => {
-    it("shows the image directly after reveal and three accessible learning actions", () => {
+    it("shows accessible learning actions before the compact image after reveal", () => {
         const render = (reveal: boolean) => renderToStaticMarkup(<TrainerCard
             reveal={reveal} prompt="Buch" answer="kitabu" imagePath="test.webp" imageBaseUrl="https://example.test/images"
             compactVocabExtras learningFeature={extras(true)} onOpenLearningHelp={vi.fn()}
@@ -36,6 +36,10 @@ describe("compact vocabulary learning flow", () => {
         expect(back).toContain('grid-cols-3');
         expect(back).not.toContain('aria-label="Bild öffnen"');
         expect(back).toContain('aria-haspopup="dialog"');
+        expect(back.indexOf('data-testid="trainer-vocab-extras"')).toBeLessThan(back.indexOf('data-testid="trainer-inline-image"'));
+        expect(back).toContain('aria-label="Kartenbild vergrößern"');
+        expect(back).toContain("cursor-zoom-in");
+        expect(back).toContain("20dvh");
         expect(back).toContain('data-present="true"');
         expect(back).not.toContain("Wortwissen wird geladen");
         expect(back).not.toContain("Eigene Notizen");
