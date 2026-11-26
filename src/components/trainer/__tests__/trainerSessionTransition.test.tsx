@@ -15,7 +15,6 @@ describe("TrainerSessionTransition", () => {
         expect(html).toContain('aria-hidden="true"');
         expect(html).toContain('src="/trainer-lion-editorial.webp"');
         expect(html).not.toContain("<svg");
-        expect(html).toContain("items-center justify-center");
         expect(html).not.toContain("animation-delay:");
         expect(source).toContain('"/trainer-lion-intro-timed.webp"');
         expect(source).toContain('"/trainer-lion-editorial.webp"');
@@ -28,7 +27,15 @@ describe("TrainerSessionTransition", () => {
         expect(css).toContain("@media (prefers-reduced-motion: reduce)");
         expect(css).toContain("animation: none");
         expect(css).toContain("object-fit: contain");
-        expect(css).toContain("36dvh");
+        expect(css).toContain("grid-template-rows: 2.75rem minmax(0, 1fr) auto auto");
+        expect(css).toContain("height: max(0px, min(420px, calc(100cqh - 2rem)))");
+        expect(css).toContain("100cqh");
+        expect(css).toContain("height: 100%");
+        expect(css).not.toContain("overflow: auto");
+        expect(source).toContain("styles.soundControl");
+        expect(source).toContain("styles.progressTrack");
+        expect(source).toContain("className={styles.transition}");
+        expect(source).not.toContain('className="absolute right-0 top-0');
         expect(css).not.toContain("lionPresence");
     });
 });

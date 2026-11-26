@@ -15,9 +15,10 @@ type Props = {
     footer?: ReactNode;
     scrollContainerRef?: Ref<HTMLDivElement>;
     compactHeader?: boolean;
+    contentSizeContainer?: boolean;
 };
 
-export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", backdropTone = "standard", wide = false, onClose, children, footer, scrollContainerRef, compactHeader = false }: Props) {
+export default function FullScreenSheet({ open, title, subtitle, presentation = "standard", backdropTone = "standard", wide = false, onClose, children, footer, scrollContainerRef, compactHeader = false, contentSizeContainer = false }: Props) {
     const sentenceLike = presentation !== "standard";
     const contentSizedDesktop = presentation === "card-detail" || presentation === "word-edit";
     const handleClose = () => {
@@ -53,7 +54,7 @@ export default function FullScreenSheet({ open, title, subtitle, presentation = 
                     </button>
                 </div>
 
-                <div ref={scrollContainerRef} className={`flex min-h-0 flex-1 justify-center overflow-auto ${sentenceLike ? "px-3 py-4 sm:px-6 sm:py-6" : "px-3 py-3 md:px-4 md:py-4"}`}>
+                <div ref={scrollContainerRef} style={contentSizeContainer ? { containerType: "size" } : undefined} className={`flex min-h-0 flex-1 justify-center overflow-auto ${sentenceLike ? "px-3 py-4 sm:px-6 sm:py-6" : "px-3 py-3 md:px-4 md:py-4"}`}>
                     <div className={`w-full max-w-none ${presentation === "card-detail" ? "pb-4 md:max-w-[840px]" : presentation === "sentence" || presentation === "word-edit" ? `pb-4 ${presentation === "word-edit" || wide ? "md:max-w-[820px]" : "md:max-w-2xl"}` : "pb-8 md:max-w-xl"}`}>
                         {children}
                     </div>

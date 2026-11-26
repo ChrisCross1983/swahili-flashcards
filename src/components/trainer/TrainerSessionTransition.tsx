@@ -26,21 +26,23 @@ export default function TrainerSessionTransition({ introSoundEnabled, onToggleIn
 
     return (
         <div
-            className="mt-4 flex min-h-[55dvh] items-center justify-center rounded-2xl border border-soft bg-surface p-6 text-center shadow-soft"
+            className={styles.transition}
             role="status"
             aria-live="polite"
         >
-            <div className="relative flex max-w-xs flex-col items-center">
-                {showSoundControl ? <button
-                    type="button"
-                    className="absolute right-0 top-0 inline-flex h-11 min-w-11 items-center justify-center rounded-full border border-soft bg-surface-elevated px-3 text-xs font-medium text-muted transition hover:border-strong hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
-                    aria-label={introSoundEnabled ? "Intro-Ton stummschalten" : "Intro-Ton einschalten"}
-                    aria-pressed={introSoundEnabled}
-                    onClick={onToggleIntroSound}
-                >
-                    <span aria-hidden="true">{introSoundEnabled ? "🔊" : "🔇"}</span>
-                    <span className="sr-only">Intro-Ton</span>
-                </button> : null}
+            <div className={styles.content}>
+                <div className={styles.soundControl}>
+                    {showSoundControl ? <button
+                        type="button"
+                        className="inline-flex h-11 min-w-11 items-center justify-center rounded-full border border-soft bg-surface-elevated px-3 text-xs font-medium text-muted transition hover:border-strong hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-primary)]"
+                        aria-label={introSoundEnabled ? "Intro-Ton stummschalten" : "Intro-Ton einschalten"}
+                        aria-pressed={introSoundEnabled}
+                        onClick={onToggleIntroSound}
+                    >
+                        <span aria-hidden="true">{introSoundEnabled ? "🔊" : "🔇"}</span>
+                        <span className="sr-only">Intro-Ton</span>
+                    </button> : null}
+                </div>
                 <div className={styles.emblem} aria-hidden="true">
                     <Image
                         key={showAnimatedLion ? "trainer-lion-intro-timed" : "trainer-lion-editorial"}
@@ -53,8 +55,8 @@ export default function TrainerSessionTransition({ introSoundEnabled, onToggleIn
                         onError={() => setAnimationUnavailable(true)}
                     />
                 </div>
-                <div className="mt-5 text-base font-semibold text-primary">Deine Lernrunde beginnt …</div>
-                <div className="mt-2 h-1 w-12 overflow-hidden rounded-full bg-surface-strong" aria-hidden="true"><span className={styles.progress} /></div>
+                <div className={styles.copy}>Deine Lernrunde beginnt …</div>
+                <div className={styles.progressTrack} aria-hidden="true"><span className={styles.progress} /></div>
             </div>
         </div>
     );

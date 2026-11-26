@@ -1693,6 +1693,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 title="Vokabeln lernen"
                                 backdropTone="calm"
                                 compactHeader
+                                contentSizeContainer={directStartPreparing}
                                 footer={cardType === "vocab" && learnStarted && todayItems.length > 0 && !directStartPreparing ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
                                     <TrainerControls
                                         reveal={reveal}
