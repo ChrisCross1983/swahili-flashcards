@@ -1,4 +1,6 @@
-export const TRAINER_SESSION_INTRO_MIN_MS = 1_800;
+export const TRAINER_SESSION_INTRO_MIN_MS = 3_200;
+export const TRAINER_LION_MOUTH_OPEN_MS = 800;
+export const TRAINER_LION_MOUTH_WIDE_OPEN_MS = 1_350;
 
 export function getTrainerSessionIntroDelay({
     startedAt,

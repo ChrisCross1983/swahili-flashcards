@@ -43,8 +43,8 @@ export default function TrainerSessionTransition({ introSoundEnabled, onToggleIn
                 </button> : null}
                 <div className={styles.emblem} aria-hidden="true">
                     <Image
-                        key={showAnimatedLion ? "trainer-lion-intro" : "trainer-lion-editorial"}
-                        src={showAnimatedLion ? "/trainer-lion-intro.webp" : "/trainer-lion-editorial.webp"}
+                        key={showAnimatedLion ? "trainer-lion-intro-timed" : "trainer-lion-editorial"}
+                        src={showAnimatedLion ? "/trainer-lion-intro-timed.webp" : "/trainer-lion-editorial.webp"}
                         width={showAnimatedLion ? 418 : 520}
                         height={showAnimatedLion ? 627 : 476}
                         alt=""

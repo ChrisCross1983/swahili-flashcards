@@ -63,6 +63,10 @@ describe("trainer session runtime regression guards", () => {
         expect(clientSource).toContain(": !learnStarted && (");
         expect(clientSource).toContain("function openSetupFromDashboard()");
         expect(clientSource).toContain("setDirectStartPreparing(false)");
+        expect(clientSource).toContain("!directStartPreparing && learnStarted && todayItems.length === 0");
+        expect(clientSource).toContain("!directStartPreparing && learnStarted && todayItems.length > 0");
+        expect(clientSource).toContain("learnStarted && todayItems.length > 0 && !directStartPreparing ?");
+        expect(clientSource).toContain("directStartCancelledRef.current || !sessionStarted ? 0");
     });
 
     it("starts today sessions via today loader", () => {

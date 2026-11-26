@@ -17,12 +17,12 @@ describe("TrainerSessionTransition", () => {
         expect(html).not.toContain("<svg");
         expect(html).toContain("items-center justify-center");
         expect(html).not.toContain("animation-delay:");
-        expect(source).toContain('"/trainer-lion-intro.webp"');
+        expect(source).toContain('"/trainer-lion-intro-timed.webp"');
         expect(source).toContain('"/trainer-lion-editorial.webp"');
         expect(source).toContain('window.matchMedia?.("(prefers-reduced-motion: reduce)")');
         expect(source).toContain("setUseAnimatedLion(!motionQuery.matches)");
         expect(source).toContain("setAnimationUnavailable(true)");
-        expect(source).toContain('key={showAnimatedLion ? "trainer-lion-intro" : "trainer-lion-editorial"}');
+        expect(source).toContain('key={showAnimatedLion ? "trainer-lion-intro-timed" : "trainer-lion-editorial"}');
         expect(source).toContain('aria-label={introSoundEnabled ? "Intro-Ton stummschalten" : "Intro-Ton einschalten"}');
         expect(source).toContain("aria-pressed={introSoundEnabled}");
         expect(css).toContain("@media (prefers-reduced-motion: reduce)");

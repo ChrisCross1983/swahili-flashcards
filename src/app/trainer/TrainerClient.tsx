@@ -37,7 +37,7 @@ import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibraryShee
 import TrainerSessionSummary, { buildTrainerSessionSummaryViewModel } from "@/components/trainer/TrainerSessionSummary";
 import TrainerSessionTransition from "@/components/trainer/TrainerSessionTransition";
 import { readTrainerIntroSoundPreference, startTrainerIntroRoar, stopTrainerIntroRoar, writeTrainerIntroSoundPreference } from "@/lib/trainer/introAudio";
-import { getTrainerSessionIntroDelay, userPrefersReducedMotion } from "@/lib/trainer/sessionIntro";
+import { getTrainerSessionIntroDelay, TRAINER_LION_MOUTH_OPEN_MS, userPrefersReducedMotion } from "@/lib/trainer/sessionIntro";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -326,7 +326,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const directStartCancelledRef = useRef(false);
     const sessionIntroStartRef = useRef(false);
-    const introAudioRef = useRef<HTMLAudioElement | null>(null);
+    const introAudioRef = useRef<ReturnType<typeof startTrainerIntroRoar>>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
@@ -1431,6 +1431,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         const introAudio = cardType === "vocab" ? startTrainerIntroRoar({
             enabled: soundEnabled,
             reducedMotion,
+            startDelayMs: TRAINER_LION_MOUTH_OPEN_MS,
             onEnded: () => { introAudioRef.current = null; },
         }) : null;
         introAudioRef.current = introAudio;
@@ -1791,7 +1792,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
 
                                 {/* === KEINE KARTEN / ENDE === */}
                                 {
-                                    learnStarted && todayItems.length === 0 && (
+                                    !directStartPreparing && learnStarted && todayItems.length === 0 && (
                                         <TrainerSessionSummary
                                             summary={sessionSummaryViewModel}
                                             onRepair={startWrongAnswerRepairDrill}
@@ -1802,7 +1803,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
 
                                 {/* === LERNKARTE === */}
                                 {
-                                    learnStarted && todayItems.length > 0 && (() => {
+                                    !directStartPreparing && learnStarted && todayItems.length > 0 && (() => {
                                         const answeredCount = answeredCardIds.size; // bereits bewertete Karten
                                         const safeAnswered = Math.max(0, answeredCount);
                                         const safeCorrect = Math.min(sessionCorrect, safeAnswered);

@@ -54,31 +54,49 @@ describe("TrainerDashboard start flow", () => {
     it("keeps the initial counts-pending state neutral and layout stable", () => {
         const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="pending" todayDue={0} />);
         expect(html).toContain("Lernzahlen werden ermittelt");
-        expect(html).toContain("Training wird vorbereitet");
-        expect(html).not.toContain("Weiterlernen");
-        expect(html).not.toContain("Heute lernen starten");
+        expect(html).toContain(">Training</h2>");
+        expect(html).toContain("Training starten");
         expect(html).not.toContain("Wird geladen");
-        expect(html).toContain('aria-label="Lernkarten werden ermittelt"');
-        expect(html).toMatch(/<button[^>]*disabled[^>]*aria-label="Lernkarten werden ermittelt"/);
+        expect(html).toContain('data-testid="trainer-dashboard-counts-pending"');
+        expect(html).toMatch(/<button[^>]*disabled[^>]*>Training starten/);
         expect(html).toContain("min-h-14");
         expect(html).toContain("motion-safe:animate-pulse");
         expect(html).toContain("min-h-[250px]");
     });
 
-    it("renders the same complete training tile in the server route fallback before hydration", () => {
+    it("shows recognizable static destinations in the server route fallback", () => {
         const fallback = renderToStaticMarkup(<TrainerLoading />);
         const clientPending = renderToStaticMarkup(<TrainerDashboard {...baseProps} countsState="pending" />);
         for (const html of [fallback, clientPending]) {
-            expect(html).toContain('data-testid="trainer-dashboard-skeleton"');
-            expect(html).toContain('aria-label="Lernkarten werden ermittelt"');
-            expect(html).toContain("motion-safe:animate-pulse");
-            expect(html).not.toContain("Heute lernen starten");
-            expect(html).not.toContain("Weiterlernen starten");
+            expect(html).toContain('data-testid="trainer-dashboard-counts-pending"');
+            expect(html).toContain("Training starten");
+            expect(html).toContain('data-testid="trainer-dashboard-create-card"');
+            expect(html).toContain('data-testid="trainer-dashboard-library-card"');
+            expect(html).toContain('data-testid="trainer-dashboard-import-card"');
+            expect(html).toContain("<svg");
+            expect((html.match(/class="h-5 w-5"/g) ?? []).length).toBe(4);
         }
-        expect(fallback).toContain('aria-label="Trainer wird vorbereitet"');
-        expect(fallback).toContain('aria-label="Neue Wörter wird vorbereitet"');
-        expect(fallback).toContain('aria-label="Meine Karten wird vorbereitet"');
-        expect(fallback).toContain('aria-label="Bulk Import wird vorbereitet"');
+    });
+
+    it("keeps independent dashboard actions enabled while training counts are pending", () => {
+        let created = 0;
+        let openedLibrary = 0;
+        let openedImport = 0;
+        const element = <TrainerDashboard
+            {...baseProps}
+            countsState="pending"
+            onOpenCreate={() => { created += 1; }}
+            onOpenCards={() => { openedLibrary += 1; }}
+            onOpenImport={() => { openedImport += 1; }}
+        />;
+
+        findButtonByText(element, "Neue Wörter anlegen")?.props.onClick();
+        findButtonByText(element, "Meine Karten")?.props.onClick();
+        findButtonByText(element, "Bulk Import")?.props.onClick();
+
+        expect(created).toBe(1);
+        expect(openedLibrary).toBe(1);
+        expect(openedImport).toBe(1);
     });
 
     it("does not infer a fallback training mode after a failed count request", () => {
@@ -118,8 +136,9 @@ describe("TrainerDashboard start flow", () => {
     it("makes today learning the primary dashboard action while keeping setup reachable", () => {
         const html = renderToStaticMarkup(<TrainerDashboard {...baseProps} />);
 
-        expect(html).toContain("Heute lernen");
-        expect(html).toContain("Starte mit den nächsten Karten. 4 sind heute dran.");
+        expect(html).toContain(">Training</h2>");
+        expect(html).toContain("Wähle eine Lernrunde oder passe sie an.");
+        expect(html).toContain("4 heute fällig · 20 insgesamt");
         expect(html).toContain("Heute lernen starten");
         expect(html).toContain("Training anpassen");
         expect(html).toContain("Bulk Import");
@@ -154,9 +173,9 @@ describe("TrainerDashboard start flow", () => {
             <TrainerDashboard {...baseProps} todayDue={0} lastMissedCount={3} />,
         );
 
-        expect(html).toContain("Weiterlernen");
+        expect(html).toContain(">Training</h2>");
         expect(html).toContain("Weiterlernen starten");
         expect(html).not.toContain("Heute lernen starten");
-        expect(html).toContain("Kleine Wiederholung: 3 zuletzt nicht gewusste Karten.");
+        expect(html).toContain("3 zuletzt nicht gewusste Karten · 20 insgesamt");
     });
 });
