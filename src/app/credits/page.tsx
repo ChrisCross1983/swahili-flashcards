@@ -1,0 +1,5 @@
+import Link from "next/link";
+
+export default function CreditsPage() {
+    return <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6"><Link className="text-sm text-accent-primary-strong underline underline-offset-4" href="/trainer">← Zum Trainer</Link><section id="trainer-lion-audio" className="mt-6 rounded-2xl border border-soft bg-surface p-6 shadow-soft"><p className="text-xs font-semibold uppercase tracking-wide text-muted">Credits</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-primary">Löwen-Introton</h1><p className="mt-4 text-sm leading-6 text-muted">„Lion roars 1“ von eardeer, bearbeiteter Ausschnitt. Verwendet unter <a className="text-accent-primary-strong underline underline-offset-4" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>.</p><p className="mt-3 text-sm"><a className="text-accent-primary-strong underline underline-offset-4" href="https://freesound.org/people/eardeer/sounds/458903/" target="_blank" rel="noreferrer">Originalaufnahme auf Freesound</a></p></section></main>;
+}

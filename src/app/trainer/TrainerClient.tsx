@@ -36,6 +36,8 @@ import TrainerCardFormSheet, { type TrainerCardFormSheetHandle } from "@/compone
 import TrainerCardLibrarySheet from "@/components/trainer/TrainerCardLibrarySheet";
 import TrainerSessionSummary, { buildTrainerSessionSummaryViewModel } from "@/components/trainer/TrainerSessionSummary";
 import TrainerSessionTransition from "@/components/trainer/TrainerSessionTransition";
+import { readTrainerIntroSoundPreference, startTrainerIntroRoar, stopTrainerIntroRoar, writeTrainerIntroSoundPreference } from "@/lib/trainer/introAudio";
+import { getTrainerSessionIntroDelay, userPrefersReducedMotion } from "@/lib/trainer/sessionIntro";
 import { materialLabel, visibleBadgeSummary, type TrainingMaterial } from "@/lib/trainer/setup";
 import { useTrainerSetup, type QuickStartPreset } from "@/lib/trainer/useTrainerSetup";
 import { useTrainerSession } from "@/lib/trainer/useTrainerSession";
@@ -248,6 +250,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const [trainingMaterial, setTrainingMaterial] = useState<TrainingMaterial>({ kind: "ALL" });
     const [repairDrillActive, setRepairDrillActive] = useState(false);
     const [directStartPreparing, setDirectStartPreparing] = useState(false);
+    const [introSoundEnabled, setIntroSoundEnabled] = useState(true);
     const [openDirectionChange, setOpenDirectionChange] = useState(false);
     const [directionMode, setDirectionMode] = useState<"DE_TO_SW" | "SW_TO_DE" | "RANDOM" | null>("RANDOM");
     const [legacyKey, setLegacyKey] = useState<string | null>(null);
@@ -322,6 +325,8 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
     const loopGuardRef = useRef<{ cardId: string | null; streak: number }>({ cardId: null, streak: 0 });
     const directStartCancelledRef = useRef(false);
+    const sessionIntroStartRef = useRef(false);
+    const introAudioRef = useRef<HTMLAudioElement | null>(null);
     const directionRef = useRef<HTMLDivElement | null>(null);
     const materialRef = useRef<HTMLDivElement | null>(null);
     const savedCardNoteRef = useRef("");
@@ -343,6 +348,22 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         audioElements.forEach(resetAudioElement);
         audioElRef.current = null;
     }, []);
+
+    const stopIntroAudio = useCallback(() => {
+        stopTrainerIntroRoar(introAudioRef.current);
+        introAudioRef.current = null;
+    }, []);
+
+    const setIntroSoundPreference = useCallback((enabled: boolean) => {
+        setIntroSoundEnabled(enabled);
+        writeTrainerIntroSoundPreference(enabled);
+        if (!enabled) stopIntroAudio();
+    }, [stopIntroAudio]);
+
+    useEffect(() => {
+        setIntroSoundEnabled(readTrainerIntroSoundPreference());
+        return () => stopIntroAudio();
+    }, [stopIntroAudio]);
 
     const ensureAudioPerfTrace = useCallback((card: CardAudioSource | null | undefined, key: string, path: string) => {
         let trace = audioPerfTracesRef.current.get(key);
@@ -1400,24 +1421,33 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         void ensureGroups();
     }
 
-    async function startRecommendedLearningFromDashboard() {
+    async function startLearningWithIntro(config: Parameters<typeof startLearningSession>[0]) {
+        if (sessionIntroStartRef.current) return;
+        sessionIntroStartRef.current = true;
+        stopIntroAudio();
+        const reducedMotion = userPrefersReducedMotion();
+        const soundEnabled = readTrainerIntroSoundPreference();
+        if (soundEnabled !== introSoundEnabled) setIntroSoundEnabled(soundEnabled);
+        const introAudio = cardType === "vocab" ? startTrainerIntroRoar({
+            enabled: soundEnabled,
+            reducedMotion,
+            onEnded: () => { introAudioRef.current = null; },
+        }) : null;
+        introAudioRef.current = introAudio;
+        const introStartedAt = Date.now();
         setDirectStartPreparing(true);
         directStartCancelledRef.current = false;
-        setOpenLearn(true);
-        setEntryQuickStartPreset(null);
-        resetTrainingPreset("today");
-        setTrainingMaterial({ kind: "ALL" });
-        setDirectionMode("RANDOM");
-        setRepairDrillActive(false);
         try {
-            await startLearningSession({
-                learnMode: "LEITNER_TODAY",
-                trainingMaterial: { kind: "ALL" },
-                directionMode: "RANDOM",
-                skipValidationHighlights: true,
-                dashboardQuickStart: true,
+            const sessionStarted = await startLearningSession(config);
+            if (!sessionStarted) stopIntroAudio();
+            const remainingIntroMs = directStartCancelledRef.current || !sessionStarted ? 0 : getTrainerSessionIntroDelay({
+                startedAt: introStartedAt,
+                now: Date.now(),
+                reducedMotion,
             });
+            if (remainingIntroMs > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, remainingIntroMs));
         } finally {
+            sessionIntroStartRef.current = false;
             setDirectStartPreparing(false);
             if (directStartCancelledRef.current) {
                 setLearnStarted(false);
@@ -1435,6 +1465,22 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                 directStartCancelledRef.current = false;
             }
         }
+    }
+
+    async function startRecommendedLearningFromDashboard() {
+        setOpenLearn(true);
+        setEntryQuickStartPreset(null);
+        resetTrainingPreset("today");
+        setTrainingMaterial({ kind: "ALL" });
+        setDirectionMode("RANDOM");
+        setRepairDrillActive(false);
+        await startLearningWithIntro({
+            learnMode: "LEITNER_TODAY",
+            trainingMaterial: { kind: "ALL" },
+            directionMode: "RANDOM",
+            skipValidationHighlights: true,
+            dashboardQuickStart: true,
+        });
     }
 
     const openSetupFromQuickStart = useCallback((quickStart: QuickStartPreset) => {
@@ -1646,7 +1692,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 title="Vokabeln lernen"
                                 backdropTone="calm"
                                 compactHeader
-                                footer={cardType === "vocab" && learnStarted && todayItems.length > 0 ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
+                                footer={cardType === "vocab" && learnStarted && todayItems.length > 0 && !directStartPreparing ? <div className="border-t border-soft bg-surface px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(74,44,16,0.08)] md:hidden" data-testid="trainer-mobile-actions">
                                     <TrainerControls
                                         reveal={reveal}
                                         hasAudio={false}
@@ -1661,6 +1707,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 onClose={() => {
                                     if (directStartPreparing) {
                                         directStartCancelledRef.current = true;
+                                        stopIntroAudio();
                                         setDirectStartPreparing(false);
                                         setOpenLearn(false);
                                         return;
@@ -1696,8 +1743,12 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 }}
                             >
                                 {/* === SETUP === */}
-                                {directStartPreparing && !learnStarted ? (
-                                    <TrainerSessionTransition />
+                                {directStartPreparing ? (
+                                    <TrainerSessionTransition
+                                        introSoundEnabled={introSoundEnabled}
+                                        onToggleIntroSound={() => setIntroSoundPreference(!introSoundEnabled)}
+                                        showSoundControl={cardType === "vocab"}
+                                    />
                                 ) : !learnStarted && (
                                     <TrainerSetupView
                                         recommendation={recommendation}
@@ -1726,7 +1777,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                         onDirectionModeChange={setDirectionMode}
                                         onStart={() => {
                                             setRepairDrillActive(false);
-                                            void startLearningSession({
+                                            void startLearningWithIntro({
                                                 learnMode: selectedSessionConfig.learnMode,
                                                 trainingMaterial: selectedSessionConfig.trainingMaterial,
                                                 directionMode: directionMode ?? "RANDOM",

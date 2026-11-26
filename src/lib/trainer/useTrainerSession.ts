@@ -308,17 +308,17 @@ export function useTrainerSession({
         const skipValidationHighlights = config?.skipValidationHighlights ?? false;
         const dashboardQuickStart = config?.dashboardQuickStart ?? false;
 
-        if (!nextLearnMode || startingRef.current) return;
+        if (!nextLearnMode || startingRef.current) return false;
         if (!nextDirectionMode) {
             if (!skipValidationHighlights) onValidationHighlight?.("DIRECTION");
-            return;
+            return false;
         }
         if (!canStartTraining(nextLearnMode, nextTrainingMaterial, nextDirectionMode)) {
             if (!skipValidationHighlights) onValidationHighlight?.("MATERIAL");
-            return;
+            return false;
         }
         const requestedLoadPlan = getSessionLoadPlan(nextLearnMode, nextTrainingMaterial);
-        if (!requestedLoadPlan) return;
+        if (!requestedLoadPlan) return false;
         startingRef.current = true;
 
         try {
@@ -384,7 +384,7 @@ export function useTrainerSession({
             if (!loadResult.ok) {
                 run?.end("load_failed");
                 setLearnStarted(false);
-                return;
+                return false;
             }
             run?.loaded(loadResult.items.length);
             if (loadResult.items.length === 0) run?.end("completed");
@@ -395,6 +395,7 @@ export function useTrainerSession({
                 items: loadResult.items, answeredIds: [], correctCount: 0, wrongIds: [], currentIndex: 0,
                 run: run?.resumeState(effectiveLearnMode, effectiveLoadPlan.kind === "today" ? "today" : effectiveLoadPlan.kind === "last-missed" ? "last_missed" : "all_cards"),
             });
+            return true;
         } finally { startingRef.current = false; }
     }
     function revealCard() {
