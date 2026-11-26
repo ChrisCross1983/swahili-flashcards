@@ -28,7 +28,9 @@ class FakeQuery {
     }
 
     eq(column: string, value: string) {
-        if (column === "cards.type" || column === "type") {
+        if (column === "cards.owner_key") {
+            this.filters.push((row) => ("cards" in row ? row.cards.owner_key : null) === value);
+        } else if (column === "cards.type" || column === "type") {
             this.typeFilter = value as "vocab" | "sentence";
         } else {
             this.filters.push((row) => String(row[column as keyof QueryRow]) === value);
@@ -142,6 +144,15 @@ describe("shared Home/Trainer due-count source", () => {
         expect(queue.items.map((item: { cardId: string }) => item.cardId)).toEqual([
             "overdue", "today", "new", "learning", "review",
         ]);
+    });
+
+    it("does not expose a foreign card through an inconsistent own progress row", async () => {
+        fixture.cards.push({ id: "foreign-card", owner_key: "user-b", type: "vocab" });
+        fixture.progress.push({ card_id: "foreign-card", owner_key: "user-a", due_date: "2026-10-08", level: 1 });
+
+        const response = await getTodayItems(todayRequest());
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ items: [] });
     });
 
     it("exposes safe per-query timings without user or card identifiers", async () => {

@@ -56,6 +56,10 @@ export const GET = withServerDiagnostics("/api/learn/today", async (req, diagnos
     `
     )
     .eq("owner_key", ownerKey)
+    // A service-role query must not trust a pre-existing progress row to
+    // prove card ownership. This also hides historical orphan/cross-owner
+    // references instead of returning another user's card content.
+    .eq("cards.owner_key", ownerKey)
     .lte("due_date", today)
     .order("due_date", { ascending: true });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { applyCardTypeFilter, getAllowedCardIdsByGroups, getCardGroups, parseGroupIds, resolveCardTypeFilter } from "@/lib/server/cardFilters";
+import { hasOwnedCard, parseCardId } from "@/lib/server/cardOwnership";
 
 export async function GET(req: Request) {
     const { user, response } = await requireUser();
@@ -60,9 +61,14 @@ export async function POST(req: Request) {
         const { user, response } = await requireUser();
         if (response) return response;
 
-        const body = await req.json();
+        let body: { cardId?: unknown; action?: unknown };
+        try {
+            body = await req.json() as { cardId?: unknown; action?: unknown };
+        } catch {
+            return NextResponse.json({ error: "Ungültige Anfrage." }, { status: 400 });
+        }
         const ownerKey = user.id;
-        const cardId = String(body?.cardId ?? "").trim();
+        const cardId = parseCardId(body?.cardId);
         const action = String(body?.action ?? "").trim();
 
         if (!cardId) {
@@ -70,6 +76,13 @@ export async function POST(req: Request) {
         }
 
         if (action === "add") {
+            try {
+                const owned = await hasOwnedCard(ownerKey, cardId);
+                if (!owned) return NextResponse.json({ error: "Card not found." }, { status: 404 });
+            } catch {
+                return NextResponse.json({ error: "Card verification failed." }, { status: 500 });
+            }
+
             const { error } = await supabaseServer
                 .from("learn_last_missed")
                 .upsert({ owner_key: ownerKey, card_id: cardId }, { onConflict: "owner_key,card_id" });

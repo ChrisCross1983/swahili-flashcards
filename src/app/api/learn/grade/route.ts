@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 import { requireUser } from "@/lib/api/auth";
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
+import { hasOwnedCard, parseCardId } from "@/lib/server/cardOwnership";
 
 import {
   getIntervalDays,
@@ -49,13 +50,27 @@ export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagno
   diagnostics.setRunId(req.headers.get("x-diagnostics-run-id"));
 
   const ownerKey = user.id;
-  const cardId = (body.cardId ?? "").trim();
+  const cardId = parseCardId(body.cardId);
 
   if (!cardId) {
     return audit.response(NextResponse.json(
       { error: "cardId is required" },
       { status: 400 }
     ));
+  }
+
+  try {
+    const owned = await audit.measure("card_ownership", () => hasOwnedCard(ownerKey, cardId));
+    if (!owned) {
+      // Deliberately indistinguishable for missing and foreign cards.
+      return audit.response(NextResponse.json({ error: "Card not found." }, { status: 404 }));
+    }
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined;
+    diagnostics.supabaseFailure("cards", "select", code);
+    return audit.response(NextResponse.json({ error: "Card verification failed." }, { status: 500 }));
   }
 
   const lvlRaw = Number.isFinite(body.currentLevel)
@@ -77,8 +92,6 @@ export const POST = withServerDiagnostics("/api/learn/grade", async (req, diagno
   const dueDate = addDaysYmdUtc(today, nextIntervalDays);
 
   const nowIso = new Date().toISOString();
-
-  console.log("[learn/grade] computed", { ownerKey, cardId, currentLevel, newLevel, nextIntervalDays, dueDate });
 
   const { error } = await audit.measure("progress_upsert", async () => await supabaseServer
     .from("card_progress")

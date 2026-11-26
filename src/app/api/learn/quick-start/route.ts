@@ -59,6 +59,7 @@ export const GET = withServerDiagnostics("/api/learn/quick-start", async (req, d
         .from("card_progress")
         .select("card_id, level, due_date, cards!inner(id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, type)")
         .eq("owner_key", user.id)
+        .eq("cards.owner_key", user.id)
         .lte("due_date", today)
         .order("due_date", { ascending: true });
     dueQuery = applyCardTypeFilter(dueQuery, resolvedType, { foreignTable: "cards" });

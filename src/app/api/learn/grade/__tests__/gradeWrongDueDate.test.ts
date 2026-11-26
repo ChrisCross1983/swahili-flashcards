@@ -8,12 +8,22 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/supabaseServer", () => ({
     supabaseServer: {
-        from: () => ({
-            upsert: (row: Record<string, unknown>) => {
-                fixture.written = row;
-                return { select: async () => ({ data: [row], error: null }) };
-            },
-        }),
+        from: (table: string) => {
+            if (table === "cards") {
+                const query = {
+                    select: () => query,
+                    eq: () => query,
+                    maybeSingle: async () => ({ data: { id: "card-a" }, error: null }),
+                };
+                return query;
+            }
+            return {
+                upsert: (row: Record<string, unknown>) => {
+                    fixture.written = row;
+                    return { select: async () => ({ data: [row], error: null }) };
+                },
+            };
+        },
     },
 }));
 

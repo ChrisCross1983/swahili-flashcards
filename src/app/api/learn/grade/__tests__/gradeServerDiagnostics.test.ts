@@ -13,6 +13,14 @@ beforeEach(() => {
     fixture.events.length = 0;
     fixture.auth.mockReset().mockResolvedValue({ user: { id: userId }, response: null });
     fixture.from.mockReset().mockImplementation((table: string) => {
+        if (table === "cards") {
+            const query = {
+                select: () => query,
+                eq: () => query,
+                maybeSingle: async () => ({ data: { id: "private-card-text" }, error: null }),
+            };
+            return query;
+        }
         if (table === "card_progress") return { upsert: () => ({ select: async () => ({ data: null, error: { code: "PGRST116", message: "private DB detail" } }) }) };
         if (table === "learning_run_health") {
             const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { run_id: runId }, error: null }) };

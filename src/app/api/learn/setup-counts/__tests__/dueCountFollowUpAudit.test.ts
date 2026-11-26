@@ -26,7 +26,9 @@ class FakeQuery {
   }
 
   eq(column: string, value: string) {
-    if (column === "cards.type" || column === "type") {
+    if (column === "cards.owner_key") {
+      this.filters.push((row) => ("cards" in row ? row.cards.owner_key : null) === value);
+    } else if (column === "cards.type" || column === "type") {
       this.typeFilter = value as "vocab" | "sentence";
     } else {
       this.filters.push((row) => String(row[column as keyof Row]) === value);
