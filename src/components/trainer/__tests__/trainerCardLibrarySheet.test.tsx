@@ -10,7 +10,10 @@ const baseProps = {
     status: "",
     groups: [{ id: "g1", name: "Alltag", owner_key: "owner", color: null }],
     isSentenceTrainer: false,
-    imageBaseUrl: "https://example.test/images",
+    mediaByCardId: {
+        "2": { imageUrl: "https://example.test/images/card-token", audioUrl: null, expiresAt: "2030-01-01T00:00:00.000Z" },
+        "v1": { imageUrl: "https://example.test/images/cat-token", audioUrl: null, expiresAt: "2030-01-01T00:00:00.000Z" },
+    },
     selectionMode: false,
     selectedIds: new Set<string>(),
     selectedTotalCount: 0,

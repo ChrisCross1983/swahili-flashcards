@@ -26,9 +26,6 @@ export async function uploadImageFile(imageFile: File): Promise<string> {
     return json.path;
 }
 
-const AUDIO_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
-
 export function useTrainerCardMedia({
     onStatus,
     onAudioUpdated,
@@ -80,9 +77,12 @@ export function useTrainerCardMedia({
         }
     }
 
-    function playAudioPath(path: string | null) {
-        if (!path) return;
-        const url = `${AUDIO_BASE_URL}/${path}`;
+    function playAudioPath(path: string | null, signedUrl?: string | null) {
+        if (!path || !signedUrl) {
+            onStatus("Audio ist gerade nicht verfügbar.");
+            return;
+        }
+        const url = signedUrl;
         stopAnyAudio();
         audioElRef.current = new Audio(url);
         audioElRef.current.play().catch(() => { });

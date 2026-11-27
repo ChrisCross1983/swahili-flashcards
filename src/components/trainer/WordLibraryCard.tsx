@@ -9,7 +9,9 @@ import { hasWordUnderstanding } from "@/lib/word/understanding";
 
 type Props = {
     card: TrainerLibraryCard;
-    imageBaseUrl: string;
+    imageUrl?: string | null;
+    /** @deprecated Compatibility-only; never used to build a media URL. */
+    imageBaseUrl?: string;
     selected: boolean;
     selectionMode: boolean;
     actionOpen: boolean;
@@ -36,7 +38,7 @@ function ActionIcon({ name }: { name: "more" | "edit" | "trash" }) {
 export const positionWordLibraryMenu = positionLibraryMenu;
 
 export default function WordLibraryCard({
-    card, imageBaseUrl, selected, selectionMode, actionOpen, onToggleSelected, onToggleActions,
+    card, imageUrl, selected, selectionMode, actionOpen, onToggleSelected, onToggleActions,
     onPlayAudio, onEditCard, onViewCard, onOpenCardGroupsEditor, onDeleteCard, activePreviewKey, onPreviewChange,
 }: Props) {
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -56,7 +58,7 @@ export default function WordLibraryCard({
         </div>
 
         <button type="button" className="word-library-main" onClick={() => selectionMode ? onToggleSelected(card.id) : onViewCard(card)} aria-label={selectionMode ? `Wort auswählen: ${word}` : `Wort ansehen: ${word}`}>
-            {card.image_path ? <Image src={`${imageBaseUrl}/${card.image_path}`} alt="" width={80} height={80} unoptimized className="word-library-thumb" /> : null}
+            {card.image_path && imageUrl ? <Image src={imageUrl} alt="" width={80} height={80} unoptimized className="word-library-thumb" /> : null}
             <span className="word-library-pair">
                 <span className="word-library-language">DE</span><CardText as="span" className="word-library-german">{card.german_text}</CardText>
                 <span className="word-library-language">SW</span><CardText as="span" className="word-library-swahili">{card.swahili_text}</CardText>

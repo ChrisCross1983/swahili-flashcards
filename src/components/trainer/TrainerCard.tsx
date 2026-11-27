@@ -18,7 +18,9 @@ type Props = {
     answerExample?: string | null;
     showExamples?: boolean;
     imagePath: string | null;
-    imageBaseUrl: string;
+    imageUrl?: string | null;
+    /** @deprecated Compatibility-only; never used to build a media URL. */
+    imageBaseUrl?: string;
     learningTypeLabel?: string | null;
     onOpenLearningHelp?: () => void;
     sentenceExplanation?: SentenceExplanation | null;
@@ -74,7 +76,7 @@ export default function TrainerCard({
     answerExample,
     showExamples = true,
     imagePath,
-    imageBaseUrl,
+    imageUrl,
     learningTypeLabel,
     onOpenLearningHelp,
     sentenceExplanation,
@@ -91,7 +93,7 @@ export default function TrainerCard({
     const [imageRemoveConfirmOpen, setImageRemoveConfirmOpen] = useState(false);
     const [imageRemoving, setImageRemoving] = useState(false);
     const [imageRemoveError, setImageRemoveError] = useState<string | null>(null);
-    const imageUrl = imagePath ? `${imageBaseUrl}/${imagePath}` : null;
+    const resolvedImageUrl = imagePath ? imageUrl ?? null : null;
 
     async function removeImage() {
         if (!onRemoveImage || imageRemoving) return;
@@ -144,9 +146,9 @@ export default function TrainerCard({
                             ) : null}
                         </div>
 
-                        {!compactVocabExtras && imageUrl ? (
+                        {!compactVocabExtras && resolvedImageUrl ? (
                             <div>
-                                <img src={imageUrl} alt="Kartenbild" className="trainer-learning-image" />
+                                <img src={resolvedImageUrl} alt="Kartenbild" className="trainer-learning-image" />
                             </div>
                         ) : null}
 

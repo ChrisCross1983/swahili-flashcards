@@ -32,9 +32,7 @@ import { parseSentenceExplanation, type SentenceExplanation } from "@/lib/senten
 import { hasWordUnderstanding, type WordEnrichment } from "@/lib/word/understanding";
 import { IMAGE_MIME_TYPES, imageLimitLabel, imageTooLarge } from "@/lib/cards/imageUploadPolicy";
 import { focusNextSentence, languageBlocksSentenceSave, sentenceExplanationErrorCopy, sentencePairKey, shouldCheckSentenceLanguages, shouldShowGrammarTip, swapSentencePair, type SentenceLanguageValidation } from "@/lib/sentence/cardFormUx";
-
-const IMAGE_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
+import { useCardMediaUrls } from "@/lib/trainer/useCardMediaUrls";
 // A new version gives users who missed the earlier subdued hint one clear introduction.
 const GRAMMAR_TIP_SEEN_KEY = "sentence-grammar-tip-seen-v2";
 
@@ -179,6 +177,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
         checkExistingGermanDetailed,
     } = useTrainerCardDuplicateCheck({ cardType, onStatus: setStatus });
     const media = useTrainerCardMedia({ onStatus: setStatus, onAudioUpdated });
+    const { getCardMediaUrl, resolveCardMediaUrls } = useCardMediaUrls();
     const saveFlow = useTrainerCardSaveFlow({
         cardType,
         mode: editingId ? "update" : "create",
@@ -251,6 +250,15 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
     }
 
     const editingImagePath = editingId ? editImagePath : null;
+    const editingMedia = getCardMediaUrl({ id: editingId, imagePath: editingImagePath, audioPath: media.editAudioPath });
+    useEffect(() => {
+        if (!open) return;
+        const duplicates = Array.isArray(duplicatePreview) ? duplicatePreview.slice(0, 5) : [];
+        void resolveCardMediaUrls([
+            { id: editingId, imagePath: editingImagePath, audioPath: media.editAudioPath },
+            ...duplicates.map((card) => ({ id: card.id, imagePath: card.image_path ?? null, audioPath: card.audio_path ?? null })),
+        ]).catch(() => {});
+    }, [duplicatePreview, editingId, editingImagePath, media.editAudioPath, open, resolveCardMediaUrls]);
     const formSelectedGroups = useMemo(
         () => groups.filter((group) => formGroupIds.includes(group.id)),
         [groups, formGroupIds]
@@ -841,15 +849,16 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         {duplicateCheckKind === "similar" ? "Ähnliche vorhandene Karten:" : "Bereits vorhandene Karten:"}
                     </p>
 
-                    {duplicatePreview.slice(0, 5).map((card: any) => (
-                        <button
+                    {duplicatePreview.slice(0, 5).map((card) => {
+                        const imageUrl = getCardMediaUrl({ id: card.id, imagePath: card.image_path, audioPath: card.audio_path })?.imageUrl ?? null;
+                        return <button
                             key={card.id}
                             type="button"
                             className="w-full flex items-center gap-3 rounded-lg border bg-surface p-2 text-left hover:bg-surface transition"
                             onClick={() => openDuplicateCard(card)}
                         >
-                            {card.image_path ? (
-                                <Image src={`${IMAGE_BASE_URL}/${card.image_path}`} alt="Bild" width={40} height={40} unoptimized className="w-10 h-10 rounded-md object-cover border" />
+                            {card.image_path && imageUrl ? (
+                                <Image src={imageUrl} alt="Bild" width={40} height={40} unoptimized className="w-10 h-10 rounded-md object-cover border" />
                             ) : (
                                 <div className="w-10 h-10 rounded-md border bg-surface flex items-center justify-center text-xs text-muted">
                                     –
@@ -861,8 +870,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                 <CardText className="text-muted">{card.swahili_text}</CardText>
                                 {isSentence && duplicateCheckKind === "strict" ? <span className="mt-1 block text-xs font-semibold">Vorhandene Karte öffnen</span> : null}
                             </div>
-                        </button>
-                    ))}
+                        </button>;
+                    })}
                 </div>
             )}
 
@@ -923,7 +932,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                 cooldownSeconds={media.generationCooldownSeconds}
                 preview={media.generatedPreview}
                 error={media.generationError}
-                currentImageUrl={editingImagePath ? `${IMAGE_BASE_URL}/${editingImagePath}` : null}
+                currentImageUrl={editingMedia?.imageUrl ?? null}
                 selectedImageUrl={media.previewUrl}
                 selectedImagePending={Boolean(media.imageFile)}
                 uploadHint={`JPG, PNG oder WebP${imageMaxBytes !== null ? ` · maximal ${imageLimitLabel(imageMaxBytes)}` : ""}`}
@@ -939,7 +948,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     </label>
                     {media.previewUrl ? <Image src={media.previewUrl} alt="Neues Bild ausgewählt" width={128} height={128} unoptimized className="mt-3 h-32 w-32 rounded-xl border object-cover" /> : null}
                 </div>
-                {editingImagePath ? <div className="mt-4"><div className="mb-2 text-xs text-muted">Aktuelles Bild</div><Image src={`${IMAGE_BASE_URL}/${editingImagePath}`} alt="Aktuelles Bild" width={1024} height={1024} unoptimized className="max-h-56 w-full rounded-2xl border bg-surface object-contain" /></div> : null}
+                {editingImagePath && editingMedia?.imageUrl ? <div className="mt-4"><div className="mb-2 text-xs text-muted">Aktuelles Bild</div><Image src={editingMedia.imageUrl} alt="Aktuelles Bild" width={1024} height={1024} unoptimized className="max-h-56 w-full rounded-2xl border bg-surface object-contain" /></div> : null}
             </>}
             {editingId && editingImagePath ? <button type="button" className="btn btn-utility mt-3 min-h-11 text-[color:var(--accent-danger-strong)] hover:bg-[color:var(--accent-danger-soft)]" disabled={removeImageBusy || saveFlow.isSaveBusy} onClick={() => { setRemoveImageError(null); setRemoveImageConfirmOpen(true); }}>Bild entfernen</button> : null}
             {removeImageError ? <p role="alert" className="mt-2 text-sm text-[color:var(--accent-danger-strong)]">{removeImageError}</p> : null}
@@ -1030,7 +1039,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                     {explanationFieldError === "swahili" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den Kiswahili-Satz ein.</p> : null}
                     {!isSentence && activeSupplement === "audio" ? <div className="word-pair-meta-panel word-audio-panel" aria-label="Aussprache bearbeiten">
                         <div className="flex flex-wrap gap-2">
-                            {media.pendingAudioBlob ? <button type="button" className={audioActionClass} onClick={media.playPendingAudio}>Abspielen</button> : media.editAudioPath ? <button type="button" className={audioActionClass} onClick={() => media.playAudioPath(media.editAudioPath)}>Abspielen</button> : null}
+                            {media.pendingAudioBlob ? <button type="button" className={audioActionClass} onClick={media.playPendingAudio}>Abspielen</button> : media.editAudioPath ? <button type="button" className={audioActionClass} onClick={() => media.playAudioPath(media.editAudioPath, editingMedia?.audioUrl)}>Abspielen</button> : null}
                             <button type="button" className={audioActionClass} onClick={() => editingId ? (media.isRecording ? media.stopRecordingForEdit() : void media.startRecordingForEdit(editingId)) : (media.isRecording ? media.stopRecordingForCreate() : media.startRecordingForCreate())}>{media.isRecording ? editingId ? "Stop & Speichern" : "Stop" : media.pendingAudioBlob || media.editAudioPath ? "Neu aufnehmen" : "Aufnahme starten"}</button>
                         </div>
                         {!editingId ? <p className="mt-2 text-xs text-muted">Wird beim Speichern der Karte hochgeladen.</p> : null}
@@ -1221,7 +1230,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                         <button
                                             type="button"
                                             className={audioActionClass}
-                                            onClick={() => media.playAudioPath(media.editAudioPath)}
+                                            onClick={() => media.playAudioPath(media.editAudioPath, editingMedia?.audioUrl)}
                                         >
                                             Abspielen
                                         </button>

@@ -12,9 +12,7 @@ import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
 import type { WordEnrichment } from "@/lib/word/understanding";
 import { parseSentenceExplanation } from "@/lib/sentence/explanation";
 import { resolveGroupColor } from "@/lib/groups/colors";
-
-const IMAGE_BASE_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
-const AUDIO_BASE_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
+import { useCardMediaUrls } from "@/lib/trainer/useCardMediaUrls";
 
 export type DetailReturn = { card: TrainerLibraryCard; note: string | null };
 
@@ -33,6 +31,7 @@ export default function CardDetailSheet({ card, initialNote = null, onClose, onE
     const audioRef = useRef<HTMLAudioElement>(null);
     const cardId = card ? String(card.id) : null;
     const hasInitialNote = card?.note_preview !== undefined;
+    const { getCardMediaUrl, resolveCardMediaUrls } = useCardMediaUrls();
 
     useEffect(() => {
         if (!cardId) return;
@@ -55,8 +54,14 @@ export default function CardDetailSheet({ card, initialNote = null, onClose, onE
     }, [cardId, hasInitialNote]);
 
     const shown = detail ?? card;
+    const media = getCardMediaUrl({ id: shown?.id, imagePath: shown?.image_path, audioPath: shown?.audio_path });
     const sentence = shown?.type === "sentence";
     const explanation = parseSentenceExplanation(shown?.sentence_explanation);
+
+    useEffect(() => {
+        if (!shown?.id) return;
+        void resolveCardMediaUrls([{ id: shown.id, imagePath: shown.image_path, audioPath: shown.audio_path }]).catch(() => {});
+    }, [resolveCardMediaUrls, shown?.audio_path, shown?.id, shown?.image_path]);
 
     return <FullScreenSheet open={Boolean(card)} title={sentence ? "Satz ansehen" : "Karte ansehen"} presentation="card-detail" onClose={onClose}>
         {loading ? <div className="card-detail-loading" role="status">Karte wird geladen …</div> : shown ? <div className={`card-detail ${!shown.image_path && !sentence ? "without-image" : ""}`} data-testid="card-detail" data-card-kind={sentence ? "sentence" : "vocab"}>
@@ -70,13 +75,13 @@ export default function CardDetailSheet({ card, initialNote = null, onClose, onE
                         <div className="card-detail-term"><span className="card-detail-language">DE</span><h2 className="card-detail-german"><CardText as="span">{shown.german_text}</CardText></h2></div>
                         <div className="card-detail-term card-detail-term--sw"><span className="card-detail-language">SW</span><div className="card-detail-swahili-row">
                             <CardText as="p" className="card-detail-swahili">{shown.swahili_text}</CardText>
-                            {shown.audio_path ? <>
+                            {shown.audio_path && media?.audioUrl ? <>
                                 <button type="button" className={`card-detail-audio ${playing ? "is-playing" : ""}`} onClick={() => { const audio = audioRef.current; if (audio) { audio.currentTime = 0; void audio.play().catch(() => setPlaying(false)); } }} aria-label="Aussprache abspielen" title="Aussprache abspielen" aria-pressed={playing}><SentenceFeatureIcon name="audio" className="h-5 w-5" /></button>
-                                <audio ref={audioRef} src={`${AUDIO_BASE_URL}/${shown.audio_path}`} preload="none" hidden onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setPlaying(false)} />
+                                <audio ref={audioRef} src={media.audioUrl} preload="none" hidden onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setPlaying(false)} />
                             </> : null}
                         </div></div>
                     </div>
-                    {shown.image_path ? <div className="card-detail-art"><Image src={`${IMAGE_BASE_URL}/${shown.image_path}`} alt={`Illustration zu ${shown.swahili_text ?? "dieser Karte"}`} width={480} height={480} unoptimized className="card-detail-image" /></div> : null}
+                    {shown.image_path && media?.imageUrl ? <div className="card-detail-art"><Image src={media.imageUrl} alt={`Illustration zu ${shown.swahili_text ?? "dieser Karte"}`} width={480} height={480} unoptimized className="card-detail-image" /></div> : null}
                     {shown.groups?.length ? <div className="card-detail-meta" aria-label="Gruppen"><div className="card-detail-groups">{shown.groups.map((group) => <span key={group.id}><i className="card-detail-group-dot" style={{ backgroundColor: resolveGroupColor(group.color).hex }} aria-hidden="true" />{group.name}</span>)}</div></div> : null}
                     {note?.trim() ? <aside className="card-detail-note"><SentenceFeatureIcon name="notes" className="h-4 w-4" /><div><span className="card-detail-note-label">Notiz</span><NotePreview value={note} /></div></aside> : null}
                 </div>

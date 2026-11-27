@@ -10,9 +10,7 @@ import { fetchGroups } from "@/lib/groups/api";
 import { blurActiveOverlayElement, lockBodyScroll, unlockBodyScroll } from "@/lib/ui/overlayLock";
 import type { Group } from "@/lib/groups/types";
 import type { WordEnrichment } from "@/lib/word/understanding";
-
-const IMAGE_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
+import { useCardMediaUrls } from "@/lib/trainer/useCardMediaUrls";
 
 type CardResult = {
     id: string | number;
@@ -35,10 +33,6 @@ type Props = {
     onOpen: () => void;
 };
 
-function getImageUrl(path: string) {
-    return `${IMAGE_BASE_URL}/${path}`;
-}
-
 export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: Props) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<CardResult[]>([]);
@@ -52,6 +46,7 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: P
     const [mounted, setMounted] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [editStatus, setEditStatus] = useState<string | null>(null);
+    const { getCardMediaUrl, resolveCardMediaUrls } = useCardMediaUrls();
     const cardFormRef = useRef<TrainerCardFormSheetHandle | null>(null);
     const detailOriginRef = useRef<{ card: CardResult; note: string | null } | null>(null);
 
@@ -174,6 +169,15 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: P
             window.clearTimeout(timeout);
         };
     }, [query, ownerKey, open]);
+
+    useEffect(() => {
+        if (!open || results.length === 0) return;
+        void resolveCardMediaUrls(results.map((card) => ({
+            id: card.id,
+            imagePath: card.image_path,
+            audioPath: card.audio_path,
+        }))).catch(() => {});
+    }, [open, resolveCardMediaUrls, results]);
 
     const ensureGroupsLoaded = useCallback(async () => {
         if (groups.length > 0) return groups;
@@ -342,9 +346,9 @@ export default function GlobalQuickSearch({ ownerKey, open, onClose, onOpen }: P
                                                 onClick={() => { setDetailCard(card); onClose(); }}
                                                 aria-label={`Karte ansehen: ${card.german_text}`}
                                             >
-                                                {card.image_path ? (
+                                                {card.image_path && getCardMediaUrl({ id: card.id, imagePath: card.image_path, audioPath: card.audio_path })?.imageUrl ? (
                                                      <Image
-                                                        src={getImageUrl(card.image_path)}
+                                                        src={getCardMediaUrl({ id: card.id, imagePath: card.image_path, audioPath: card.audio_path })!.imageUrl!}
                                                         alt="Vorschau"
                                                          width={40} height={40} unoptimized
                                                         className="h-10 w-10 rounded-lg border object-cover"

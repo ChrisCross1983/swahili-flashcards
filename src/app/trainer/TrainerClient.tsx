@@ -52,6 +52,7 @@ import { updateLibraryNoteStatus, useTrainerCardLibrary, type TrainerLibraryCard
 import { getTrainerCopy } from "@/lib/trainer/trainerCopy";
 import { formatTrainerDueDate, formatTrainerDueStatus } from "@/lib/trainer/trainerDueDate";
 import { useTrainerChatContext } from "@/lib/trainer/useTrainerChatContext";
+import { useCardMediaUrls, type CardMediaReference } from "@/lib/trainer/useCardMediaUrls";
 
 const LEGACY_KEY_NAME = "ramona_owner_key";
 
@@ -63,10 +64,6 @@ type Props = {
     initialSetupCountsState?: "ready" | "error";
 };
 
-const IMAGE_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-images`;
-const AUDIO_BASE_URL =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/card-audio`;
 const DEBUG_LEITNER = process.env.NEXT_PUBLIC_DEBUG_LEITNER === "1";
 const DEBUG_AUDIO_PERF = process.env.NODE_ENV === "development";
 
@@ -106,6 +103,7 @@ type AudioPerfTrace = {
 type PreparedCardAudio = {
     key: string;
     path: string;
+    url: string;
     audio: HTMLAudioElement;
 };
 
@@ -120,10 +118,17 @@ type CardAudioSource = {
     german?: string | null;
     german_text?: string | null;
     de?: string | null;
+    image_path?: string | null;
+    imagePath?: string | null;
+    image?: string | null;
 };
 
-function getAudioPublicUrl(path: string) {
-    return `${AUDIO_BASE_URL}/${path}`;
+function toCardMediaReference(card: CardAudioSource | null | undefined): CardMediaReference {
+    return {
+        id: card?.cardId ?? card?.card_id ?? card?.id ?? null,
+        imagePath: card?.image_path ?? card?.imagePath ?? card?.image ?? null,
+        audioPath: card?.audio_path ?? null,
+    };
 }
 
 function getCardAudioPath(card: CardAudioSource | null | undefined) {
@@ -186,13 +191,7 @@ function getNetworkStateLabel(value: number) {
 }
 
 function sanitizeAudioSrc(src: string) {
-    if (!src) return "";
-    const base = `${AUDIO_BASE_URL}/`;
-    if (!src.startsWith(base)) return src;
-    const relative = src.slice(base.length);
-    const parts = relative.split("/");
-    if (parts.length <= 1) return "<owner>";
-    return ["<owner>", ...parts.slice(1)].join("/");
+    return src ? "<signed-card-audio>" : "";
 }
 
 function getBufferedSummary(audio: HTMLAudioElement) {
@@ -242,6 +241,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
     const cardLibrary = useTrainerCardLibrary({ itemLabel: cardItemLabel });
     const { cards, setCards } = cardLibrary;
+    const { resolveCardMediaUrls, getCardMediaUrl, invalidateCardMediaUrl } = useCardMediaUrls();
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
     const detailOriginRef = useRef<{ card: TrainerLibraryCard; note: string | null } | null>(null);
@@ -462,13 +462,15 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const prepareCardAudio = useCallback((card: CardAudioSource | null | undefined): PreparedCardAudio | null => {
         const path = getCardAudioPath(card);
         const key = getCardAudioKey(card);
-        if (!path || !key || typeof Audio === "undefined") return null;
+        const url = getCardMediaUrl(toCardMediaReference(card))?.audioUrl;
+        if (!path || !key || !url || typeof Audio === "undefined") return null;
 
         const trace = ensureAudioPerfTrace(card, key, path);
         const existing = preparedCardAudioRef.current.get(key);
-        if (existing) return existing;
+        if (existing?.url === url) return existing;
+        if (existing) resetAudioElement(existing.audio);
 
-        const audio = new Audio(getAudioPublicUrl(path));
+        const audio = new Audio(url);
         audio.preload = "auto";
         attachAudioPerfListeners(audio, key);
         recordAudioPerfEvent(trace, "audio-element-created", {
@@ -485,10 +487,10 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             // Loading can fail transiently; play() will still surface a rejected promise that we intentionally ignore.
         }
 
-        const prepared = { key, path, audio };
+        const prepared = { key, path, url, audio };
         preparedCardAudioRef.current.set(key, prepared);
         return prepared;
-    }, [attachAudioPerfListeners, ensureAudioPerfTrace, recordAudioPerfEvent]);
+    }, [attachAudioPerfListeners, ensureAudioPerfTrace, getCardMediaUrl, recordAudioPerfEvent]);
 
     const playCardAudioIfExists = useCallback((card: CardAudioSource | null | undefined, trigger: "reveal" | "manual" = "manual") => {
         const key = getCardAudioKey(card);
@@ -1085,6 +1087,37 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const nextAudioItem = todayItems[currentIndex + 1] ?? null;
     const currentAudioKey = getCardAudioKey(currentItem);
     const nextAudioKey = getCardAudioKey(nextAudioItem);
+    const currentMedia = getCardMediaUrl(toCardMediaReference(currentItem));
+
+    useEffect(() => {
+        if (!learnStarted) return;
+        const references = [currentItem, nextAudioItem].map(toCardMediaReference);
+        void resolveCardMediaUrls(references).catch(() => {
+            // Fail closed: the card remains usable without a media URL and no
+            // public URL is substituted when authorization/signing fails.
+        });
+    }, [currentItem, learnStarted, nextAudioItem, resolveCardMediaUrls]);
+
+    useEffect(() => {
+        if (!learnStarted || !currentMedia?.expiresAt) return;
+        const remaining = Date.parse(currentMedia.expiresAt) - Date.now();
+        if (!Number.isFinite(remaining)) return;
+        // Refresh before the 60-second cache safety window closes, while the
+        // session is still active. This keeps manual iOS playback synchronous.
+        const timer = window.setTimeout(() => {
+            void resolveCardMediaUrls([currentItem, nextAudioItem].map(toCardMediaReference)).catch(() => {});
+        }, Math.max(1_000, remaining - 59_000));
+        return () => window.clearTimeout(timer);
+    }, [currentItem, currentMedia?.expiresAt, learnStarted, nextAudioItem, resolveCardMediaUrls]);
+
+    useEffect(() => {
+        if (!openCards || cardLibrary.visibleCards.length === 0) return;
+        void resolveCardMediaUrls(cardLibrary.visibleCards.map((card) => ({
+            id: card.id,
+            imagePath: card.image_path ?? null,
+            audioPath: card.audio_path ?? null,
+        }))).catch(() => {});
+    }, [cardLibrary.visibleCards, openCards, resolveCardMediaUrls]);
 
     const removeCurrentAudio = useCallback(async (): Promise<boolean> => {
         const cardId = resolveCardId(todayItems[currentIndex]);
@@ -1101,6 +1134,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             stopAnyAudio();
             const key = getCardAudioKey(todayItems[currentIndex]);
             if (key) preparedCardAudioRef.current.delete(key);
+            invalidateCardMediaUrl(cardId);
             setTodayItems((previous) => previous.map((item) => resolveCardId(item) === cardId ? { ...item, audio_path: null } : item));
             setCards((previous) => previous.map((card) => String(card.id) === cardId ? { ...card, audio_path: null } : card));
             showToast("Audio entfernt.");
@@ -1110,7 +1144,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         } finally {
             audioRemoveLockRef.current = false;
         }
-    }, [currentIndex, setCards, setTodayItems, stopAnyAudio, todayItems]);
+    }, [currentIndex, invalidateCardMediaUrl, setCards, setTodayItems, stopAnyAudio, todayItems]);
 
     const removeCurrentImage = useCallback(async (): Promise<boolean> => {
         const cardId = resolveCardId(todayItems[currentIndex]);
@@ -1124,6 +1158,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             });
             const body = await response.json().catch(() => null) as { card?: { image_path?: string | null } } | null;
             if (!response.ok || body?.card?.image_path !== null) return false;
+            invalidateCardMediaUrl(cardId);
             patchResumeSnapshotCard(ownerKey, cardType, cardId, { image_path: null, imagePath: null, image: null });
             setTodayItems((previous) => previous.map((item) => resolveCardId(item) === cardId ? { ...item, image_path: null, imagePath: null, image: null } : item));
             setCards((previous) => previous.map((card) => String(card.id) === cardId ? { ...card, image_path: null } : card));
@@ -1134,7 +1169,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         } finally {
             imageRemoveLockRef.current = false;
         }
-    }, [cardType, currentIndex, ownerKey, setCards, setTodayItems, todayItems]);
+    }, [cardType, currentIndex, invalidateCardMediaUrl, ownerKey, setCards, setTodayItems, todayItems]);
 
     useEffect(() => {
         if (!DEBUG_AUDIO_PERF) return;
@@ -1891,7 +1926,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                                             answerExample={direction === "DE_TO_SW" ? currentSwahiliExample : currentGermanExample}
                                                             showExamples={cardType === "sentence"}
                                                             imagePath={reveal ? currentImagePath : null}
-                                                            imageBaseUrl={IMAGE_BASE_URL}
+                                                            imageUrl={reveal ? currentMedia?.imageUrl ?? null : null}
                                                             compactVocabExtras={cardType === "vocab"}
                                                             footer={<div className="flex min-w-0 items-center gap-2 border-t border-soft pt-2" data-testid="card-compact-actions">
                                                                 {cardType === "vocab" ? <button type="button" onClick={openCurrentCardGroupsEditor} aria-label={currentItemGroups.length ? "Gruppen bearbeiten" : "Gruppe hinzufügen"} title={currentItemGroups.map((group: Group) => group.name).join(", ")}
@@ -2154,7 +2189,10 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 status={status}
                                 groups={groups}
                                 isSentenceTrainer={isSentenceTrainer}
-                                imageBaseUrl={IMAGE_BASE_URL}
+                                mediaByCardId={Object.fromEntries(cardLibrary.visibleCards.flatMap((card) => {
+                                    const media = getCardMediaUrl({ id: card.id, imagePath: card.image_path ?? null, audioPath: card.audio_path ?? null });
+                                    return media ? [[String(card.id), media]] : [];
+                                }))}
                                 selectionMode={cardLibrary.selectionMode}
                                 selectedIds={cardLibrary.selectedIds}
                                 selectedTotalCount={cardLibrary.selectedTotalCount}

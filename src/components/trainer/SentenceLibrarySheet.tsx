@@ -27,7 +27,7 @@ export default function SentenceLibrarySheet({
     open,
     title,
     isSentenceTrainer,
-    imageBaseUrl,
+    mediaByCardId = {},
     cardsLoadState,
     cardsLoadError,
     status,
@@ -211,7 +211,7 @@ export default function SentenceLibrarySheet({
                     if (!isSentenceTrainer) return <WordLibraryCard
                         key={id}
                         card={card}
-                        imageBaseUrl={imageBaseUrl}
+                        imageUrl={mediaByCardId[id]?.imageUrl ?? null}
                         selected={selected}
                         selectionMode={selectionMode}
                         actionOpen={actionOpen}

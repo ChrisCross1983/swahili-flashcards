@@ -6,6 +6,7 @@ import type { LibrarySortOrder } from "@/lib/trainer/cardLibraryBehavior";
 import type { WordEnrichment } from "@/lib/word/understanding";
 import type { DetailReturn } from "@/components/trainer/CardDetailSheet";
 import SentenceLibrarySheet from "@/components/trainer/SentenceLibrarySheet";
+import type { AuthorizedCardMedia } from "@/lib/trainer/useCardMediaUrls";
 
 export type TrainerCardLibrarySheetProps = {
     open: boolean;
@@ -15,7 +16,9 @@ export type TrainerCardLibrarySheetProps = {
     status: string;
     groups: Group[];
     isSentenceTrainer: boolean;
-    imageBaseUrl: string;
+    mediaByCardId?: Record<string, AuthorizedCardMedia>;
+    /** @deprecated Compatibility-only; never used to build a media URL. */
+    imageBaseUrl?: string;
     selectionMode: boolean;
     selectedIds: Set<string>;
     selectedTotalCount: number;

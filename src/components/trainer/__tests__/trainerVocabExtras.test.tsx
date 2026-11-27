@@ -18,7 +18,7 @@ const withoutImage = <TrainerVocabExtras cardId="test-card" german="Buch" swahil
 describe("compact vocabulary learning flow", () => {
     it("shows accessible learning actions before the compact image after reveal", () => {
         const render = (reveal: boolean) => renderToStaticMarkup(<TrainerCard
-            reveal={reveal} prompt="Buch" answer="kitabu" imagePath="test.webp" imageBaseUrl="https://example.test/images"
+            reveal={reveal} prompt="Buch" answer="kitabu" imagePath="test.webp" imageUrl="https://example.test/images/test.webp"
             compactVocabExtras learningFeature={extras(true)} onOpenLearningHelp={vi.fn()}
         />);
         const front = render(false);

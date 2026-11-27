@@ -10,7 +10,7 @@ const handlers = {
     onToggleSelected: vi.fn(), onToggleActions: vi.fn(), onPlayAudio: vi.fn(),
     onEditCard: vi.fn(), onViewCard: vi.fn(), onOpenCardGroupsEditor: vi.fn(), onDeleteCard: vi.fn(),
 };
-const base = { imageBaseUrl: "https://example.test/images", selected: false, selectionMode: false, actionOpen: false, ...handlers };
+const base = { imageUrl: "https://example.test/images/signed-thumbnail", selected: false, selectionMode: false, actionOpen: false, ...handlers };
 const render = (card: TrainerLibraryCard) => renderToStaticMarkup(<WordLibraryCard {...base} card={card} />);
 
 describe("WordLibraryCard", () => {

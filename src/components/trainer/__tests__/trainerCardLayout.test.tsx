@@ -13,7 +13,7 @@ describe("trainer card layout", () => {
         for (const prompt of ["Hund", "Der Hund schläft."]) {
             const render = (reveal: boolean) => renderToStaticMarkup(<TrainerCard
                 reveal={reveal} prompt={prompt} answer="mbwa" imagePath="dog.webp"
-                imageBaseUrl="https://example.com/images"
+                imageUrl="https://example.com/images/dog.webp"
             />);
             const front = render(false);
             expect(front).not.toContain("Kartenbild");
@@ -25,7 +25,7 @@ describe("trainer card layout", () => {
     it("places vocabulary learning actions before the compact stored image without an empty placeholder", () => {
         const render = (reveal: boolean, imagePath: string | null) => renderToStaticMarkup(<TrainerCard
             reveal={reveal} prompt="Ein sehr langes zusammenhängendes Vokabelwort" answer="Übersetzung"
-            imagePath={imagePath} imageBaseUrl="https://example.com/images" compactVocabExtras
+            imagePath={imagePath} imageUrl={imagePath ? `https://example.com/images/${imagePath}` : null} compactVocabExtras
             learningFeature={reveal ? <div data-testid="learning-actions">Lernhilfen</div> : null}
         />);
         const front = render(false, "word.webp");
