@@ -25,6 +25,8 @@ export type TrainerLibraryCard = {
     [key: string]: unknown;
 };
 
+export type CardMediaFilter = "all" | "with-image" | "with-audio" | "without-image";
+
 export function updateLibraryNoteStatus(cards: TrainerLibraryCard[], cardId: string, mainNotes: string): TrainerLibraryCard[] {
     const hasNote = mainNotes.trim().length > 0;
     return cards.map((card) => String(card.id) === cardId ? { ...card, has_note: hasNote || (card.type === "sentence" && Boolean(card.note_preview?.memory_hint?.trim() || card.note_preview?.example_sentence?.trim() || card.note_preview?.confusion_note?.trim())), note_preview: { ...card.note_preview, main_notes: mainNotes } } : card);
@@ -52,33 +54,39 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
     const [groupFilter, setGroupFilterState] = useState<string[]>([]);
     const [searchQuery, setSearchQueryState] = useState("");
     const [sortOrder, setSortOrder] = useState<LibrarySortOrder>("recent");
+    const [mediaFilter, setMediaFilterState] = useState<CardMediaFilter>("all");
+    const [serverTotal, setServerTotal] = useState<number | null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(CARD_LIBRARY_PAGE_SIZE);
     const [duplicateReviewOpen, setDuplicateReviewOpen] = useState(false);
 
     const hasActiveGroupFilter = groupFilter.length > 0;
+    const hasActiveMediaFilter = mediaFilter !== "all";
+    const usesServerPagination = serverTotal !== null;
 
     const filteredCards = useMemo(
-        () => filterAndSortLibraryCards(cards, searchQuery, groupFilter, sortOrder),
-        [cards, groupFilter, searchQuery, sortOrder]
+        () => usesServerPagination ? cards : filterAndSortLibraryCards(cards, searchQuery, groupFilter, sortOrder),
+        [cards, groupFilter, searchQuery, sortOrder, usesServerPagination]
     );
 
     const visibleCards = useMemo(
-        () => getVisibleCards(filteredCards, visibleCount),
-        [filteredCards, visibleCount]
+        () => usesServerPagination ? filteredCards : getVisibleCards(filteredCards, visibleCount),
+        [filteredCards, usesServerPagination, visibleCount]
     );
 
     const countLabel = useMemo(() => getLibraryCountLabel({
         visible: visibleCards.length,
-        total: filteredCards.length,
-        filtered: hasActiveGroupFilter || Boolean(searchQuery.trim()),
+        total: serverTotal ?? filteredCards.length,
+        filtered: hasActiveGroupFilter || hasActiveMediaFilter || Boolean(searchQuery.trim()),
         itemLabel: params.itemLabel,
-    }), [filteredCards.length, hasActiveGroupFilter, searchQuery, params.itemLabel, visibleCards.length]);
+    }), [filteredCards.length, hasActiveGroupFilter, hasActiveMediaFilter, searchQuery, params.itemLabel, serverTotal, visibleCards.length]);
 
     const canLoadMore = useMemo(
-        () => shouldShowLoadMore(filteredCards.length, visibleCount),
-        [filteredCards.length, visibleCount]
+        () => usesServerPagination
+            ? filteredCards.length < (serverTotal ?? 0)
+            : shouldShowLoadMore(filteredCards.length, visibleCount),
+        [filteredCards.length, serverTotal, usesServerPagination, visibleCount]
     );
 
     const selectedVisibleCount = useMemo(
@@ -107,6 +115,22 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
     const setSearchQuery = useCallback((query: string) => {
         setSearchQueryState(query);
         setVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+    }, []);
+
+    const setMediaFilter = useCallback((filter: CardMediaFilter) => {
+        setMediaFilterState(filter);
+        setVisibleCount(CARD_LIBRARY_PAGE_SIZE);
+        setSelectedIds(clearSelection());
+    }, []);
+
+    const applyServerPage = useCallback((nextCards: TrainerLibraryCard[], total: number, append = false) => {
+        setServerTotal(Math.max(0, total));
+        setCards((previous) => {
+            if (!append) return nextCards;
+            const byId = new Map(previous.map((card) => [String(card.id), card]));
+            for (const card of nextCards) byId.set(String(card.id), card);
+            return Array.from(byId.values());
+        });
     }, []);
 
     const toggleSelected = useCallback((cardId: string | number) => {
@@ -144,6 +168,11 @@ export function useTrainerCardLibrary(params: UseTrainerCardLibraryParams = {}) 
         setSearchQuery,
         sortOrder,
         setSortOrder,
+        mediaFilter,
+        setMediaFilter,
+        hasActiveMediaFilter,
+        applyServerPage,
+        serverTotal,
         setGroupFilter,
         hasActiveGroupFilter,
         selectedIds,

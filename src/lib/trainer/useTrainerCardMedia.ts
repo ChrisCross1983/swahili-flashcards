@@ -59,6 +59,7 @@ export function useTrainerCardMedia({
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<BlobPart[]>([]);
     const audioElRef = useRef<HTMLAudioElement | null>(null);
+    const audioRemovalLock = useRef(false);
 
     useEffect(() => {
         if (!imageFile) {
@@ -264,6 +265,34 @@ export function useTrainerCardMedia({
         setIsRecording(false);
     }
 
+    async function removeAudioForEdit(cardId: string | null): Promise<boolean> {
+        const resolvedCardId = String(cardId ?? "").trim();
+        if (!resolvedCardId || audioRemovalLock.current) return false;
+        audioRemovalLock.current = true;
+        try {
+            const response = await fetch("/api/upload-audio", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cardId: resolvedCardId }),
+            });
+            const body = await response.json().catch(() => null) as { audio_path?: string | null; error?: string } | null;
+            if (!response.ok || body?.audio_path !== null) {
+                onStatus(body?.error ?? "Audio konnte nicht entfernt werden.");
+                return false;
+            }
+            stopAnyAudio();
+            setEditAudioPath(null);
+            onAudioUpdated(resolvedCardId, null);
+            onStatus("Audio entfernt.");
+            return true;
+        } catch {
+            onStatus("Audio konnte nicht entfernt werden.");
+            return false;
+        } finally {
+            audioRemovalLock.current = false;
+        }
+    }
+
     return {
         imageFile,
         setImageFile,
@@ -292,5 +321,6 @@ export function useTrainerCardMedia({
         stopRecordingForCreate,
         startRecordingForEdit,
         stopRecordingForEdit,
+        removeAudioForEdit,
     };
 }

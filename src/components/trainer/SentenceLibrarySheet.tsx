@@ -9,6 +9,7 @@ import SentenceLibraryCard from "@/components/trainer/SentenceLibraryCard";
 import CardDetailSheet from "@/components/trainer/CardDetailSheet";
 import type { TrainerCardLibrarySheetProps } from "@/components/trainer/TrainerCardLibrarySheet";
 import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import type { CardMediaFilter } from "@/lib/trainer/useTrainerCardLibrary";
 import type { LibrarySortOrder } from "@/lib/trainer/cardLibraryBehavior";
 
 function LibraryIcon({ name, className = "h-4 w-4" }: { name: "more" | "check" | "edit" | "trash" | "chevron" | "close"; className?: string }) {
@@ -41,7 +42,10 @@ export default function SentenceLibrarySheet({
     onSearchQueryChange,
     sortOrder,
     onSortOrderChange,
+    mediaFilter,
+    onMediaFilterChange,
     hasActiveGroupFilter,
+    hasActiveMediaFilter,
     visibleCards,
     filteredCardsCount,
     canLoadMore,
@@ -153,6 +157,22 @@ export default function SentenceLibrarySheet({
                     <LibraryIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 </div>
 
+                {!isSentenceTrainer ? <div className="sentence-library-filter">
+                    <span className="sr-only" id="sentence-library-media-filter-label">Nach Medien filtern</span>
+                    <select
+                        aria-labelledby="sentence-library-media-filter-label"
+                        value={mediaFilter}
+                        onChange={(event) => onMediaFilterChange(event.target.value as CardMediaFilter)}
+                        className="sentence-library-select"
+                    >
+                        <option value="all">Alle Medien</option>
+                        <option value="with-image">Mit Bild</option>
+                        <option value="with-audio">Mit Audio</option>
+                        <option value="without-image">Ohne Bild</option>
+                    </select>
+                    <LibraryIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                </div> : null}
+
                 {!isSentenceTrainer ? <div className="sentence-library-sort"><select aria-label="Karten sortieren" className="sentence-library-select" value={sortOrder} onChange={(event) => onSortOrderChange(event.target.value as LibrarySortOrder)}><option value="recent">Zuletzt hinzugefügt</option><option value="az">A–Z</option><option value="za">Z–A</option></select><LibraryIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /></div> : null}
 
                 <button type="button" className={`sentence-library-toolbar-button ${selectionMode ? "is-active" : ""}`} onClick={selectionMode ? finishSelection : beginSelection} aria-pressed={selectionMode} aria-label={selectionMode ? "Auswahl beenden" : "Mehrfachauswahl"}>
@@ -172,9 +192,9 @@ export default function SentenceLibrarySheet({
                 </div>
             </div>
 
-            {hasActiveGroupFilter ? <div className="sentence-library-active-filter">
-                <span className="inline-flex min-w-0 items-center gap-2"><GroupColorDot color={activeGroup?.color} /><span className="truncate">Gruppe: {activeGroup?.name ?? "Ausgewählt"}</span></span>
-                <button type="button" onClick={() => onGroupFilterChange([])} className="sentence-library-filter-reset"><LibraryIcon name="close" className="h-3.5 w-3.5" />Filter zurücksetzen</button>
+            {hasActiveGroupFilter || hasActiveMediaFilter ? <div className="sentence-library-active-filter">
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-2">{hasActiveGroupFilter ? <span className="inline-flex min-w-0 items-center gap-2"><GroupColorDot color={activeGroup?.color} /><span className="truncate">Gruppe: {activeGroup?.name ?? "Ausgewählt"}</span></span> : null}{hasActiveMediaFilter ? <span>{mediaFilter === "with-image" ? "Mit Bild" : mediaFilter === "with-audio" ? "Mit Audio" : "Ohne Bild"}</span> : null}</span>
+                <button type="button" onClick={() => { onGroupFilterChange([]); onMediaFilterChange("all"); }} className="sentence-library-filter-reset"><LibraryIcon name="close" className="h-3.5 w-3.5" />Filter zurücksetzen</button>
             </div> : null}
 
             {selectionMode ? <div className="sentence-library-selection-bar" role="status">
@@ -198,9 +218,9 @@ export default function SentenceLibrarySheet({
 
             {cardsLoadState === "loaded" && filteredCardsCount === 0 ? <div className="sentence-library-empty">
                 <span className="sentence-library-empty-icon"><SentenceFeatureIcon name="notes" className="h-6 w-6" /></span>
-                <p className="mt-4 text-xl font-bold tracking-tight">{searchQuery.trim() && !isSentenceTrainer ? "Keine passenden Karten gefunden." : hasActiveGroupFilter ? `${noun} in dieser Gruppe nicht gefunden` : isSentenceTrainer ? "Noch keine Sätze" : "Noch keine Wörter"}</p>
-                <p className="mt-2 max-w-sm text-sm text-muted">{hasActiveGroupFilter ? `Wähle eine andere Gruppe oder zeige wieder alle ${noun} an.` : isSentenceTrainer ? "Lege deinen ersten Satz an und baue deine eigene Lernsammlung auf." : "Lege dein erstes Wort an und baue deine persönliche Lernsammlung auf."}</p>
-                {searchQuery.trim() && !isSentenceTrainer ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onSearchQueryChange("")}>Suche zurücksetzen</button> : hasActiveGroupFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onGroupFilterChange([])}>{`Alle ${noun} anzeigen`}</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>{isSentenceTrainer ? "Ersten Satz anlegen" : "Erstes Wort anlegen"}</button>}
+                <p className="mt-4 text-xl font-bold tracking-tight">{searchQuery.trim() && !isSentenceTrainer ? "Keine passenden Karten gefunden." : hasActiveGroupFilter ? `${noun} in dieser Gruppe nicht gefunden` : hasActiveMediaFilter ? "Keine Karten mit diesem Medienfilter gefunden." : isSentenceTrainer ? "Noch keine Sätze" : "Noch keine Wörter"}</p>
+                <p className="mt-2 max-w-sm text-sm text-muted">{hasActiveGroupFilter || hasActiveMediaFilter ? `Passe die Filter an oder zeige wieder alle ${noun} an.` : isSentenceTrainer ? "Lege deinen ersten Satz an und baue deine eigene Lernsammlung auf." : "Lege dein erstes Wort an und baue deine persönliche Lernsammlung auf."}</p>
+                {searchQuery.trim() && !isSentenceTrainer ? <button type="button" className="btn btn-secondary mt-5" onClick={() => onSearchQueryChange("")}>Suche zurücksetzen</button> : hasActiveGroupFilter || hasActiveMediaFilter ? <button type="button" className="btn btn-secondary mt-5" onClick={() => { onGroupFilterChange([]); onMediaFilterChange("all"); }}>{`Alle ${noun} anzeigen`}</button> : <button type="button" className="btn btn-primary mt-5" onClick={onCreateSentence}>{isSentenceTrainer ? "Ersten Satz anlegen" : "Erstes Wort anlegen"}</button>}
             </div> : null}
 
             {cardsLoadState === "loaded" && visibleCards.length > 0 ? <div className={`sentence-library-grid ${!isSentenceTrainer ? "word-library-grid" : ""}`}>

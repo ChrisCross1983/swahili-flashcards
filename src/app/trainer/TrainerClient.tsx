@@ -240,7 +240,15 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     const [cardsLoadState, setCardsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
     const [cardsLoadError, setCardsLoadError] = useState<string | null>(null);
     const cardLibrary = useTrainerCardLibrary({ itemLabel: cardItemLabel });
-    const { cards, setCards } = cardLibrary;
+    const {
+        cards,
+        setCards,
+        applyServerPage,
+        groupFilter: libraryGroupFilter,
+        mediaFilter: libraryMediaFilter,
+        searchQuery: librarySearchQuery,
+        sortOrder: librarySortOrder,
+    } = cardLibrary;
     const { resolveCardMediaUrls, getCardMediaUrl, invalidateCardMediaUrl } = useCardMediaUrls();
     const [openLearn, setOpenLearn] = useState(false);
     const [openCards, setOpenCards] = useState(false);
@@ -810,7 +818,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         setIsRecording(false);
     }
 
-    async function loadCards(q?: string, opts?: { silent?: boolean }) {
+    const loadCards = useCallback(async (q?: string, opts?: { silent?: boolean; append?: boolean; offset?: number }) => {
         const silent = opts?.silent ?? false;
 
         if (!silent) setStatus("Lade Karten...");
@@ -820,10 +828,16 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
         try {
             const searchParams = new URLSearchParams({
                 type: cardType,
+                limit: "50",
+                offset: String(opts?.offset ?? 0),
+                sort: librarySortOrder,
+                media: libraryMediaFilter,
             });
-            if (q && q.trim().length > 0) {
-                searchParams.set("q", q);
+            const query = q ?? librarySearchQuery;
+            if (query.trim().length > 0) {
+                searchParams.set("q", query);
             }
+            if (libraryGroupFilter.length > 0) searchParams.set("groupIds", libraryGroupFilter.join(","));
             const url = `/api/cards?${searchParams.toString()}`;
 
             const res = await fetch(url);
@@ -838,9 +852,12 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             }
 
             const nextCards = Array.isArray((json as { cards?: unknown[] }).cards)
-                ? (json as { cards: any[] }).cards
+                ? (json as { cards: TrainerLibraryCard[] }).cards
                 : [];
-            setCards(nextCards);
+            const total = typeof (json as { total?: unknown }).total === "number"
+                ? Math.max(0, (json as { total: number }).total)
+                : nextCards.length;
+            applyServerPage(nextCards, total, opts?.append ?? false);
             setCardsLoadState("loaded");
             if (!silent) setStatus("");
         } catch (error) {
@@ -849,7 +866,15 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
             setCardsLoadError(message);
             if (!silent) setStatus(message);
         }
-    }
+    }, [applyServerPage, cardType, libraryGroupFilter, libraryMediaFilter, librarySearchQuery, librarySortOrder]);
+
+    useEffect(() => {
+        if (!openCards) return;
+        const timer = window.setTimeout(() => {
+            void loadCards(undefined, { silent: true });
+        }, librarySearchQuery.trim() ? 180 : 0);
+        return () => window.clearTimeout(timer);
+    }, [libraryGroupFilter, libraryMediaFilter, librarySearchQuery, librarySortOrder, loadCards, openCards]);
 
     function applyDeletedCards(deletedIds: string[]) {
         if (deletedIds.length === 0) return;
@@ -1653,8 +1678,10 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
     function openCardLibrary() {
         setStatus("");
         cardLibrary.resetVisibleWindow();
+        setCardsLoadState("loading");
+        setCardsLoadError(null);
         setOpenCards(true);
-        void Promise.all([loadCards(), ensureGroups()]);
+        void ensureGroups();
     }
 
     function openManageGroups() {
@@ -2133,6 +2160,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                     showToast("Karte gelöscht ✅");
                                 }}
                                 onAudioUpdated={(cardId, audioPath) => {
+                                    invalidateCardMediaUrl(cardId);
                                     if (detailOriginRef.current && String(detailOriginRef.current.card.id) === String(cardId)) {
                                         detailOriginRef.current = { ...detailOriginRef.current, card: { ...detailOriginRef.current.card, audio_path: audioPath } };
                                     }
@@ -2202,7 +2230,10 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 onSearchQueryChange={cardLibrary.setSearchQuery}
                                 sortOrder={cardLibrary.sortOrder}
                                 onSortOrderChange={cardLibrary.setSortOrder}
+                                mediaFilter={cardLibrary.mediaFilter}
+                                onMediaFilterChange={cardLibrary.setMediaFilter}
                                 hasActiveGroupFilter={cardLibrary.hasActiveGroupFilter}
+                                hasActiveMediaFilter={cardLibrary.hasActiveMediaFilter}
                                 visibleCards={cardLibrary.visibleCards}
                                 filteredCardsCount={cardLibrary.filteredCards.length}
                                 canLoadMore={cardLibrary.canLoadMore}
@@ -2222,7 +2253,7 @@ export default function TrainerClient({ ownerKey, userEmail, cardType = "vocab",
                                 onGroupFilterChange={cardLibrary.setGroupFilter}
                                 onOpenDuplicateReview={cardLibrary.openDuplicateReview}
                                 onOpenManageGroups={openManageGroups}
-                                onLoadMore={cardLibrary.loadMore}
+                                onLoadMore={() => void loadCards(undefined, { silent: true, append: true, offset: cardLibrary.cards.length })}
                                 onToggleSelected={cardLibrary.toggleSelected}
                                 onPlayAudio={playCardAudioIfExists}
                                 onEditCard={(card) => {

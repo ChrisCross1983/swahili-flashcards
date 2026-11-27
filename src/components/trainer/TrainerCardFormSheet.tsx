@@ -1026,7 +1026,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. Habari za asubuhi"
                         rows={2}
-                    /> : <div className="word-swahili-control"><input
+                    /> : <input
                         id={`trainer-${cardType}-swahili`}
                         ref={swahiliWordInputRef}
                         className="sentence-textarea word-input mt-2"
@@ -1035,15 +1035,8 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         onChange={(e) => handlePrimaryFieldChange(setSwahili, e.target.value)}
                         placeholder="z.B. paka"
                         autoComplete="off"
-                    /><button type="button" className={`word-pair-audio ${media.pendingAudioBlob || media.editAudioPath ? "is-present" : ""}`} aria-label={media.pendingAudioBlob || media.editAudioPath ? "Aussprache bearbeiten" : "Aussprache aufnehmen"} title={media.pendingAudioBlob || media.editAudioPath ? "Aussprache bearbeiten" : "Aussprache aufnehmen"} aria-expanded={activeSupplement === "audio"} onClick={() => toggleSupplement("audio")}><SentenceFeatureIcon name="audio" className="h-5 w-5" /></button></div>}
+                    />}
                     {explanationFieldError === "swahili" ? <p className="mt-1 text-sm text-red-700" role="alert">Bitte gib zuerst den Kiswahili-Satz ein.</p> : null}
-                    {!isSentence && activeSupplement === "audio" ? <div className="word-pair-meta-panel word-audio-panel" aria-label="Aussprache bearbeiten">
-                        <div className="flex flex-wrap gap-2">
-                            {media.pendingAudioBlob ? <button type="button" className={audioActionClass} onClick={media.playPendingAudio}>Abspielen</button> : media.editAudioPath ? <button type="button" className={audioActionClass} onClick={() => media.playAudioPath(media.editAudioPath, editingMedia?.audioUrl)}>Abspielen</button> : null}
-                            <button type="button" className={audioActionClass} onClick={() => editingId ? (media.isRecording ? media.stopRecordingForEdit() : void media.startRecordingForEdit(editingId)) : (media.isRecording ? media.stopRecordingForCreate() : media.startRecordingForCreate())}>{media.isRecording ? editingId ? "Stop & Speichern" : "Stop" : media.pendingAudioBlob || media.editAudioPath ? "Neu aufnehmen" : "Aufnahme starten"}</button>
-                        </div>
-                        {!editingId ? <p className="mt-2 text-xs text-muted">Wird beim Speichern der Karte hochgeladen.</p> : null}
-                    </div> : null}
                     </div>
                     </div>
                     {!isSentence ? <div className="word-pair-meta" aria-label="Kartenmetadaten">
@@ -1159,7 +1152,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
 
                     </SentenceFormDisclosure> : null}
 
-                    {isSentence ? <SentenceFormDisclosure sentence={isSentence} title="Aussprache" icon="audio" present={Boolean(media.pendingAudioBlob || media.editAudioPath)} description={isSentence ? undefined : "Nimm deine Aussprache auf."} open={activeSupplement === "audio"} onToggle={() => toggleSupplement("audio")}>
+                    <SentenceFormDisclosure sentence={isSentence} title="Aussprache & Audio" icon="audio" present={Boolean(media.pendingAudioBlob || media.editAudioPath)} description="Aufnahme anhören, erstellen oder ersetzen." open={activeSupplement === "audio"} onToggle={() => toggleSupplement("audio")}>
                     {!editingId && (
                         <div className="pt-1">
 
@@ -1252,6 +1245,15 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                                                 Stop & Speichern
                                             </button>
                                         )}
+                                        {!media.isRecording ? (
+                                            <button
+                                                type="button"
+                                                className="btn btn-ghost text-accent-cta"
+                                                onClick={() => void media.removeAudioForEdit(editingId)}
+                                            >
+                                                Audio entfernen
+                                            </button>
+                                        ) : null}
                                     </>
                                 ) : (
                                     <>
@@ -1282,7 +1284,7 @@ const TrainerCardFormSheet = forwardRef<TrainerCardFormSheetHandle, Props>(funct
                         </div>
                     )}
 
-                    </SentenceFormDisclosure> : null}
+                    </SentenceFormDisclosure>
 
                     {!isSentence ? notesFeature : null}
                     {isSentence ? imageFeature : null}

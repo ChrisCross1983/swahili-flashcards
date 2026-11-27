@@ -14,6 +14,23 @@ import { cardImageBucket, isOwnerStoragePath, removeStoragePaths } from "@/lib/s
 import { withServerDiagnostics } from "@/lib/diagnostics/server";
 import { requireUserWithPerformance, ServerPerformanceAudit } from "@/lib/server/performanceAudit";
 
+type CardMediaFilter = "all" | "with-image" | "with-audio" | "without-image";
+type CardLibrarySort = "recent" | "az" | "za";
+
+function parseCardMediaFilter(value: string | null): CardMediaFilter {
+    return value === "with-image" || value === "with-audio" || value === "without-image" ? value : "all";
+}
+
+function parseCardLibrarySort(value: string | null): CardLibrarySort {
+    return value === "az" || value === "za" ? value : "recent";
+}
+
+function parseCardLibraryPage(value: string | null): number | null {
+    if (value === null) return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 0 ? Math.min(parsed, 10_000) : null;
+}
+
 async function cleanupCardImage(path: string | null | undefined, ownerKey: string, stage: string) {
     if (!isOwnerStoragePath(path, ownerKey)) return;
     try {
@@ -193,6 +210,11 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
     const id = searchParams.get("id");
     const resolvedType = resolveCardTypeFilter(searchParams.get("type"));
     const groupIds = parseGroupIds(searchParams);
+    const mediaFilter = parseCardMediaFilter(searchParams.get("media"));
+    const librarySort = parseCardLibrarySort(searchParams.get("sort"));
+    const pageSize = parseCardLibraryPage(searchParams.get("limit"));
+    const pageOffset = parseCardLibraryPage(searchParams.get("offset")) ?? 0;
+    const usesPagination = !id && pageSize !== null;
     let allowedCardIds: string[] | null;
 
     try {
@@ -212,12 +234,12 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
 
     if (allowedCardIds && allowedCardIds.length === 0) {
         if (id) return audit.response(NextResponse.json({ card: null }), { groupFilterIds: 0 });
-        return audit.response(NextResponse.json({ cards: [] }), { groupFilterIds: 0 });
+        return audit.response(NextResponse.json(usesPagination ? { cards: [], total: 0 } : { cards: [] }), { groupFilterIds: 0 });
     }
 
     let query = supabaseServer
         .from("cards")
-        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, created_at, type")
+        .select("id, german_text, swahili_text, german_example, swahili_example, image_path, audio_path, sentence_explanation, created_at, type", usesPagination ? { count: "exact" } : undefined)
         .eq("owner_key", ownerKey);
 
     if (id) query = query.eq("id", id);
@@ -230,11 +252,19 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
         query = query.or(`german_text.ilike.%${q}%,swahili_text.ilike.%${q}%`);
     }
 
-    const { data, error } = await audit.measure("cards_query", async () => id
-        ? await query
-        : await query.order("created_at", {
-            ascending: false,
-        }));
+    if (mediaFilter === "with-image") query = query.not("image_path", "is", null);
+    if (mediaFilter === "with-audio") query = query.not("audio_path", "is", null);
+    if (mediaFilter === "without-image") query = query.is("image_path", null);
+
+    const { data, error, count } = await audit.measure("cards_query", async () => {
+        if (id) return query;
+        const ordered = librarySort === "recent"
+            ? query.order("created_at", { ascending: false })
+            : query.order("german_text", { ascending: librarySort === "az" });
+        return usesPagination
+            ? ordered.range(pageOffset, pageOffset + Math.min(pageSize ?? 50, 100) - 1)
+            : ordered;
+    });
 
     if (error) {
         console.error(error);
@@ -294,6 +324,7 @@ export const GET = withServerDiagnostics("/api/cards", async (req, diagnostics) 
     const transformStartedAt = performance.now();
     const result = NextResponse.json({
         cards: cards.map((card) => ({ ...card, has_note: hasCardNote(notesByCard.get(String(card.id)) ?? {}, card.type), note_preview: notesByCard.get(String(card.id)) ?? null, groups: groupsByCard.get(String(card.id)) ?? [], word_enrichment: wordUnderstandingByCard.get(String(card.id)) ?? null })),
+        ...(usesPagination ? { total: count ?? cards.length } : {}),
     });
     audit.mark("transform", transformStartedAt);
     return audit.response(result, {

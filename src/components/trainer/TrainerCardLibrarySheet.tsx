@@ -1,7 +1,7 @@
 "use client";
 
 import type { Group } from "@/lib/groups/types";
-import type { TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
+import type { CardMediaFilter, TrainerLibraryCard } from "@/lib/trainer/useTrainerCardLibrary";
 import type { LibrarySortOrder } from "@/lib/trainer/cardLibraryBehavior";
 import type { WordEnrichment } from "@/lib/word/understanding";
 import type { DetailReturn } from "@/components/trainer/CardDetailSheet";
@@ -28,7 +28,10 @@ export type TrainerCardLibrarySheetProps = {
     onSearchQueryChange: (query: string) => void;
     sortOrder: LibrarySortOrder;
     onSortOrderChange: (order: LibrarySortOrder) => void;
+    mediaFilter: CardMediaFilter;
+    onMediaFilterChange: (filter: CardMediaFilter) => void;
     hasActiveGroupFilter: boolean;
+    hasActiveMediaFilter: boolean;
     visibleCards: TrainerLibraryCard[];
     filteredCardsCount: number;
     canLoadMore: boolean;

@@ -61,7 +61,7 @@ describe("phase 2 product UX cleanup", () => {
         expect(trainerCardFormSource).toContain("Wortpaar");
         expect(trainerCardFormSource).toContain('title={isSentence ? "Bild" : "Illustration"}');
         expect(trainerCardFormSource).toContain('title="Gruppe"');
-        expect(trainerCardFormSource).toContain('title="Aussprache"');
+        expect(trainerCardFormSource).toContain('title="Aussprache & Audio"');
         expect(trainerCardFormSource).toContain('title="Notizen"');
         expect(trainerCardFormSource).not.toContain('title="Beispiele"');
         expect(trainerCardFormSource).toContain("<NoteEditor");

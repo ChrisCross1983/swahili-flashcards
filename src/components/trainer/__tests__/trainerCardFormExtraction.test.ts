@@ -60,7 +60,7 @@ describe("trainer card form extraction", () => {
         expect(formSource).not.toContain('title="Beispiele"');
         expect(formSource).toContain('title="Notizen"');
         expect(formSource).toContain('title="Gruppe"');
-        expect(formSource).toContain('title="Aussprache"');
+        expect(formSource).toContain('title="Aussprache & Audio"');
         expect(formSource).toContain('formNoteText: formNoteDraft.mainNotes');
         expect(formSource).toContain('<SentenceExplanationContent explanation={explanationPreview} />');
     });

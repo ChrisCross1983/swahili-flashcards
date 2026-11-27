@@ -23,7 +23,10 @@ const baseProps = {
     onSearchQueryChange: vi.fn(),
     sortOrder: "recent" as const,
     onSortOrderChange: vi.fn(),
+    mediaFilter: "all" as const,
+    onMediaFilterChange: vi.fn(),
     hasActiveGroupFilter: false,
+    hasActiveMediaFilter: false,
     visibleCards: [
         { id: "1", german_text: "bitte", swahili_text: "tafadhali", groups: [{ id: "g1", name: "Alltag", color: null }] },
         { id: "2", german_text: "danke", swahili_text: "asante", image_path: "card.png", audio_path: "card.mp3", groups: [] },
@@ -59,6 +62,7 @@ describe("TrainerCardLibrarySheet", () => {
         expect(html).toContain("Meine Karten");
         expect(html).toContain("Karten durchsuchen …");
         expect(html).toContain("Zuletzt hinzugefügt");
+        expect(html).toContain("Alle Medien");
         expect(html).toContain("2 von 3 Karten angezeigt");
         expect(html).toContain("bitte");
         expect(html).toContain("tafadhali");
@@ -68,6 +72,12 @@ describe("TrainerCardLibrarySheet", () => {
         expect(html).toContain("Gruppen verwalten");
         expect(html).toContain('aria-label="Aussprache vorhanden, abspielen"');
         expect(html).toContain("Aktionen für bitte");
+    });
+
+    it("renders compact media filters without changing the library structure", () => {
+        const html = renderToStaticMarkup(<TrainerCardLibrarySheet {...baseProps} mediaFilter="with-image" hasActiveMediaFilter />);
+        expect(html).toContain("Mit Bild");
+        expect(html).toContain("Filter zurücksetzen");
     });
 
     it("keeps sentence group selection in the card form and group maintenance central", () => {
